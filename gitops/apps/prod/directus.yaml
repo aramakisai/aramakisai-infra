@@ -1,0 +1,28 @@
+---
+# Directus — Headless CMS
+# wave: 0
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: directus
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/aramakisai/aramakisai-infra
+    targetRevision: main
+    path: gitops/manifests/prod/directus
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: prod
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

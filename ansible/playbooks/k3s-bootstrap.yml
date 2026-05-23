@@ -1,0 +1,141 @@
+---
+# K3s クラスタ全体の初期ブートストラップ Playbook
+# 実行順序:
+#   1. cp-node に K3s を --cluster-init でインストール (etcd 初期化)
+#   2. prod-node-1/2 に K3s をローリングでインストール (etcd 参加 + ワークロード)
+#   3. cloudflared を事前インストール (ArgoCD への外部アクセス経路を確保)
+#   4. kubeconfig を手元に取得
+#   5. ArgoCD をインストール・App of Apps を適用
+
+
+# ============================================================
+# Play 1: K3s クラスタ初期化 (cp-node)
+# ============================================================
+- name: K3s server (cluster-init) のセットアップ
+  hosts: k3s_server
+  become: true
+  roles:
+    - role: k3s-server
+
+
+# ============================================================
+# Play 2: K3s server+worker ノード (prod-node-1/2) のセットアップ
+# ============================================================
+- name: K3s server+worker のセットアップ
+  hosts: k3s_server_worker
+  become: true
+  serial: 1          # ローリングアップデート: 1台ずつ順番に処理
+  roles:
+    - role: k3s-server
+
+
+# ============================================================
+# Play 3: cloudflared 事前インストール
+# ArgoCD より先にインストールし、外部アクセス経路を確保する
+# ============================================================
+- name: cloudflared の事前インストール
+  hosts: k3s_server
+  run_once: true
+  become: true
+  vars:
+    cloudflared_tunnel_token: "{{ lookup('env', 'CLOUDFLARE_TUNNEL_TOKEN') }}"
+    cloudflared_tunnel_id: "{{ lookup('env', 'CLOUDFLARE_TUNNEL_ID') }}"
+  tasks:
+    - name: cloudflared namespace 作成
+      command: >
+        kubectl create namespace cloudflared --dry-run=client -o yaml
+        | kubectl apply -f -
+
+    - name: Cloudflare Tunnel token を Secret として登録
+      command: >
+        kubectl create secret generic cloudflared-token
+        --from-literal=token={{ cloudflared_tunnel_token }}
+        -n cloudflared
+        --dry-run=client -o yaml
+        | kubectl apply -f -
+      no_log: true
+
+    - name: cloudflared マニフェストをノードに転送
+      # Single Source of Truth: gitops/manifests/prod/cloudflared/ が唯一の定義場所
+      # terraform/templates/cloudflared.yaml.j2 は廃止済み
+      copy:
+        src: "{{ playbook_dir }}/../../gitops/manifests/prod/cloudflared/"
+        dest: /tmp/cloudflared/
+
+    - name: cloudflared Deployment を適用
+      command: kubectl apply -f /tmp/cloudflared/
+
+    - name: cloudflared が Ready になるまで待機
+      command: >
+        kubectl rollout status deployment/cloudflared
+        -n cloudflared --timeout=120s
+
+
+# ============================================================
+# Play 4: kubeconfig を手元に取得
+# ============================================================
+- name: kubeconfig を手元に取得
+  hosts: k3s_server
+  run_once: true
+  become: true
+  tasks:
+    - name: kubeconfig をフェッチ
+      fetch:
+        src: /etc/rancher/k3s/k3s.yaml
+        dest: "{{ playbook_dir }}/../../kubeconfig"
+        flat: true
+
+    - name: kubeconfig のサーバーアドレスを Tailscale IP に書き換え
+      delegate_to: localhost
+      replace:
+        path: "{{ playbook_dir }}/../../kubeconfig"
+        regexp: 'https://127\.0\.0\.1:6443'
+        replace: "https://{{ ansible_host }}:6443"
+
+
+# ============================================================
+# Play 5: ArgoCD の初期 bootstrap
+# ============================================================
+- name: ArgoCD の初期 bootstrap
+  hosts: k3s_server
+  run_once: true
+  become: true
+  tasks:
+    - name: ArgoCD namespace 作成
+      command: >
+        kubectl create namespace argocd --dry-run=client -o yaml
+        | kubectl apply -f -
+
+    - name: ArgoCD インストール
+      command: >
+        kubectl apply -n argocd
+        -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+
+    - name: ArgoCD が Ready になるまで待機
+      command: >
+        kubectl rollout status deployment/argocd-server
+        -n argocd --timeout=300s
+
+    - name: infisical-auth Secret を作成 (ESO を経由しない唯一の Secret)
+      # この Secret だけは ESO を経由せず直接 kubectl apply で作成する
+      command: >
+        kubectl create secret generic infisical-auth
+        --from-literal=serviceToken={{ lookup('env', 'INFISICAL_SERVICE_TOKEN') }}
+        -n argocd
+        --dry-run=client -o yaml
+        | kubectl apply -f -
+      no_log: true
+
+    - name: App of Apps (root.yaml) をノードに転送
+      # root.yaml は gitops リポジトリのルートにある前提
+      # 実際のパスは環境に合わせて調整してください
+      copy:
+        src: "{{ playbook_dir }}/../../gitops/root.yaml"
+        dest: /tmp/root.yaml
+
+    - name: App of Apps (root.yaml) を適用
+      command: kubectl apply -n argocd -f /tmp/root.yaml
+      # 適用後は ArgoCD が自律的に sync を開始:
+      #   wave: -1  ESO (Helm Chart) + ClusterSecretStore
+      #   wave: 0   Authentik, Directus, Stalwart, cloudflared (adopt), ...
+      # cloudflared は既に稼働しているため ArgoCD が同名リソースを adopt する

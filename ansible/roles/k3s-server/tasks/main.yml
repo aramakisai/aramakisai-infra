@@ -1,0 +1,56 @@
+---
+# K3s サーバーロール: インストールと初期設定
+
+# 1. 前提パッケージのインストール
+- name: 前提パッケージのインストール
+  apt:
+    name:
+      - curl
+      - open-iscsi   # Longhorn (分散ストレージ) 用
+      - nfs-common   # NFS マウント用
+    state: present
+    update_cache: true
+
+# 2. K3s 設定ディレクトリを作成
+- name: K3s 設定ディレクトリを作成
+  file:
+    path: /etc/rancher/k3s
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+# 3. K3s config.yaml を配置 (インストール前に置くことでインストーラが読み込む)
+- name: K3s config.yaml を配置
+  template:
+    src: config.yaml.j2
+    dest: /etc/rancher/k3s/config.yaml
+    owner: root
+    group: root
+    mode: '0600'
+  notify: Restart k3s
+
+# 4. K3s インストール
+- name: K3s をインストール
+  shell: curl -sfL https://get.k3s.io | sh -s -
+  environment:
+    INSTALL_K3S_VERSION: "{{ k3s_version }}"
+    K3S_TOKEN: "{{ k3s_token }}"
+    # cluster-init ノードは K3S_URL を設定しない (自分がクラスタ起点になる)
+    # その他のノードは cp-node の Tailscale IP (MagicDNS) を指定
+    K3S_URL: >-
+      {{
+        '' if (k3s_cluster_init | default(false)) | bool
+        else 'https://' + hostvars[groups['k3s_server'][0]]['ansible_host'] + ':6443'
+      }}
+  args:
+    creates: /usr/local/bin/k3s  # k3s バイナリが既に存在する場合はスキップ (冪等)
+
+# 5. K3s サービスが起動するまで待機
+- name: K3s サービスが起動するまで待機 (port 6443)
+  wait_for:
+    port: 6443
+    host: "{{ ansible_host }}"
+    timeout: 120
+    state: started
+    delay: 5

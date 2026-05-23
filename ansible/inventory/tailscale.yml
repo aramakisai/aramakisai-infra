@@ -1,0 +1,40 @@
+---
+# Tailscale MagicDNS ベースのインベントリ
+# SSH は Tailscale 経由のみ (ポート 22 はパブリックに閉じている)
+#
+# 注意: ansible_host の MagicDNS ホスト名は tailnet 固有の値です。
+#       初回 terraform apply 後に tailscale admin console で確認し、
+#       cp-node.tail<hash>.ts.net の形式に書き換えてください。
+#
+# 確認方法:
+#   tailscale status
+#   または https://login.tailscale.com/admin/machines で確認
+
+all:
+  children:
+    # etcd クラスタ初期化担当 (cluster-init)
+    # cp-node はワークロードも受け付ける (no-schedule taint なし)
+    k3s_server:
+      hosts:
+        cp-node:
+          ansible_host: cp-node.aramakisai.com.beta.tailscale.net  # 要変更
+          k3s_role: server
+          k3s_cluster_init: true
+
+    # etcd 参加 + ワークロード実行 (server+worker)
+    k3s_server_worker:
+      hosts:
+        prod-node-1:
+          ansible_host: prod-node-1.aramakisai.com.beta.tailscale.net  # 要変更
+          k3s_role: server
+          k3s_cluster_init: false
+        prod-node-2:
+          ansible_host: prod-node-2.aramakisai.com.beta.tailscale.net  # 要変更
+          k3s_role: server
+          k3s_cluster_init: false
+
+  vars:
+    ansible_user: root
+    ansible_ssh_private_key_file: ~/.ssh/id_ed25519
+    k3s_version: v1.32.3+k3s1
+    k3s_token: "{{ lookup('env', 'K3S_TOKEN') }}"  # Infisical または環境変数から取得

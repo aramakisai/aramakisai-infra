@@ -1,0 +1,42 @@
+---
+# Authentik — Identity Provider
+# wave: 0 — ESO/CNPG が揃った後にデプロイ
+#
+# multi-source: Helm chart + このリポジトリの helm-values + CNPG Cluster manifest を合成
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: authentik
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  sources:
+    # Authentik Helm chart
+    - repoURL: https://charts.goauthentik.io
+      chart: authentik
+      targetRevision: "2024.*"
+      helm:
+        valueFiles:
+          - $values/gitops/helm-values/prod/authentik.yaml
+    # helm-values + CNPG Cluster manifest
+    - repoURL: https://github.com/aramakisai/aramakisai-infra
+      targetRevision: main
+      ref: values
+    # CNPG Cluster (Authentik 用 PostgreSQL)
+    - repoURL: https://github.com/aramakisai/aramakisai-infra
+      targetRevision: main
+      path: gitops/manifests/prod/authentik
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: prod
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

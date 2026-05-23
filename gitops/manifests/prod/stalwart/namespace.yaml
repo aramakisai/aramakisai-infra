@@ -1,0 +1,9 @@
+---
+# prod namespace (Stalwart は Directus/Authentik と共有)
+# 既に prod namespace が存在する場合は冪等に適用される
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: prod
+  labels:
+    app.kubernetes.io/managed-by: argocd

@@ -1,0 +1,36 @@
+# K3s サーバー systemd ユニット (override 用)
+# K3s インストーラが /etc/systemd/system/k3s.service を自動生成するため、
+# 通常このファイルは使用しない。カスタム起動オプションが必要な場合に利用する。
+#
+# 使用する場合は tasks/main.yml で以下のようにデプロイ:
+#   - name: K3s service override を配置
+#     template:
+#       src: k3s-server.service.j2
+#       dest: /etc/systemd/system/k3s.service.d/override.conf
+
+[Unit]
+Description=Lightweight Kubernetes (K3s)
+Documentation=https://k3s.io
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+EnvironmentFile=-/etc/default/k3s
+EnvironmentFile=-/etc/rancher/k3s/k3s.env
+KillMode=process
+Delegate=yes
+LimitNOFILE=1048576
+LimitNPROC=infinity
+LimitCORE=infinity
+TasksMax=infinity
+TimeoutStartSec=0
+Restart=always
+RestartSec=5s
+ExecStartPre=/bin/sh -xc '! /usr/bin/systemctl is-enabled --quiet nm-cloud-setup.service'
+ExecStartPre=-/sbin/modprobe br_netfilter
+ExecStartPre=-/sbin/modprobe overlay
+ExecStart=/usr/local/bin/k3s server
+
+[Install]
+WantedBy=multi-user.target

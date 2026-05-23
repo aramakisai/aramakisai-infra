@@ -1,0 +1,9 @@
+---
+# prod namespace は複数サービスで共有 (Authentik/Directus/Stalwart)
+# 既に存在する場合も kubectl apply で安全に再適用できる
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: prod
+  labels:
+    app.kubernetes.io/managed-by: argocd

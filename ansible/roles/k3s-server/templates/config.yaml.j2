@@ -1,0 +1,22 @@
+# K3s サーバー設定
+# 配置先: /etc/rancher/k3s/config.yaml
+# K3s インストール前に配置することでインストーラが読み込む
+
+# CNI: Cilium を使用するため Flannel を無効化
+flannel-backend: none
+
+# NetworkPolicy: Cilium が担当するため K3s 組み込みを無効化
+disable-network-policy: true
+
+# 不要なコンポーネントを無効化
+disable:
+  - traefik    # Traefik は gitops (Helm/ArgoCD) で管理するため無効
+  - servicelb  # MetalLB / CloudLB を使わないため無効
+
+# Spegel: ノード間イメージキャッシュ (帯域・起動時間の節約)
+embedded-registry: true
+
+{% if k3s_cluster_init | default(false) %}
+# etcd クラスタ初期化 (最初の1台 cp-node のみ true)
+cluster-init: true
+{% endif %}

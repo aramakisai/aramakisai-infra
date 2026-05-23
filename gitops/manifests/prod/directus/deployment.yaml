@@ -1,0 +1,77 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: directus
+  namespace: prod
+  labels:
+    app: directus
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: directus
+  template:
+    metadata:
+      labels:
+        app: directus
+    spec:
+      containers:
+        - name: directus
+          image: directus/directus:latest
+          ports:
+            - containerPort: 8055
+          envFrom:
+            - secretRef:
+                name: directus-secrets   # ESO が生成
+          env:
+            # DB 接続 (CNPG が提供する RW エンドポイント)
+            - name: DB_CLIENT
+              value: pg
+            - name: DB_HOST
+              value: directus-db-rw.prod.svc.cluster.local
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_DATABASE
+              value: directus
+            - name: DB_USER
+              value: directus
+            # DB_PASSWORD は directus-secrets Secret から注入
+            - name: PUBLIC_URL
+              value: https://aramakisai.com   # 本番 URL (要変更)
+            - name: STORAGE_LOCATIONS
+              value: local
+            - name: STORAGE_LOCAL_ROOT
+              value: /directus/uploads
+          volumeMounts:
+            - name: uploads
+              mountPath: /directus/uploads
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          readinessProbe:
+            httpGet:
+              path: /server/health
+              port: 8055
+            initialDelaySeconds: 15
+            periodSeconds: 10
+      volumes:
+        - name: uploads
+          persistentVolumeClaim:
+            claimName: directus-uploads
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: directus-uploads
+  namespace: prod
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi

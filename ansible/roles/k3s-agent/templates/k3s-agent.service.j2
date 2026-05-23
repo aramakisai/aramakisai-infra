@@ -1,0 +1,26 @@
+# K3s Agent systemd ユニット (将来用スケルトン)
+# pure agent ノードを追加する際に tasks/main.yml と合わせて実装すること
+
+[Unit]
+Description=Lightweight Kubernetes (K3s) Agent
+Documentation=https://k3s.io
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+EnvironmentFile=-/etc/default/k3s-agent
+EnvironmentFile=-/etc/rancher/k3s/k3s-agent.env
+KillMode=process
+Delegate=yes
+LimitNOFILE=1048576
+LimitNPROC=infinity
+LimitCORE=infinity
+TasksMax=infinity
+TimeoutStartSec=0
+Restart=always
+RestartSec=5s
+ExecStart=/usr/local/bin/k3s agent
+
+[Install]
+WantedBy=multi-user.target

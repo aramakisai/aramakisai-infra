@@ -1,0 +1,68 @@
+# Authentik Helm values — prod
+# Chart: https://charts.goauthentik.io (authentik)
+
+authentik:
+  # シークレットキー (ESO が authentik-secrets Secret として提供)
+  secret_key: "$(AUTHENTIK_SECRET_KEY)"
+
+  # PostgreSQL: CNPG Cluster を使用 (subchart の PostgreSQL は無効)
+  postgresql:
+    host: authentik-db-rw.prod.svc.cluster.local
+    port: 5432
+    name: authentik
+    user: authentik
+    password: "$(DB_PASSWORD)"
+
+  # Redis: subchart を使用
+  redis:
+    host: "{{ .Release.Name }}-redis-master"
+
+  # ログレベル
+  log_level: info
+
+# Redis subchart を有効化 (軽量なので内蔵で十分)
+redis:
+  enabled: true
+  master:
+    persistence:
+      size: 1Gi
+    resources:
+      requests:
+        memory: "128Mi"
+        cpu: "100m"
+      limits:
+        memory: "256Mi"
+        cpu: "200m"
+
+# PostgreSQL subchart は CNPG を使うため無効化
+postgresql:
+  enabled: false
+
+# Server
+server:
+  replicas: 1
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "250m"
+    limits:
+      memory: "1Gi"
+      cpu: "500m"
+  # シークレットを環境変数として注入
+  envFrom:
+    - secretRef:
+        name: authentik-secrets   # ESO が生成: AUTHENTIK_SECRET_KEY, DB_PASSWORD
+
+# Worker
+worker:
+  replicas: 1
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "250m"
+    limits:
+      memory: "1Gi"
+      cpu: "500m"
+  envFrom:
+    - secretRef:
+        name: authentik-secrets

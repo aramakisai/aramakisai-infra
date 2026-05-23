@@ -1,0 +1,86 @@
+---
+# Directus Staging
+# prod とは別 DB・別 Secret を使用
+# staging から prod へのアクセス禁止
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: directus
+  namespace: staging
+  labels:
+    app: directus
+    env: staging
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: directus
+      env: staging
+  template:
+    metadata:
+      labels:
+        app: directus
+        env: staging
+    spec:
+      containers:
+        - name: directus
+          image: directus/directus:latest
+          ports:
+            - containerPort: 8055
+          envFrom:
+            - secretRef:
+                name: directus-staging-secrets
+          env:
+            - name: DB_CLIENT
+              value: pg
+            - name: DB_HOST
+              value: directus-staging-db-rw.staging.svc.cluster.local
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_DATABASE
+              value: directus
+            - name: DB_USER
+              value: directus
+            - name: PUBLIC_URL
+              value: https://stg.aramakisai.com
+            - name: STORAGE_LOCATIONS
+              value: local
+            - name: STORAGE_LOCAL_ROOT
+              value: /directus/uploads
+          volumeMounts:
+            - name: uploads
+              mountPath: /directus/uploads
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "250m"
+      volumes:
+        - name: uploads
+          emptyDir: {}   # staging はデータ永続化不要
+---
+# Staging 用 CNPG Cluster
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: directus-staging-db
+  namespace: staging
+spec:
+  instances: 1
+  bootstrap:
+    initdb:
+      database: directus
+      owner: directus
+      secret:
+        name: directus-staging-db-credentials
+  storage:
+    size: 5Gi
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "100m"
+    limits:
+      memory: "256Mi"
+      cpu: "250m"

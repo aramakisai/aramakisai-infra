@@ -1,0 +1,31 @@
+---
+# Directus 用 PostgreSQL クラスター (CloudNativePG)
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: directus-db
+  namespace: prod
+spec:
+  instances: 1
+
+  postgresql:
+    parameters:
+      max_connections: "100"
+
+  bootstrap:
+    initdb:
+      database: directus
+      owner: directus
+      secret:
+        name: directus-db-credentials   # ESO が生成
+
+  storage:
+    size: 10Gi   # Directus はアセットを DB に保存するため authentik より大きめ
+
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "250m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"

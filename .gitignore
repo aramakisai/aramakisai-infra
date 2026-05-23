@@ -1,0 +1,32 @@
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+.terraform.lock.hcl
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Ansible
+ansible/kubeconfig
+*.retry
+*.pyc
+__pycache__/
+
+# 環境変数
+.env
+*.env.local
+
+# エディタ
+.DS_Store
+.vscode/
+*.swp
+*.swo
+
+# SSH
+*.pem

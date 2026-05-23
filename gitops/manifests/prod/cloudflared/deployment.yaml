@@ -1,0 +1,62 @@
+---
+# cloudflared Deployment — Single Source of Truth
+#
+# このファイルが唯一の定義場所です。
+# Ansible のブートストラップ時もここを kubectl apply し、
+# ArgoCD が同じファイルを参照して adopt します。
+# (旧: terraform/templates/cloudflared.yaml.j2 は廃止)
+#
+# TUNNEL_TOKEN は Ansible が事前に作成した cloudflared-token Secret から取得します。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloudflared
+  namespace: cloudflared
+  annotations:
+    # ArgoCD が Ansible 適用済みリソースを adopt するためのアノテーション
+    argocd.argoproj.io/managed-by: argocd
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: cloudflared
+  template:
+    metadata:
+      labels:
+        app: cloudflared
+    spec:
+      containers:
+        - name: cloudflared
+          image: cloudflare/cloudflared:latest
+          args:
+            - tunnel
+            - --no-autoupdate
+            - run
+            - --token
+            - $(TUNNEL_TOKEN)
+          env:
+            - name: TUNNEL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: cloudflared-token
+                  key: token
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "100m"
+            limits:
+              memory: "128Mi"
+              cpu: "200m"
+          livenessProbe:
+            httpGet:
+              path: /ready
+              port: 2000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 2000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      restartPolicy: Always

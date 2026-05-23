@@ -1,0 +1,53 @@
+---
+# Stalwart Mail Server
+# StatefulSet を使用: Pod identity の安定性がメールサーバーに必要
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: stalwart
+  namespace: prod
+  labels:
+    app: stalwart
+spec:
+  serviceName: stalwart
+  replicas: 1   # メールサーバーはシングルインスタンス推奨 (HA は複雑)
+  selector:
+    matchLabels:
+      app: stalwart
+  template:
+    metadata:
+      labels:
+        app: stalwart
+    spec:
+      containers:
+        - name: stalwart
+          image: stalwartlabs/mail-server:latest
+          ports:
+            - containerPort: 25    # SMTP
+            - containerPort: 587   # SMTP Submission
+            - containerPort: 465   # SMTPS
+            - containerPort: 143   # IMAP
+            - containerPort: 993   # IMAPS
+            - containerPort: 443   # HTTPS (Web Admin / JMAP)
+          envFrom:
+            - secretRef:
+                name: stalwart-secrets   # ESO が生成
+          volumeMounts:
+            - name: data
+              mountPath: /opt/stalwart-mail
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          livenessProbe:
+            tcpSocket:
+              port: 25
+            initialDelaySeconds: 30
+            periodSeconds: 30
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: stalwart-data

@@ -1,0 +1,31 @@
+---
+# Directus — Staging 環境
+# wave: 0
+#
+# staging から prod へのアクセス禁止 (別 DB を使用)
+# Cloudflare Access (stg.aramakisai.com, api.stg.aramakisai.com) で保護済み
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: directus-staging
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/aramakisai/aramakisai-infra
+    targetRevision: main
+    path: gitops/manifests/staging/directus
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: staging
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

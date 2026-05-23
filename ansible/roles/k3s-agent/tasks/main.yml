@@ -1,0 +1,11 @@
+---
+# K3s Agent ロール (将来用スケルトン)
+#
+# 現状のクラスタ構成は全ノードが server+worker のため、このロールは使用していない。
+# 将来的に pure agent ノード (ストレージ特化・GPU ノード等) を追加する場合に実装する。
+
+- name: K3s agent role is not yet implemented
+  debug:
+    msg: >
+      k3s-agent role is a placeholder for future pure agent nodes.
+      Current cluster uses server+worker nodes only (cp-node, prod-node-1, prod-node-2).
