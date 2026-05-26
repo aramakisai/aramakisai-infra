@@ -1,8 +1,23 @@
 # ============================================================
 # Cloudflare Access: Authentik OIDC IdP 登録
+#
+# 【注意】Authentik はクラスター上で動くため、初回 terraform apply 時は
+#         authentik_cf_client_id / authentik_cf_client_secret が空で構わない。
+#         Authentik セットアップ後に HCP Terraform ワークスペースで変数を設定し、
+#         再度 terraform apply することで IdP が登録される。
 # ============================================================
 
-resource "cloudflare_access_identity_provider" "authentik" {
+locals {
+  # nonsensitive(): 比較結果は true/false のみで秘密値を露出しないため安全
+  authentik_configured = nonsensitive(
+    var.authentik_cf_client_id != "" &&
+    var.authentik_cf_client_secret != ""
+  )
+}
+
+resource "cloudflare_zero_trust_access_identity_provider" "authentik" {
+  count = local.authentik_configured ? 1 : 0
+
   account_id = var.cloudflare_account_id
   name       = "Authentik"
   type       = "oidc"
@@ -25,7 +40,7 @@ resource "cloudflare_access_identity_provider" "authentik" {
 # Cloudflare Access Applications
 # ============================================================
 
-resource "cloudflare_access_application" "stg" {
+resource "cloudflare_zero_trust_access_application" "stg" {
   account_id                = var.cloudflare_account_id
   name                      = "Staging Frontend"
   domain                    = "stg.aramakisai.com"
@@ -34,7 +49,7 @@ resource "cloudflare_access_application" "stg" {
   auto_redirect_to_identity = true
 }
 
-resource "cloudflare_access_application" "api_stg" {
+resource "cloudflare_zero_trust_access_application" "api_stg" {
   account_id                = var.cloudflare_account_id
   name                      = "Staging API"
   domain                    = "api.stg.aramakisai.com"
@@ -43,7 +58,7 @@ resource "cloudflare_access_application" "api_stg" {
   auto_redirect_to_identity = true
 }
 
-resource "cloudflare_access_application" "argocd" {
+resource "cloudflare_zero_trust_access_application" "argocd" {
   account_id                = var.cloudflare_account_id
   name                      = "ArgoCD"
   domain                    = "argocd.aramakisai.com"
@@ -54,17 +69,18 @@ resource "cloudflare_access_application" "argocd" {
 
 # ============================================================
 # Cloudflare Access Policies
+# Authentik IdP が登録済みの場合のみ作成する
 # ============================================================
 
 locals {
-  access_applications = {
-    stg     = cloudflare_access_application.stg.id
-    api_stg = cloudflare_access_application.api_stg.id
-    argocd  = cloudflare_access_application.argocd.id
-  }
+  access_applications = local.authentik_configured ? {
+    stg     = cloudflare_zero_trust_access_application.stg.id
+    api_stg = cloudflare_zero_trust_access_application.api_stg.id
+    argocd  = cloudflare_zero_trust_access_application.argocd.id
+  } : {}
 }
 
-resource "cloudflare_access_policy" "allow_authentik" {
+resource "cloudflare_zero_trust_access_policy" "allow_authentik" {
   for_each = local.access_applications
 
   account_id     = var.cloudflare_account_id
@@ -74,6 +90,6 @@ resource "cloudflare_access_policy" "allow_authentik" {
   decision       = "allow"
 
   include {
-    login_method = [cloudflare_access_identity_provider.authentik.id]
+    login_method = [cloudflare_zero_trust_access_identity_provider.authentik[0].id]
   }
 }

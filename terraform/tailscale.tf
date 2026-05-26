@@ -5,7 +5,7 @@ resource "tailscale_tailnet_key" "k3s_nodes" {
   expiry        = 3600    # auth key 自体は1時間で失効 (apply 後は不要)
   tags          = var.tailscale_tags
 
-  description = "K3s nodes bootstrap key (terraform managed, expires in 1h)"
+  description = "K3s bootstrap key managed expires 1h"
 }
 
 # 注意:

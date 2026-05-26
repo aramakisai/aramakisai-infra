@@ -11,7 +11,7 @@ variable "hcloud_location" {
 variable "hcloud_image" {
   description = "ノードのベース OS イメージ"
   type        = string
-  default     = "ubuntu-24.04"
+  default     = "debian-13"
 }
 
 variable "ssh_public_key" {
@@ -71,14 +71,17 @@ variable "authentik_cf_client_id" {
   description = "Authentik OIDC Client ID (Cloudflare Access IdP 登録用)"
   type        = string
   sensitive   = true
-  # 環境変数 TF_VAR_authentik_cf_client_id で渡す
+  default     = ""
+  # Authentik はクラスター上で動くため初回 apply 時は空でよい
+  # Authentik セットアップ後に HCP Terraform ワークスペースで設定して再 apply する
 }
 
 variable "authentik_cf_client_secret" {
   description = "Authentik OIDC Client Secret"
   type        = string
   sensitive   = true
-  # 環境変数 TF_VAR_authentik_cf_client_secret で渡す
+  default     = ""
+  # 同上
 }
 
 # ============================================================

@@ -35,6 +35,15 @@ resource "hcloud_server" "nodes" {
   ssh_keys     = [hcloud_ssh_key.default.id]
   firewall_ids = [hcloud_firewall.k3s_nodes.id]
 
+  # パブリックネットワーク設定を明示する
+  # IPv4 を有効化。ダウンロードなど GitHub へのアクセスに必要。
+  # ノード間通信は private network (10.0.1.0/24) を使用する。
+  # 外部 SSH アクセスは Tailscale、外部 HTTP/SMTP は Cloudflare Tunnel。
+  public_net {
+    ipv4_enabled = true
+    ipv6_enabled = true
+  }
+
   # cloud-init: Tailscale インストール + tailnet 接続
   user_data = templatefile("${path.module}/templates/cloud-init.yaml.tpl", {
     tailscale_auth_key = tailscale_tailnet_key.k3s_nodes.key
@@ -63,58 +72,63 @@ resource "hcloud_server" "nodes" {
 # Ansible Bootstrap (Tailscale 接続確認後に実行)
 # ============================================================
 
-resource "null_resource" "ansible_bootstrap" {
-  # ノードが再作成 (taint) されたときのみ再実行する
-  triggers = {
-    cp_node_id     = hcloud_server.nodes["cp-node"].id
-    prod_node_1_id = hcloud_server.nodes["prod-node-1"].id
-    prod_node_2_id = hcloud_server.nodes["prod-node-2"].id
-  }
-
-  provisioner "local-exec" {
-    # 機密情報は environment ブロックで渡す (コマンド文字列に展開しない)
-    environment = {
-      ANSIBLE_HOST_KEY_CHECKING = "False"
-      K3S_TOKEN                 = var.k3s_token
-      CLOUDFLARE_TUNNEL_TOKEN   = cloudflare_tunnel.main.tunnel_token
-      CLOUDFLARE_TUNNEL_ID      = cloudflare_tunnel.main.id
-      TAILSCALE_API_KEY         = var.tailscale_api_key
-      TAILSCALE_TAILNET         = var.tailscale_tailnet
-    }
-
-    command = <<-EOT
-      set -e
-
-      echo "=== Waiting for K3s nodes to register in Tailscale ==="
-      for HOST in cp-node prod-node-1 prod-node-2; do
-        echo "Polling Tailscale API for $HOST..."
-        RETRIES=0
-        MAX_RETRIES=60
-        until curl -sf \
-          -H "Authorization: Bearer $TAILSCALE_API_KEY" \
-          "https://api.tailscale.com/api/v2/tailnet/$TAILSCALE_TAILNET/devices" \
-          | jq -e --arg h "$HOST" '.devices[] | select(.hostname == $h) | .addresses[0]' > /dev/null 2>&1; do
-          RETRIES=$((RETRIES + 1))
-          if [ $RETRIES -ge $MAX_RETRIES ]; then
-            echo "ERROR: $HOST did not register within timeout (5min)"
-            exit 1
-          fi
-          echo "  $HOST not yet registered (attempt $RETRIES/$MAX_RETRIES), retrying in 5s..."
-          sleep 5
-        done
-        echo "  $HOST registered."
-      done
-
-      echo "=== All nodes registered. Running Ansible... ==="
-      ansible-playbook \
-        -i ${path.root}/../ansible/inventory/tailscale.yml \
-        ${path.root}/../ansible/playbooks/k3s-bootstrap.yml
-    EOT
-  }
-
-  depends_on = [
-    hcloud_server.nodes,
-    cloudflare_tunnel.main,
-    cloudflare_tunnel_config.main,
-  ]
-}
+# TODO: Ansible bootstrap を手動実行に変更
+# HCP Terraform リモート実行ではこのリソースが機能しないため、
+# Tailscale にノードが登録された後、手動で以下を実行:
+# cd ansible && ansible-playbook -i inventory/tailscale.yml playbooks/k3s-bootstrap.yml
+#
+# resource "null_resource" "ansible_bootstrap" {
+#   # ノードが再作成 (taint) されたときのみ再実行する
+#   triggers = {
+#     cp_node_id     = hcloud_server.nodes["cp-node"].id
+#     prod_node_1_id = hcloud_server.nodes["prod-node-1"].id
+#     prod_node_2_id = hcloud_server.nodes["prod-node-2"].id
+#   }
+#
+#   provisioner "local-exec" {
+#     # 機密情報は environment ブロックで渡す (コマンド文字列に展開しない)
+#     environment = {
+#       ANSIBLE_HOST_KEY_CHECKING = "False"
+#       K3S_TOKEN                 = var.k3s_token
+#       CLOUDFLARE_TUNNEL_TOKEN   = cloudflare_zero_trust_tunnel_cloudflared.main.tunnel_token
+#       CLOUDFLARE_TUNNEL_ID      = cloudflare_zero_trust_tunnel_cloudflared.main.id
+#       TAILSCALE_API_KEY         = var.tailscale_api_key
+#       TAILSCALE_TAILNET         = var.tailscale_tailnet
+#     }
+#
+#     command = <<-EOT
+#       set -e
+#
+#       echo "=== Waiting for K3s nodes to register in Tailscale ==="
+#       for HOST in cp-node prod-node-1 prod-node-2; do
+#         echo "Polling Tailscale API for $HOST..."
+#         RETRIES=0
+#         MAX_RETRIES=60
+#         until curl -sf \
+#           -H "Authorization: Bearer $TAILSCALE_API_KEY" \
+#           "https://api.tailscale.com/api/v2/tailnet/$TAILSCALE_TAILNET/devices" \
+#           | jq -e --arg h "$HOST" '.devices[] | select(.hostname == $h) | .addresses[0]' > /dev/null 2>&1; do
+#           RETRIES=$((RETRIES + 1))
+#           if [ $RETRIES -ge $MAX_RETRIES ]; then
+#             echo "ERROR: $HOST did not register within timeout (5min)"
+#             exit 1
+#           fi
+#           echo "  $HOST not yet registered (attempt $RETRIES/$MAX_RETRIES), retrying in 5s..."
+#           sleep 5
+#         done
+#         echo "  $HOST registered."
+#       done
+#
+#       echo "=== All nodes registered. Running Ansible... ==="
+#       ansible-playbook \
+#         -i ${path.root}/../ansible/inventory/tailscale.yml \
+#         ${path.root}/../ansible/playbooks/k3s-bootstrap.yml
+#     EOT
+#   }
+#
+#   depends_on = [
+#     hcloud_server.nodes,
+#     cloudflare_zero_trust_tunnel_cloudflared.main,
+#     cloudflare_zero_trust_tunnel_cloudflared_config.main,
+#   ]
+# }
