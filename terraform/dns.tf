@@ -101,35 +101,197 @@ resource "cloudflare_record" "mx" {
   comment  = "Stalwart MX record"
 }
 
-# SPF: mail.aramakisai.com (MX) からの送信を許可
+# SPF (ドメイン全体): MX で許可されたサーバーからの送信を許可
+# ra=postmaster: SPF 失敗の集計レポートを postmaster@ に送信 (Stalwart 推奨)
 resource "cloudflare_record" "spf" {
   zone_id = var.cloudflare_zone_id
   name    = "@"
-  value   = "v=spf1 mx ~all"
+  value   = "v=spf1 mx ra=postmaster -all"
   type    = "TXT"
   proxied = false
   comment = "SPF record"
 }
 
-# DMARC: SPF/DKIM 失敗時は quarantine、集計レポートを dmarc@ に送信
+# SPF (mail サブドメイン): mail.aramakisai.com 自体からの送信を許可
+resource "cloudflare_record" "spf_mail" {
+  zone_id = var.cloudflare_zone_id
+  name    = "mail"
+  value   = "v=spf1 a ra=postmaster -all"
+  type    = "TXT"
+  proxied = false
+  comment = "SPF record for mail subdomain (Stalwart)"
+}
+
+# DMARC: SPF/DKIM 失敗時は reject、集計・フォレンジックレポートを postmaster@ に送信
 resource "cloudflare_record" "dmarc" {
   zone_id = var.cloudflare_zone_id
   name    = "_dmarc"
-  value   = "v=DMARC1; p=quarantine; rua=mailto:dmarc@aramakisai.com; ruf=mailto:dmarc@aramakisai.com; fo=1"
+  value   = "v=DMARC1; p=reject; rua=mailto:postmaster@aramakisai.com; ruf=mailto:postmaster@aramakisai.com"
   type    = "TXT"
   proxied = false
   comment = "DMARC record"
 }
 
-# DKIM: Stalwart 初回起動後に管理画面 (mail-admin.aramakisai.com) から
-#       DKIM 鍵ペアを生成し、表示される TXT レコードをここに追加する
-#
-# 追加例:
-# resource "cloudflare_record" "dkim" {
-#   zone_id = var.cloudflare_zone_id
-#   name    = "mail._domainkey"
-#   value   = "v=DKIM1; k=rsa; p=<Stalwart が生成した公開鍵>"
-#   type    = "TXT"
-#   proxied = false
-#   comment = "DKIM record (Stalwart)"
-# }
+# ============================================================
+# DKIM 署名鍵 (Stalwart 管理画面で生成)
+# セレクター名: 202605e (Ed25519) / 202605r (RSA)
+# ============================================================
+
+# DKIM Ed25519 (軽量・高速。Ed25519 未対応の古い MTA 向けに RSA も同時運用)
+resource "cloudflare_record" "dkim_ed25519" {
+  zone_id = var.cloudflare_zone_id
+  name    = "202605e._domainkey"
+  value   = "v=DKIM1; k=ed25519; h=sha256; p=YTxG7pHBpZAh+cWvU8DbWXQnsExlX1r1IIGeQ6a27Aw="
+  type    = "TXT"
+  proxied = false
+  comment = "DKIM Ed25519 key (selector: 202605e, Stalwart)"
+}
+
+# DKIM RSA-2048 (互換性重視。公開鍵が長いため DNS ゾーンでは2行に分割されるが値は連結する)
+resource "cloudflare_record" "dkim_rsa" {
+  zone_id = var.cloudflare_zone_id
+  name    = "202605r._domainkey"
+  value   = "v=DKIM1; k=rsa; h=sha256; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArVTX8sPGIotZf1zwQ+JkA2BWK9PlcASW56bp/mFDxzrXVASQjTR4pHn1mudc8kCKXZpP+n5I0jdHc1jXH8r83g9PQjloFg86//lTriFkzDQmCU5KYJIiT1Q2Ccpt/wpfzM1XqqO8buN9ADn9KKkYLoV5U8YWAZz6RBOnxwmB7Rv8r6C9VstBl849QRqN6kn/FKcjkJ9wY2Bjo1of7QEcJu8odYwS826710+u7qFklMiyFJGjW+tEki0atDazs7DqifWgY7g2m5wPyBjONQGOYntOe9Wg+KmEtbKkDdL+XtoCsY2NLH0QhCk9/Y2+WX8OKitocxgkA5j8KPe06lLYpQIDAQAB"
+  type    = "TXT"
+  proxied = false
+  comment = "DKIM RSA-2048 key (selector: 202605r, Stalwart)"
+}
+
+# ============================================================
+# SMTP TLS レポート
+# ============================================================
+
+resource "cloudflare_record" "smtp_tls" {
+  zone_id = var.cloudflare_zone_id
+  name    = "_smtp._tls"
+  value   = "v=TLSRPTv1; rua=mailto:postmaster@aramakisai.com"
+  type    = "TXT"
+  proxied = false
+  comment = "SMTP TLS reporting (RFC 8460)"
+}
+
+# ============================================================
+# メールクライアント自動設定 (autoconfig / autodiscover)
+# ============================================================
+
+# Thunderbird 系: https://autoconfig.aramakisai.com/mail/config-v1.1.xml
+resource "cloudflare_record" "autoconfig" {
+  zone_id = var.cloudflare_zone_id
+  name    = "autoconfig"
+  value   = "mail.aramakisai.com"
+  type    = "CNAME"
+  proxied = false
+  comment = "Thunderbird autoconfig (Stalwart)"
+}
+
+# Outlook 系: https://autodiscover.aramakisai.com/autodiscover/autodiscover.xml
+resource "cloudflare_record" "autodiscover" {
+  zone_id = var.cloudflare_zone_id
+  name    = "autodiscover"
+  value   = "mail.aramakisai.com"
+  type    = "CNAME"
+  proxied = false
+  comment = "Outlook autodiscover (Stalwart)"
+}
+
+# ============================================================
+# SRV レコード (メールクライアント自動設定)
+# ============================================================
+
+resource "cloudflare_record" "srv_imaps" {
+  zone_id = var.cloudflare_zone_id
+  name    = "_imaps._tcp"
+  type    = "SRV"
+  proxied = false
+  data {
+    priority = 0
+    weight   = 1
+    port     = 993
+    target   = "mail.aramakisai.com"
+  }
+  comment = "IMAPS SRV (Stalwart)"
+}
+
+resource "cloudflare_record" "srv_imap" {
+  zone_id = var.cloudflare_zone_id
+  name    = "_imap._tcp"
+  type    = "SRV"
+  proxied = false
+  data {
+    priority = 0
+    weight   = 1
+    port     = 143
+    target   = "mail.aramakisai.com"
+  }
+  comment = "IMAP SRV (Stalwart)"
+}
+
+resource "cloudflare_record" "srv_submissions" {
+  zone_id = var.cloudflare_zone_id
+  name    = "_submissions._tcp"
+  type    = "SRV"
+  proxied = false
+  data {
+    priority = 0
+    weight   = 1
+    port     = 465
+    target   = "mail.aramakisai.com"
+  }
+  comment = "SMTPS SRV (Stalwart)"
+}
+
+resource "cloudflare_record" "srv_submission" {
+  zone_id = var.cloudflare_zone_id
+  name    = "_submission._tcp"
+  type    = "SRV"
+  proxied = false
+  data {
+    priority = 0
+    weight   = 1
+    port     = 587
+    target   = "mail.aramakisai.com"
+  }
+  comment = "SMTP Submission SRV (Stalwart)"
+}
+
+resource "cloudflare_record" "srv_jmap" {
+  zone_id = var.cloudflare_zone_id
+  name    = "_jmap._tcp"
+  type    = "SRV"
+  proxied = false
+  data {
+    priority = 0
+    weight   = 1
+    port     = 443
+    target   = "mail.aramakisai.com"
+  }
+  comment = "JMAP SRV (Stalwart)"
+}
+
+resource "cloudflare_record" "srv_caldavs" {
+  zone_id = var.cloudflare_zone_id
+  name    = "_caldavs._tcp"
+  type    = "SRV"
+  proxied = false
+  data {
+    priority = 0
+    weight   = 1
+    port     = 443
+    target   = "mail.aramakisai.com"
+  }
+  comment = "CalDAV SRV (Stalwart)"
+}
+
+resource "cloudflare_record" "srv_carddavs" {
+  zone_id = var.cloudflare_zone_id
+  name    = "_carddavs._tcp"
+  type    = "SRV"
+  proxied = false
+  data {
+    priority = 0
+    weight   = 1
+    port     = 443
+    target   = "mail.aramakisai.com"
+  }
+  comment = "CardDAV SRV (Stalwart)"
+}
