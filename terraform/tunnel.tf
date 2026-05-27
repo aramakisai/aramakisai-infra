@@ -34,7 +34,7 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "main" {
     # Authentik IdP
     ingress_rule {
       hostname = "idp.aramakisai.com"
-      service  = "http://authentik-server.authentik.svc.cluster.local:80"
+      service  = "http://authentik-server.prod.svc.cluster.local:80"
     }
 
     # Staging フロントエンド
