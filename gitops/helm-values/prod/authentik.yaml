@@ -2,8 +2,8 @@
 # Chart: https://charts.goauthentik.io (authentik)
 
 authentik:
-  # シークレットキー (ESO が authentik-secrets Secret として提供)
-  secret_key: "$(AUTHENTIK_SECRET_KEY)"
+  # シークレットキー (secretKeyRef で注入するためここには書かない)
+  secret_key: ""
 
   # PostgreSQL: CNPG Cluster を使用 (subchart の PostgreSQL は無効)
   postgresql:
@@ -11,7 +11,8 @@ authentik:
     port: 5432
     name: authentik
     user: authentik
-    password: "$(DB_PASSWORD)"
+    # password は secretKeyRef で注入するためここには書かない
+    # (envFrom の $(VAR) 置換は Kubernetes では動作しないため)
 
   # Redis: subchart を使用
   redis:
@@ -48,7 +49,18 @@ server:
     limits:
       memory: "1Gi"
       cpu: "500m"
-  # シークレットを環境変数として注入
+  # DB パスワードは secretKeyRef で直接注入 (envFrom の $(VAR) 置換は不可)
+  env:
+    - name: AUTHENTIK_POSTGRESQL__PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: authentik-secrets
+          key: DB_PASSWORD
+    - name: AUTHENTIK_SECRET_KEY
+      valueFrom:
+        secretKeyRef:
+          name: authentik-secrets
+          key: AUTHENTIK_SECRET_KEY
   envFrom:
     - secretRef:
         name: authentik-secrets   # ESO が生成: AUTHENTIK_SECRET_KEY, DB_PASSWORD
@@ -63,6 +75,17 @@ worker:
     limits:
       memory: "1Gi"
       cpu: "500m"
+  env:
+    - name: AUTHENTIK_POSTGRESQL__PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: authentik-secrets
+          key: DB_PASSWORD
+    - name: AUTHENTIK_SECRET_KEY
+      valueFrom:
+        secretKeyRef:
+          name: authentik-secrets
+          key: AUTHENTIK_SECRET_KEY
   envFrom:
     - secretRef:
         name: authentik-secrets
