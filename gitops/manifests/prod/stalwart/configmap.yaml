@@ -121,6 +121,26 @@ data:
     store = "rocksdb"
 
     # ============================================================
+    # 管理者 (フォールバック認証)
+    # ============================================================
+
+    # Web Admin UI へのログインに使用する管理者アカウント
+    # STALWART_ADMIN_SECRET は stalwart-secrets (ExternalSecret) から envFrom で注入される
+    [authentication.fallback-admin]
+    user   = "admin"
+    secret = "%{env:STALWART_ADMIN_SECRET}%"
+
+    # ============================================================
+    # HTTP 設定 (Cloudflare Tunnel リバースプロキシ対応)
+    # ============================================================
+
+    # Cloudflare Tunnel 経由でアクセスされるため X-Forwarded-For を信頼する
+    # これがないと管理画面が接続元 IP を誤認識する場合がある
+    [server.http]
+    use-x-forwarded-for = true
+    permissive-cors     = false
+
+    # ============================================================
     # ログ設定
     # ============================================================
 
