@@ -22,8 +22,12 @@ authentik:
   log_level: info
 
 # Redis subchart を有効化 (軽量なので内蔵で十分)
+# image.tag を上書き: Bitnami は 2024 年以降 Docker Hub からリビジョン付きタグ (-rX) を削除したため
+# ローリングタグ (7.4) を指定する
 redis:
   enabled: true
+  image:
+    tag: "7.4"
   master:
     persistence:
       size: 1Gi
