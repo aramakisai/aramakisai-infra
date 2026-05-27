@@ -84,7 +84,7 @@ data:
 
     [store."rocksdb"]
     type        = "rocksdb"
-    path        = "/opt/stalwart-mail/data"
+    path        = "/opt/stalwart/data"
     compression = "lz4"
 
     # ============================================================

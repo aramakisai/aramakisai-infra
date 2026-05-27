@@ -61,12 +61,12 @@ spec:
                 name: stalwart-secrets
           volumeMounts:
             - name: data
-              mountPath: /opt/stalwart-mail
+              mountPath: /opt/stalwart
             - name: config
-              mountPath: /opt/stalwart-mail/etc
+              mountPath: /opt/stalwart/etc
               readOnly: true
-              # Stalwart のデフォルト設定パス: /opt/stalwart-mail/etc/config.toml
-              # /opt/stalwart-mail (PVC) の etc/ サブディレクトリを ConfigMap で上書き
+              # v0.15.5 のデフォルト設定パス: /opt/stalwart/etc/config.toml
+              # /opt/stalwart (PVC) の etc/ サブディレクトリを ConfigMap で上書き
           resources:
             requests:
               memory: "256Mi"
