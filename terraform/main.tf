@@ -66,6 +66,13 @@ resource "hcloud_server" "nodes" {
     hcloud_network_subnet.nodes,
     hcloud_firewall.k3s_nodes,
   ]
+
+  lifecycle {
+    # user_data (cloud-init) はサーバー初回起動時の1回のみ使用される。
+    # Tailscale auth key はコミットのたびに失効・再生成されるため、
+    # key の値が変わっても稼働中ノードを再作成しないよう変更を無視する。
+    ignore_changes = [user_data]
+  }
 }
 
 # ============================================================
