@@ -16,7 +16,23 @@ disable:
 # Spegel: ノード間イメージキャッシュ (帯域・起動時間の節約)
 embedded-registry: true
 
+# ノード間通信を Hetzner private network (10.0.1.0/24) に固定する
+# kubelet の登録 IP・etcd ピアリング・Pod ネットワークのルーティングが
+# private network 経由になり、パブリック IPv6 に余分なトラフィックが流れない
+node-ip: "{{ k3s_private_ip }}"
+
 {% if k3s_cluster_init | default(false) %}
 # etcd クラスタ初期化 (最初の1台 cp-node のみ true)
 cluster-init: true
+
+# TLS SAN: kubeconfig を Tailscale 経由で使う場合に TLS エラーを防ぐ
+# K3s デフォルトの証明書は 127.0.0.1 のみ SAN に含まれるため、
+# Tailscale MagicDNS と private IP を追加する
+tls-san:
+  - "{{ ansible_host }}"    # Tailscale MagicDNS (外部 kubectl 用)
+  - "{{ k3s_private_ip }}"  # private network IP (ノード間 API アクセス用)
+{% else %}
+# 追加 server として cp-node のクラスタに参加する
+# K3S_URL 環境変数ではなくここで指定することで server モード (k3s.service) でインストールされる
+server: "https://{{ hostvars[groups['k3s_server'][0]]['k3s_private_ip'] }}:6443"
 {% endif %}

@@ -3,9 +3,10 @@
 # 実行順序:
 #   1. cp-node に K3s を --cluster-init でインストール (etcd 初期化)
 #   2. prod-node-1/2 に K3s をローリングでインストール (etcd 参加 + ワークロード)
-#   3. cloudflared を事前インストール (ArgoCD への外部アクセス経路を確保)
-#   4. kubeconfig を手元に取得
-#   5. ArgoCD をインストール・App of Apps を適用
+#   3. Cilium をインストール (flannel-backend: none のため CNI が必須 / ノードを Ready にする)
+#   4. cloudflared を事前インストール (ArgoCD への外部アクセス経路を確保)
+#   5. kubeconfig を手元に取得
+#   6. ArgoCD をインストール・App of Apps を適用
 
 
 # ============================================================
@@ -30,7 +31,58 @@
 
 
 # ============================================================
-# Play 3: cloudflared 事前インストール
+# Play 3: Cilium インストール
+# flannel-backend: none のため、K3s は CNI を持たない。
+# Cilium がいないとノードが NotReady のままで全 Pod が Pending になる。
+# ArgoCD (GitOps) より先に Ansible で直接インストールする。
+# ============================================================
+- name: Cilium のインストール
+  hosts: k3s_server
+  run_once: true
+  become: true
+  vars:
+    cilium_version: "1.17.3"
+  tasks:
+    - name: Helm がインストールされているか確認
+      command: helm version --short
+      register: helm_check
+      failed_when: false
+      changed_when: false
+
+    - name: Helm をインストール
+      shell: curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+      when: helm_check.rc != 0
+
+    - name: Cilium Helm リポジトリを追加
+      command: helm repo add cilium https://helm.cilium.io/
+      changed_when: false
+
+    - name: Helm リポジトリを更新
+      command: helm repo update
+      changed_when: false
+
+    - name: Cilium をインストール (既にインストール済みの場合は upgrade)
+      shell: >
+        helm upgrade --install cilium cilium/cilium
+        --version {{ cilium_version }}
+        --namespace kube-system
+        --set operator.replicas=1
+        --set ipam.mode=kubernetes
+        --set kubeProxyReplacement=false
+        --wait --timeout=300s
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+    - name: 全ノードが Ready になるまで待機
+      command: kubectl wait node --all --for=condition=Ready --timeout=120s
+      retries: 5
+      delay: 10
+      register: node_ready_result
+      until: node_ready_result.rc == 0
+
+
+# ============================================================
+# Play 4: cloudflared 事前インストール
 # ArgoCD より先にインストールし、外部アクセス経路を確保する
 # ============================================================
 - name: cloudflared の事前インストール
@@ -42,12 +94,12 @@
     cloudflared_tunnel_id: "{{ lookup('env', 'CLOUDFLARE_TUNNEL_ID') }}"
   tasks:
     - name: cloudflared namespace 作成
-      command: >
+      shell: >
         kubectl create namespace cloudflared --dry-run=client -o yaml
         | kubectl apply -f -
 
     - name: Cloudflare Tunnel token を Secret として登録
-      command: >
+      shell: >
         kubectl create secret generic cloudflared-token
         --from-literal=token={{ cloudflared_tunnel_token }}
         -n cloudflared
@@ -65,14 +117,25 @@
     - name: cloudflared Deployment を適用
       command: kubectl apply -f /tmp/cloudflared/
 
+    - name: cloudflared の ProgressDeadlineExceeded 条件をクリア
+      # 過去の失敗 rollout に ProgressDeadlineExceeded 条件が残っている場合のみ restart する。
+      # kubectl apply で spec が変わっていれば新しい rollout が既に開始されているため、
+      # 条件が "ProgressDeadlineExceeded" の場合だけ restart して余分な二重 rollout を防ぐ。
+      shell: >
+        kubectl get deployment cloudflared -n cloudflared
+        -o jsonpath='{.status.conditions[?(@.type=="Progressing")].reason}'
+        | grep -q ProgressDeadlineExceeded
+        && kubectl rollout restart deployment/cloudflared -n cloudflared
+        || true
+
     - name: cloudflared が Ready になるまで待機
       command: >
         kubectl rollout status deployment/cloudflared
-        -n cloudflared --timeout=120s
+        -n cloudflared --timeout=240s
 
 
 # ============================================================
-# Play 4: kubeconfig を手元に取得
+# Play 5: kubeconfig を手元に取得
 # ============================================================
 - name: kubeconfig を手元に取得
   hosts: k3s_server
@@ -87,6 +150,7 @@
 
     - name: kubeconfig のサーバーアドレスを Tailscale IP に書き換え
       delegate_to: localhost
+      become: false   # ローカルファイルへの書き換えに sudo は不要
       replace:
         path: "{{ playbook_dir }}/../../kubeconfig"
         regexp: 'https://127\.0\.0\.1:6443'
@@ -94,7 +158,7 @@
 
 
 # ============================================================
-# Play 5: ArgoCD の初期 bootstrap
+# Play 6: ArgoCD の初期 bootstrap
 # ============================================================
 - name: ArgoCD の初期 bootstrap
   hosts: k3s_server
@@ -102,13 +166,16 @@
   become: true
   tasks:
     - name: ArgoCD namespace 作成
-      command: >
+      shell: >
         kubectl create namespace argocd --dry-run=client -o yaml
         | kubectl apply -f -
 
     - name: ArgoCD インストール
+      # --server-side: ArgoCD の CRD が大きく last-applied-configuration アノテーションが
+      # 262144 バイト制限を超えるため、Server-Side Apply を使用する
+      # --force-conflicts: 初回 client-side apply との field ownership 競合を解消する
       command: >
-        kubectl apply -n argocd
+        kubectl apply -n argocd --server-side --force-conflicts
         -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
 
     - name: ArgoCD が Ready になるまで待機
@@ -118,17 +185,40 @@
 
     - name: infisical-auth Secret を作成 (ESO を経由しない唯一の Secret)
       # この Secret だけは ESO を経由せず直接 kubectl apply で作成する
-      command: >
+      # ClusterSecretStore (universalAuthCredentials) に合わせて
+      # clientId / clientSecret キーで登録する (serviceToken 形式ではない)
+      shell: >
         kubectl create secret generic infisical-auth
-        --from-literal=serviceToken={{ lookup('env', 'INFISICAL_SERVICE_TOKEN') }}
+        --from-literal=clientId={{ lookup('env', 'INFISICAL_CLIENT_ID') }}
+        --from-literal=clientSecret={{ lookup('env', 'INFISICAL_CLIENT_SECRET') }}
         -n argocd
         --dry-run=client -o yaml
         | kubectl apply -f -
       no_log: true
 
+    - name: GitHub Deploy Key を ArgoCD Repository Secret として登録
+      # プライベートリポジトリへのアクセスに必要
+      # Deploy Key は GitHub → Settings → Deploy keys で生成・登録すること
+      # 秘密鍵は Infisical の ARGOCD_GITHUB_DEPLOY_KEY に保存
+      shell: |
+        kubectl create secret generic aramakisai-infra-repo \
+          --from-literal=type=git \
+          --from-literal=url=git@github.com:aramakisai/aramakisai-infra.git \
+          --from-literal=sshPrivateKey="{{ lookup('env', 'ARGOCD_GITHUB_DEPLOY_KEY') }}" \
+          -n argocd \
+          --dry-run=client -o yaml \
+          | kubectl label --local -f - argocd.argoproj.io/secret-type=repository -o yaml \
+          | kubectl apply -f -
+      no_log: true
+
+    - name: root.yaml の repoURL を SSH 形式に確認 (念のため)
+      # root.yaml は SSH URL を使うこと:
+      #   git@github.com:aramakisai/aramakisai-infra.git
+      # HTTPS + PAT でもよいが Deploy Key の場合は SSH URL が必要
+      debug:
+        msg: "repoURL は git@github.com:aramakisai/aramakisai-infra.git を使用すること"
+
     - name: App of Apps (root.yaml) をノードに転送
-      # root.yaml は gitops リポジトリのルートにある前提
-      # 実際のパスは環境に合わせて調整してください
       copy:
         src: "{{ playbook_dir }}/../../gitops/root.yaml"
         dest: /tmp/root.yaml

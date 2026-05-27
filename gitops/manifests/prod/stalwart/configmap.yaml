@@ -1,0 +1,130 @@
+---
+# Stalwart Mail Server 設定ファイル
+# 詳細: https://stalw.art/docs/configuration/overview
+#
+# TLS 証明書: Let's Encrypt + Cloudflare DNS-01 チャレンジ
+#   - ポート 443 を外部に開放しない (DNS チャレンジのためポート不要)
+#   - CLOUDFLARE_API_TOKEN は ExternalSecret (stalwart-secrets) から注入
+#
+# Web Admin: https://mail-admin.aramakisai.com (Cloudflare Tunnel 経由)
+#   - CF Access は設定しない。Stalwart 独自認証で保護。
+#   - 初回ログイン後に管理者パスワードを変更すること
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: stalwart-config
+  namespace: prod
+data:
+  config.toml: |
+    # ============================================================
+    # サーバー基本設定
+    # ============================================================
+    [server]
+    hostname = "mail.aramakisai.com"
+
+    # ============================================================
+    # リスナー定義
+    # ============================================================
+
+    # SMTP (25): MTA 間の受信。TLS は STARTTLS で対応
+    [server.listener."smtp"]
+    bind = ["[::]:25"]
+    protocol = "smtp"
+
+    # SMTP Submission (587): メールクライアント → MTA。STARTTLS 必須
+    [server.listener."submission"]
+    bind = ["[::]:587"]
+    protocol = "smtp"
+    [server.listener."submission".tls]
+    enable = true
+    implicit = false
+
+    # SMTPS (465): メールクライアント → MTA。Implicit TLS
+    [server.listener."smtps"]
+    bind = ["[::]:465"]
+    protocol = "smtp"
+    [server.listener."smtps".tls]
+    enable = true
+    implicit = true
+
+    # IMAP (143): メールクライアント。STARTTLS 推奨
+    [server.listener."imap"]
+    bind = ["[::]:143"]
+    protocol = "imap"
+
+    # IMAPS (993): メールクライアント。Implicit TLS
+    [server.listener."imaps"]
+    bind = ["[::]:993"]
+    protocol = "imap"
+    [server.listener."imaps".tls]
+    enable = true
+    implicit = true
+
+    # HTTPS (443): Web Admin UI + JMAP
+    # Cloudflare Tunnel (stalwart-admin ClusterIP) 経由でのみ到達可能
+    [server.listener."https"]
+    bind = ["[::]:443"]
+    protocol = "http"
+    [server.listener."https".tls]
+    enable = true
+    implicit = true
+
+    # ============================================================
+    # TLS 証明書 (Let's Encrypt / ACME)
+    # ============================================================
+
+    [certificate."default"]
+    type = "acme"
+    acme = "letsencrypt"
+    domains = ["mail.aramakisai.com"]
+
+    # Let's Encrypt 本番環境
+    # ステージング環境でテストする場合は以下を使用:
+    #   directory = "https://acme-staging-v02.api.letsencrypt.org/directory"
+    [acme."letsencrypt"]
+    directory = "https://acme-v02.api.letsencrypt.org/directory"
+    challenge = "dns-01"
+    contact = ["mailto:admin@aramakisai.com"]
+    default = true
+
+    # Cloudflare DNS-01 チャレンジ用プロバイダー設定
+    # CLOUDFLARE_API_TOKEN は Zone:DNS:Edit 権限のみの最小権限トークンを使用
+    # (stalwart-secrets ExternalSecret から envFrom で注入される)
+    [acme."letsencrypt".provider]
+    type = "cloudflare"
+    # Stalwart は %{env:VAR_NAME}% 記法で環境変数を参照する
+    secret = "%{env:CLOUDFLARE_API_TOKEN}%"
+
+    # ============================================================
+    # ストレージ設定
+    # ============================================================
+
+    [storage]
+    data   = "rocksdb"
+    fts    = "rocksdb"
+    blob   = "rocksdb"
+    lookup = "rocksdb"
+
+    [store."rocksdb"]
+    type        = "rocksdb"
+    path        = "/opt/stalwart-mail/data"
+    compression = "lz4"
+
+    # ============================================================
+    # ディレクトリ (ユーザー管理)
+    # ============================================================
+
+    # 内部ディレクトリ: Stalwart 管理画面でユーザーを管理する
+    # 将来的に Authentik LDAP/SCIM 連携も可能
+    [directory."default"]
+    type  = "internal"
+    store = "rocksdb"
+
+    # ============================================================
+    # ログ設定
+    # ============================================================
+
+    [tracer."stdout"]
+    type  = "stdout"
+    level = "info"
+    ansi  = false    # コンテナ環境では ANSI カラーコードを無効化

@@ -58,25 +58,16 @@ resource "cloudflare_zero_trust_access_application" "api_stg" {
   auto_redirect_to_identity = true
 }
 
-resource "cloudflare_zero_trust_access_application" "argocd" {
-  account_id                = var.cloudflare_account_id
-  name                      = "ArgoCD"
-  domain                    = "argocd.aramakisai.com"
-  type                      = "self_hosted"
-  session_duration          = "8h"   # 管理画面はセキュリティ強化のため短め
-  auto_redirect_to_identity = true
-}
-
 # ============================================================
 # Cloudflare Access Policies
 # Authentik IdP が登録済みの場合のみ作成する
+# ArgoCD は自前の認証 (admin / SSO) があるため CF Access 保護対象外
 # ============================================================
 
 locals {
   access_applications = local.authentik_configured ? {
     stg     = cloudflare_zero_trust_access_application.stg.id
     api_stg = cloudflare_zero_trust_access_application.api_stg.id
-    argocd  = cloudflare_zero_trust_access_application.argocd.id
   } : {}
 }
 

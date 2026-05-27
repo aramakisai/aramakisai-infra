@@ -16,7 +16,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/aramakisai/aramakisai-infra
+    repoURL: git@github.com:aramakisai/aramakisai-infra.git
     targetRevision: main
     path: gitops/manifests/staging/directus
   destination:

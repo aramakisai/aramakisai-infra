@@ -1,6 +1,9 @@
 ---
 # Stalwart Mail Server
 # StatefulSet を使用: Pod identity の安定性がメールサーバーに必要
+#
+# image バージョンは stalwartlabs/mail-server の GitHub Releases で確認して固定すること
+# https://github.com/stalwartlabs/mail-server/releases
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -9,7 +12,7 @@ metadata:
   labels:
     app: stalwart
 spec:
-  serviceName: stalwart
+  serviceName: stalwart-mail
   replicas: 1   # メールサーバーはシングルインスタンス推奨 (HA は複雑)
   selector:
     matchLabels:
@@ -19,22 +22,49 @@ spec:
       labels:
         app: stalwart
     spec:
+      # prod-node-1 に固定:
+      # hostPort を使用するため Pod が稼働するノードの IP でのみ応答する。
+      # DNS (mail.aramakisai.com) も prod-node-1 の IP 1 件のみを指定している。
+      # PVC は ReadWriteOnce のため、スケジューラーも実質的にこのノードに固定される。
+      nodeSelector:
+        kubernetes.io/hostname: prod-node-1
       containers:
         - name: stalwart
-          image: stalwartlabs/mail-server:latest
+          # latest は使用しない。バージョンを固定してデプロイ時の再現性を確保する
+          # 更新手順: image タグを変更 → GitOps PR → ArgoCD が自動 sync
+          image: stalwartlabs/mail-server:v0.10.6
           ports:
-            - containerPort: 25    # SMTP
-            - containerPort: 587   # SMTP Submission
-            - containerPort: 465   # SMTPS
-            - containerPort: 143   # IMAP
-            - containerPort: 993   # IMAPS
-            - containerPort: 443   # HTTPS (Web Admin / JMAP)
+            - name: smtp
+              containerPort: 25
+              hostPort: 25        # 外部 MTA はポート 25 に直接接続する (NodePort 不可)
+            - name: submission
+              containerPort: 587
+              hostPort: 587       # MUA → MTA STARTTLS
+            - name: smtps
+              containerPort: 465
+              hostPort: 465       # MUA → MTA Implicit TLS
+            - name: imap
+              containerPort: 143
+              hostPort: 143       # メールクライアント STARTTLS
+            - name: imaps
+              containerPort: 993
+              hostPort: 993       # メールクライアント Implicit TLS
+            - name: https
+              containerPort: 443
+              # hostPort なし: Cloudflare Tunnel → stalwart-admin ClusterIP 経由
+          # stalwart-secrets (ESO 生成) から全環境変数を注入
+          # 含まれるキー: STALWART_ADMIN_SECRET, CLOUDFLARE_API_TOKEN
           envFrom:
             - secretRef:
-                name: stalwart-secrets   # ESO が生成
+                name: stalwart-secrets
           volumeMounts:
             - name: data
               mountPath: /opt/stalwart-mail
+            - name: config
+              mountPath: /opt/stalwart-mail/etc
+              readOnly: true
+              # Stalwart のデフォルト設定パス: /opt/stalwart-mail/etc/config.toml
+              # /opt/stalwart-mail (PVC) の etc/ サブディレクトリを ConfigMap で上書き
           resources:
             requests:
               memory: "256Mi"
@@ -47,7 +77,17 @@ spec:
               port: 25
             initialDelaySeconds: 30
             periodSeconds: 30
+            failureThreshold: 3
+          readinessProbe:
+            tcpSocket:
+              port: 25
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
       volumes:
         - name: data
           persistentVolumeClaim:
             claimName: stalwart-data
+        - name: config
+          configMap:
+            name: stalwart-config

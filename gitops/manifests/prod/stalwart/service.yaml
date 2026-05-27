@@ -1,43 +1,53 @@
 ---
-# Stalwart: メールポートは外部公開が必要
-# Hetzner ではパブリック IP への NodePort を使用する
-# (LoadBalancer は追加費用が発生するため NodePort を選択)
+# stalwart-mail: クラスター内部からメールポートへアクセスするための ClusterIP
 #
-# SMTP (25) はスパム対策で多くのプロバイダーがブロックするため
-# Hetzner に 25番ポート開放申請が必要な場合がある
+# 外部からのメール (SMTP/IMAP) は StatefulSet の hostPort で直接ノードに到達するため、
+# このサービスはクラスター内部向け (Prometheus scrape 等の将来用途) のみ。
+# NodePort は不要: hostPort が標準ポートをそのまま公開しているため。
 apiVersion: v1
 kind: Service
 metadata:
-  name: stalwart
+  name: stalwart-mail
   namespace: prod
   labels:
     app: stalwart
 spec:
-  type: NodePort
+  type: ClusterIP
   selector:
     app: stalwart
   ports:
     - name: smtp
       port: 25
       targetPort: 25
-      nodePort: 30025
     - name: submission
       port: 587
       targetPort: 587
-      nodePort: 30587
     - name: smtps
       port: 465
       targetPort: 465
-      nodePort: 30465
     - name: imap
       port: 143
       targetPort: 143
-      nodePort: 30143
     - name: imaps
       port: 993
       targetPort: 993
-      nodePort: 30993
+---
+# stalwart-admin: Web Admin UI 向け ClusterIP
+# Cloudflare Tunnel (cloudflared) がこの ClusterIP を経由して
+# mail-admin.aramakisai.com へのアクセスを転送する
+# 外部からは直接到達不可 (ファイアウォールでポート 443 を開放しない)
+apiVersion: v1
+kind: Service
+metadata:
+  name: stalwart-admin
+  namespace: prod
+  labels:
+    app: stalwart
+spec:
+  type: ClusterIP
+  selector:
+    app: stalwart
+  ports:
     - name: https
       port: 443
       targetPort: 443
-      nodePort: 30443
