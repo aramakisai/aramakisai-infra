@@ -100,10 +100,11 @@ data:
     # ============================================================
 
     [storage]
-    data   = "rocksdb"
-    fts    = "rocksdb"
-    blob   = "rocksdb"
-    lookup = "rocksdb"
+    data      = "rocksdb"
+    fts       = "rocksdb"
+    blob      = "rocksdb"
+    lookup    = "rocksdb"
+    directory = "default"   # ユーザー認証に使用するディレクトリバックエンドを指定
 
     [store."rocksdb"]
     type        = "rocksdb"
@@ -134,9 +135,10 @@ data:
     # HTTP 設定 (Cloudflare Tunnel リバースプロキシ対応)
     # ============================================================
 
+    # v0.11.0 以降: [server.http] → [http] にキー名変更
     # Cloudflare Tunnel 経由でアクセスされるため X-Forwarded-For を信頼する
     # これがないと管理画面が接続元 IP を誤認識する場合がある
-    [server.http]
+    [http]
     use-x-forwarded-for = true
     permissive-cors     = false
 

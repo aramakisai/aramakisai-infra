@@ -32,7 +32,7 @@ spec:
         - name: stalwart
           # latest は使用しない。バージョンを固定してデプロイ時の再現性を確保する
           # 更新手順: image タグを変更 → GitOps PR → ArgoCD が自動 sync
-          image: stalwartlabs/mail-server:v0.10.6
+          image: stalwartlabs/mail-server:v0.11.7
           ports:
             - name: smtp
               containerPort: 25
