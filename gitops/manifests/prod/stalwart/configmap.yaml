@@ -2,9 +2,10 @@
 # Stalwart Mail Server 設定ファイル
 # 詳細: https://stalw.art/docs/configuration/overview
 #
-# TLS 証明書: Let's Encrypt + Cloudflare DNS-01 チャレンジ
-#   - ポート 443 を外部に開放しない (DNS チャレンジのためポート不要)
-#   - CLOUDFLARE_API_TOKEN は ExternalSecret (stalwart-secrets) から注入
+# TLS 証明書 (ACME): Web Admin UI から設定する
+#   初回起動後に https://mail-admin.aramakisai.com へアクセスし
+#   Settings > Server > TLS > ACME Providers で Let's Encrypt + Cloudflare DNS-01 を設定する
+#   CLOUDFLARE_API_TOKEN (Zone:DNS:Edit) は stalwart-secrets ExternalSecret から注入済み
 #
 # Web Admin: https://mail-admin.aramakisai.com (Cloudflare Tunnel 経由)
 #   - CF Access は設定しない。Stalwart 独自認証で保護。
@@ -62,38 +63,13 @@ data:
 
     # HTTPS (443): Web Admin UI + JMAP
     # Cloudflare Tunnel (stalwart-admin ClusterIP) 経由でのみ到達可能
+    # no_tls_verify = true のため、初回は自己署名証明書でも接続可能
     [server.listener."https"]
     bind = ["[::]:443"]
     protocol = "http"
     [server.listener."https".tls]
     enable = true
     implicit = true
-
-    # ============================================================
-    # TLS 証明書 (Let's Encrypt / ACME)
-    # ============================================================
-
-    [certificate."default"]
-    type = "acme"
-    acme = "letsencrypt"
-    domains = ["mail.aramakisai.com"]
-
-    # Let's Encrypt 本番環境
-    # ステージング環境でテストする場合は以下を使用:
-    #   directory = "https://acme-staging-v02.api.letsencrypt.org/directory"
-    [acme."letsencrypt"]
-    directory = "https://acme-v02.api.letsencrypt.org/directory"
-    challenge = "dns-01"
-    contact = ["mailto:admin@aramakisai.com"]
-    default = true
-
-    # Cloudflare DNS-01 チャレンジ用プロバイダー設定
-    # CLOUDFLARE_API_TOKEN は Zone:DNS:Edit 権限のみの最小権限トークンを使用
-    # (stalwart-secrets ExternalSecret から envFrom で注入される)
-    [acme."letsencrypt".provider]
-    type = "cloudflare"
-    # Stalwart は %{env:VAR_NAME}% 記法で環境変数を参照する
-    secret = "%{env:CLOUDFLARE_API_TOKEN}%"
 
     # ============================================================
     # ストレージ設定
@@ -104,7 +80,7 @@ data:
     fts       = "rocksdb"
     blob      = "rocksdb"
     lookup    = "rocksdb"
-    directory = "default"   # ユーザー認証に使用するディレクトリバックエンドを指定
+    directory = "default"
 
     [store."rocksdb"]
     type        = "rocksdb"
@@ -135,9 +111,7 @@ data:
     # HTTP 設定 (Cloudflare Tunnel リバースプロキシ対応)
     # ============================================================
 
-    # v0.11.0 以降: [server.http] → [http] にキー名変更
     # Cloudflare Tunnel 経由でアクセスされるため X-Forwarded-For を信頼する
-    # これがないと管理画面が接続元 IP を誤認識する場合がある
     [http]
     use-x-forwarded-for = true
     permissive-cors     = false
@@ -147,6 +121,7 @@ data:
     # ============================================================
 
     [tracer."stdout"]
-    type  = "stdout"
-    level = "info"
-    ansi  = false    # コンテナ環境では ANSI カラーコードを無効化
+    type   = "stdout"
+    level  = "info"
+    ansi   = false    # コンテナ環境では ANSI カラーコードを無効化
+    enable = true
