@@ -21,23 +21,12 @@ authentik:
   # ログレベル
   log_level: info
 
-# Redis subchart を有効化 (軽量なので内蔵で十分)
-# image.tag を上書き: Bitnami は 2024 年以降 Docker Hub からリビジョン付きタグ (-rX) を削除したため
-# ローリングタグ (7.4) を指定する
+# Bitnami Redis subchart は無効化
+# Docker Hub から Bitnami Redis イメージが撤退したため、
+# gitops/manifests/prod/authentik/redis.yaml で公式 redis:7-alpine を直接管理する。
+# サービス名 authentik-redis-master に合わせて authentik.redis.host は変更不要。
 redis:
-  enabled: true
-  image:
-    tag: "7.4"
-  master:
-    persistence:
-      size: 1Gi
-    resources:
-      requests:
-        memory: "128Mi"
-        cpu: "100m"
-      limits:
-        memory: "256Mi"
-        cpu: "200m"
+  enabled: false
 
 # PostgreSQL subchart は CNPG を使うため無効化
 postgresql:
