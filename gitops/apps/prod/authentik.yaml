@@ -40,6 +40,7 @@ spec:
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true
+      - RespectIgnoreDifferences=true
   ignoreDifferences:
     - group: external-secrets.io
       kind: ExternalSecret
