@@ -20,7 +20,7 @@
 #   - NetworkListener: destroy + create (リスナー設定を最新化)
 #   - MtaRoute: destroy + create (リレー設定を最新化)
 #   - MtaOutboundStrategy: update (ルーティングポリシーを更新)
-#   - SystemSettings: update (ホスト名・デフォルトドメインを更新)
+#   - SystemSettings: update (ホスト名を更新) + Domain ID を動的取得して defaultDomainId を設定
 #   - Domain / DkimSignature / DnsServer / AcmeProvider: 変更しない
 apiVersion: batch/v1
 kind: Job
@@ -94,6 +94,33 @@ spec:
                 --user admin \
                 --password "$STALWART_ADMIN_SECRET" \
                 apply --file /settings/settings-update.ndjson
+
+              echo "    ✅ settings-update.ndjson の適用完了"
+
+              # ── defaultDomainId を動的に設定 ─────────────────────────────
+              # #dom-1 は plan 内参照のため settings-update.ndjson では使えない。
+              # 実際の Domain ID を query して SystemSettings に設定する。
+              echo ">>> Domain ID を取得して defaultDomainId を更新中..."
+              DOMAIN_ID=$(/tmp/stalwart-cli \
+                --url "$STALWART_URL" \
+                -k \
+                --user admin \
+                --password "$STALWART_ADMIN_SECRET" \
+                --no-color \
+                query Domain 2>/dev/null | awk 'NR==2 {print $1}')
+
+              if [ -n "$DOMAIN_ID" ]; then
+                printf '{"@type":"update","object":"SystemSettings","value":{"defaultDomainId":"%s"}}\n' "$DOMAIN_ID" \
+                  | /tmp/stalwart-cli \
+                      --url "$STALWART_URL" \
+                      -k \
+                      --user admin \
+                      --password "$STALWART_ADMIN_SECRET" \
+                      apply --stdin
+                echo "    ✅ defaultDomainId を $DOMAIN_ID に設定しました"
+              else
+                echo "    ⚠ ドメインが見つかりません。defaultDomainId の更新をスキップします。"
+              fi
 
               echo "    ✅ 設定の適用が完了しました"
           env:
