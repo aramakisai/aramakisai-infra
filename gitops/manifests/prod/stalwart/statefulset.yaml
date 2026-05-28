@@ -78,14 +78,6 @@ spec:
                 secretKeyRef:
                   name: stalwart-secrets
                   key: STALWART_ADMIN_SECRET
-            # ── Recovery Mode (初回セットアップ / DB パスワードリセット時のみ) ──
-            # DB に admin アカウントが存在しない・パスワードが不一致の場合に有効化する
-            # 設定適用完了後は下記 2 行を削除して ArgoCD sync すること
-            - name: STALWART_RECOVERY_MODE
-              value: "1"
-            - name: STALWART_RECOVERY_ADMIN
-              # 形式: "username:password" — K8s env var 参照で STALWART_ADMIN_SECRET を埋め込む
-              value: "admin:$(STALWART_ADMIN_SECRET)"
           volumeMounts:
             - name: data
               mountPath: /opt/stalwart
@@ -101,17 +93,15 @@ spec:
             limits:
               memory: "512Mi"
               cpu: "500m"
-          # probe: recovery mode 中は port 443 が未起動なため port 8080 を使用
-          # 設定適用完了後 (recovery mode 解除時) に port 443 に戻すこと
           livenessProbe:
             tcpSocket:
-              port: 8080
+              port: 443
             initialDelaySeconds: 30
             periodSeconds: 30
             failureThreshold: 3
           readinessProbe:
             tcpSocket:
-              port: 8080
+              port: 443
             initialDelaySeconds: 10
             periodSeconds: 10
             failureThreshold: 3
