@@ -72,19 +72,12 @@ spec:
             - secretRef:
                 name: stalwart-secrets
           env:
-            # STALWART_ADMIN_SECRET を明示定義: 下の STALWART_RECOVERY_ADMIN の値展開に使用
+            # STALWART_ADMIN_SECRET を明示定義: 環境変数として Pod 内で参照可能にする
             - name: STALWART_ADMIN_SECRET
               valueFrom:
                 secretKeyRef:
                   name: stalwart-secrets
                   key: STALWART_ADMIN_SECRET
-            # ===== 初期セットアップ用 (設定完了後に必ず削除すること) =====
-            # Recovery mode: port 8080 で Admin UI を起動し、メールサービスを一時停止
-            # 設定完了後にこの2行を削除して ArgoCD sync → 通常運用に切り替わる
-            - name: STALWART_RECOVERY_MODE
-              value: "1"
-            - name: STALWART_RECOVERY_ADMIN
-              value: "admin:$(STALWART_ADMIN_SECRET)"
           volumeMounts:
             - name: data
               mountPath: /opt/stalwart
@@ -100,17 +93,15 @@ spec:
             limits:
               memory: "512Mi"
               cpu: "500m"
-          # recovery mode 中は port 8080 のみ開く
-          # 設定完了・recovery mode 解除後は port: 443 に変更すること
           livenessProbe:
             tcpSocket:
-              port: 8080
+              port: 443
             initialDelaySeconds: 30
             periodSeconds: 30
             failureThreshold: 3
           readinessProbe:
             tcpSocket:
-              port: 8080
+              port: 443
             initialDelaySeconds: 10
             periodSeconds: 10
             failureThreshold: 3
