@@ -38,13 +38,23 @@ resource "cloudflare_zero_trust_access_identity_provider" "authentik" {
 
 # ============================================================
 # Cloudflare Access Applications
+#
+# 保護対象:
+#   stg.aramakisai.com       Staging Frontend (Authentik OIDC)
+#   api.stg.aramakisai.com   Staging API      (Authentik OIDC)
+#
+# 非保護 (自前認証あり):
+#   webmail.aramakisai.com   Snappymail 独自ログイン (IMAP 認証) で保護
+#                            CF Access を重ねると二重認証になるため除外
+#   argocd.aramakisai.com    ArgoCD 自前認証 (admin / Authentik SSO) で保護
+#   mail-admin.aramakisai.com  Stalwart 独自ログインで保護
 # ============================================================
 
 resource "cloudflare_zero_trust_access_application" "stg" {
-  account_id  = var.cloudflare_account_id
-  name        = "Staging Frontend"
-  domain      = "stg.aramakisai.com"
-  type        = "self_hosted"
+  account_id       = var.cloudflare_account_id
+  name             = "Staging Frontend"
+  domain           = "stg.aramakisai.com"
+  type             = "self_hosted"
   session_duration = "24h"
 
   # auto_redirect_to_identity requires allowed_idps with exactly one IdP
@@ -53,26 +63,11 @@ resource "cloudflare_zero_trust_access_application" "stg" {
 }
 
 resource "cloudflare_zero_trust_access_application" "api_stg" {
-  account_id  = var.cloudflare_account_id
-  name        = "Staging API"
-  domain      = "api.stg.aramakisai.com"
-  type        = "self_hosted"
+  account_id       = var.cloudflare_account_id
+  name             = "Staging API"
+  domain           = "api.stg.aramakisai.com"
+  type             = "self_hosted"
   session_duration = "24h"
-
-  # auto_redirect_to_identity requires allowed_idps with exactly one IdP
-  auto_redirect_to_identity = local.authentik_configured
-  allowed_idps              = local.authentik_configured ? [cloudflare_zero_trust_access_identity_provider.authentik[0].id] : []
-}
-
-# Snappymail Webmail
-# 全委員がアクセスできるよう Authentik OIDC で認証
-# セッション 7 日: メールクライアント的な使い方のため長めに設定
-resource "cloudflare_zero_trust_access_application" "webmail" {
-  account_id  = var.cloudflare_account_id
-  name        = "Webmail (Snappymail)"
-  domain      = "webmail.aramakisai.com"
-  type        = "self_hosted"
-  session_duration = "168h"
 
   # auto_redirect_to_identity requires allowed_idps with exactly one IdP
   auto_redirect_to_identity = local.authentik_configured
@@ -82,14 +77,12 @@ resource "cloudflare_zero_trust_access_application" "webmail" {
 # ============================================================
 # Cloudflare Access Policies
 # Authentik IdP が登録済みの場合のみ作成する
-# ArgoCD は自前の認証 (admin / SSO) があるため CF Access 保護対象外
 # ============================================================
 
 locals {
   access_applications = local.authentik_configured ? {
     stg     = cloudflare_zero_trust_access_application.stg.id
     api_stg = cloudflare_zero_trust_access_application.api_stg.id
-    webmail = cloudflare_zero_trust_access_application.webmail.id
   } : {}
 }
 
