@@ -1,0 +1,71 @@
+---
+# Snappymail Webmail
+#
+# image バージョンは https://github.com/the-djmaze/snappymail/releases で確認して固定すること
+# 更新手順: image タグを変更 → GitOps PR → ArgoCD が自動 sync
+#
+# 初期セットアップ手順:
+#   1. ArgoCD sync でデプロイ後、kubectl port-forward で 8888 に接続
+#      kubectl port-forward -n prod deploy/snappymail 8888:8888
+#   2. https://localhost:8888/?admin にアクセス
+#      パスワード: Infisical の SNAPPYMAIL_ADMIN_PASSWORD
+#   3. Domains → "+" で aramakisai.com を追加
+#      IMAP: stalwart-mail.prod.svc.cluster.local:993 (SSL, verify=off)
+#      SMTP: stalwart-mail.prod.svc.cluster.local:587 (STARTTLS)
+#   4. 以降は webmail.aramakisai.com (Cloudflare Tunnel) でアクセス可能
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: snappymail
+  namespace: prod
+  labels:
+    app: snappymail
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: snappymail
+  template:
+    metadata:
+      labels:
+        app: snappymail
+    spec:
+      containers:
+        - name: snappymail
+          # latest は使用しない。バージョンを固定してデプロイ時の再現性を確保する
+          image: djmaze/snappymail:latest
+          ports:
+            - name: http
+              containerPort: 8888
+          env:
+            - name: SNAPPYMAIL_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: snappymail-secrets
+                  key: SNAPPYMAIL_ADMIN_PASSWORD
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/snappymail
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "256Mi"
+              cpu: "200m"
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8888
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8888
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: snappymail-data

@@ -58,6 +58,18 @@ resource "cloudflare_zero_trust_access_application" "api_stg" {
   auto_redirect_to_identity = true
 }
 
+# Snappymail Webmail
+# 全委員がアクセスできるよう Authentik OIDC で認証
+# セッション 7 日: メールクライアント的な使い方のため長めに設定
+resource "cloudflare_zero_trust_access_application" "webmail" {
+  account_id                = var.cloudflare_account_id
+  name                      = "Webmail (Snappymail)"
+  domain                    = "webmail.aramakisai.com"
+  type                      = "self_hosted"
+  session_duration          = "168h"
+  auto_redirect_to_identity = true
+}
+
 # ============================================================
 # Cloudflare Access Policies
 # Authentik IdP が登録済みの場合のみ作成する
@@ -68,6 +80,7 @@ locals {
   access_applications = local.authentik_configured ? {
     stg     = cloudflare_zero_trust_access_application.stg.id
     api_stg = cloudflare_zero_trust_access_application.api_stg.id
+    webmail = cloudflare_zero_trust_access_application.webmail.id
   } : {}
 }
 

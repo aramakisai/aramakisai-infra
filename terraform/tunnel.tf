@@ -22,6 +22,14 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "main" {
       }
     }
 
+    # Snappymail Webmail
+    # CF Access (Authentik OIDC) で全委員を認証してからアクセスを許可
+    # port 443 をファイアウォールで開放せずに webmail を提供するための経路
+    ingress_rule {
+      hostname = "webmail.aramakisai.com"
+      service  = "http://snappymail.prod.svc.cluster.local:8888"
+    }
+
     # ArgoCD UI
     ingress_rule {
       hostname = "argocd.aramakisai.com"
