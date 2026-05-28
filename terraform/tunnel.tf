@@ -9,19 +9,6 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "main" {
   tunnel_id  = cloudflare_zero_trust_tunnel_cloudflared.main.id
 
   config {
-    # Stalwart Web Admin UI
-    # proxied = true (Cloudflare CDN) → Tunnel → stalwart-admin ClusterIP:443
-    # CF Access は設定しない。Stalwart 独自のログインで保護される。
-    # no_tls_verify = true: Stalwart の TLS 証明書は Let's Encrypt (ACME DNS-01) だが、
-    #                        内部 ClusterIP 経由のため SNI が一致しない場合があるため
-    ingress_rule {
-      hostname = "mail-admin.aramakisai.com"
-      service  = "https://stalwart-admin.prod.svc.cluster.local:443"
-      origin_request {
-        no_tls_verify = true
-      }
-    }
-
     # Snappymail Webmail
     # CF Access (Authentik OIDC) で全委員を認証してからアクセスを許可
     # port 443 をファイアウォールで開放せずに webmail を提供するための経路

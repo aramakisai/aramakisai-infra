@@ -31,23 +31,3 @@ spec:
     - name: imaps
       port: 993
       targetPort: 993
----
-# stalwart-admin: Web Admin UI 向け ClusterIP
-# Cloudflare Tunnel (cloudflared) がこの ClusterIP を経由して
-# mail-admin.aramakisai.com へのアクセスを転送する
-# 外部からは直接到達不可 (ファイアウォールでポート 443 を開放しない)
-apiVersion: v1
-kind: Service
-metadata:
-  name: stalwart-admin
-  namespace: prod
-  labels:
-    app: stalwart
-spec:
-  type: ClusterIP
-  selector:
-    app: stalwart
-  ports:
-    - name: https
-      port: 443
-      targetPort: 443

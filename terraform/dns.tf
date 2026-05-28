@@ -79,17 +79,6 @@ resource "cloudflare_record" "mail_prod_node_1" {
 #
 # PTR レコードがないと外部 MTA (Gmail 等) に spam 判定されメールが届かない
 
-# mail-admin.aramakisai.com → Cloudflare Tunnel (Web Admin UI)
-# proxied = true: Cloudflare が TLS を終端する
-resource "cloudflare_record" "mail_admin" {
-  zone_id = var.cloudflare_zone_id
-  name    = "mail-admin"
-  value   = local.tunnel_cname
-  type    = "CNAME"
-  proxied = true
-  comment = "Stalwart Web Admin (Cloudflare Tunnel)"
-}
-
 # MX レコード: aramakisai.com のメールを mail.aramakisai.com に転送
 resource "cloudflare_record" "mx" {
   zone_id  = var.cloudflare_zone_id

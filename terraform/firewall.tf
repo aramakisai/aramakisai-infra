@@ -80,6 +80,17 @@ resource "hcloud_firewall" "k3s_nodes" {
     description = "Stalwart IMAPS"
   }
 
+  # HTTPS 443: Stalwart Web Admin / JMAP / Autoconfig
+  # mail.aramakisai.com は proxied=false (直接 AAAA) のため Cloudflare 経由にならない
+  # Stalwart 独自の TLS (Let's Encrypt DNS-01 ACME) で保護
+  rule {
+    direction   = "in"
+    protocol    = "tcp"
+    port        = "443"
+    source_ips  = ["0.0.0.0/0", "::/0"]
+    description = "Stalwart HTTPS (Admin / JMAP)"
+  }
+
   # TCP 22 (SSH) は意図的に未定義
   # → Tailscale SSH を使用するため、パブリックインターネットからの SSH は不要
   #
@@ -88,8 +99,4 @@ resource "hcloud_firewall" "k3s_nodes" {
   #
   # Cloudflare Tunnel (cloudflared) はアウトバウンド接続のみ使用
   # → インバウンドルール不要
-  #
-  # Stalwart Web Admin (443) はインバウンドを開けない
-  # → Cloudflare Tunnel 経由で mail-admin.aramakisai.com からのみアクセス
-  # → TLS 証明書は Cloudflare DNS-01 ACME で取得 (ポート不要)
 }
