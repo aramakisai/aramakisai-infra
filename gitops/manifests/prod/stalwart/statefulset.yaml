@@ -40,7 +40,7 @@ spec:
           # 更新手順: image タグを変更 → GitOps PR → ArgoCD が自動 sync
           # 注意: Docker Hub イメージ名は stalwartlabs/mail-server (旧・Archived) ではなく
           #       stalwartlabs/stalwart (新) を使用すること
-          image: stalwartlabs/stalwart:v0.15.5
+          image: stalwartlabs/stalwart:v0.16.6-alpine
           ports:
             - name: smtp
               containerPort: 25
