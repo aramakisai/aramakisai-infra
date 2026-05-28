@@ -54,8 +54,9 @@ spec:
               # BusyBox tar は -J 非対応のため xz で展開してから tar
               xz -d /tmp/stalwart-cli.tar.xz
               tar -xf /tmp/stalwart-cli.tar -C /tmp/
-              # アーカイブ内のバイナリ名: stalwart-cli-x86_64-unknown-linux-musl
-              mv /tmp/stalwart-cli-x86_64-unknown-linux-musl /tmp/stalwart-cli
+              # アーカイブはディレクトリ stalwart-cli-x86_64-unknown-linux-musl/ を含む
+              # その中に stalwart-cli バイナリがある
+              mv /tmp/stalwart-cli-x86_64-unknown-linux-musl/stalwart-cli /tmp/stalwart-cli
               chmod +x /tmp/stalwart-cli
               echo "    ✅ stalwart-cli v1.0.7 取得完了"
 
