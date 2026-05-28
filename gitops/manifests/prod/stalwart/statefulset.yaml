@@ -78,12 +78,12 @@ spec:
                 secretKeyRef:
                   name: stalwart-secrets
                   key: STALWART_ADMIN_SECRET
-          # ── Recovery Mode (admin アカウント作成時のみ有効) ──────────────────
-          # admin account を作成したら下記 2 行を削除して ArgoCD sync すること
-          - name: STALWART_RECOVERY_MODE
-            value: "1"
-          - name: STALWART_RECOVERY_ADMIN
-            value: "admin:$(STALWART_ADMIN_SECRET)"
+            # ── Recovery Mode (admin アカウント作成時のみ有効) ────────────────
+            # admin account を作成したら下記 2 行を削除して ArgoCD sync すること
+            - name: STALWART_RECOVERY_MODE
+              value: "1"
+            - name: STALWART_RECOVERY_ADMIN
+              value: "admin:$(STALWART_ADMIN_SECRET)"
           volumeMounts:
             - name: data
               mountPath: /opt/stalwart
