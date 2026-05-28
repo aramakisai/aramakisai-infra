@@ -42,6 +42,29 @@ data:
     {"@type":"update","object":"MtaOutboundStrategy","value":{"route":{"match":{"0":{"if":"is_local_domain(rcpt_domain)","then":"'local'"}},"else":"'resend-relay'"}}}
     {"@type":"update","object":"SystemSettings","value":{"defaultHostname":"mail.aramakisai.com","defaultDomainId":"#dom-1"}}
 
+  # ============================================================
+  # settings-update.ndjson — PostSync Job 用・冪等再適用 NDJSON
+  # ============================================================
+  #
+  # settings.ndjson との差分:
+  #   - Domain は create せず何もしない (destroy すると全アカウント・メールが消えるため)
+  #   - DkimSignature は destroy しない (再生成すると DKIM 鍵が変わり DNS 更新が必要になるため)
+  #   - DnsServer / AcmeProvider は destroy しない (Domain から参照されており objectIsLinked エラーになるため)
+  #   - NetworkListener と MtaRoute は destroy+create で確実に最新化
+  #   - MtaOutboundStrategy と SystemSettings は update で更新
+  #
+  # 適用対象:
+  #   - Stalwart が稼働中 (HTTPS port 443 が生きている) 場合のみ動作する
+  #   - DB が空 (PVC リセット直後) の場合は手動で settings.ndjson を適用すること
+  #
+  settings-update.ndjson: |
+    {"@type":"destroy","object":"NetworkListener"}
+    {"@type":"destroy","object":"MtaRoute"}
+    {"@type":"create","object":"NetworkListener","value":{"smtp":{"name":"smtp","bind":{"[::]:25":true},"protocol":"smtp","tlsImplicit":false},"submission":{"name":"submission","bind":{"[::]:587":true},"protocol":"smtp","tlsImplicit":false},"smtps":{"name":"smtps","bind":{"[::]:465":true},"protocol":"smtp","tlsImplicit":true},"imap":{"name":"imap","bind":{"[::]:143":true},"protocol":"imap","tlsImplicit":false},"imaps":{"name":"imaps","bind":{"[::]:993":true},"protocol":"imap","tlsImplicit":true},"https":{"name":"https","bind":{"[::]:443":true},"protocol":"http","tlsImplicit":true}}}
+    {"@type":"create","object":"MtaRoute","value":{"resend-relay":{"@type":"Relay","name":"resend-relay","description":"Resend SMTP リレー (Hetzner port 25 新規アカウント制限回避)","address":"smtp.resend.com","port":587,"implicitTls":false,"authUsername":"resend","authSecret":{"@type":"EnvironmentVariable","variableName":"RESEND_API_KEY"}}}}
+    {"@type":"update","object":"MtaOutboundStrategy","value":{"route":{"match":{"0":{"if":"is_local_domain(rcpt_domain)","then":"'local'"}},"else":"'resend-relay'"}}}
+    {"@type":"update","object":"SystemSettings","value":{"defaultHostname":"mail.aramakisai.com","defaultDomainId":"#dom-1"}}
+
 # ============================================================
 # 適用手順 (recovery mode が有効な状態で実行すること)
 # ============================================================
