@@ -133,29 +133,21 @@ resource "cloudflare_record" "dmarc" {
 }
 
 # ============================================================
-# DKIM 署名鍵 (Stalwart 管理画面で生成)
-# セレクター名: 202605e (Ed25519) / 202605r (RSA)
+# DKIM 署名鍵
 # ============================================================
-
-# DKIM Ed25519 (軽量・高速。Ed25519 未対応の古い MTA 向けに RSA も同時運用)
-resource "cloudflare_record" "dkim_ed25519" {
-  zone_id = var.cloudflare_zone_id
-  name    = "202605e._domainkey"
-  value   = "v=DKIM1; k=ed25519; h=sha256; p=YTxG7pHBpZAh+cWvU8DbWXQnsExlX1r1IIGeQ6a27Aw="
-  type    = "TXT"
-  proxied = false
-  comment = "DKIM Ed25519 key (selector: 202605e, Stalwart)"
-}
-
-# DKIM RSA-2048 (互換性重視。公開鍵が長いため DNS ゾーンでは2行に分割されるが値は連結する)
-resource "cloudflare_record" "dkim_rsa" {
-  zone_id = var.cloudflare_zone_id
-  name    = "202605r._domainkey"
-  value   = "v=DKIM1; k=rsa; h=sha256; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArVTX8sPGIotZf1zwQ+JkA2BWK9PlcASW56bp/mFDxzrXVASQjTR4pHn1mudc8kCKXZpP+n5I0jdHc1jXH8r83g9PQjloFg86//lTriFkzDQmCU5KYJIiT1Q2Ccpt/wpfzM1XqqO8buN9ADn9KKkYLoV5U8YWAZz6RBOnxwmB7Rv8r6C9VstBl849QRqN6kn/FKcjkJ9wY2Bjo1of7QEcJu8odYwS826710+u7qFklMiyFJGjW+tEki0atDazs7DqifWgY7g2m5wPyBjONQGOYntOe9Wg+KmEtbKkDdL+XtoCsY2NLH0QhCk9/Y2+WX8OKitocxgkA5j8KPe06lLYpQIDAQAB"
-  type    = "TXT"
-  proxied = false
-  comment = "DKIM RSA-2048 key (selector: 202605r, Stalwart)"
-}
+#
+# v0.16.6 の初回起動時に DB が初期化され、旧秘密鍵 (202605e / 202605r) が消失した。
+# 秘密鍵のない公開鍵レコードは無意味なため、Terraform 管理から削除する。
+#
+# 新しい DKIM レコードは Stalwart の dkimManagement: Automatic + dnsManagement が
+# Cloudflare API 経由で自動登録する (gitops/manifests/prod/stalwart/settings-configmap.yaml 参照)。
+# Stalwart が登録するレコードは Terraform state には含まれないため drift は発生しない。
+#
+# 削除手順:
+#   terraform apply \
+#     -target cloudflare_record.dkim_ed25519 \
+#     -target cloudflare_record.dkim_rsa
+# (リソース定義を削除した後に apply すると Cloudflare から削除される)
 
 # ============================================================
 # SMTP TLS レポート

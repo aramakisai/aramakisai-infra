@@ -108,6 +108,13 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: stalwart-data
+        # config + settings を同一ディレクトリ (/etc/stalwart) に projected で合成
+        # /etc/stalwart/config.json   ← stalwart-config ConfigMap
+        # /etc/stalwart/settings.ndjson ← stalwart-settings ConfigMap
         - name: config
-          configMap:
-            name: stalwart-config
+          projected:
+            sources:
+              - configMap:
+                  name: stalwart-config
+              - configMap:
+                  name: stalwart-settings
