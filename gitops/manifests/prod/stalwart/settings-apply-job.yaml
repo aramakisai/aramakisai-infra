@@ -62,6 +62,7 @@ spec:
               for i in $(seq 1 24); do
                 if /tmp/stalwart-cli \
                     --url "$STALWART_URL" \
+                    -k \
                     --user admin \
                     --password "$STALWART_ADMIN_SECRET" \
                     query Domain > /dev/null 2>&1; then
@@ -84,6 +85,7 @@ spec:
               echo ">>> settings-update.ndjson を適用中..."
               /tmp/stalwart-cli \
                 --url "$STALWART_URL" \
+                -k \
                 --user admin \
                 --password "$STALWART_ADMIN_SECRET" \
                 apply /settings/settings-update.ndjson
