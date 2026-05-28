@@ -47,16 +47,12 @@ resource "cloudflare_record" "api_stg" {
 # Stalwart メールサーバー
 # ============================================================
 
-# mail.aramakisai.com → prod-node-1 のみ (シングル A レコード)
+# mail.aramakisai.com → prod-node-1 のみ (A + AAAA)
 #
-# StatefulSet は hostPort を使用しており、Pod が稼働するノードのみがポート
-# 25/587/465/143/993 に応答する。StatefulSet は prod-node-1 に固定
+# StatefulSet は hostNetwork を使用しており、Pod が稼働するノードのみがポート
+# 25/587/465/143/993/443 に応答する。StatefulSet は prod-node-1 に固定
 # (statefulset.yaml の nodeSelector: kubernetes.io/hostname: prod-node-1) して
 # あるため、DNS も prod-node-1 の IP 1 件のみを指定する。
-#
-# ラウンドロビン DNS は使用しない:
-# replicas: 1 の StatefulSet では Pod が 1 台のノードにしか存在しないため、
-# 他のノードへの接続はすべてタイムアウトになるため。
 #
 # proxied = false: Cloudflare プロキシは SMTP/IMAP を中継できない
 resource "cloudflare_record" "mail_prod_node_1" {
@@ -65,7 +61,16 @@ resource "cloudflare_record" "mail_prod_node_1" {
   value   = hcloud_server.nodes["prod-node-1"].ipv6_address
   type    = "AAAA"
   proxied = false
-  comment = "Stalwart mail IPv6 (prod-node-1 固定 / hostPort)"
+  comment = "Stalwart mail IPv6 (prod-node-1 固定)"
+}
+
+resource "cloudflare_record" "mail_prod_node_1_ipv4" {
+  zone_id = var.cloudflare_zone_id
+  name    = "mail"
+  value   = hcloud_server.nodes["prod-node-1"].ipv4_address
+  type    = "A"
+  proxied = false
+  comment = "Stalwart mail IPv4 (prod-node-1 固定)"
 }
 
 # ⚠️  terraform apply 後に Hetzner PTR (rDNS) の設定が必要
