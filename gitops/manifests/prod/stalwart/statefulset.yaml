@@ -41,6 +41,7 @@ spec:
           # 注意: Docker Hub イメージ名は stalwartlabs/mail-server (旧・Archived) ではなく
           #       stalwartlabs/stalwart (新) を使用すること
           image: stalwartlabs/stalwart:v0.16.6-alpine
+          # v0.16 config: --config /etc/stalwart/config.json (Dockerfile デフォルト)
           ports:
             - name: smtp
               containerPort: 25
@@ -60,14 +61,28 @@ spec:
           envFrom:
             - secretRef:
                 name: stalwart-secrets
+          env:
+            # STALWART_ADMIN_SECRET を明示定義: 下の STALWART_RECOVERY_ADMIN の値展開に使用
+            - name: STALWART_ADMIN_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: stalwart-secrets
+                  key: STALWART_ADMIN_SECRET
+            # ===== 初期セットアップ用 (設定完了後に必ず削除すること) =====
+            # Recovery mode: port 8080 で Admin UI を起動し、メールサービスを一時停止
+            # 設定完了後にこの2行を削除して ArgoCD sync → 通常運用に切り替わる
+            - name: STALWART_RECOVERY_MODE
+              value: "1"
+            - name: STALWART_RECOVERY_ADMIN
+              value: "admin:$(STALWART_ADMIN_SECRET)"
           volumeMounts:
             - name: data
               mountPath: /opt/stalwart
             - name: config
-              mountPath: /opt/stalwart/etc
+              mountPath: /etc/stalwart
               readOnly: true
-              # v0.15.5 のデフォルト設定パス: /opt/stalwart/etc/config.toml
-              # /opt/stalwart (PVC) の etc/ サブディレクトリを ConfigMap で上書き
+              # v0.16 のデフォルト config パス: /etc/stalwart/config.json
+              # (Dockerfile: CMD ["--config", "/etc/stalwart/config.json"])
           resources:
             requests:
               memory: "256Mi"
@@ -75,15 +90,17 @@ spec:
             limits:
               memory: "512Mi"
               cpu: "500m"
+          # recovery mode 中は port 8080 のみ開く
+          # 設定完了・recovery mode 解除後は port: 443 に変更すること
           livenessProbe:
             tcpSocket:
-              port: 25
+              port: 8080
             initialDelaySeconds: 30
             periodSeconds: 30
             failureThreshold: 3
           readinessProbe:
             tcpSocket:
-              port: 25
+              port: 8080
             initialDelaySeconds: 10
             periodSeconds: 10
             failureThreshold: 3

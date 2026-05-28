@@ -1,127 +1,28 @@
 ---
-# Stalwart Mail Server 設定ファイル
-# 詳細: https://stalw.art/docs/configuration/overview
+# Stalwart Mail Server 設定ファイル (v0.16+)
 #
-# TLS 証明書 (ACME): Web Admin UI から設定する
-#   初回起動後に https://mail-admin.aramakisai.com へアクセスし
-#   Settings > Server > TLS > ACME Providers で Let's Encrypt + Cloudflare DNS-01 を設定する
-#   CLOUDFLARE_API_TOKEN (Zone:DNS:Edit) は stalwart-secrets ExternalSecret から注入済み
+# v0.16 以降の変更点:
+#   - config.json は「データストアの場所」だけを記述する最小設定ファイル
+#   - リスナー・認証・ドメイン・DKIM 等の全設定は RocksDB に保存され、
+#     Web Admin UI (http://<node>:8080/admin) から管理する
+#   - 旧 config.toml の設定内容は Admin UI で再設定が必要
 #
-# Web Admin: https://mail-admin.aramakisai.com (Cloudflare Tunnel 経由)
-#   - CF Access は設定しない。Stalwart 独自認証で保護。
-#   - 初回ログイン後に管理者パスワードを変更すること
+# Web Admin: https://mail-admin.aramakisai.com  (Cloudflare Tunnel 経由 / port 443)
+#   初期セットアップ時のみ: http://<prod-node-1-tailscale-ip>:8080/admin  (recovery mode)
+#
+# ACME (TLS 証明書): Admin UI > Settings > Certificates > ACME Providers
+#   Provider: Let's Encrypt, DNS-01, Cloudflare
+#   CLOUDFLARE_API_TOKEN は stalwart-secrets (ESO) から自動注入済み
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: stalwart-config
   namespace: prod
 data:
-  config.toml: |
-    # ============================================================
-    # サーバー基本設定
-    # ============================================================
-    [server]
-    hostname = "mail.aramakisai.com"
-
-    # ============================================================
-    # リスナー定義
-    # ============================================================
-
-    # SMTP (25): MTA 間の受信。TLS は STARTTLS で対応
-    [server.listener."smtp"]
-    bind = ["[::]:25"]
-    protocol = "smtp"
-
-    # SMTP Submission (587): メールクライアント → MTA。STARTTLS 必須
-    [server.listener."submission"]
-    bind = ["[::]:587"]
-    protocol = "smtp"
-    [server.listener."submission".tls]
-    enable = true
-    implicit = false
-
-    # SMTPS (465): メールクライアント → MTA。Implicit TLS
-    [server.listener."smtps"]
-    bind = ["[::]:465"]
-    protocol = "smtp"
-    [server.listener."smtps".tls]
-    enable = true
-    implicit = true
-
-    # IMAP (143): メールクライアント。STARTTLS 推奨
-    [server.listener."imap"]
-    bind = ["[::]:143"]
-    protocol = "imap"
-
-    # IMAPS (993): メールクライアント。Implicit TLS
-    [server.listener."imaps"]
-    bind = ["[::]:993"]
-    protocol = "imap"
-    [server.listener."imaps".tls]
-    enable = true
-    implicit = true
-
-    # HTTPS (443): Web Admin UI + JMAP
-    # Cloudflare Tunnel (stalwart-admin ClusterIP) 経由でのみ到達可能
-    # no_tls_verify = true のため、初回は自己署名証明書でも接続可能
-    [server.listener."https"]
-    bind = ["[::]:443"]
-    protocol = "http"
-    [server.listener."https".tls]
-    enable = true
-    implicit = true
-
-    # ============================================================
-    # ストレージ設定
-    # ============================================================
-
-    [storage]
-    data      = "rocksdb"
-    fts       = "rocksdb"
-    blob      = "rocksdb"
-    lookup    = "rocksdb"
-    directory = "default"
-
-    [store."rocksdb"]
-    type        = "rocksdb"
-    path        = "/opt/stalwart/data"
-    compression = "lz4"
-
-    # ============================================================
-    # ディレクトリ (ユーザー管理)
-    # ============================================================
-
-    # 内部ディレクトリ: Stalwart 管理画面でユーザーを管理する
-    # 将来的に Authentik LDAP/SCIM 連携も可能
-    [directory."default"]
-    type  = "internal"
-    store = "rocksdb"
-
-    # ============================================================
-    # 管理者 (フォールバック認証)
-    # ============================================================
-
-    # Web Admin UI へのログインに使用する管理者アカウント
-    # STALWART_ADMIN_SECRET は stalwart-secrets (ExternalSecret) から envFrom で注入される
-    [authentication.fallback-admin]
-    user   = "admin"
-    secret = "%{env:STALWART_ADMIN_SECRET}%"
-
-    # ============================================================
-    # HTTP 設定 (Cloudflare Tunnel リバースプロキシ対応)
-    # ============================================================
-
-    # Cloudflare Tunnel 経由でアクセスされるため X-Forwarded-For を信頼する
-    [http]
-    use-x-forwarded-for = true
-    permissive-cors     = false
-
-    # ============================================================
-    # ログ設定
-    # ============================================================
-
-    [tracer."stdout"]
-    type   = "stdout"
-    level  = "info"
-    ansi   = false    # コンテナ環境では ANSI カラーコードを無効化
-    enable = true
+  # v0.16 の config.json: データストアの場所のみ記述する
+  # その他の設定 (リスナー・認証・ルーティング等) はすべて DB に保存し Admin UI で管理
+  config.json: |
+    {
+      "@type": "RocksDb",
+      "path": "/opt/stalwart/data"
+    }
