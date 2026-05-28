@@ -84,10 +84,8 @@ spec:
             - name: STALWART_RECOVERY_MODE
               value: "1"
             - name: STALWART_RECOVERY_ADMIN
-              valueFrom:
-                secretKeyRef:
-                  name: stalwart-secrets
-                  key: STALWART_ADMIN_SECRET
+              # 形式: "username:password" — K8s env var 参照で STALWART_ADMIN_SECRET を埋め込む
+              value: "admin:$(STALWART_ADMIN_SECRET)"
           volumeMounts:
             - name: data
               mountPath: /opt/stalwart
