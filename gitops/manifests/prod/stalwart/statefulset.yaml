@@ -120,6 +120,7 @@ spec:
         # /etc/stalwart/settings.ndjson ← stalwart-settings ConfigMap
         - name: config
           projected:
+            defaultMode: 0644
             sources:
               - configMap:
                   name: stalwart-config
