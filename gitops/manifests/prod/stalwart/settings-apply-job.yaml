@@ -93,7 +93,7 @@ spec:
                 -k \
                 --user admin \
                 --password "$STALWART_ADMIN_SECRET" \
-                apply /settings/settings-update.ndjson
+                apply --file /settings/settings-update.ndjson
 
               echo "    ✅ 設定の適用が完了しました"
           env:
