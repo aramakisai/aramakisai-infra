@@ -51,7 +51,11 @@ spec:
               apk add --no-cache wget xz > /dev/null 2>&1
               wget -qO /tmp/stalwart-cli.tar.xz \
                 https://github.com/stalwartlabs/cli/releases/download/v1.0.7/stalwart-cli-x86_64-unknown-linux-musl.tar.xz
-              tar -xJf /tmp/stalwart-cli.tar.xz -C /tmp/
+              # BusyBox tar は -J 非対応のため xz で展開してから tar
+              xz -d /tmp/stalwart-cli.tar.xz
+              tar -xf /tmp/stalwart-cli.tar -C /tmp/
+              # アーカイブ内のバイナリ名: stalwart-cli-x86_64-unknown-linux-musl
+              mv /tmp/stalwart-cli-x86_64-unknown-linux-musl /tmp/stalwart-cli
               chmod +x /tmp/stalwart-cli
               echo "    ✅ stalwart-cli v1.0.7 取得完了"
 
