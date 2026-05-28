@@ -38,6 +38,9 @@ spec:
       #   1. hostNetwork + port 25 のバインドには root (または NET_BIND_SERVICE) が必要
       #   2. v0.15 が root で作成した PVC ファイル (RocksDB) へのアクセスに必要
       #      v0.16 Alpine イメージがデフォルト non-root になったため権限エラーが発生する
+      # 終了猶予: デフォルト 30 秒。メールキューが空になるのを待つ時間
+      # 本番運用開始後は配送中メールの損失を避けるため 60 秒程度に伸ばすこと
+      terminationGracePeriodSeconds: 30
       securityContext:
         runAsUser: 0
         runAsGroup: 0
