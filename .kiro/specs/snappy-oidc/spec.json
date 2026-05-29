@@ -1,0 +1,6 @@
+{
+  "name": "snappy-oidc",
+  "description": "Configure OIDC login for Snappymail",
+  "status": "implementation",
+  "language": "ja"
+}

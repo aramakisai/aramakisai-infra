@@ -155,41 +155,40 @@ spec:
       containers:
         - name: snappymail
           image: djmaze/snappymail:v2.38.2
-          command:
-            - sh
-            - -c
-            - |
-              # application.ini の自動適用スクリプト (バックグラウンドで生成検知)
-              (
-                CONFIG_FILE="/var/lib/snappymail/_data_/_default_/configs/application.ini"
-                for i in \$(seq 1 60); do
-                  if [ -f "\$CONFIG_FILE" ]; then
-                    echo "Found application.ini, applying GitOps configurations..."
-                    # plugins.enable = On
-                    sed -i 's|enable = Off|enable = On|' "\$CONFIG_FILE"
-                    # plugins.enabled_list = "login-authentik"
-                    sed -i -E 's|enabled_list[[:space:]]*=[[:space:]]*.*|enabled_list = "login-authentik"|' "\$CONFIG_FILE"
-                    # login.hide_login_form = On
-                    if ! grep -q "hide_login_form" "\$CONFIG_FILE"; then
-                      sed -i '/\[login\]/a hide_login_form = On' "\$CONFIG_FILE"
-                    else
-                      sed -i 's|hide_login_form = .*|hide_login_form = On|' "\$CONFIG_FILE"
-                    fi
-                    # login.default_domain = "aramakisai.com"
-                    sed -i 's|default_domain = ""|default_domain = "aramakisai.com"|' "\$CONFIG_FILE"
-
-                    # admin_password のハッシュ自動注入
-                    NEW_HASH=\$(php -r 'echo password_hash(getenv("SNAPPYMAIL_ADMIN_PASSWORD"), PASSWORD_BCRYPT);')
-                    if [ -n "\$NEW_HASH" ]; then
-                      sed -i "s|admin_password = \".*\"|admin_password = \"\$NEW_HASH\"|" "\$CONFIG_FILE"
-                    fi
-                    echo "GitOps configurations successfully applied to application.ini"
-                    break
-                  fi
-                  sleep 1
-                done
-              ) &
-              exec /docker-entrypoint.sh apache2-foreground
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                  - sh
+                  - -c
+                  - |
+                    # application.ini 適用用のスクリプトファイルを一時生成 (Bourne shell での syntax error 回避)
+                    printf '%s\n' \
+                      'CONFIG_FILE="/var/lib/snappymail/_data_/_default_/configs/application.ini"' \
+                      'i=1' \
+                      'while [ $i -le 60 ]; do' \
+                      '  if [ -f "$CONFIG_FILE" ]; then' \
+                      '    echo "Found application.ini, applying GitOps configurations..."' \
+                      '    sed -i "s/enable = Off/enable = On/" "$CONFIG_FILE"' \
+                      '    sed -i "s/enabled_list.*/enabled_list = \"login-authentik\"/" "$CONFIG_FILE"' \
+                      '    if ! grep -q "hide_login_form" "$CONFIG_FILE"; then' \
+                      '      sed -i "/\\[login\\]/a hide_login_form = On" "$CONFIG_FILE"' \
+                      '    else' \
+                      '      sed -i "s/hide_login_form = .*/hide_login_form = On/" "$CONFIG_FILE"' \
+                      '    fi' \
+                      '    sed -i "s/default_domain.*/default_domain = \"aramakisai.com\"/" "$CONFIG_FILE"' \
+                      '    NEW_HASH=`php -r '\''echo password_hash(getenv("SNAPPYMAIL_ADMIN_PASSWORD"), PASSWORD_BCRYPT);'\''`' \
+                      '    if [ -n "$NEW_HASH" ]; then' \
+                      '      sed -i "s|admin_password = \".*\"|admin_password = \"$NEW_HASH\"|" "$CONFIG_FILE"' \
+                      '    fi' \
+                      '    echo "GitOps configurations successfully applied to application.ini"' \
+                      '    break' \
+                      '  fi' \
+                      '  sleep 1' \
+                      '  i=`expr $i + 1`' \
+                      'done' \
+                      > /tmp/apply.sh
+                    sh /tmp/apply.sh &
           ports:
             - name: http
               containerPort: 8888
