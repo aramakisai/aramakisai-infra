@@ -36,7 +36,7 @@ data:
     {"@type":"destroy","object":"DkimSignature"}
     {"@type":"destroy","object":"MtaRoute"}
     {"@type":"create","object":"DnsServer","value":{"cf-dns":{"@type":"Cloudflare","description":"Cloudflare DNS (DKIM 自動登録)","secret":{"@type":"EnvironmentVariable","variableName":"CLOUDFLARE_API_TOKEN"}}}}
-    {"@type":"create","object":"Certificate","value":{"cert-main":{"cert":"/etc/stalwart/tls/tls.crt","privateKey":"/etc/stalwart/tls/tls.key"}}}
+    {"@type":"create","object":"Certificate","value":{"cert-main":{"certificate":{"@type":"File","filePath":"/etc/stalwart/tls/tls.crt"},"privateKey":{"@type":"File","filePath":"/etc/stalwart/tls/tls.key"}}}}
     {"@type":"create","object":"Domain","value":{"dom-1":{"name":"aramakisai.com","certificateManagement":{"@type":"Manual","certificateId":"#cert-main"},"dkimManagement":{"@type":"Automatic","algorithms":{"Dkim1Ed25519Sha256":true}},"dnsManagement":{"@type":"Automatic","dnsServerId":"#cf-dns","publishRecords":{"dkim":true}},"subAddressing":{"@type":"Enabled"}}}}
     {"@type":"create","object":"NetworkListener","value":{"smtp":{"name":"smtp","bind":{"[::]:25":true},"protocol":"smtp","tlsImplicit":false},"submission":{"name":"submission","bind":{"[::]:587":true},"protocol":"smtp","tlsImplicit":false},"smtps":{"name":"smtps","bind":{"[::]:465":true},"protocol":"smtp","tlsImplicit":true},"imap":{"name":"imap","bind":{"[::]:143":true},"protocol":"imap","tlsImplicit":false},"imaps":{"name":"imaps","bind":{"[::]:993":true},"protocol":"imap","tlsImplicit":true},"https":{"name":"https","bind":{"[::]:8080":true},"protocol":"http","tlsImplicit":false}}}
     {"@type":"create","object":"MtaRoute","value":{"resend-relay":{"@type":"Relay","name":"resend-relay","description":"Resend SMTP リレー (Hetzner port 25 新規アカウント制限回避)","address":"smtp.resend.com","port":587,"implicitTls":false,"authUsername":"resend","authSecret":{"@type":"EnvironmentVariable","variableName":"RESEND_API_KEY"}}}}
@@ -62,7 +62,7 @@ data:
     {"@type":"destroy","object":"NetworkListener"}
     {"@type":"destroy","object":"Certificate"}
     {"@type":"destroy","object":"MtaRoute"}
-    {"@type":"create","object":"Certificate","value":{"cert-main":{"cert":"/etc/stalwart/tls/tls.crt","privateKey":"/etc/stalwart/tls/tls.key"}}}
+    {"@type":"create","object":"Certificate","value":{"cert-main":{"certificate":{"@type":"File","filePath":"/etc/stalwart/tls/tls.crt"},"privateKey":{"@type":"File","filePath":"/etc/stalwart/tls/tls.key"}}}}
     {"@type":"create","object":"NetworkListener","value":{"smtp":{"name":"smtp","bind":{"[::]:25":true},"protocol":"smtp","tlsImplicit":false},"submission":{"name":"submission","bind":{"[::]:587":true},"protocol":"smtp","tlsImplicit":false},"smtps":{"name":"smtps","bind":{"[::]:465":true},"protocol":"smtp","tlsImplicit":true},"imap":{"name":"imap","bind":{"[::]:143":true},"protocol":"imap","tlsImplicit":false},"imaps":{"name":"imaps","bind":{"[::]:993":true},"protocol":"imap","tlsImplicit":true},"https":{"name":"https","bind":{"[::]:8080":true},"protocol":"http","tlsImplicit":false}}}
     {"@type":"create","object":"MtaRoute","value":{"resend-relay":{"@type":"Relay","name":"resend-relay","description":"Resend SMTP リレー (Hetzner port 25 新規アカウント制限回避)","address":"smtp.resend.com","port":587,"implicitTls":false,"authUsername":"resend","authSecret":{"@type":"EnvironmentVariable","variableName":"RESEND_API_KEY"}}}}
     {"@type":"update","object":"MtaOutboundStrategy","value":{"route":{"match":{"0":{"if":"is_local_domain(rcpt_domain)","then":"'local'"}},"else":"'resend-relay'"}}}
