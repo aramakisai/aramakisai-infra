@@ -53,10 +53,99 @@ spec:
             - sh
             - -c
             - |
+              # 1. プラグインのインストール
               PLUGIN_DIR="/data/_data_/plugins/login-authentik"
               mkdir -p "$PLUGIN_DIR"
               cp /plugin-src/index.php "$PLUGIN_DIR/index.php"
               echo "login-authentik plugin installed to $PLUGIN_DIR"
+
+              # 2. 初期設定ディレクトリの作成
+              CONFIGS_DIR="/data/_data_/_default_/configs"
+              DOMAINS_DIR="/data/_data_/_default_/domains"
+              mkdir -p "$CONFIGS_DIR" "$DOMAINS_DIR"
+
+              # 3. plugin-login-authentik.ini の生成 (存在しない場合)
+              if [ ! -f "$CONFIGS_DIR/plugin-login-authentik.ini" ]; then
+                printf '%s\n' \
+                  '[plugin]' \
+                  "client_id = \"${SNAPPYMAIL_OAUTH2_CLIENT_ID}\"" \
+                  "client_secret = \"${SNAPPYMAIL_OAUTH2_CLIENT_SECRET}\"" \
+                  'authorize_uri = "https://idp.aramakisai.com/application/o/authorize/"' \
+                  'token_uri = "https://idp.aramakisai.com/application/o/token/"' \
+                  'userinfo_uri = "https://idp.aramakisai.com/application/o/userinfo/"' \
+                  > "$CONFIGS_DIR/plugin-login-authentik.ini"
+                echo "Generated plugin-login-authentik.ini"
+              fi
+
+              # 4. domains/aramakisai.com.json の生成 (存在しない場合)
+              if [ ! -f "$DOMAINS_DIR/aramakisai.com.json" ]; then
+                printf '%s\n' \
+                  '{' \
+                  '    "IMAP": {' \
+                  '        "host": "stalwart-mail.prod.svc.cluster.local",' \
+                  '        "port": 993,' \
+                  '        "type": 1,' \
+                  '        "timeout": 300,' \
+                  '        "shortLogin": false,' \
+                  '        "lowerLogin": true,' \
+                  '        "sasl": [' \
+                  '            "OAUTHBEARER",' \
+                  '            "XOAUTH2",' \
+                  '            "PLAIN",' \
+                  '            "LOGIN"' \
+                  '        ],' \
+                  '        "ssl": {' \
+                  '            "verify_peer": false,' \
+                  '            "verify_peer_name": false,' \
+                  '            "allow_self_signed": true,' \
+                  '            "SNI_enabled": true,' \
+                  '            "disable_compression": true,' \
+                  '            "security_level": 1' \
+                  '        }' \
+                  '    },' \
+                  '    "SMTP": {' \
+                  '        "host": "stalwart-mail.prod.svc.cluster.local",' \
+                  '        "port": 587,' \
+                  '        "type": 2,' \
+                  '        "timeout": 60,' \
+                  '        "shortLogin": false,' \
+                  '        "lowerLogin": true,' \
+                  '        "sasl": [' \
+                  '            "OAUTHBEARER",' \
+                  '            "XOAUTH2",' \
+                  '            "PLAIN",' \
+                  '            "LOGIN"' \
+                  '        ],' \
+                  '        "ssl": {' \
+                  '            "verify_peer": false,' \
+                  '            "verify_peer_name": false,' \
+                  '            "allow_self_signed": true,' \
+                  '            "SNI_enabled": true,' \
+                  '            "disable_compression": true,' \
+                  '            "security_level": 1' \
+                  '        },' \
+                  '        "useAuth": true,' \
+                  '        "setSender": false,' \
+                  '        "usePhpMail": false' \
+                  '    }' \
+                  '}' \
+                  > "$DOMAINS_DIR/aramakisai.com.json"
+                echo "Generated domains/aramakisai.com.json"
+              fi
+
+              # 5. 所有者の修正 (www-data)
+              chown -R 33:33 /data/_data_
+          env:
+            - name: SNAPPYMAIL_OAUTH2_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: snappymail-secrets
+                  key: SNAPPYMAIL_OAUTH2_CLIENT_ID
+            - name: SNAPPYMAIL_OAUTH2_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: snappymail-secrets
+                  key: SNAPPYMAIL_OAUTH2_CLIENT_SECRET
           volumeMounts:
             - name: data
               mountPath: /data
@@ -65,8 +154,42 @@ spec:
               readOnly: true
       containers:
         - name: snappymail
-          # latest は使用しない。バージョンを固定してデプロイ時の再現性を確保する
-          image: djmaze/snappymail:latest
+          image: djmaze/snappymail:2.38.2
+          command:
+            - sh
+            - -c
+            - |
+              # application.ini の自動適用スクリプト (バックグラウンドで生成検知)
+              (
+                CONFIG_FILE="/var/lib/snappymail/_data_/_default_/configs/application.ini"
+                for i in \$(seq 1 60); do
+                  if [ -f "\$CONFIG_FILE" ]; then
+                    echo "Found application.ini, applying GitOps configurations..."
+                    # plugins.enable = On
+                    sed -i 's|enable = Off|enable = On|' "\$CONFIG_FILE"
+                    # plugins.enabled_list = "login-authentik"
+                    sed -i -E 's|enabled_list[[:space:]]*=[[:space:]]*.*|enabled_list = "login-authentik"|' "\$CONFIG_FILE"
+                    # login.hide_login_form = On
+                    if ! grep -q "hide_login_form" "\$CONFIG_FILE"; then
+                      sed -i '/\[login\]/a hide_login_form = On' "\$CONFIG_FILE"
+                    else
+                      sed -i 's|hide_login_form = .*|hide_login_form = On|' "\$CONFIG_FILE"
+                    fi
+                    # login.default_domain = "aramakisai.com"
+                    sed -i 's|default_domain = ""|default_domain = "aramakisai.com"|' "\$CONFIG_FILE"
+
+                    # admin_password のハッシュ自動注入
+                    NEW_HASH=\$(php -r 'echo password_hash(getenv("SNAPPYMAIL_ADMIN_PASSWORD"), PASSWORD_BCRYPT);')
+                    if [ -n "\$NEW_HASH" ]; then
+                      sed -i "s|admin_password = \".*\"|admin_password = \"\$NEW_HASH\"|" "\$CONFIG_FILE"
+                    fi
+                    echo "GitOps configurations successfully applied to application.ini"
+                    break
+                  fi
+                  sleep 1
+                done
+              ) &
+              exec /docker-entrypoint.sh apache2-foreground
           ports:
             - name: http
               containerPort: 8888
