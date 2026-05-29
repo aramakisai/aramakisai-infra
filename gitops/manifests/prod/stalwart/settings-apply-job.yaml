@@ -103,14 +103,13 @@ spec:
               echo "    ✅ stalwart-cli v1.0.7 取得完了"
 
               # ── Stalwart HTTPS の起動待機 (最大 120 秒) ──────────────────
-              STALWART_URL="https://mail.aramakisai.com"
-              echo ">>> Stalwart HTTPS の起動を待機中 ($STALWART_URL)..."
+              STALWART_URL="http://stalwart-mail.prod.svc.cluster.local:8080"
+              echo ">>> Stalwart HTTP API の起動を待機中 ($STALWART_URL)..."
               READY=0
               for i in $(seq 1 24); do
                 if /tmp/stalwart-cli \
                     --url "$STALWART_URL" \
-                    -k \
-                    --user admin \
+                        --user admin \
                     --password "$STALWART_ADMIN_SECRET" \
                     query Domain > /dev/null 2>&1; then
                   echo "    ✅ Stalwart 応答確認 (attempt $i)"
@@ -132,7 +131,6 @@ spec:
               echo ">>> settings-update.ndjson を適用中..."
               /tmp/stalwart-cli \
                 --url "$STALWART_URL" \
-                -k \
                 --user admin \
                 --password "$STALWART_ADMIN_SECRET" \
                 apply --file /settings/settings-update.ndjson
@@ -145,7 +143,6 @@ spec:
               echo ">>> Domain ID を取得して defaultDomainId を更新中..."
               DOMAIN_ID=$(/tmp/stalwart-cli \
                 --url "$STALWART_URL" \
-                -k \
                 --user admin \
                 --password "$STALWART_ADMIN_SECRET" \
                 --no-color \
@@ -155,8 +152,7 @@ spec:
                 printf '{"@type":"update","object":"SystemSettings","value":{"defaultDomainId":"%s"}}\n' "$DOMAIN_ID" \
                   | /tmp/stalwart-cli \
                       --url "$STALWART_URL" \
-                      -k \
-                      --user admin \
+                            --user admin \
                       --password "$STALWART_ADMIN_SECRET" \
                       apply --stdin
                 echo "    ✅ defaultDomainId を $DOMAIN_ID に設定しました"
