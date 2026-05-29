@@ -4,15 +4,26 @@
 # image バージョンは https://github.com/the-djmaze/snappymail/releases で確認して固定すること
 # 更新手順: image タグを変更 → GitOps PR → ArgoCD が自動 sync
 #
-# 初期セットアップ手順:
-#   1. ArgoCD sync でデプロイ後、kubectl port-forward で 8888 に接続
-#      kubectl port-forward -n prod deploy/snappymail 8888:8888
-#   2. https://localhost:8888/?admin にアクセス
-#      パスワード: Infisical の SNAPPYMAIL_ADMIN_PASSWORD
-#   3. Domains → "+" で aramakisai.com を追加
-#      IMAP: stalwart-mail.prod.svc.cluster.local:993 (SSL, verify=off)
-#      SMTP: stalwart-mail.prod.svc.cluster.local:587 (STARTTLS)
-#   4. 以降は webmail.aramakisai.com (Cloudflare Tunnel) でアクセス可能
+# 認証方式: Authentik OAuth2 のみ (login-authentik プラグイン)
+#   - ログインフォームは非表示 (Admin → Login → "Allow users to login from any domain" = off)
+#   - 認証は Authentik OAuth2 Authorization Code フロー
+#   - IMAP/SMTP 接続は OAUTHBEARER SASL (Stalwart が Authentik OIDC で token を検証)
+#
+# Init Container が行うこと:
+#   1. ConfigMap (snappymail-plugin-authentik) から index.php を読み込む
+#   2. PVC 上の /var/lib/snappymail/_data_/plugins/login-authentik/ にコピー
+#   ※ Snappymail Admin で "login-authentik" プラグインを有効化し
+#      Client ID / Client Secret を設定すること (下部コメント参照)
+#
+# 初回セットアップ手順 (Admin → login-authentik プラグイン設定):
+#   kubectl port-forward -n prod deploy/snappymail 8888:8888
+#   → http://localhost:8888/?admin
+#   CLIENT_ID=$(kubectl get secret snappymail-secrets -n prod \
+#     -o jsonpath='{.data.SNAPPYMAIL_OAUTH2_CLIENT_ID}' | base64 -d)
+#   CLIENT_SECRET=$(kubectl get secret snappymail-secrets -n prod \
+#     -o jsonpath='{.data.SNAPPYMAIL_OAUTH2_CLIENT_SECRET}' | base64 -d)
+#   → Extensions → login-authentik → Enable → Client ID / Client Secret を貼り付け
+#   → Login → "Hide login form" → enabled
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -20,6 +31,11 @@ metadata:
   namespace: prod
   labels:
     app: snappymail
+  annotations:
+    # OAuth2 クレデンシャルが更新されたら自動再起動
+    secret.reloader.stakater.com/reload: "snappymail-secrets"
+    # プラグインが更新されたら自動再起動
+    configmap.reloader.stakater.com/reload: "snappymail-plugin-authentik"
 spec:
   replicas: 1
   selector:
@@ -30,6 +46,23 @@ spec:
       labels:
         app: snappymail
     spec:
+      initContainers:
+        - name: install-authentik-plugin
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              PLUGIN_DIR="/data/_data_/plugins/login-authentik"
+              mkdir -p "$PLUGIN_DIR"
+              cp /plugin-src/index.php "$PLUGIN_DIR/index.php"
+              echo "login-authentik plugin installed to $PLUGIN_DIR"
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: plugin-src
+              mountPath: /plugin-src
+              readOnly: true
       containers:
         - name: snappymail
           # latest は使用しない。バージョンを固定してデプロイ時の再現性を確保する
@@ -69,3 +102,6 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: snappymail-data
+        - name: plugin-src
+          configMap:
+            name: snappymail-plugin-authentik

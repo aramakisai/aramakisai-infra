@@ -1,0 +1,177 @@
+---
+# Authentik LDAP Outpost — K3s クラスター内 LDAP サービス
+#
+# 役割:
+#   Stalwart Mail Server の IMAP/SMTP 認証を Authentik に委譲するためのプロキシ。
+#   クラスター内から ldap://authentik-ldap-outpost.prod.svc.cluster.local:389 で到達できる。
+#
+# アクセス制限:
+#   制限はなく、Authentik に登録されている全ユーザーが Stalwart を利用できます。
+#
+# 前提 (Authentik WebUI での設定 — 詳細は下部コメント参照):
+#   1. LDAP Provider "Stalwart LDAP" を作成
+#   2. Application "stalwart-ldap" を作成
+#   3. Outpost (type: LDAP) を作成し Application をアサイン
+#   4. Outpost Token を Infisical に AUTHENTIK_LDAP_OUTPOST_TOKEN として登録
+#
+# バージョン管理:
+#   Authentik Helm chart (helm-values/prod/authentik.yaml: targetRevision: "2026.*") と
+#   同じバージョンに合わせること。
+#   確認: kubectl get pods -n prod -l app.kubernetes.io/name=authentik \
+#           -o jsonpath='{.items[0].spec.containers[0].image}'
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: authentik-ldap-outpost
+  namespace: prod
+  labels:
+    app: authentik-ldap-outpost
+  annotations:
+    # Outpost Token が更新されたら自動再起動
+    secret.reloader.stakater.com/reload: "authentik-ldap-outpost-token"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: authentik-ldap-outpost
+  template:
+    metadata:
+      labels:
+        app: authentik-ldap-outpost
+    spec:
+      containers:
+        - name: ldap
+          # ⚠️  Authentik サーバーと同じバージョンに合わせること
+          # 最新リリース: https://github.com/goauthentik/authentik/releases
+          image: ghcr.io/goauthentik/ldap:2026.4.2
+          ports:
+            - name: ldap
+              containerPort: 3389
+            - name: ldaps
+              containerPort: 6636
+            - name: metrics
+              containerPort: 9300
+          env:
+            - name: AUTHENTIK_HOST
+              # Authentik サーバーの URL (Cloudflare Tunnel 経由)
+              value: "https://idp.aramakisai.com"
+            - name: AUTHENTIK_INSECURE
+              value: "false"
+            - name: AUTHENTIK_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: authentik-ldap-outpost-token
+                  key: token
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "128Mi"
+              cpu: "100m"
+          livenessProbe:
+            httpGet:
+              path: /outpost.goauthentik.io/ping
+              port: 9300
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /outpost.goauthentik.io/ping
+              port: 9300
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: authentik-ldap-outpost
+  namespace: prod
+  labels:
+    app: authentik-ldap-outpost
+spec:
+  selector:
+    app: authentik-ldap-outpost
+  ports:
+    - name: ldap
+      port: 389
+      targetPort: 3389
+    - name: ldaps
+      port: 636
+      targetPort: 6636
+---
+# Authentik LDAP Outpost サービストークン
+#
+# このトークンは 2 箇所で使用する:
+#   1. LDAP Outpost コンテナ (AUTHENTIK_TOKEN): Authentik API への接続認証
+#   2. Stalwart の LDAP bind (AUTHENTIK_LDAP_OUTPOST_TOKEN):
+#      cn=ldapservice の bindSecret として使用 (同じトークン値)
+#
+# Infisical キー名: AUTHENTIK_LDAP_OUTPOST_TOKEN
+# 取得方法: Authentik WebUI → Admin → Outposts → <outpost名> →
+#           Service account → Token をコピー
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: authentik-ldap-outpost-token
+  namespace: prod
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: infisical
+  target:
+    name: authentik-ldap-outpost-token
+    creationPolicy: Owner
+  data:
+    - secretKey: token
+      remoteRef:
+        key: AUTHENTIK_LDAP_OUTPOST_TOKEN
+
+# ============================================================
+# Authentik WebUI での設定手順 (初回のみ)
+# ============================================================
+#
+# ① LDAP Provider 作成
+#    Admin → Applications → Providers → Create → LDAP Provider
+#    Name: Stalwart LDAP
+#    Bind flow: default-authentication-flow (または任意)
+#    Search group: 任意 (全ユーザーを許可する場合は指定しない)
+#    Certificate: 任意 (LDAP over TLS が必要な場合のみ)
+#
+# ② Application 作成
+#    Admin → Applications → Applications → Create
+#    Name: Stalwart LDAP
+#    Slug: stalwart-ldap
+#    Provider: Stalwart LDAP (上記)
+#    (※ 特定のグループに限定しないため、Policy/Group binding は設定不要)
+#
+# ③ LDAP Outpost 作成
+#    Admin → Applications → Outposts → Create
+#    Name: stalwart-ldap-outpost
+#    Type: LDAP
+#    Applications: Stalwart LDAP (上記)
+#    → 作成後: "View Deployment Info" → TOKEN 値をコピー
+#    → Infisical に AUTHENTIK_LDAP_OUTPOST_TOKEN として登録
+#
+# ④ OAuth2 / OIDC Provider 作成 (OAUTHBEARER / WebUI SSO 用)
+#    Admin → Applications → Providers → Create → OAuth2/OpenID Provider
+#    Name: Stalwart Mail
+#    Client ID: stalwart-mail (固定値 — Stalwart OIDC Directory の requireAudience と一致させる)
+#    Client Secret: 任意 (メモしておく)
+#    Redirect URIs: https://mail.aramakisai.com/auth/callback
+#    Signing key: authentik Self-signed Certificate (デフォルト)
+#    Scopes: openid, email, profile, Groups (カスタムスコープ)
+#    → Groups スコープマッピングを追加:
+#       Admin → Customisation → Scope Mappings → Create
+#       Name: groups, Expression: return ak_user_by(username=request.user.username).groups.all()
+#       ↑ 既存の "authentik default OAuth Mapping: OpenID 'groups'" があればそれを使う
+#
+# ⑤ Application 作成 (OAuth2)
+#    Name: Stalwart Mail
+#    Slug: stalwart-mail
+#    Provider: Stalwart Mail (上記)
+#    (※ 特定のグループに限定しないため、Policy/Group binding は設定不要)
+# ============================================================

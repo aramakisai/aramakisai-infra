@@ -6,6 +6,9 @@
 #
 # ⚠️  再適用時の注意:
 #   - NetworkListener / AcmeProvider / DnsServer / DkimSignature → destroy してから create (冪等)
+#   - Directory (LDAP/OIDC) → destroy してから create (冪等)
+#     Authentication.directoryId は destroy 中に一時的に無効になるが
+#     同一 apply 内で create + update するため問題ない
 #   - Domain → 初回のみ create。再適用時にドメインを変更する場合は手動で destroy すること
 #     (destroy すると紐付いているアカウントも削除されるため注意)
 #   - Account → NDJSON には含めない (別途 admin-account-create.sh で作成)
@@ -42,6 +45,10 @@ data:
     {"@type":"create","object":"MtaRoute","value":{"resend-relay":{"@type":"Relay","name":"resend-relay","description":"Resend SMTP リレー (Hetzner port 25 新規アカウント制限回避)","address":"smtp.resend.com","port":587,"implicitTls":false,"authUsername":"resend","authSecret":{"@type":"EnvironmentVariable","variableName":"RESEND_API_KEY"}}}}
     {"@type":"update","object":"MtaOutboundStrategy","value":{"route":{"match":{"0":{"if":"is_local_domain(rcpt_domain)","then":"'local'"}},"else":"'resend-relay'"}}}
     {"@type":"update","object":"SystemSettings","value":{"defaultHostname":"mail.aramakisai.com","defaultDomainId":"#dom-1"}}
+    {"@type":"destroy","object":"Directory"}
+    {"@type":"create","object":"Directory","value":{"authentik-ldap":{"@type":"Ldap","description":"Authentik LDAP Outpost — IMAP/SMTP パスワード認証 + Stalwart 内蔵 OAuth2 のバックエンド","url":"ldap://authentik-ldap-outpost.prod.svc.cluster.local:389","baseDn":"dc=ldap,dc=goauthentik,dc=io","bindDn":"cn=ldapservice,ou=users,dc=ldap,dc=goauthentik,dc=io","bindSecret":{"@type":"EnvironmentVariable","variableName":"AUTHENTIK_LDAP_OUTPOST_TOKEN"},"filterLogin":"(&(objectClass=inetOrgPerson)(|(mail=?)(uid=?)))","filterMailbox":"(&(objectClass=inetOrgPerson)(|(mail=?)(mailAlias=?)))","filterMemberOf":"(&(objectClass=group)(member=?))","attrEmail":["mail"],"attrEmailAlias":["mailAlias"],"attrMemberOf":["memberOf"],"groupClass":"group"}}}
+    {"@type":"create","object":"Directory","value":{"authentik-oidc":{"@type":"Oidc","description":"Authentik OIDC — Snappymail OAUTHBEARER 検証 (active directory)","issuerUrl":"https://idp.aramakisai.com/application/o/snappymail/","requireAudience":"snappymail-webmail","requireScopes":["openid","email"],"claimUsername":"preferred_username","usernameDomain":"aramakisai.com","claimName":"name","claimGroups":"groups"}}}
+    {"@type":"update","object":"Authentication","value":{"directoryId":"#authentik-oidc"}}
 
   # ============================================================
   # settings-update.ndjson — PostSync Job 用・冪等再適用 NDJSON
@@ -52,6 +59,8 @@ data:
   #   - DkimSignature は destroy しない (再生成すると DKIM 鍵が変わり DNS 更新が必要になるため)
   #   - DnsServer / AcmeProvider は destroy しない (Domain から参照されており objectIsLinked エラーになるため)
   #   - NetworkListener と MtaRoute は destroy+create で確実に最新化
+  #   - Directory (LDAP/OIDC) は destroy+create で確実に最新化
+  #     (Authentication.directoryId は apply 完了後に再設定されるため一時的な無効状態は許容)
   #   - MtaOutboundStrategy と SystemSettings は update で更新
   #
   # 適用対象:
@@ -67,6 +76,10 @@ data:
     {"@type":"create","object":"MtaRoute","value":{"resend-relay":{"@type":"Relay","name":"resend-relay","description":"Resend SMTP リレー (Hetzner port 25 新規アカウント制限回避)","address":"smtp.resend.com","port":587,"implicitTls":false,"authUsername":"resend","authSecret":{"@type":"EnvironmentVariable","variableName":"RESEND_API_KEY"}}}}
     {"@type":"update","object":"MtaOutboundStrategy","value":{"route":{"match":{"0":{"if":"is_local_domain(rcpt_domain)","then":"'local'"}},"else":"'resend-relay'"}}}
     {"@type":"update","object":"SystemSettings","value":{"defaultHostname":"mail.aramakisai.com"}}
+    {"@type":"destroy","object":"Directory"}
+    {"@type":"create","object":"Directory","value":{"authentik-ldap":{"@type":"Ldap","description":"Authentik LDAP Outpost — IMAP/SMTP パスワード認証 + Stalwart 内蔵 OAuth2 のバックエンド","url":"ldap://authentik-ldap-outpost.prod.svc.cluster.local:389","baseDn":"dc=ldap,dc=goauthentik,dc=io","bindDn":"cn=ldapservice,ou=users,dc=ldap,dc=goauthentik,dc=io","bindSecret":{"@type":"EnvironmentVariable","variableName":"AUTHENTIK_LDAP_OUTPOST_TOKEN"},"filterLogin":"(&(objectClass=inetOrgPerson)(|(mail=?)(uid=?)))","filterMailbox":"(&(objectClass=inetOrgPerson)(|(mail=?)(mailAlias=?)))","filterMemberOf":"(&(objectClass=group)(member=?))","attrEmail":["mail"],"attrEmailAlias":["mailAlias"],"attrMemberOf":["memberOf"],"groupClass":"group"}}}
+    {"@type":"create","object":"Directory","value":{"authentik-oidc":{"@type":"Oidc","description":"Authentik OIDC — Snappymail OAUTHBEARER 検証 (active directory)","issuerUrl":"https://idp.aramakisai.com/application/o/snappymail/","requireAudience":"snappymail-webmail","requireScopes":["openid","email"],"claimUsername":"preferred_username","usernameDomain":"aramakisai.com","claimName":"name","claimGroups":"groups"}}}
+    {"@type":"update","object":"Authentication","value":{"directoryId":"#authentik-oidc"}}
 
 # ============================================================
 # 適用手順 (recovery mode が有効な状態で実行すること)
