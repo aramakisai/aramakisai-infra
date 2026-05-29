@@ -27,6 +27,10 @@ spec:
           dnsPolicy: ClusterFirstWithHostNet
           nodeSelector:
             kubernetes.io/hostname: prod-node-1
+          # hostPort は K3s + Cilium で機能しない (スケジューラーがポート衝突判定)
+          # hostNetwork: true だけで十分なため hostPort を無効化
+          hostPort:
+            enabled: false
           # ClusterIP のみ: hostNetwork で直接バインドするため外部 LB は不要
           service:
             enabled: true
