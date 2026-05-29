@@ -22,6 +22,47 @@
 #   - MtaOutboundStrategy: update (ルーティングポリシーを更新)
 #   - SystemSettings: update (ホスト名を更新) + Domain ID を動的取得して defaultDomainId を設定
 #   - Domain / DkimSignature / DnsServer / AcmeProvider: 変更しない
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: stalwart-settings-apply
+  namespace: prod
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: stalwart-settings-apply
+  namespace: prod
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["delete"]
+    resourceNames: ["stalwart-0"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: stalwart-settings-apply
+  namespace: prod
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: stalwart-settings-apply
+subjects:
+  - kind: ServiceAccount
+    name: stalwart-settings-apply
+    namespace: prod
+---
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -38,6 +79,7 @@ spec:
   template:
     spec:
       restartPolicy: OnFailure
+      serviceAccountName: stalwart-settings-apply
       containers:
         - name: stalwart-cli
           image: alpine:3.19
@@ -123,6 +165,21 @@ spec:
               fi
 
               echo "    ✅ 設定の適用が完了しました"
+
+              # ── Stalwart Pod を再起動して設定をロード ────────────────────
+              # stalwart-cli apply は DB に設定を書き込むが、
+              # 配信エンジンのゲートウェイ設定はランタイムで再読み込みされない。
+              # Pod を削除すると StatefulSet が再作成し、最新 DB 設定でロードされる。
+              echo ">>> Stalwart Pod を再起動して新しいゲートウェイ設定をロード中..."
+              KUBE_TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+              HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -k -X DELETE \
+                -H "Authorization: Bearer $KUBE_TOKEN" \
+                "https://kubernetes.default.svc/api/v1/namespaces/prod/pods/stalwart-0")
+              if [ "$HTTP_CODE" = "200" ]; then
+                echo "    ✅ stalwart-0 を削除しました (StatefulSet が自動再作成します)"
+              else
+                echo "    ⚠ Pod 削除の HTTP ステータス: $HTTP_CODE (既に再起動済みの可能性あり)"
+              fi
           env:
             - name: STALWART_ADMIN_SECRET
               valueFrom:

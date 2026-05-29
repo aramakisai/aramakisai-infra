@@ -54,7 +54,7 @@ spec:
             - -c
             - |
               # 1. プラグインのインストール
-              PLUGIN_DIR="/data/_data_/plugins/login-authentik"
+              PLUGIN_DIR="/data/_data_/_default_/plugins/login-authentik"
               mkdir -p "$PLUGIN_DIR"
               cp /plugin-src/index.php "$PLUGIN_DIR/index.php"
               echo "login-authentik plugin installed to $PLUGIN_DIR"
