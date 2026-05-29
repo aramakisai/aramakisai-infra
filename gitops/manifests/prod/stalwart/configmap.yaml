@@ -10,9 +10,9 @@
 # Web Admin: https://mail-admin.aramakisai.com  (Cloudflare Tunnel 経由 / port 443)
 #   初期セットアップ時のみ: http://<prod-node-1-tailscale-ip>:8080/admin  (recovery mode)
 #
-# ACME (TLS 証明書): Admin UI > Settings > Certificates > ACME Providers
-#   Provider: Let's Encrypt, DNS-01, Cloudflare
-#   CLOUDFLARE_API_TOKEN は stalwart-secrets (ESO) から自動注入済み
+# TLS 証明書: cert-manager が取得した mail-tls Secret を /etc/stalwart/tls/ にマウント
+#   Stalwart の Certificate オブジェクト (cert-main) がこのパスを参照する
+#   証明書の自動更新は cert-manager が担当 (90日 / 30日前更新)
 apiVersion: v1
 kind: ConfigMap
 metadata:

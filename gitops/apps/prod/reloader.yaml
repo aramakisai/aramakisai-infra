@@ -1,0 +1,47 @@
+---
+# Stakater Reloader — Secret/ConfigMap 更新時に Pod を自動再起動
+# wave: 0 — 他のアプリと同時に起動して問題ない
+#
+# StatefulSet/Deployment に以下のアノテーションを付けると
+# 指定 Secret が更新されたとき自動で rollout restart が発行される:
+#   secret.reloader.stakater.com/reload: "<secret-name>"
+#
+# 用途: cert-manager が mail-tls を更新した際に stalwart を自動再起動する
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: reloader
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://stakater.github.io/stakater-charts
+    chart: reloader
+    targetRevision: "1.4.*"
+    helm:
+      valuesObject:
+        reloader:
+          # 監視対象を prod namespace の stalwart に絞る必要はない
+          # (クラスター全体を監視するがアノテーションがない Pod には何もしない)
+          deployment:
+            resources:
+              requests:
+                memory: "32Mi"
+                cpu: "10m"
+              limits:
+                memory: "64Mi"
+                cpu: "50m"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: reloader
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

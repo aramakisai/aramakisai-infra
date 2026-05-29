@@ -11,6 +11,9 @@ metadata:
   namespace: prod
   labels:
     app: stalwart
+  annotations:
+    # cert-manager が mail-tls Secret を更新したら Reloader が自動で rollout restart を発行する
+    secret.reloader.stakater.com/reload: "mail-tls"
 spec:
   serviceName: stalwart-mail
   replicas: 1   # メールサーバーはシングルインスタンス推奨 (HA は複雑)
@@ -86,6 +89,11 @@ spec:
               readOnly: true
               # v0.16 のデフォルト config パス: /etc/stalwart/config.json
               # (Dockerfile: CMD ["--config", "/etc/stalwart/config.json"])
+            - name: tls
+              mountPath: /etc/stalwart/tls
+              readOnly: true
+              # cert-manager が生成した mail-tls Secret (tls.crt / tls.key) をマウント
+              # Stalwart の Certificate オブジェクトがこのパスを参照する
           resources:
             requests:
               memory: "256Mi"
@@ -122,3 +130,8 @@ spec:
                   name: stalwart-config
               - configMap:
                   name: stalwart-settings
+        # cert-manager が prod namespace に作成する mail-tls Secret
+        # /etc/stalwart/tls/tls.crt と /etc/stalwart/tls/tls.key をマウント
+        - name: tls
+          secret:
+            secretName: mail-tls
