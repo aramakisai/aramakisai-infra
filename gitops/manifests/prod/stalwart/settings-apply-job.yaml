@@ -90,7 +90,7 @@ spec:
 
               # ── stalwart-cli のダウンロード ────────────────────────────────
               echo ">>> stalwart-cli をダウンロード中..."
-              apk add --no-cache wget xz > /dev/null 2>&1
+              apk add --no-cache wget xz curl > /dev/null 2>&1
               wget -qO /tmp/stalwart-cli.tar.xz \
                 https://github.com/stalwartlabs/cli/releases/download/v1.0.7/stalwart-cli-x86_64-unknown-linux-musl.tar.xz
               # BusyBox tar は -J 非対応のため xz で展開してから tar
