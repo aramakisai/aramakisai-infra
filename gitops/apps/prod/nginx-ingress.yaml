@@ -31,6 +31,11 @@ spec:
           # hostNetwork: true だけで十分なため hostPort を無効化
           hostPort:
             enabled: false
+          # admission webhook を無効化:
+          # stalwart sync 時に nginx-ingress がまだ起動していないと循環デッドロックになるため
+          # (stalwart sync → Ingress webhook → nginx-ingress 未起動 → 失敗 → port 443 解放されず)
+          admissionWebhooks:
+            enabled: false
           # ClusterIP のみ: hostNetwork で直接バインドするため外部 LB は不要
           service:
             enabled: true
