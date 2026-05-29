@@ -166,7 +166,7 @@ spec:
                     printf '%s\n' \
                       'CONFIG_FILE="/var/lib/snappymail/_data_/_default_/configs/application.ini"' \
                       'i=1' \
-                      'while [ $i -le 60 ]; do' \
+                      'while [ $i -le 30 ]; do' \
                       '  if [ -f "$CONFIG_FILE" ]; then' \
                       '    echo "Found application.ini, applying GitOps configurations..."' \
                       '    sed -i "s/enable = Off/enable = On/" "$CONFIG_FILE"' \
@@ -188,7 +188,7 @@ spec:
                       '  i=`expr $i + 1`' \
                       'done' \
                       > /tmp/apply.sh
-                    sh /tmp/apply.sh &
+                    sh /tmp/apply.sh
           ports:
             - name: http
               containerPort: 8888
