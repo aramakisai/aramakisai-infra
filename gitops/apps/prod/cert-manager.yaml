@@ -1,0 +1,35 @@
+---
+# cert-manager — TLS 証明書自動管理
+# wave: -1 — CRD (Certificate, ClusterIssuer 等) を他のアプリより先にインストール
+#
+# cert-manager が Let's Encrypt (DNS-01/Cloudflare) で証明書を取得し
+# K8s Secret に保存する。nginx-ingress が TLS 終端に使用する。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cert-manager
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://charts.jetstack.io
+    chart: cert-manager
+    targetRevision: "v1.16.*"
+    helm:
+      valuesObject:
+        installCRDs: true
+        replicaCount: 1
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cert-manager
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

@@ -1,0 +1,42 @@
+---
+# Stalwart HTTPS / JMAP / Admin UI — nginx-ingress 経由
+#
+# nginx-ingress が port 443 で TLS 終端し、Stalwart の HTTP port 8080 に転送する。
+# SNI ルーティング: mail.aramakisai.com → stalwart-mail:8080
+#
+# Stalwart 側の設定変更:
+#   - HTTPS NetworkListener: port 443 (tlsImplicit: true) → port 8080 (tlsImplicit: false)
+#   - liveness/readiness probe: tcpSocket:443 → tcpSocket:25 (SMTP は常時稼働)
+#
+# nginx-ingress → Stalwart 間はクラスター内部通信のため TLS 不要 (HTTP)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: stalwart-https
+  namespace: prod
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    # WebSocket サポート (JMAP over WebSocket)
+    nginx.ingress.kubernetes.io/proxy-http-version: "1.1"
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      proxy_set_header Upgrade $http_upgrade;
+      proxy_set_header Connection "upgrade";
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - mail.aramakisai.com
+      secretName: mail-tls
+  rules:
+    - host: mail.aramakisai.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: stalwart-mail
+                port:
+                  name: http

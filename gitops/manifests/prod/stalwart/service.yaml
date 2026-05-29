@@ -31,3 +31,7 @@ spec:
     - name: imaps
       port: 993
       targetPort: 993
+    # nginx-ingress → Stalwart HTTP バックエンド (HTTPS TLS 終端後の平文転送)
+    - name: http
+      port: 8080
+      targetPort: 8080

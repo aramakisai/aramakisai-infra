@@ -63,9 +63,9 @@ spec:
               containerPort: 143
             - name: imaps
               containerPort: 993
-            - name: https
-              containerPort: 443
-              # Cloudflare Tunnel → stalwart-admin ClusterIP 経由
+            # nginx-ingress バックエンド: TLS は nginx-ingress が終端し HTTP で転送
+            - name: http
+              containerPort: 8080
           # stalwart-secrets (ESO 生成) から全環境変数を注入
           # 含まれるキー: STALWART_ADMIN_SECRET, CLOUDFLARE_API_TOKEN
           envFrom:
@@ -93,15 +93,17 @@ spec:
             limits:
               memory: "512Mi"
               cpu: "500m"
+          # SMTP port 25 で疎通確認: nginx-ingress が port 443 を担当するため
+          # port 443 への依存をなくし SMTP/IMAP が正常な限り Healthy とする
           livenessProbe:
             tcpSocket:
-              port: 443
+              port: 25
             initialDelaySeconds: 30
             periodSeconds: 30
             failureThreshold: 3
           readinessProbe:
             tcpSocket:
-              port: 443
+              port: 25
             initialDelaySeconds: 10
             periodSeconds: 10
             failureThreshold: 3
