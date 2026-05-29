@@ -48,7 +48,7 @@ data:
     {"@type":"destroy","object":"Directory"}
     {"@type":"create","object":"Directory","value":{"authentik-ldap":{"@type":"Ldap","description":"Authentik LDAP Outpost — IMAP/SMTP パスワード認証 + Stalwart 内蔵 OAuth2 のバックエンド","url":"ldap://authentik-ldap-outpost.prod.svc.cluster.local:389","baseDn":"dc=ldap,dc=goauthentik,dc=io","bindDn":"cn=ldapservice,ou=users,dc=ldap,dc=goauthentik,dc=io","bindSecret":{"@type":"EnvironmentVariable","variableName":"AUTHENTIK_LDAP_OUTPOST_TOKEN"},"filterLogin":"(&(objectClass=inetOrgPerson)(|(mail=?)(uid=?)))","filterMailbox":"(&(objectClass=inetOrgPerson)(|(mail=?)(mailAlias=?)))","filterMemberOf":"(&(objectClass=group)(member=?))","attrEmail":{"mail":true},"attrEmailAlias":{"mailAlias":true},"attrMemberOf":{"memberOf":true},"groupClass":"group"}}}
     {"@type":"create","object":"Directory","value":{"authentik-oidc":{"@type":"Oidc","description":"Authentik OIDC — Snappymail OAUTHBEARER 検証 (active directory)","issuerUrl":"https://idp.aramakisai.com/application/o/snappymail/","requireAudience":"snappymail-webmail","requireScopes":{"openid":true,"email":true},"claimUsername":"preferred_username","usernameDomain":"aramakisai.com","claimName":"name","claimGroups":"groups"}}}
-    {"@type":"update","object":"Authentication","value":{"directoryId":"#authentik-oidc"}}
+    {"@type":"update","object":"Authentication","value":{"directoryId":"#authentik-ldap"}}
 
   # ============================================================
   # settings-update.ndjson — PostSync Job 用・冪等再適用 NDJSON
@@ -78,7 +78,7 @@ data:
     {"@type":"update","object":"SystemSettings","value":{"defaultHostname":"mail.aramakisai.com"}}
     {"@type":"create","object":"Directory","value":{"authentik-ldap":{"@type":"Ldap","description":"Authentik LDAP Outpost — IMAP/SMTP パスワード認証 + Stalwart 内蔵 OAuth2 のバックエンド","url":"ldap://authentik-ldap-outpost.prod.svc.cluster.local:389","baseDn":"dc=ldap,dc=goauthentik,dc=io","bindDn":"cn=ldapservice,ou=users,dc=ldap,dc=goauthentik,dc=io","bindSecret":{"@type":"EnvironmentVariable","variableName":"AUTHENTIK_LDAP_OUTPOST_TOKEN"},"filterLogin":"(&(objectClass=inetOrgPerson)(|(mail=?)(uid=?)))","filterMailbox":"(&(objectClass=inetOrgPerson)(|(mail=?)(mailAlias=?)))","filterMemberOf":"(&(objectClass=group)(member=?))","attrEmail":{"mail":true},"attrEmailAlias":{"mailAlias":true},"attrMemberOf":{"memberOf":true},"groupClass":"group"}}}
     {"@type":"create","object":"Directory","value":{"authentik-oidc":{"@type":"Oidc","description":"Authentik OIDC — Snappymail OAUTHBEARER 検証 (active directory)","issuerUrl":"https://idp.aramakisai.com/application/o/snappymail/","requireAudience":"snappymail-webmail","requireScopes":{"openid":true,"email":true},"claimUsername":"preferred_username","usernameDomain":"aramakisai.com","claimName":"name","claimGroups":"groups"}}}
-    {"@type":"update","object":"Authentication","value":{"directoryId":"#authentik-oidc"}}
+    {"@type":"update","object":"Authentication","value":{"directoryId":"#authentik-ldap"}}
 
 # ============================================================
 # 適用手順 (recovery mode が有効な状態で実行すること)
