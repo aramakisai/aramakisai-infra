@@ -80,6 +80,8 @@ spec:
     spec:
       restartPolicy: OnFailure
       serviceAccountName: stalwart-settings-apply
+      nodeSelector:
+        kubernetes.io/hostname: prod-node-1
       containers:
         - name: stalwart-cli
           image: alpine:3.19
