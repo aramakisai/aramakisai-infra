@@ -109,8 +109,7 @@ spec:
               for i in $(seq 1 24); do
                 if /tmp/stalwart-cli \
                     --url "$STALWART_URL" \
-                        --user admin \
-                    --password "$STALWART_ADMIN_SECRET" \
+                    --api-key "$STALWART_API_KEY" \
                     query Domain > /dev/null 2>&1; then
                   echo "    ✅ Stalwart 応答確認 (attempt $i)"
                   READY=1
@@ -150,8 +149,7 @@ spec:
                 printf '{"@type":"update","object":"SystemSettings","value":{"defaultDomainId":"%s"}}\n' "$DOMAIN_ID" \
                   | /tmp/stalwart-cli \
                       --url "$STALWART_URL" \
-                            --user admin \
-                      --password "$STALWART_ADMIN_SECRET" \
+                      --api-key "$STALWART_API_KEY" \
                       apply --stdin
                 echo "    ✅ defaultDomainId を $DOMAIN_ID に設定しました"
               else
