@@ -80,8 +80,6 @@ spec:
     spec:
       restartPolicy: OnFailure
       serviceAccountName: stalwart-settings-apply
-      nodeSelector:
-        kubernetes.io/hostname: prod-node-1
       containers:
         - name: stalwart-cli
           image: alpine:3.19
@@ -105,9 +103,8 @@ spec:
               echo "    ✅ stalwart-cli v1.0.7 取得完了"
 
               # ── Stalwart HTTPS の起動待機 (最大 120 秒) ──────────────────
-              STALWART_URL="http://10.0.1.2:8080"
+              STALWART_URL="http://stalwart-mail.prod.svc.cluster.local:8080"
               echo ">>> Stalwart HTTP API の起動を待機中 ($STALWART_URL)..."
-              # prod-node-1 の直接 IP を使用 (ClusterIP 経由は同一ノード内ヘアピンで失敗するため)
               READY=0
               for i in $(seq 1 24); do
                 if /tmp/stalwart-cli \
