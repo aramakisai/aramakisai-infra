@@ -131,8 +131,7 @@ spec:
               echo ">>> settings-update.ndjson を適用中..."
               /tmp/stalwart-cli \
                 --url "$STALWART_URL" \
-                --user "$STALWART_JOB_USER" \
-                --password "$STALWART_JOB_TOKEN" \
+                --api-key "$STALWART_API_KEY" \
                 apply --file /settings/settings-update.ndjson
 
               echo "    ✅ settings-update.ndjson の適用完了"
@@ -143,8 +142,7 @@ spec:
               echo ">>> Domain ID を取得して defaultDomainId を更新中..."
               DOMAIN_ID=$(/tmp/stalwart-cli \
                 --url "$STALWART_URL" \
-                --user "$STALWART_JOB_USER" \
-                --password "$STALWART_JOB_TOKEN" \
+                --api-key "$STALWART_API_KEY" \
                 --no-color \
                 query Domain 2>/dev/null | awk 'NR==2 {print $1}')
 
@@ -177,16 +175,11 @@ spec:
                 echo "    ⚠ Pod 削除の HTTP ステータス: $HTTP_CODE (既に再起動済みの可能性あり)"
               fi
           env:
-            - name: STALWART_JOB_USER
+            - name: STALWART_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: stalwart-secrets
-                  key: STALWART_JOB_USER
-            - name: STALWART_JOB_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: stalwart-secrets
-                  key: STALWART_JOB_TOKEN
+                  key: STALWART_API_KEY
           volumeMounts:
             - name: settings
               mountPath: /settings
