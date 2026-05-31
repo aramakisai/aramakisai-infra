@@ -23,6 +23,9 @@ metadata:
 data:
   config.custom.inc.php: |
     <?php
+    // Cloudflare Tunnel 経由のため HTTPS を明示 (redirect_uri が http:// になるのを防ぐ)
+    $config['base_url'] = 'https://webmail.aramakisai.com';
+
     // Authentik OAuth2 ログイン
     $config['oauth_provider'] = 'generic';
     $config['oauth_provider_name'] = 'Authentik';
