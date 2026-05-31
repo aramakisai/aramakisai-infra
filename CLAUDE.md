@@ -498,7 +498,7 @@ URL:    https://webmail.aramakisai.com
    - Type: OAuth2/OpenID Provider
    - Name: Roundcube
    - Client ID: `roundcube` (固定 — Stalwart の requireAudience と一致させること)
-   - Redirect URIs: `https://webmail.aramakisai.com/?_task=login&_action=oauth`
+   - Redirect URIs: `https://webmail.aramakisai.com/index.php/login/oauth`
    - Scopes: openid, email, profile
 2. Applications → 新規作成: slug=`roundcube`, Provider=上記
 3. Infisical に登録:

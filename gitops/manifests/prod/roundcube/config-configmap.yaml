@@ -13,7 +13,7 @@
 #
 # Authentik 側の必須設定:
 #   - OAuth2/OIDC Provider: slug=roundcube, client_id=roundcube
-#   - Redirect URI: https://webmail.aramakisai.com/?_task=login&_action=oauth
+#   - Redirect URI: https://webmail.aramakisai.com/index.php/login/oauth
 #   - Scopes: openid, email, profile
 apiVersion: v1
 kind: ConfigMap
@@ -24,7 +24,8 @@ data:
   config.custom.inc.php: |
     <?php
     // Cloudflare Tunnel 経由のため HTTPS を明示 (redirect_uri が http:// になるのを防ぐ)
-    $config['base_url'] = 'https://webmail.aramakisai.com';
+    // base_url ではなく request_url を使う — resolve_url() がこちらを優先するため
+    $config['request_url'] = 'https://webmail.aramakisai.com';
 
     // Authentik OAuth2 ログイン
     $config['oauth_provider'] = 'generic';
@@ -34,7 +35,7 @@ data:
     $config['oauth_auth_uri'] = 'https://idp.aramakisai.com/application/o/authorize/';
     $config['oauth_token_uri'] = 'https://idp.aramakisai.com/application/o/token/';
     $config['oauth_identity_uri'] = 'https://idp.aramakisai.com/application/o/userinfo/';
-    $config['oauth_scope'] = 'openid email profile';
+    $config['oauth_scope'] = 'openid email profile offline_access';
     $config['oauth_identity_fields'] = ['email'];
     $config['oauth_login_redirect'] = true;
 
@@ -52,3 +53,7 @@ data:
 
     $config['product_name'] = '荒牧祭 Webmail';
     $config['support_url'] = '';
+
+    // デバッグ (ログイン問題解決後に削除)
+    $config['debug_level'] = 4;
+    $config['imap_debug'] = true;
