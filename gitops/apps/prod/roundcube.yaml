@@ -1,10 +1,10 @@
 ---
-# Snappymail Webmail
+# Roundcube Webmail
 # wave: 0
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: snappymail
+  name: roundcube
   namespace: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "0"
@@ -15,7 +15,7 @@ spec:
   source:
     repoURL: git@github.com:aramakisai/aramakisai-infra.git
     targetRevision: main
-    path: gitops/manifests/prod/snappymail
+    path: gitops/manifests/prod/roundcube
   destination:
     server: https://kubernetes.default.svc
     namespace: prod

@@ -187,15 +187,15 @@ resource "cloudflare_record" "smtp_tls" {
 # メールクライアント自動設定 (autoconfig / autodiscover)
 # ============================================================
 
-# Snappymail Webmail: https://webmail.aramakisai.com
-# Cloudflare Access (Authentik OIDC) で保護 → Tunnel → snappymail Pod
+# Roundcube Webmail: https://webmail.aramakisai.com
+# Roundcube 自身が Authentik OAuth2 で保護 → Tunnel → roundcube Pod
 resource "cloudflare_record" "webmail" {
   zone_id = var.cloudflare_zone_id
   name    = "webmail"
   value   = local.tunnel_cname
   type    = "CNAME"
   proxied = true
-  comment = "Snappymail Webmail (Cloudflare Tunnel + Access)"
+  comment = "Roundcube Webmail (Cloudflare Tunnel)"
 }
 
 # Thunderbird 系: https://autoconfig.aramakisai.com/mail/config-v1.1.xml

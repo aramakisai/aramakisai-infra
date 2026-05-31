@@ -9,12 +9,12 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "main" {
   tunnel_id  = cloudflare_zero_trust_tunnel_cloudflared.main.id
 
   config {
-    # Snappymail Webmail
-    # CF Access (Authentik OIDC) で全委員を認証してからアクセスを許可
+    # Roundcube Webmail
+    # Roundcube 自身が Authentik OAuth2 (oauth_login_redirect) で認証するため CF Access は不要
     # port 443 をファイアウォールで開放せずに webmail を提供するための経路
     ingress_rule {
       hostname = "webmail.aramakisai.com"
-      service  = "http://snappymail.prod.svc.cluster.local:8888"
+      service  = "http://roundcube.prod.svc.cluster.local:80"
     }
 
     # ArgoCD UI

@@ -1,0 +1,92 @@
+---
+# Roundcube Webmail
+#
+# image バージョンは https://hub.docker.com/r/roundcube/roundcubemail/tags で確認して固定すること
+# 更新手順: image タグを変更 → GitOps PR → ArgoCD が自動 sync
+#
+# 認証方式: Authentik OAuth2 (oauth_login_redirect: true でログイン時に自動リダイレクト)
+#   - IMAP/SMTP 接続は OAUTHBEARER SASL (Stalwart が authentik-oidc directory で token を検証)
+#   - カスタムプラグイン不要 (Roundcube 1.6 ネイティブサポート)
+#
+# DB: SQLite (/var/roundcube/db/ に PVC をマウント)
+#   セッションデータ・アドレス帳・フィルタ設定を保存
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: roundcube
+  namespace: prod
+  labels:
+    app: roundcube
+  annotations:
+    secret.reloader.stakater.com/reload: "roundcube-secrets"
+    configmap.reloader.stakater.com/reload: "roundcube-config"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: roundcube
+  template:
+    metadata:
+      labels:
+        app: roundcube
+    spec:
+      containers:
+        - name: roundcube
+          image: roundcube/roundcubemail:1.6-apache
+          ports:
+            - name: http
+              containerPort: 80
+          env:
+            - name: ROUNDCUBEMAIL_DEFAULT_HOST
+              value: "ssl://stalwart-mail.prod.svc.cluster.local"
+            - name: ROUNDCUBEMAIL_DEFAULT_PORT
+              value: "993"
+            - name: ROUNDCUBEMAIL_SMTP_SERVER
+              value: "tls://stalwart-mail.prod.svc.cluster.local"
+            - name: ROUNDCUBEMAIL_SMTP_PORT
+              value: "587"
+            - name: ROUNDCUBEMAIL_DB_TYPE
+              value: "sqlite"
+            - name: ROUNDCUBEMAIL_SKIN
+              value: "elastic"
+            - name: ROUNDCUBEMAIL_DES_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: roundcube-secrets
+                  key: ROUNDCUBE_DES_KEY
+            - name: ROUNDCUBE_OAUTH2_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: roundcube-secrets
+                  key: ROUNDCUBE_OAUTH2_CLIENT_SECRET
+          volumeMounts:
+            - name: db
+              mountPath: /var/roundcube/db
+            - name: config
+              mountPath: /var/roundcube/config
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "50m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      volumes:
+        - name: db
+          persistentVolumeClaim:
+            claimName: roundcube-db
+        - name: config
+          configMap:
+            name: roundcube-config

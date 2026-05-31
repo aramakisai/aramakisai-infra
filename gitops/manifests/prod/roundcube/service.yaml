@@ -2,15 +2,15 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: snappymail
+  name: roundcube
   namespace: prod
   labels:
-    app: snappymail
+    app: roundcube
 spec:
   type: ClusterIP
   selector:
-    app: snappymail
+    app: roundcube
   ports:
     - name: http
-      port: 8888
-      targetPort: 8888
+      port: 80
+      targetPort: 80

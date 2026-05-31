@@ -44,7 +44,7 @@ resource "cloudflare_zero_trust_access_identity_provider" "authentik" {
 #   api.stg.aramakisai.com   Staging API      (Authentik OIDC)
 #
 # 非保護 (自前認証あり):
-#   webmail.aramakisai.com   Snappymail 独自ログイン (IMAP 認証) で保護
+#   webmail.aramakisai.com   Roundcube が Authentik OAuth2 で保護
 #                            CF Access を重ねると二重認証になるため除外
 #   argocd.aramakisai.com    ArgoCD 自前認証 (admin / Authentik SSO) で保護
 #   mail-admin.aramakisai.com  Stalwart 独自ログインで保護

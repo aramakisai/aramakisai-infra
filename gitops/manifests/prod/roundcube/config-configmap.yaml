@@ -1,0 +1,51 @@
+---
+# Roundcube カスタム設定
+#
+# Roundcube 1.6+ は OAuth2 / OAUTHBEARER をネイティブサポートするため
+# カスタムプラグインは不要。
+#
+# 認証フロー:
+#   1. ユーザーが webmail.aramakisai.com にアクセス
+#   2. oauth_login_redirect: true により Authentik に自動リダイレクト
+#   3. Authentik で認証 → access_token を取得
+#   4. Roundcube が IMAP/SMTP に OAUTHBEARER で接続
+#   5. Stalwart が authentik-oidc ディレクトリで token を検証
+#
+# Authentik 側の必須設定:
+#   - OAuth2/OIDC Provider: slug=roundcube, client_id=roundcube
+#   - Redirect URI: https://webmail.aramakisai.com/?_task=login&_action=oauth
+#   - Scopes: openid, email, profile
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: roundcube-config
+  namespace: prod
+data:
+  config.custom.inc.php: |
+    <?php
+    // Authentik OAuth2 ログイン
+    $config['oauth_provider'] = 'generic';
+    $config['oauth_provider_name'] = 'Authentik';
+    $config['oauth_client_id'] = 'roundcube';  // Authentik 側で同じ値を設定すること
+    $config['oauth_client_secret'] = getenv('ROUNDCUBE_OAUTH2_CLIENT_SECRET');
+    $config['oauth_auth_uri'] = 'https://idp.aramakisai.com/application/o/authorize/';
+    $config['oauth_token_uri'] = 'https://idp.aramakisai.com/application/o/token/';
+    $config['oauth_identity_uri'] = 'https://idp.aramakisai.com/application/o/userinfo/';
+    $config['oauth_scope'] = 'openid email profile';
+    $config['oauth_identity_fields'] = ['email'];
+    $config['oauth_login_redirect'] = true;
+
+    // IMAP/SMTP に OAUTHBEARER を使用 (Stalwart が authentik-oidc で token を検証)
+    $config['imap_auth_type'] = 'OAUTHBEARER';
+    $config['smtp_auth_type'] = 'OAUTHBEARER';
+
+    // クラスタ内自己署名証明書を許容
+    $config['imap_conn_options'] = [
+        'ssl' => ['verify_peer' => false, 'verify_peer_name' => false],
+    ];
+    $config['smtp_conn_options'] = [
+        'ssl' => ['verify_peer' => false, 'verify_peer_name' => false],
+    ];
+
+    $config['product_name'] = '荒牧祭 Webmail';
+    $config['support_url'] = '';
