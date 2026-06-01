@@ -16,7 +16,7 @@
   - _Requirements: 1_
   - _Boundary: directus/db-cluster.yaml_
 
-- [ ] 2. cloudflared のトポロジー分散設定
+- [x] 2. cloudflared のトポロジー分散設定
   - `gitops/manifests/prod/cloudflared/deployment.yaml` に `topologySpreadConstraints` (maxSkew: 1 / topologyKey: kubernetes.io/hostname / whenUnsatisfiable: ScheduleAnyway) を追加する
   - `kubectl get pods -n cloudflared -o wide` で 2 Pod が異なるノードに配置されれば完了
   - _Requirements: 2_
