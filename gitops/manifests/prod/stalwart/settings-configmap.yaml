@@ -52,7 +52,7 @@ data:
     {"@type":"destroy","object":"AllowedIp"}
     {"@type":"create","object":"AllowedIp","value":{"cluster-pod-cidr":{"address":"10.42.0.0/16","reason":"Kubernetes Pod network (Cilium overlay)"},"cluster-node-cidr":{"address":"10.0.1.0/24","reason":"Kubernetes Node network"}}}
     {"@type":"destroy","object":"Tracer"}
-    {"@type":"create","object":"Tracer","value":{"console":{"@type":"Console","level":"info","ansi":false,"enable":true}}}
+    {"@type":"create","object":"Tracer","value":{"console":{"@type":"Stdout","level":"info","ansi":false,"enable":true}}}
 
   # ============================================================
   # settings-update.ndjson — PostSync Job 用・冪等再適用 NDJSON
@@ -86,7 +86,7 @@ data:
     {"@type":"destroy","object":"AllowedIp"}
     {"@type":"create","object":"AllowedIp","value":{"cluster-pod-cidr":{"address":"10.42.0.0/16","reason":"Kubernetes Pod network (Cilium overlay)"},"cluster-node-cidr":{"address":"10.0.1.0/24","reason":"Kubernetes Node network"}}}
     {"@type":"destroy","object":"Tracer"}
-    {"@type":"create","object":"Tracer","value":{"console":{"@type":"Console","level":"info","ansi":false,"enable":true}}}
+    {"@type":"create","object":"Tracer","value":{"console":{"@type":"Stdout","level":"info","ansi":false,"enable":true}}}
 
 # ============================================================
 # 適用手順 (recovery mode が有効な状態で実行すること)
