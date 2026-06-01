@@ -54,9 +54,20 @@ server:
         secretKeyRef:
           name: authentik-secrets
           key: AUTHENTIK_SECRET_KEY
+    - name: AUTHENTIK_WEB__WORKERS
+      value: "1"
   envFrom:
     - secretRef:
         name: authentik-secrets   # ESO が生成: AUTHENTIK_SECRET_KEY, DB_PASSWORD
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchLabels:
+                cnpg.io/cluster: authentik-db
+            topologyKey: kubernetes.io/hostname
 
 # Worker
 worker:
