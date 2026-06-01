@@ -1,0 +1,28 @@
+---
+# prod namespace 設定 (LimitRange など)
+# wave: -1 — アプリより先に適用して LimitRange を有効化しておく
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: namespace-config
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:aramakisai/aramakisai-infra.git
+    targetRevision: main
+    path: gitops/manifests/prod/namespace-config
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: prod
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

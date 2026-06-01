@@ -16,6 +16,13 @@ disable:
 # Spegel: ノード間イメージキャッシュ (帯域・起動時間の節約)
 embedded-registry: true
 
+# kubelet メモリ予約: OS・K3sシステムコンポーネント分を確保し OOM を防ぐ
+# eviction-hard: 空きメモリが 200Mi を下回ると優先度の低い Pod を退避させる
+kubelet-arg:
+  - "system-reserved=cpu=100m,memory=300Mi"
+  - "kube-reserved=cpu=100m,memory=300Mi"
+  - "eviction-hard=memory.available<200Mi"
+
 # ノード間通信を Hetzner private network (10.0.1.0/24) に固定する
 # kubelet の登録 IP・etcd ピアリング・Pod ネットワークのルーティングが
 # private network 経由になり、パブリック IPv6 に余分なトラフィックが流れない

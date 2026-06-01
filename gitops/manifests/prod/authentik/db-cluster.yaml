@@ -7,7 +7,7 @@ metadata:
   name: authentik-db
   namespace: prod
 spec:
-  instances: 3   # 1 Primary + 2 Standby (HA構成)
+  instances: 2   # 1 Primary + 1 Standby (HA構成)
 
   affinity:
     podAntiAffinityType: preferred
@@ -16,6 +16,9 @@ spec:
   postgresql:
     parameters:
       max_connections: "100"
+      shared_buffers: "64MB"
+      effective_cache_size: "128MB"
+      work_mem: "4MB"
 
   bootstrap:
     initdb:

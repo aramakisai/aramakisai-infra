@@ -1,0 +1,20 @@
+---
+# prod namespace のデフォルトリソース制限
+# resources: を明示していない Pod (ephemeral Job など) が無制限にメモリを消費しないよう上限を設ける
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: prod-default-limits
+  namespace: prod
+spec:
+  limits:
+    - type: Container
+      defaultRequest:
+        memory: "64Mi"
+        cpu: "50m"
+      default:
+        memory: "512Mi"
+        cpu: "500m"
+      max:
+        memory: "2Gi"
+        cpu: "2000m"
