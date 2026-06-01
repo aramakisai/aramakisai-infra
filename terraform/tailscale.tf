@@ -1,8 +1,8 @@
 resource "tailscale_tailnet_key" "k3s_nodes" {
-  reusable      = true    # 3ノードを1つのキーで処理するため
-  ephemeral     = false   # ノードをデバイスリストに永続登録 (MagicDNS 維持のため)
-  preauthorized = true    # 管理者承認なしに tailnet に接続できる
-  expiry        = 3600    # auth key 自体は1時間で失効 (apply 後は不要)
+  reusable      = true  # 3ノードを1つのキーで処理するため
+  ephemeral     = false # ノードをデバイスリストに永続登録 (MagicDNS 維持のため)
+  preauthorized = true  # 管理者承認なしに tailnet に接続できる
+  expiry        = 3600  # auth key 自体は1時間で失効 (apply 後は不要)
   tags          = var.tailscale_tags
 
   description = "K3s bootstrap key managed expires 1h"

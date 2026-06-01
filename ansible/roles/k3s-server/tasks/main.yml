@@ -3,7 +3,7 @@
 
 # 1. 前提パッケージのインストール
 - name: 前提パッケージのインストール
-  apt:
+  ansible.builtin.apt:
     name:
       - curl
       - open-iscsi   # Longhorn (分散ストレージ) 用
@@ -13,7 +13,7 @@
 
 # 2. K3s 設定ディレクトリを作成
 - name: K3s 設定ディレクトリを作成
-  file:
+  ansible.builtin.file:
     path: /etc/rancher/k3s
     state: directory
     owner: root
@@ -22,7 +22,7 @@
 
 # 3. K3s config.yaml を配置 (インストール前に置くことでインストーラが読み込む)
 - name: K3s config.yaml を配置
-  template:
+  ansible.builtin.template:
     src: config.yaml.j2
     dest: /etc/rancher/k3s/config.yaml
     owner: root
@@ -35,7 +35,7 @@
 # k3s-agent.service をインストールする (agent モード) ため、server モードにならない。
 # join 先の URL は config.yaml の server: キーで指定する。
 - name: K3s をインストール
-  shell: curl -sfL https://get.k3s.io | sh -
+  ansible.builtin.shell: curl -sfL https://get.k3s.io | sh -
   environment:
     INSTALL_K3S_VERSION: "{{ k3s_version }}"
     K3S_TOKEN: "{{ k3s_token }}"
@@ -48,11 +48,11 @@
 
 # 5. config.yaml の変更を K3s に反映させる (wait_for より前にハンドラーを実行)
 - name: ハンドラーを即時実行 (config 変更を反映)
-  meta: flush_handlers
+  ansible.builtin.meta: flush_handlers
 
 # 6. K3s サービスが起動するまで待機
 - name: K3s サービスが起動するまで待機 (port 6443)
-  wait_for:
+  ansible.builtin.wait_for:
     port: 6443
     host: "{{ ansible_host }}"
     timeout: 180

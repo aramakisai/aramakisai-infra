@@ -1,0 +1,8 @@
+profile: min
+warn_list:
+  - command-instead-of-module  # K3s は公式の curl | sh インストーラーを使用
+  - risky-shell-pipe           # K3s / Helm インストールでパイプを使用 (意図的)
+skip_list:
+  - role-name                  # k3s-server / k3s-agent はハイフン命名 (慣習に従う)
+exclude_paths:
+  - gitops/manifests/prod/stalwart/settings-configmap.yaml  # NDJSON で長行が必然

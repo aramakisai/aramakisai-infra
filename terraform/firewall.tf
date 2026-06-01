@@ -8,18 +8,18 @@ resource "hcloud_firewall" "k3s_nodes" {
 
   # Tailscale: DERP リレー / NAT トラバーサル (UDP)
   rule {
-    direction  = "in"
-    protocol   = "udp"
-    port       = "41641"
-    source_ips = ["0.0.0.0/0", "::/0"]
+    direction   = "in"
+    protocol    = "udp"
+    port        = "41641"
+    source_ips  = ["0.0.0.0/0", "::/0"]
     description = "Tailscale DERP / direct UDP"
   }
 
   # ICMP (ping / Path MTU Discovery)
   rule {
-    direction  = "in"
-    protocol   = "icmp"
-    source_ips = ["0.0.0.0/0", "::/0"]
+    direction   = "in"
+    protocol    = "icmp"
+    source_ips  = ["0.0.0.0/0", "::/0"]
     description = "ICMP"
   }
 

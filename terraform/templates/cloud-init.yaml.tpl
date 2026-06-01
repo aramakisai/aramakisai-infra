@@ -20,4 +20,3 @@ runcmd:
 
   # ホスト名を永続化
   - hostnamectl set-hostname "${hostname}"
-

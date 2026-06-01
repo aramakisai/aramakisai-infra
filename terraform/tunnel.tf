@@ -22,7 +22,7 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "main" {
       hostname = "argocd.aramakisai.com"
       service  = "https://argocd-server.argocd.svc.cluster.local:443"
       origin_request {
-        no_tls_verify = true  # ArgoCD は内部で自己署名証明書を使用
+        no_tls_verify = true # ArgoCD は内部で自己署名証明書を使用
       }
     }
 

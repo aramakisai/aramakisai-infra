@@ -124,7 +124,7 @@ spec:
         # /etc/stalwart/settings.ndjson ← stalwart-settings ConfigMap
         - name: config
           projected:
-            defaultMode: 0644
+            defaultMode: 420  # 0644 in octal (rw-r--r--)
             sources:
               - configMap:
                   name: stalwart-config
