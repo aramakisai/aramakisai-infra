@@ -1,0 +1,14 @@
+{
+  "name": "single-node-migration",
+  "description": "3×CX23 HAクラスターから1×CX33シングルノードへの移行。Raspberry Pi + Grafana Cloud Alertingによる半自動コールドスタンバイ復旧を実装する。",
+  "status": "design-review",
+  "language": "ja",
+  "phase": "tasks-generated",
+  "approvals": {
+    "requirements": { "approved": true },
+    "design": { "generated": true, "approved": false },
+    "tasks": { "generated": true, "approved": false }
+  },
+  "prerequisites": ["backup", "monitoring"],
+  "updated_at": "2026-06-02T00:00:00Z"
+}
