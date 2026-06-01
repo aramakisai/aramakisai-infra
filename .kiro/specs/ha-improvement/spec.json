@@ -7,7 +7,7 @@
   "approvals": {
     "requirements": { "approved": true },
     "design": { "approved": true },
-    "tasks": { "generated": true, "approved": false }
+    "tasks": { "generated": true, "approved": true }
   },
   "updated_at": "2026-06-01T00:00:00Z"
 }

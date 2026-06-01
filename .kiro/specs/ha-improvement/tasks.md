@@ -3,14 +3,14 @@
 ## タスク一覧
 
 - [ ] 1. CloudNativePG レプリカ数の増加
-- [ ] 1.1 (P) Authentik DB を instances: 3 に変更
+- [x] 1.1 (P) Authentik DB を instances: 3 に変更
   - `gitops/manifests/prod/authentik/db-cluster.yaml` の `instances` を `1` → `3` に変更する
   - `spec.affinity.podAntiAffinity` (preferredDuringScheduling / topologyKey: kubernetes.io/hostname) を追加して各インスタンスが別ノードに分散されるよう設定する
   - `kubectl get pods -n prod -l cnpg.io/cluster=authentik-db -o wide` で 3 Pod が異なるノードに配置されれば完了
   - _Requirements: 1_
   - _Boundary: authentik/db-cluster.yaml_
 
-- [ ] 1.2 (P) Directus DB を instances: 3 に変更
+- [x] 1.2 (P) Directus DB を instances: 3 に変更
   - `gitops/manifests/prod/directus/db-cluster.yaml` に同様の変更を加える
   - `kubectl get pods -n prod -l cnpg.io/cluster=directus-db -o wide` で 3 Pod が異なるノードに配置されれば完了
   - _Requirements: 1_

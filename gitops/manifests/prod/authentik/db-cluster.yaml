@@ -7,7 +7,17 @@ metadata:
   name: authentik-db
   namespace: prod
 spec:
-  instances: 1   # 3ノード構成だが DB は1インスタンスで運用 (コスト優先)
+  instances: 3   # 1 Primary + 2 Standby (HA構成)
+
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchLabels:
+                cnpg.io/cluster: authentik-db
+            topologyKey: kubernetes.io/hostname
 
   postgresql:
     parameters:
