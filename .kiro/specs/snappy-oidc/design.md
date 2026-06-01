@@ -1,3 +1,7 @@
+# ⚠️ 廃止済み — Snappymail は Roundcube に切り替えたため本設計は無効
+
+---
+
 # 基本設計 (Design) - Snappymail OIDC 設定 (完全自動セットアップ)
 
 ## 1. システムシーケンス
@@ -26,7 +30,16 @@ sequenceDiagram
 ## 2. コンポーネント詳細 (GitOps 自動化)
 
 ### 2.1. Kubernetes マニフェストの自動セットアップ化
-手動での初期設定（UIでのポチポチ操作）を廃止し、PVCが空の状態からでも自動で設定が完了するように、[deployment.yaml](gitops/manifests/prod/snappymail/deployment.yaml) を改修する。
+`gitops/manifests/prod/snappymail/` ディレクトリとマニフェスト一式を**新規作成**する。手動での初期設定（UIでのポチポチ操作）を廃止し、PVCが空の状態からでも自動で設定が完了する構成にする。
+
+作成するファイル:
+- `deployment.yaml` — initContainers + バックグラウンド監視スクリプト構成
+- `external-secret.yaml` — OIDC Client ID / Secret の ESO 定義
+- `pvc.yaml` — `snappymail-data` PVC (ReadWriteOnce / 1Gi)
+- `service.yaml` — ClusterIP Service
+- `gitops/apps/prod/snappymail.yaml` — ArgoCD Application 定義
+
+`deployment.yaml` の構成:
 
 1. **`initContainers` (install-authentik-plugin)**:
    - 環境変数 `SNAPPYMAIL_OAUTH2_CLIENT_ID` / `SNAPPYMAIL_OAUTH2_CLIENT_SECRET` を受け取る。

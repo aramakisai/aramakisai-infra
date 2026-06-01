@@ -1,0 +1,13 @@
+{
+  "name": "backup",
+  "description": "CloudNativePG scheduled backups and Stalwart mail data backup to Hetzner Object Storage",
+  "status": "tasks-review",
+  "language": "ja",
+  "phase": "tasks-generated",
+  "approvals": {
+    "requirements": { "approved": true },
+    "design": { "approved": true },
+    "tasks": { "generated": true, "approved": false }
+  },
+  "updated_at": "2026-06-01T00:00:00Z"
+}

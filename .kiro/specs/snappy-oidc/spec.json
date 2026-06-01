@@ -1,6 +1,9 @@
 {
   "name": "snappy-oidc",
   "description": "Configure OIDC login for Snappymail",
-  "status": "implementation",
-  "language": "ja"
+  "status": "cancelled",
+  "language": "ja",
+  "phase": "cancelled",
+  "cancelled_reason": "Snappymail を Roundcube に切り替えたため本スペックは無効。Roundcube の OIDC 設定は gitops/manifests/prod/roundcube/ で管理済み。",
+  "updated_at": "2026-06-01T00:00:00Z"
 }
