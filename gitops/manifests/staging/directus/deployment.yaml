@@ -24,7 +24,7 @@ spec:
     spec:
       containers:
         - name: directus
-          image: directus/directus:latest
+          image: directus/directus:11.1.2
           ports:
             - containerPort: 8055
           envFrom:
@@ -60,27 +60,3 @@ spec:
       volumes:
         - name: uploads
           emptyDir: {}   # staging はデータ永続化不要
----
-# Staging 用 CNPG Cluster
-apiVersion: postgresql.cnpg.io/v1
-kind: Cluster
-metadata:
-  name: directus-staging-db
-  namespace: staging
-spec:
-  instances: 1
-  bootstrap:
-    initdb:
-      database: directus
-      owner: directus
-      secret:
-        name: directus-staging-db-credentials
-  storage:
-    size: 5Gi
-  resources:
-    requests:
-      memory: "128Mi"
-      cpu: "100m"
-    limits:
-      memory: "256Mi"
-      cpu: "250m"

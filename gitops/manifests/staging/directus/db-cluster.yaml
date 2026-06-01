@@ -1,0 +1,25 @@
+---
+# Directus Staging 用 PostgreSQL クラスター (CloudNativePG)
+# staging はデータ永続化不要のため instances: 1 / バックアップ設定なし
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: directus-staging-db
+  namespace: staging
+spec:
+  instances: 1
+  bootstrap:
+    initdb:
+      database: directus
+      owner: directus
+      secret:
+        name: directus-staging-db-credentials
+  storage:
+    size: 5Gi
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "100m"
+    limits:
+      memory: "256Mi"
+      cpu: "250m"
