@@ -42,6 +42,24 @@ data:
       forward_to = [prometheus.remote_write.default.receiver]
     }
 
+    // ArgoCD メトリクス
+    prometheus.scrape "argocd" {
+      targets = [
+        {__address__ = "argocd-metrics.argocd.svc.cluster.local:8082"},
+        {__address__ = "argocd-server-metrics.argocd.svc.cluster.local:8083"},
+        {__address__ = "argocd-repo-server.argocd.svc.cluster.local:8084"},
+      ]
+      forward_to = [prometheus.remote_write.default.receiver]
+    }
+
+    // ノードメトリクス (Alloy 組み込みの unix exporter)
+    prometheus.exporter.unix "node" {}
+
+    prometheus.scrape "node" {
+      targets    = prometheus.exporter.unix.node.targets
+      forward_to = [prometheus.remote_write.default.receiver]
+    }
+
     prometheus.remote_write "default" {
       endpoint {
         url = env("PROMETHEUS_REMOTE_WRITE_URL")
