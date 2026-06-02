@@ -62,14 +62,14 @@ data:
       forward_to = [prometheus.remote_write.default.receiver]
     }
 
-    // ───── kubelet / cAdvisor (自ノードのみ) ─────
-    // MY_NODE_NAME Downward API でノード名を取得し、自ノードの IP のみ対象にする
+    // ───── kubelet / cAdvisor (API サーバープロキシ経由・自ノードのみ) ─────
+    // 直接 10250 ポートに接続するのではなく kubernetes.default.svc をプロキシとして使う
 
     discovery.kubernetes "nodes" {
       role = "node"
     }
 
-    discovery.relabel "local_node" {
+    discovery.relabel "kubelet_node" {
       targets = discovery.kubernetes.nodes.targets
       rule {
         source_labels = ["__meta_kubernetes_node_name"]
@@ -77,26 +77,53 @@ data:
         regex         = env("MY_NODE_NAME")
       }
       rule {
-        source_labels = ["__meta_kubernetes_node_address_InternalIP"]
-        target_label  = "__address__"
-        replacement   = "$1:10250"
+        replacement  = "kubernetes.default.svc:443"
+        target_label = "__address__"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_node_name"]
+        regex         = "(.+)"
+        replacement   = "/api/v1/nodes/${1}/proxy/metrics"
+        target_label  = "__metrics_path__"
+      }
+    }
+
+    discovery.relabel "cadvisor_node" {
+      targets = discovery.kubernetes.nodes.targets
+      rule {
+        source_labels = ["__meta_kubernetes_node_name"]
+        action        = "keep"
+        regex         = env("MY_NODE_NAME")
+      }
+      rule {
+        replacement  = "kubernetes.default.svc:443"
+        target_label = "__address__"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_node_name"]
+        regex         = "(.+)"
+        replacement   = "/api/v1/nodes/${1}/proxy/metrics/cadvisor"
+        target_label  = "__metrics_path__"
       }
     }
 
     prometheus.scrape "kubelet" {
-      targets   = discovery.relabel.local_node.output
+      targets   = discovery.relabel.kubelet_node.output
       scheme    = "https"
       bearer_token_file = "/var/run/secrets/kubernetes.io/serviceaccount/token"
-      tls_config { insecure_skip_verify = true }
+      tls_config {
+        ca_file = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+      }
       forward_to = [prometheus.remote_write.default.receiver]
     }
 
     prometheus.scrape "cadvisor" {
-      targets      = discovery.relabel.local_node.output
-      scheme       = "https"
-      metrics_path = "/metrics/cadvisor"
+      targets   = discovery.relabel.cadvisor_node.output
+      scheme    = "https"
       bearer_token_file = "/var/run/secrets/kubernetes.io/serviceaccount/token"
-      tls_config { insecure_skip_verify = true }
+      tls_config {
+        ca_file = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+      }
       forward_to = [prometheus.remote_write.default.receiver]
     }
 
@@ -190,7 +217,7 @@ metadata:
   name: alloy
 rules:
   - apiGroups: [""]
-    resources: ["pods", "pods/log", "nodes", "nodes/metrics", "namespaces", "endpoints", "services"]
+    resources: ["pods", "pods/log", "nodes", "nodes/metrics", "nodes/proxy", "namespaces", "endpoints", "services"]
     verbs: ["get", "list", "watch"]
   - nonResourceURLs: ["/metrics", "/metrics/cadvisor"]
     verbs: ["get"]
