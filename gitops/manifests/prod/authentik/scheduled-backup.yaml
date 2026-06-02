@@ -1,0 +1,13 @@
+---
+# Authentik DB 日次フルバックアップ (毎日 02:00 UTC)
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: authentik-db-daily
+  namespace: prod
+spec:
+  schedule: "0 2 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: authentik-db
+  target: prefer-standby

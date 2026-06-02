@@ -1,0 +1,13 @@
+---
+# Directus DB 日次フルバックアップ (毎日 02:00 UTC)
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: directus-db-daily
+  namespace: prod
+spec:
+  schedule: "0 2 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: directus-db
+  target: prefer-standby

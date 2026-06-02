@@ -2,42 +2,42 @@
 
 ## タスク一覧
 
-- [ ] 1. Hetzner Object Storage のセットアップ (手動作業)
-  - Hetzner Robot ダッシュボードで `aramakisai-backups` バケットを `fsn1` リージョンに作成する
-  - S3 アクセスキーを発行し、`HETZNER_S3_ACCESS_KEY_ID` / `HETZNER_S3_SECRET_ACCESS_KEY` として Infisical に登録する
+- [x] 1. Backblaze B2 のセットアップ (手動作業)
+  - app.backblaze.com で `aramakisai-backups` バケットを作成し、エンドポイント URL (リージョン含む) を控える
+  - Application Key を発行し、`B2_KEY_ID` / `B2_APPLICATION_KEY` として Infisical に登録する
   - `scripts/push-secrets-to-infisical.sh` を使って登録し、クラスター側で ESO が取得できることを確認すれば完了
   - _Requirements: 1_
 
-- [ ] 2. S3 認証情報 ExternalSecret の作成
-  - `gitops/manifests/shared/eso/hetzner-s3-external-secret.yaml` を新規作成し、`hetzner-s3-credentials` Secret が `prod` namespace に展開されるよう定義する
-  - `kubectl get secret hetzner-s3-credentials -n prod` で2キーが存在することを確認すれば完了
+- [x] 2. S3 認証情報 ExternalSecret の作成
+  - `gitops/manifests/shared/eso/b2-external-secret.yaml` を新規作成し、`b2-credentials` Secret が `prod` namespace に展開されるよう定義する
+  - `kubectl get secret b2-credentials -n prod` で2キーが存在することを確認すれば完了
   - _Requirements: 1_
 
-- [ ] 3. CloudNativePG バックアップ設定
-- [ ] 3.1 (P) Authentik DB にバックアップ設定を追加
-  - `gitops/manifests/prod/authentik/db-cluster.yaml` の `spec.backup.barmanObjectStore` に S3 設定 (destinationPath / endpointURL / s3Credentials / retentionPolicy: 7d) を追加する
+- [x] 3. CloudNativePG バックアップ設定
+- [x] 3.1 (P) Authentik DB にバックアップ設定を追加
+  - `gitops/manifests/prod/authentik/db-cluster.yaml` の `spec.backup.barmanObjectStore` に B2 設定 (destinationPath / endpointURL / s3Credentials / retentionPolicy: 7d) を追加する
   - `gitops/manifests/prod/authentik/scheduled-backup.yaml` を新規作成し、`schedule: "0 2 * * *"` で毎日 02:00 UTC にバックアップを取得するよう設定する
   - `kubectl get backup -n prod` で Authentik DB のバックアップが `completed` 状態になれば完了
   - _Requirements: 2_
   - _Boundary: authentik/db-cluster.yaml, authentik/scheduled-backup.yaml_
 
-- [ ] 3.2 (P) Directus DB にバックアップ設定を追加
-  - `gitops/manifests/prod/directus/db-cluster.yaml` に同様の S3 バックアップ設定を追加する
+- [x] 3.2 (P) Directus DB にバックアップ設定を追加
+  - `gitops/manifests/prod/directus/db-cluster.yaml` に同様の B2 バックアップ設定を追加する
   - `gitops/manifests/prod/directus/scheduled-backup.yaml` を新規作成する
   - `kubectl get backup -n prod` で Directus DB のバックアップが `completed` 状態になれば完了
   - _Requirements: 2_
   - _Boundary: directus/db-cluster.yaml, directus/scheduled-backup.yaml_
 
-- [ ] 4. VolSync による Stalwart PVC バックアップ
-- [ ] 4.1 VolSync を ArgoCD Application として追加
+- [x] 4. VolSync による Stalwart PVC バックアップ
+- [x] 4.1 VolSync を ArgoCD Application として追加
   - `gitops/apps/prod/volsync.yaml` を新規作成し、VolSync Helm chart を `sync-wave: "-1"` でインストールする
   - `kubectl get pods -n volsync` で VolSync コントローラーが Running になれば完了
   - _Requirements: 3_
 
-- [ ] 4.2 Stalwart restic ExternalSecret と ReplicationSource の作成
+- [x] 4.2 Stalwart restic ExternalSecret と ReplicationSource の作成
   - Infisical に `STALWART_RESTIC_REPOSITORY` / `STALWART_RESTIC_PASSWORD` を登録する
   - `gitops/manifests/prod/stalwart/restic-external-secret.yaml` を新規作成し、restic が必要とする Secret (`RESTIC_REPOSITORY`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `RESTIC_PASSWORD`) を展開する
-  - `gitops/manifests/prod/stalwart/replication-source.yaml` を新規作成し、`schedule: "0 3 * * *"` / `retain.daily: 7` でバックアップを設定する
+  - `gitops/manifests/prod/stalwart/replication-source.yaml` を新規作成し、`schedule: "0 */2 * * *"` (2時間ごと) / `retain.hourly: 12` / `retain.daily: 7` でバックアップを設定する
   - `kubectl get replicationsource stalwart-backup -n prod -o jsonpath='{.status.lastSyncTime}'` に日時が表示されれば完了
   - _Requirements: 3_
   - _Depends: 4.1_
@@ -51,7 +51,7 @@
   - _Depends: 3.1, 3.2, 4.2_
 
 - [ ] 6. Rclone Google Drive 同期のセットアップ
-- [ ] 6.1 Google Drive Service Account の準備 (手動作業)
+- [ ] 6.1 Google Drive Service Account の準備 (手動作業)  ← 手動作業中
   - Google Cloud Console でプロジェクトを作成し Google Drive API を有効化する
   - Service Account を作成して JSON キーをダウンロードし、Google Drive の同期先フォルダ (`aramakisai-backups`) に「編集者」権限を付与する
   - SA JSON を Base64 エンコードしてから Infisical に登録する: `cat sa.json | base64 -w 0` の出力を `GOOGLE_SERVICE_ACCOUNT_JSON` として保存する (JSON をそのまま登録すると改行文字でパースエラーが起きるため Base64 を必ず使うこと)
@@ -59,7 +59,7 @@
   - Infisical 上に2キーが確認できれば完了
   - _Requirements: 4_
 
-- [ ] 6.2 rclone ExternalSecret・CronJob・ArgoCD Application を作成
+- [x] 6.2 rclone ExternalSecret・CronJob・ArgoCD Application を作成
   - `gitops/manifests/prod/rclone/external-secret.yaml` を新規作成し、`rclone-gdrive-secret` Secret (`SA_JSON` / `GDRIVE_FOLDER_ID`) が展開されるよう定義する
   - `gitops/manifests/prod/rclone/cronjob.yaml` を新規作成し、`schedule: "0 4 * * *"` / `concurrencyPolicy: Forbid` で S3 → Google Drive を rclone sync する CronJob を定義する
   - `gitops/apps/prod/rclone.yaml` に ArgoCD Application を定義する
@@ -89,6 +89,7 @@
   - `kubectl describe replicationdestination stalwart-restore -n prod` で `lastSyncTime` が更新され `latestImage` が設定されることを確認する
   - Stalwart を再起動 (`--replicas=1`) し、メールデータが復元されて SMTP/IMAP が正常に応答することを確認すれば完了
   - _Requirements: 3_
+  - _Boundary: stalwart StatefulSet, stalwart-data PVC_
   - _Depends: 5_
 
 - [ ] 8. フル DR 検証 (ノード全損シナリオ・目標 RTO 80〜100 分)

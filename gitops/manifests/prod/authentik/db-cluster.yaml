@@ -27,6 +27,23 @@ spec:
       secret:
         name: authentik-db-credentials   # ESO が生成する Secret
 
+  backup:
+    barmanObjectStore:
+      destinationPath: "s3://aramakisai-backups/cnpg/authentik-db"
+      endpointURL: "https://s3.us-west-004.backblazeb2.com"
+      s3Credentials:
+        accessKeyId:
+          name: b2-credentials
+          key: ACCESS_KEY_ID
+        secretAccessKey:
+          name: b2-credentials
+          key: SECRET_ACCESS_KEY
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+    retentionPolicy: "7d"
+
   storage:
     size: 5Gi
 

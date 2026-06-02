@@ -1,0 +1,20 @@
+---
+# Stalwart メールデータ PVC バックアップ (VolSync + restic → Backblaze B2)
+# 2時間ごとにスナップショット取得、最大メール消失を 2 時間以内に抑える
+apiVersion: volsync.backube/v1alpha1
+kind: ReplicationSource
+metadata:
+  name: stalwart-backup
+  namespace: prod
+spec:
+  sourcePVC: stalwart-data
+  trigger:
+    schedule: "0 */2 * * *"
+  restic:
+    pruneIntervalDays: 1
+    repository: stalwart-restic-secret
+    retain:
+      hourly: 12   # 直近 24 時間分 (2h × 12)
+      daily: 7     # 日次スナップショット 7 日分
+    copyMethod: Snapshot
+    cacheCapacity: 1Gi

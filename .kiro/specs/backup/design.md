@@ -4,12 +4,12 @@
 
 ```
                     ┌─ Primary ──────────────────────────────────┐
-                    │  Hetzner Object Storage (fsn1)             │
+                    │  Backblaze B2                              │
                     │  バケット: aramakisai-backups               │
                     │  ├── cnpg/authentik-db/  (WAL + full)      │
 クラスター          │  ├── cnpg/directus-db/   (WAL + full)      │
   CNPG 02:00 ──────┤  └── volsync/stalwart/   (restic repo)     │
-  VolSync 03:00 ───┘                                             │
+  VolSync */2h ────┘                                             │
                                     │ rclone sync 04:00          │
                     ┌─ Secondary ───▼────────────────────────────┤
                     │  Google Drive (Service Account)             │
@@ -20,7 +20,7 @@
                     └────────────────────────────────────────────┘
 
 クラスター内の認証フロー:
-  Infisical → ESO ExternalSecret → hetzner-s3-credentials Secret
+  Infisical → ESO ExternalSecret → b2-credentials Secret
     ├── CloudNativePG Cluster.backup.barmanObjectStore が参照
     ├── VolSync ReplicationSource が参照
     └── rclone CronJob が参照 (S3 → Google Drive 同期)
@@ -33,28 +33,31 @@
 
 ### 2.1. S3 認証情報 (shared)
 
-`gitops/manifests/shared/eso/hetzner-s3-external-secret.yaml` を新規作成し、
-`ClusterSecretStore: infisical` 経由で Hetzner S3 認証情報を取得する。
+`gitops/manifests/shared/eso/b2-external-secret.yaml` を新規作成し、
+`ClusterSecretStore: infisical` 経由で Backblaze B2 認証情報を取得する。
+
+Backblaze B2 の Application Key ID / Application Key は S3 互換 API では
+`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` として扱う。
 
 ```yaml
 apiVersion: external-secrets.io/v1beta1
 kind: ExternalSecret
 metadata:
-  name: hetzner-s3-credentials
+  name: b2-credentials
   namespace: prod          # CNPG と VolSync が同じ namespace を参照
 spec:
   secretStoreRef:
     kind: ClusterSecretStore
     name: infisical
   target:
-    name: hetzner-s3-credentials
+    name: b2-credentials
   data:
     - secretKey: ACCESS_KEY_ID
       remoteRef:
-        key: HETZNER_S3_ACCESS_KEY_ID
+        key: B2_KEY_ID
     - secretKey: SECRET_ACCESS_KEY
       remoteRef:
-        key: HETZNER_S3_SECRET_ACCESS_KEY
+        key: B2_APPLICATION_KEY
 ```
 
 ### 2.2. CloudNativePG バックアップ設定
@@ -66,13 +69,13 @@ spec:
   backup:
     barmanObjectStore:
       destinationPath: "s3://aramakisai-backups/cnpg/<cluster-name>"
-      endpointURL: "https://fsn1.your-objectstorage.com"
+      endpointURL: "https://s3.us-west-004.backblazeb2.com"
       s3Credentials:
         accessKeyId:
-          name: hetzner-s3-credentials
+          name: b2-credentials
           key: ACCESS_KEY_ID
         secretAccessKey:
-          name: hetzner-s3-credentials
+          name: b2-credentials
           key: SECRET_ACCESS_KEY
       wal:
         compression: gzip
@@ -102,7 +105,8 @@ spec:
 
 ### 2.3. VolSync による Stalwart PVC バックアップ
 
-**VolSync** を ArgoCD で管理し、`stalwart-data` PVC を restic 経由で S3 にバックアップする。
+**VolSync** を ArgoCD で管理し、`stalwart-data` PVC を restic 経由で B2 にバックアップする。
+スケジュールは **2時間ごと**とし、最大メール消失を 2 時間以内に抑える。
 
 #### ArgoCD Application
 
@@ -121,12 +125,13 @@ metadata:
 spec:
   sourcePVC: stalwart-data
   trigger:
-    schedule: "0 3 * * *"    # 毎日 03:00 UTC
+    schedule: "0 */2 * * *"  # 2時間ごと (最大メール消失 2 時間)
   restic:
     pruneIntervalDays: 1
     repository: stalwart-restic-secret   # restic リポジトリ設定
     retain:
-      daily: 7
+      hourly: 12    # 直近 24 時間分 (2h × 12)
+      daily: 7      # 日次スナップショット 7 日分
     copyMethod: Snapshot
     cacheCapacity: 1Gi
 ```
@@ -138,7 +143,7 @@ restic が必要とする環境変数 (`RESTIC_REPOSITORY`, `AWS_ACCESS_KEY_ID`,
 `AWS_SECRET_ACCESS_KEY`, `RESTIC_PASSWORD`) を Infisical から注入する。
 
 Infisical に追加するキー:
-- `STALWART_RESTIC_REPOSITORY` = `s3:https://fsn1.your-objectstorage.com/aramakisai-backups/volsync/stalwart`
+- `STALWART_RESTIC_REPOSITORY` = `s3:https://s3.us-west-004.backblazeb2.com/aramakisai-backups/volsync/stalwart`
 - `STALWART_RESTIC_PASSWORD` = ランダム生成パスフレーズ
 
 ### 2.4. Rclone CronJob (S3 → Google Drive 同期)
@@ -205,7 +210,7 @@ metadata:
   name: rclone-gdrive-sync
   namespace: prod
 spec:
-  schedule: "0 4 * * *"    # 毎日 04:00 UTC (CNPG 02:00 + VolSync 03:00 完了後)
+  schedule: "0 4 * * *"    # 毎日 04:00 UTC (CNPG 02:00 完了後)
   concurrencyPolicy: Forbid
   jobTemplate:
     spec:
@@ -221,18 +226,18 @@ spec:
                 - |
                   echo "$SA_JSON" > /tmp/sa.json
                   rclone sync \
-                    :s3,provider=Other,endpoint=$(S3_ENDPOINT),access_key_id=$(AWS_ACCESS_KEY_ID),secret_access_key=$(AWS_SECRET_ACCESS_KEY):aramakisai-backups \
+                    :s3,provider=Other,endpoint=$(S3_ENDPOINT),access_key_id=$(ACCESS_KEY_ID),secret_access_key=$(SECRET_ACCESS_KEY):aramakisai-backups \
                     :drive,service_account_file=/tmp/sa.json,root_folder_id=$(GDRIVE_FOLDER_ID): \
                     --transfers=4 \
                     --log-level=INFO
               env:
                 - name: S3_ENDPOINT
-                  value: "https://fsn1.your-objectstorage.com"
+                  value: "https://s3.us-west-004.backblazeb2.com"
               envFrom:
                 - secretRef:
-                    name: hetzner-s3-credentials   # AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY
+                    name: b2-credentials       # ACCESS_KEY_ID / SECRET_ACCESS_KEY
                 - secretRef:
-                    name: rclone-gdrive-secret     # SA_JSON / GDRIVE_FOLDER_ID
+                    name: rclone-gdrive-secret # SA_JSON / GDRIVE_FOLDER_ID
               resources:
                 requests:
                   memory: "128Mi"
@@ -267,13 +272,13 @@ spec:
     - name: authentik-db
       barmanObjectStore:
         destinationPath: s3://aramakisai-backups/cnpg/authentik-db
-        endpointURL: https://fsn1.your-objectstorage.com
+        endpointURL: https://s3.us-west-004.backblazeb2.com
         s3Credentials:
           accessKeyId:
-            name: hetzner-s3-credentials
+            name: b2-credentials
             key: ACCESS_KEY_ID
           secretAccessKey:
-            name: hetzner-s3-credentials
+            name: b2-credentials
             key: SECRET_ACCESS_KEY
 EOF
 ```
@@ -305,9 +310,9 @@ EOF
 | データ | 消える? | 理由 | 復旧元 |
 |--------|---------|------|--------|
 | K3s etcd (クラスター状態) | ✅ 消える | local-path、ノードに紐づく | Git (ArgoCD re-sync) |
-| Authentik DB | ✅ 消える | CNPG PVC が local-path | Hetzner S3 (barman PITR) |
-| Directus DB | ✅ 消える | 同上 | Hetzner S3 (barman PITR) |
-| Stalwart メールデータ | ✅ 消える | PVC が local-path + prod-node-1 固定 | Hetzner S3 (restic) |
+| Authentik DB | ✅ 消える | CNPG PVC が local-path | Backblaze B2 (barman PITR) |
+| Directus DB | ✅ 消える | 同上 | Backblaze B2 (barman PITR) |
+| Stalwart メールデータ | ✅ 消える | PVC が local-path + prod-node-1 固定 | Backblaze B2 (restic、最大 2h 前) |
 | Roundcube SQLite | ✅ 消える | PVC が local-path | **復旧不可**（許容）|
 | Cloudflare Tunnel Token | ✅ 消える (Secret) | Infisical が保持 | ESO が自動再作成 |
 | TLS 証明書 | ✅ 消える (Secret) | cert-manager が再発行 | Let's Encrypt (自動) |
@@ -335,7 +340,7 @@ EOF
     PVC が空のため DB 接続エラー / メールデータなしの状態
 
 フェーズ 3: DB 復旧 (~20分, 並列実行可)
-  Authentik DB: CNPG bootstrap.recovery で S3 から PITR リストア
+  Authentik DB: CNPG bootstrap.recovery で B2 から PITR リストア
   Directus DB:  同上
 
 フェーズ 4: Stalwart メールデータ復旧 (~10〜30分、データ量による)
@@ -369,13 +374,13 @@ spec:
     - name: authentik-db-backup
       barmanObjectStore:
         destinationPath: s3://aramakisai-backups/cnpg/authentik-db
-        endpointURL: https://fsn1.your-objectstorage.com
+        endpointURL: https://s3.us-west-004.backblazeb2.com
         s3Credentials:
           accessKeyId:
-            name: hetzner-s3-credentials
+            name: b2-credentials
             key: ACCESS_KEY_ID
           secretAccessKey:
-            name: hetzner-s3-credentials
+            name: b2-credentials
             key: SECRET_ACCESS_KEY
 ```
 
@@ -390,5 +395,5 @@ spec:
 
 - CNPG: `kubectl get backup -n prod` でバックアップ一覧を確認。`status.phase: completed` を確認
 - VolSync: `kubectl get replicationsource stalwart-backup -n prod -o jsonpath='{.status.lastSyncTime}'` で最終成功時刻を確認
-- S3: Hetzner Robot ダッシュボードでオブジェクト数の増加を確認
+- B2: Backblaze コンソールでオブジェクト数の増加を確認
 - フル DR 検証: Task 8 のシナリオで staging ノードを使って実際に手順を通しで実行する
