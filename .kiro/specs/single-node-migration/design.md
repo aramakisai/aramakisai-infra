@@ -13,13 +13,12 @@
 ### Goals
 
 - 3×CX23 → 1×CX33 への移行（コスト削減 ▲¥15,720/年）
-- Authentik・Directus・Roundcube のデータを無損失で移行
+- Authentik・Directus・Stalwart（VolSync経由）・Roundcube のデータを無損失で移行
 - Grafana Cloud + Raspberry Pi による障害検知から30分以内の半自動復旧
 - `backup` スペックで設定したS3バックアップを DR 経路として確立
 
 ### Non-Goals
 
-- Stalwart メールデータの移行（新規スタートとする）
 - ゼロダウンタイム移行（ダウンタイムを許容する）
 - Raspberry Pi 自体の冗長化
 - Kubernetes 外のサービス（Cloudflare、Tailscale、Infisical）の変更
@@ -488,7 +487,7 @@ flowchart TD
 ### 移行前検証
 
 - `pg_dump` 出力の行数確認（0行はNGとして再取得）
-- `tar tzf stalwart-data.tar.gz` でアーカイブ整合性確認（Stalwartは新規スタートのためスキップ）
+- VolSync バックアップの最新ステータスが `completed` であることを確認（Stalwart用）
 - `psql --dry-run` 相当: `pg_restore --list` で SQL ファイルの構造確認
 
 ### 移行後機能検証

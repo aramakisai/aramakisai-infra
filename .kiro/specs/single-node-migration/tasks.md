@@ -50,10 +50,15 @@
   - `ansible/inventory/tailscale.yml` の `k3s_server_worker` グループ全体を削除する
   - `k3s_server` グループの `prod-node-1` のみ残し、`k3s_cluster_init: true`・`k3s_private_ip: 10.0.1.1` を設定する
   - `ansible -i inventory/tailscale.yml k3s_server -m ping --check` が接続先1台を示せば完了（新ノード稼働後に確認）
-  - 2.1〜2.3 の変更とまとめて `git commit && git push` し、ArgoCD が新設定を参照できる状態にする
-  - _Requirements: 1.2_
+  - 2.1〜2.3, 2.5 の変更とまとめて `git commit && git push` し、ArgoCD が新設定を参照できる状態にする
+  - _Requirements: 1.2
   - _Boundary: ansible/inventory/tailscale.yml_
   - _Depends: 2.1, 2.2, 2.3_
+
+- [x] 2.5 不要な Ansible ロールを削除する
+  - `ansible/roles/k3s-agent/` ディレクトリを削除し、デッドコードをクリーンアップする
+  - `git status` で `k3s-agent` の削除が確認されれば完了
+  - _Boundary: ansible/roles/k3s-agent_
 
 - [ ] 3. 新クラスターのプロビジョニング
 - [ ] 3.1 terraform apply で新ノードを作成し旧3ノードを削除する
@@ -102,6 +107,14 @@
   - `https://webmail.aramakisai.com` にアクセスして画面が表示されれば完了
   - _Requirements: 2.3_
   - _Boundary: Roundcube Deployment_
+  - _Depends: 4.1_
+
+- [ ] 4.5 (P) Stalwart メールデータを VolSync からリストアする
+  - `./scripts/test-volsync-restore.sh` 相当の手順で `ReplicationDestination` を作成し、S3 restic から `stalwart-data` PVC へデータをリストアする
+  - `kubectl rollout restart statefulset/stalwart -n prod` を実行する
+  - メールサーバーが起動し、SMTP(587)/IMAP(993) ポートで疎通が確認されれば完了
+  - _Requirements: 2.4_
+  - _Boundary: Stalwart StatefulSet, Stalwart PVC_
   - _Depends: 4.1_
 
 - [ ] 5. Raspberry Pi 復旧サービスの実装
