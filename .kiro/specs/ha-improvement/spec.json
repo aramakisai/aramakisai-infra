@@ -1,13 +1,14 @@
 {
   "name": "ha-improvement",
   "description": "Improve application-layer HA: CloudNativePG replicas, cloudflared topology spread, PodDisruptionBudgets",
-  "status": "tasks-review",
+  "status": "cancelled",
   "language": "ja",
-  "phase": "tasks-generated",
+  "phase": "cancelled",
+  "cancelled_reason": "single-node-migration スペックでシングルノード構成に移行するため、PDB・DB replicas増加・topology spread 等のHA改善はすべて無意味になった。完了済みタスク（DB instances変更・cloudflared topology spread）はその後の設計変更で上書き済み。",
   "approvals": {
     "requirements": { "approved": true },
     "design": { "approved": true },
     "tasks": { "generated": true, "approved": true }
   },
-  "updated_at": "2026-06-01T00:00:00Z"
+  "updated_at": "2026-06-02T00:00:00Z"
 }
