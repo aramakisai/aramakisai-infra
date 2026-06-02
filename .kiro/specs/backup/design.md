@@ -3,30 +3,17 @@
 ## 1. 全体構成
 
 ```
-                    ┌─ Primary ──────────────────────────────────┐
-                    │  Backblaze B2                              │
-                    │  バケット: aramakisai-backups               │
-                    │  ├── cnpg/authentik-db/  (WAL + full)      │
-クラスター          │  ├── cnpg/directus-db/   (WAL + full)      │
-  CNPG 02:00 ──────┤  └── volsync/stalwart/   (restic repo)     │
-  VolSync */2h ────┘                                             │
-                                    │ rclone sync 04:00          │
-                    ┌─ Secondary ───▼────────────────────────────┤
-                    │  Google Drive (Service Account)             │
-                    │  フォルダ: aramakisai-backups/             │
-                    │  ├── cnpg/authentik-db/                    │
-                    │  ├── cnpg/directus-db/                     │
-                    │  └── volsync/stalwart/                     │
-                    └────────────────────────────────────────────┘
+クラスター
+  CNPG 02:00 ────┐
+  VolSync */2h ──┤  Backblaze B2 (aramakisai-backups)
+                 │  ├── cnpg/authentik-db/  (WAL + full)
+                 │  ├── cnpg/directus-db/   (WAL + full)
+                 └── volsync/stalwart/      (restic repo, 暗号化)
 
 クラスター内の認証フロー:
   Infisical → ESO ExternalSecret → b2-credentials Secret
     ├── CloudNativePG Cluster.backup.barmanObjectStore が参照
-    ├── VolSync ReplicationSource が参照
-    └── rclone CronJob が参照 (S3 → Google Drive 同期)
-
-  Infisical → ESO ExternalSecret → rclone-gdrive-secret
-    └── rclone CronJob が参照 (Google Drive Service Account JSON)
+    └── VolSync ReplicationSource が参照
 ```
 
 ## 2. コンポーネント詳細
@@ -144,109 +131,6 @@ restic が必要とする環境変数 (`RESTIC_REPOSITORY`, `AWS_ACCESS_KEY_ID`,
 Infisical に追加するキー:
 - `STALWART_RESTIC_REPOSITORY` = `s3:https://s3.us-west-004.backblazeb2.com/aramakisai-backups/volsync/stalwart`
 - `STALWART_RESTIC_PASSWORD` = ランダム生成パスフレーズ
-
-### 2.4. Rclone CronJob (S3 → Google Drive 同期)
-
-#### Google Drive 認証方式
-
-Service Account を使用する。OAuth2 フローが不要なため Kubernetes での自動実行に適している。
-
-事前準備 (手動):
-1. Google Cloud Console でプロジェクトを作成し Google Drive API を有効化する
-2. Service Account を作成し、JSON キーをダウンロードする
-3. Google Drive で同期先フォルダ (`aramakisai-backups`) を作成し、Service Account のメールアドレスに「編集者」権限を付与する
-4. JSON キーの内容と フォルダ ID を Infisical に登録する:
-   - `GOOGLE_SERVICE_ACCOUNT_JSON` = SA JSON の内容 (文字列全体)
-   - `GDRIVE_FOLDER_ID` = 共有フォルダの ID (URL末尾の英数字)
-
-#### Google Drive 認証の注意点
-
-SA JSON を Infisical に登録する際は **Base64 エンコード済み文字列**として保存すること。
-JSON をそのまま登録すると改行文字 (`\n`) や特殊文字による Kubernetes Secret / シェル展開のパースエラーが起きる。
-
-```bash
-# 登録時
-cat sa.json | base64 -w 0   # この出力を GOOGLE_SERVICE_ACCOUNT_JSON に登録
-
-# ExternalSecret 側で decodingStrategy: Base64 を指定してデコード
-```
-
-#### ExternalSecret
-
-`gitops/manifests/prod/rclone/external-secret.yaml` を新規作成:
-
-```yaml
-apiVersion: external-secrets.io/v1beta1
-kind: ExternalSecret
-metadata:
-  name: rclone-gdrive-secret
-  namespace: prod
-spec:
-  secretStoreRef:
-    kind: ClusterSecretStore
-    name: infisical
-  target:
-    name: rclone-gdrive-secret
-  data:
-    - secretKey: SA_JSON
-      remoteRef:
-        key: GOOGLE_SERVICE_ACCOUNT_JSON
-        decodingStrategy: Base64   # Infisical に Base64 エンコード済みで登録されているためデコードする
-    - secretKey: GDRIVE_FOLDER_ID
-      remoteRef:
-        key: GDRIVE_FOLDER_ID
-```
-
-#### CronJob
-
-`gitops/manifests/prod/rclone/cronjob.yaml` を新規作成。
-rclone のフラグで S3 と Google Drive を直接指定し、設定ファイル不要で動作させる。
-
-```yaml
-apiVersion: batch/v1
-kind: CronJob
-metadata:
-  name: rclone-gdrive-sync
-  namespace: prod
-spec:
-  schedule: "0 4 * * *"    # 毎日 04:00 UTC (CNPG 02:00 完了後)
-  concurrencyPolicy: Forbid
-  jobTemplate:
-    spec:
-      template:
-        spec:
-          restartPolicy: OnFailure
-          containers:
-            - name: rclone
-              image: rclone/rclone:latest
-              command:
-                - /bin/sh
-                - -c
-                - |
-                  echo "$SA_JSON" > /tmp/sa.json
-                  rclone sync \
-                    :s3,provider=Other,endpoint=$(S3_ENDPOINT),access_key_id=$(ACCESS_KEY_ID),secret_access_key=$(SECRET_ACCESS_KEY):aramakisai-backups \
-                    :drive,service_account_file=/tmp/sa.json,root_folder_id=$(GDRIVE_FOLDER_ID): \
-                    --transfers=4 \
-                    --log-level=INFO
-              env:
-                - name: S3_ENDPOINT
-                  value: "s3.us-west-004.backblazeb2.com"
-              envFrom:
-                - secretRef:
-                    name: b2-credentials       # ACCESS_KEY_ID / SECRET_ACCESS_KEY
-                - secretRef:
-                    name: rclone-gdrive-secret # SA_JSON / GDRIVE_FOLDER_ID
-              resources:
-                requests:
-                  memory: "128Mi"
-                  cpu: "100m"
-                limits:
-                  memory: "256Mi"
-                  cpu: "200m"
-```
-
-ArgoCD Application は `gitops/apps/prod/rclone.yaml` に定義する。
 
 ## 3. リストア手順 (参考)
 
