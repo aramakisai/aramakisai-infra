@@ -132,8 +132,7 @@ spec:
     retain:
       hourly: 12    # 直近 24 時間分 (2h × 12)
       daily: 7      # 日次スナップショット 7 日分
-    copyMethod: Snapshot
-    cacheCapacity: 1Gi
+    copyMethod: Direct
 ```
 
 #### restic Secret (ExternalSecret)
