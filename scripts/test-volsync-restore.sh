@@ -103,9 +103,9 @@ spec:
     destinationPVC: ${PVC_NAME}
     copyMethod: Direct
     moverSecurityContext:
-      runAsUser: 1000
-      runAsGroup: 1000
-      fsGroup: 1000
+      runAsUser: 0
+      runAsGroup: 0
+      fsGroup: 0
 EOF
 
 echo "  ✅ ReplicationDestination 作成: ${RESTORE_NAME}"

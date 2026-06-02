@@ -1,0 +1,10 @@
+---
+# prod namespace 定義
+# volsync.backube/privileged-movers: Stalwart が root (UID 0) で動作するため
+# VolSync mover も root で実行する必要がある
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: prod
+  annotations:
+    volsync.backube/privileged-movers: "true"

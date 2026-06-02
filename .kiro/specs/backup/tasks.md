@@ -42,7 +42,7 @@
   - _Requirements: 3_
   - _Depends: 4.1_
 
-- [ ] 5. バックアップ動作の最終確認
+- [x] 5. バックアップ動作の最終確認
   - CNPG: 翌日以降に `kubectl get backup -n prod` で両 DB のバックアップ履歴を確認する
   - VolSync: `kubectl describe replicationsource stalwart-backup -n prod` で `lastSyncDuration` と `lastSyncTime` を確認する
   - S3: Backblaze コンソールで `aramakisai-backups` バケット内にオブジェクトが作成されていることを確認する
@@ -51,7 +51,7 @@
   - _Depends: 3.1, 3.2, 4.2_
 
 - [ ] 6. 復旧検証 (クラスター稼働中・部分障害を想定)
-- [ ] 6.1 (P) CloudNativePG PITR リストア検証
+- [x] 6.1 (P) CloudNativePG PITR リストア検証
   - staging 用の一時 Namespace (`restore-test`) を作成し、本番 DB には触れない環境でリストアを実施する
   - `authentik-db` の最新バックアップから `Cluster` リソースを `bootstrap.recovery` で再作成し、Pod が `Running` かつ `role=primary` になることを確認する
   - `kubectl exec` でリストア済み DB に接続し、テーブルとレコードが存在することを SQL で確認する
@@ -61,7 +61,7 @@
   - _Boundary: restore-test Namespace (本番非接触)_
   - _Depends: 5_
 
-- [ ] 6.2 (P) VolSync restic リストア検証
+- [x] 6.2 (P) VolSync restic リストア検証
   - Stalwart を一時停止 (`kubectl scale statefulset stalwart -n prod --replicas=0`) し、PVC 内のデータを退避する
   - `ReplicationDestination` リソースを手動トリガー (`trigger.manual`) で作成し、S3 から `stalwart-data` PVC へのリストアを実行する
   - `kubectl describe replicationdestination stalwart-restore -n prod` で `lastSyncTime` が更新され `latestImage` が設定されることを確認する
@@ -72,6 +72,7 @@
   - _Depends: 5_
 
 - [ ] 7. フル DR 検証 (ノード全損シナリオ・目標 RTO 80〜100 分)
+  - _Note: single-node-migration の実装時にインフラ再構築を伴うため、その際に通しで検証する_
 - [ ] 7.1 フェーズ 1: インフラ再構築 (~30 分)
   - `terraform taint` で全ノードを強制再作成対象にし、`terraform apply` で新規ノードを起動する
   - Tailscale tailnet にノードが登録されたことを確認してから `ansible-playbook k3s-bootstrap.yml` を実行する

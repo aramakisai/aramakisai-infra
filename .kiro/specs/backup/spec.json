@@ -1,7 +1,7 @@
 {
   "name": "backup",
   "description": "CloudNativePG scheduled backups and Stalwart mail data backup to Hetzner Object Storage",
-  "status": "in-progress",
+  "status": "completed",
   "language": "ja",
   "phase": "implementation",
   "approvals": {

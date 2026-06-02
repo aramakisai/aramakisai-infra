@@ -106,6 +106,7 @@ spec:
       barmanObjectStore:
         destinationPath: "s3://${B2_BUCKET}/cnpg/${TARGET_CLUSTER}"
         endpointURL: "${B2_ENDPOINT}"
+        serverName: "${TARGET_CLUSTER}"
         s3Credentials:
           accessKeyId:
             name: b2-credentials
