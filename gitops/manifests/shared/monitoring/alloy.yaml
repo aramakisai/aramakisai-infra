@@ -34,10 +34,10 @@ data:
       }
     }
 
-    // ノードメトリクス
-    prometheus.scrape "node" {
+    // Alloy 自身のメトリクス (port 12345)
+    prometheus.scrape "alloy_self" {
       targets = [{
-        __address__ = "localhost:9100",
+        __address__ = "localhost:12345",
       }]
       forward_to = [prometheus.remote_write.default.receiver]
     }

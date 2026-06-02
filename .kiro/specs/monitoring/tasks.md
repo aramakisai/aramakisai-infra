@@ -10,19 +10,19 @@
   - Infisical のダッシュボードで6キーが確認できれば完了
   - _Requirements: 1_
 
-- [ ] 2. alloy-external-secret.yaml を作成
+- [x] 2. alloy-external-secret.yaml を作成
   - `gitops/manifests/shared/eso/alloy-external-secret.yaml` を新規作成し、`monitoring` namespace に `alloy-secrets` Secret が展開されるよう6キーを定義する
   - ArgoCD sync 後に `kubectl get secret alloy-secrets -n monitoring` で6キーが存在することを確認すれば完了
   - _Requirements: 1_
   - _Depends: 1_
 
-- [ ] 3. alloy.yaml の ConfigMap を修正
+- [x] 3. alloy.yaml の ConfigMap を修正
   - `gitops/manifests/shared/monitoring/alloy.yaml` の `prometheus.scrape "node"` ブロックを `prometheus.scrape "alloy_self"` に変更し、scrape 対象を `localhost:9100` → `localhost:12345` (Alloy 自身のメトリクス) に修正する
   - `kubectl apply --dry-run=client -f alloy.yaml` で検証通過すれば完了
   - _Requirements: 4_
 
 - [ ] 4. ArgoCD Application と monitoring のデプロイ
-- [ ] 4.1 (P) monitoring ArgoCD Application を作成
+- [x] 4.1 (P) monitoring ArgoCD Application を作成
   - `gitops/apps/prod/monitoring.yaml` を新規作成し、`gitops/manifests/shared/monitoring` を参照する Application を定義する
   - ArgoCD UI で `monitoring` Application が Synced / Healthy になれば完了
   - _Requirements: 2_
