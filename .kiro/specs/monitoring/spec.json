@@ -1,13 +1,13 @@
 {
   "name": "monitoring",
   "description": "Deploy Grafana Alloy DaemonSet to ship pod logs and node metrics to Grafana Cloud (Loki + Prometheus)",
-  "status": "tasks-review",
+  "status": "completed",
   "language": "ja",
-  "phase": "tasks-generated",
+  "phase": "completed",
   "approvals": {
     "requirements": { "approved": true },
     "design": { "approved": true },
-    "tasks": { "generated": true, "approved": false }
+    "tasks": { "generated": true, "approved": true }
   },
-  "updated_at": "2026-06-01T00:00:00Z"
+  "updated_at": "2026-06-02T00:00:00Z"
 }
