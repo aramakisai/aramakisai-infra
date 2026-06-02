@@ -475,15 +475,6 @@ Grafana Cloud をバックエンドとして使うため、クラスター内に
 
 Grafana Cloud の接続情報: My Account → Stack → Prometheus / Loki の「Details」から取得。
 
-### ⚠️ 未完了の作業
-
-現状 `alloy.yaml` マニフェストは存在するが以下が不足しており**未デプロイ**:
-
-1. `gitops/apps/prod/monitoring.yaml` — ArgoCD Application 定義（未作成）
-2. `gitops/manifests/shared/eso/alloy-external-secret.yaml` — `alloy-secrets` ExternalSecret（未作成）
-3. Infisical への上記6キーの登録（未実施）
-4. `.env.app-secrets.example` への Grafana Cloud キーの追記（未実施）
-
 ---
 
 ## Roundcube Webmail
