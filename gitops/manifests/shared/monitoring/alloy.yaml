@@ -13,17 +13,17 @@ metadata:
   namespace: monitoring
 data:
   config.alloy: |
-    // Kubernetes Pod ログ収集
-    loki.source.kubernetes "pods" {
-      targets    = discovery.kubernetes.pods.targets
-      forward_to = [loki.write.default.receiver]
-    }
+    // ───── ログ収集 ─────
 
     discovery.kubernetes "pods" {
       role = "pod"
     }
 
-    // Grafana Loki への転送 (Grafana Cloud または self-hosted)
+    loki.source.kubernetes "pods" {
+      targets    = discovery.kubernetes.pods.targets
+      forward_to = [loki.write.default.receiver]
+    }
+
     loki.write "default" {
       endpoint {
         url = env("LOKI_URL")
@@ -34,31 +34,7 @@ data:
       }
     }
 
-    // Alloy 自身のメトリクス (port 12345)
-    prometheus.scrape "alloy_self" {
-      targets = [{
-        __address__ = "localhost:12345",
-      }]
-      forward_to = [prometheus.remote_write.default.receiver]
-    }
-
-    // ArgoCD メトリクス
-    prometheus.scrape "argocd" {
-      targets = [
-        {__address__ = "argocd-metrics.argocd.svc.cluster.local:8082"},
-        {__address__ = "argocd-server-metrics.argocd.svc.cluster.local:8083"},
-        {__address__ = "argocd-repo-server.argocd.svc.cluster.local:8084"},
-      ]
-      forward_to = [prometheus.remote_write.default.receiver]
-    }
-
-    // ノードメトリクス (Alloy 組み込みの unix exporter)
-    prometheus.exporter.unix "node" {}
-
-    prometheus.scrape "node" {
-      targets    = prometheus.exporter.unix.node.targets
-      forward_to = [prometheus.remote_write.default.receiver]
-    }
+    // ───── Prometheus remote write ─────
 
     prometheus.remote_write "default" {
       endpoint {
@@ -68,6 +44,72 @@ data:
           password = env("PROMETHEUS_PASSWORD")
         }
       }
+    }
+
+    // ───── Alloy 自身のメトリクス ─────
+
+    prometheus.scrape "alloy_self" {
+      targets = [{ __address__ = "localhost:12345" }]
+      forward_to = [prometheus.remote_write.default.receiver]
+    }
+
+    // ───── ノードメトリクス (unix exporter — 自ノードのみ) ─────
+
+    prometheus.exporter.unix "node" {}
+
+    prometheus.scrape "node_unix" {
+      targets    = prometheus.exporter.unix.node.targets
+      forward_to = [prometheus.remote_write.default.receiver]
+    }
+
+    // ───── kubelet / cAdvisor (自ノードのみ) ─────
+    // MY_NODE_NAME Downward API でノード名を取得し、自ノードの IP のみ対象にする
+
+    discovery.kubernetes "nodes" {
+      role = "node"
+    }
+
+    discovery.relabel "local_node" {
+      targets = discovery.kubernetes.nodes.targets
+      rule {
+        source_labels = ["__meta_kubernetes_node_name"]
+        action        = "keep"
+        regex         = env("MY_NODE_NAME")
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_node_address_InternalIP"]
+        target_label  = "__address__"
+        replacement   = "$1:10250"
+      }
+    }
+
+    prometheus.scrape "kubelet" {
+      targets   = discovery.relabel.local_node.output
+      scheme    = "https"
+      bearer_token_file = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+      tls_config { insecure_skip_verify = true }
+      forward_to = [prometheus.remote_write.default.receiver]
+    }
+
+    prometheus.scrape "cadvisor" {
+      targets      = discovery.relabel.local_node.output
+      scheme       = "https"
+      metrics_path = "/metrics/cadvisor"
+      bearer_token_file = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+      tls_config { insecure_skip_verify = true }
+      forward_to = [prometheus.remote_write.default.receiver]
+    }
+
+    // ───── ArgoCD メトリクス ─────
+    // DaemonSet 全 Pod がスクレイプするが ArgoCD メトリクスは小規模のため許容
+
+    prometheus.scrape "argocd" {
+      targets = [
+        {__address__ = "argocd-metrics.argocd.svc.cluster.local:8082"},
+        {__address__ = "argocd-server-metrics.argocd.svc.cluster.local:8083"},
+        {__address__ = "argocd-repo-server.argocd.svc.cluster.local:8084"},
+      ]
+      forward_to = [prometheus.remote_write.default.receiver]
     }
 ---
 apiVersion: apps/v1
@@ -93,6 +135,11 @@ spec:
           args:
             - run
             - /etc/alloy/config.alloy
+          env:
+            - name: MY_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
           envFrom:
             - secretRef:
                 name: alloy-secrets   # ESO が生成
@@ -101,6 +148,12 @@ spec:
               mountPath: /etc/alloy
             - name: varlog
               mountPath: /var/log
+              readOnly: true
+            - name: proc
+              mountPath: /proc
+              readOnly: true
+            - name: sys
+              mountPath: /sys
               readOnly: true
           resources:
             requests:
@@ -116,6 +169,12 @@ spec:
         - name: varlog
           hostPath:
             path: /var/log
+        - name: proc
+          hostPath:
+            path: /proc
+        - name: sys
+          hostPath:
+            path: /sys
       tolerations:
         - operator: Exists   # 全ノードにデプロイ (taint があっても)
 ---
@@ -131,8 +190,10 @@ metadata:
   name: alloy
 rules:
   - apiGroups: [""]
-    resources: ["pods", "pods/log", "nodes", "namespaces"]
+    resources: ["pods", "pods/log", "nodes", "nodes/metrics", "namespaces", "endpoints", "services"]
     verbs: ["get", "list", "watch"]
+  - nonResourceURLs: ["/metrics", "/metrics/cadvisor"]
+    verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
