@@ -56,6 +56,7 @@
   - `authentik-db` の最新バックアップから `Cluster` リソースを `bootstrap.recovery` で再作成し、Pod が `Running` かつ `role=primary` になることを確認する
   - `kubectl exec` でリストア済み DB に接続し、テーブルとレコードが存在することを SQL で確認する
   - 確認後 `restore-test` Namespace を削除し、本番クラスターへの影響がないことを確認すれば完了
+  - 実行: `./scripts/test-cnpg-restore.sh authentik-db` (スクリプト準備済み)
   - _Requirements: 2_
   - _Boundary: restore-test Namespace (本番非接触)_
   - _Depends: 5_
@@ -65,6 +66,7 @@
   - `ReplicationDestination` リソースを手動トリガー (`trigger.manual`) で作成し、S3 から `stalwart-data` PVC へのリストアを実行する
   - `kubectl describe replicationdestination stalwart-restore -n prod` で `lastSyncTime` が更新され `latestImage` が設定されることを確認する
   - Stalwart を再起動 (`--replicas=1`) し、メールデータが復元されて SMTP/IMAP が正常に応答することを確認すれば完了
+  - 実行: `./scripts/test-volsync-restore.sh` (スクリプト準備済み)
   - _Requirements: 3_
   - _Boundary: stalwart StatefulSet, stalwart-data PVC_
   - _Depends: 5_
