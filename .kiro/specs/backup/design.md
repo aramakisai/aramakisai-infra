@@ -191,7 +191,7 @@ spec:
     - secretKey: SA_JSON
       remoteRef:
         key: GOOGLE_SERVICE_ACCOUNT_JSON
-      decodingStrategy: Base64   # Infisical に Base64 エンコード済みで登録されているためデコードする
+        decodingStrategy: Base64   # Infisical に Base64 エンコード済みで登録されているためデコードする
     - secretKey: GDRIVE_FOLDER_ID
       remoteRef:
         key: GDRIVE_FOLDER_ID
