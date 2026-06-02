@@ -157,11 +157,11 @@ spec:
               readOnly: true
           resources:
             requests:
-              memory: "128Mi"
+              memory: "256Mi"
               cpu: "100m"
             limits:
-              memory: "256Mi"
-              cpu: "200m"
+              memory: "512Mi"
+              cpu: "300m"
       volumes:
         - name: config
           configMap:
