@@ -231,7 +231,7 @@ spec:
                     --log-level=INFO
               env:
                 - name: S3_ENDPOINT
-                  value: "https://s3.us-west-004.backblazeb2.com"
+                  value: "s3.us-west-004.backblazeb2.com"
               envFrom:
                 - secretRef:
                     name: b2-credentials       # ACCESS_KEY_ID / SECRET_ACCESS_KEY

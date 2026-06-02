@@ -51,7 +51,7 @@
   - _Depends: 3.1, 3.2, 4.2_
 
 - [ ] 6. Rclone Google Drive 同期のセットアップ
-- [ ] 6.1 Google Drive Service Account の準備 (手動作業)  ← 手動作業中
+- [ ] 6.1 Google Drive Service Account の準備 (手動作業)
   - Google Cloud Console でプロジェクトを作成し Google Drive API を有効化する
   - Service Account を作成して JSON キーをダウンロードし、Google Drive の同期先フォルダ (`aramakisai-backups`) に「編集者」権限を付与する
   - SA JSON を Base64 エンコードしてから Infisical に登録する: `cat sa.json | base64 -w 0` の出力を `GOOGLE_SERVICE_ACCOUNT_JSON` として保存する (JSON をそのまま登録すると改行文字でパースエラーが起きるため Base64 を必ず使うこと)
