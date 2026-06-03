@@ -7,9 +7,10 @@
 
 ## DR の基本方針
 
-- **自動復旧が前提**: Grafana Cloud → Raspberry Pi (`recovery.sh`) が無人で復旧する
+- **自動復旧が前提**: Grafana Cloud → GitHub Actions (`.github/workflows/dr-recovery.yml`) が無人で復旧する
 - **人手は復旧後確認のみ**: `docs/dr-runbook.md` の「復旧後の確認」セクションを参照
-- **手動手順は例外**: `recovery.sh` が失敗した場合のフォールバックとして `docs/dr-runbook.md` の「手動フォールバック」を使う
+- **手動手順は例外**: ワークフローが失敗した場合のフォールバックとして `docs/dr-runbook.md` の「手動フォールバック」を使う
+- **復旧スクリプト**: `.github/scripts/recovery.sh` (旧 `raspberry-pi/recovery/recovery.sh` から移動)
 
 ---
 
@@ -93,10 +94,44 @@ make kubectl ARGS="apply \
   -f gitops/manifests/prod/stalwart/restic-external-secret.yaml"
 ```
 
-### VolSync リストア
+### VolSync リストアとアカウント ID の整合性
 
 DR 時の Stalwart メールデータ復元は `recovery.sh` が自動で行う（ステップ 7）。  
 手動で行う場合は `gitops/manifests/prod/stalwart/replication-destination.yaml` を apply する。
+
+**重要**: VolSync バックアップが `settings.ndjson` 適用**前**の状態だと、DR 後にメールが消える。
+
+原因: Stalwart v0.16 のアカウント ID は LDAP directory 設定に基づいて生成される。  
+settings.ndjson の `destroy Directory` + `create Directory` でアカウント ID マッピングがリセットされ、  
+旧 DB のメールデータが新アカウント ID からアクセスできなくなる。
+
+**解決策**: VolSync バックアップは必ず settings.ndjson 適用済み・LDAP 接続確認済みの状態で取ること。  
+`stalwart-cli query Account` で accounts が存在することを確認してからバックアップを信頼する。
+
+### Stalwart v0.16 管理 API の認証
+
+v0.16 で `STALWART_ADMIN_SECRET` は廃止。API キー (Bearer token) 方式に変更。  
+API キーを失った場合の正式な復旧手順:
+
+```bash
+# 1. STALWART_RECOVERY_ADMIN を環境変数として StatefulSet に追加
+kubectl create secret generic stalwart-recovery -n prod \
+  --from-literal=credentials="admin:$(openssl rand -hex 16)"
+
+# statefulset.yaml に以下を追加してデプロイ:
+# - name: STALWART_RECOVERY_ADMIN
+#   valueFrom:
+#     secretKeyRef:
+#       name: stalwart-recovery
+#       key: credentials
+
+# 2. recovery admin で settings.ndjson を適用
+stalwart-cli --url https://mail.aramakisai.com \
+  --user admin --password "<recovery-password>" \
+  apply --file /tmp/stalwart-settings.ndjson
+
+# 3. 完了後、STALWART_RECOVERY_ADMIN を削除（セキュリティ上必須）
+```
 
 ---
 
@@ -122,5 +157,6 @@ ID=$(curl -sf -H "Authorization: Bearer $TAILSCALE_API_KEY" \
 ## 参照先
 
 - DR 手順全文: `docs/dr-runbook.md`
-- 自動復旧スクリプト: `raspberry-pi/recovery/recovery.sh`
+- 自動復旧スクリプト: `.github/scripts/recovery.sh`
+- 復旧ワークフロー: `.github/workflows/dr-recovery.yml`
 - CNPG 移行時の詳細知見: `.kiro/specs/single-node-migration/design.md` の「実装時の知見」セクション
