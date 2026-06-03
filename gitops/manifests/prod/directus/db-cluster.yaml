@@ -5,9 +5,6 @@ kind: Cluster
 metadata:
   name: directus-db
   namespace: prod
-  annotations:
-    # DR recovery 時に既存 WAL archive を継続して使うためチェックをスキップ
-    cnpg.io/skipEmptyWalArchiveCheck: enabled
 spec:
   instances: 1
   imageName: ghcr.io/cloudnative-pg/postgresql:16.8
@@ -19,28 +16,14 @@ spec:
       effective_cache_size: "128MB"
       work_mem: "4MB"
 
-  # DR / 移行共通の recovery bootstrap
-  # skipEmptyWalArchiveCheck: enabled で WAL archive チェックをスキップし、
-  # 同一 S3 パス・同一 serverName で recovery と backup を継続運用する。
+  # WAL アーカイブが旧クラスターで機能していなかったため recovery 不可。
+  # initdb で起動し、以降の WAL は backup セクションで B2 に蓄積する。
   bootstrap:
-    recovery:
-      source: directus-db-source
-
-  externalClusters:
-    - name: directus-db-source
-      barmanObjectStore:
-        destinationPath: "s3://aramakisai-backups/cnpg/directus-db"
-        endpointURL: "https://s3.us-west-004.backblazeb2.com"
-        serverName: directus-db
-        s3Credentials:
-          accessKeyId:
-            name: b2-credentials
-            key: ACCESS_KEY_ID
-          secretAccessKey:
-            name: b2-credentials
-            key: SECRET_ACCESS_KEY
-        wal:
-          compression: gzip
+    initdb:
+      database: directus
+      owner: directus
+      secret:
+        name: directus-db-credentials
 
   backup:
     barmanObjectStore:
