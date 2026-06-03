@@ -22,6 +22,7 @@
 - ゼロダウンタイム移行（ダウンタイムを許容する）
 - Raspberry Pi 自体の冗長化
 - Kubernetes 外のサービス（Cloudflare、Tailscale、Infisical）の変更
+- 永続的なシングルノード化（予算が許せば3ノード HA に戻す選択肢を維持する）
 
 ---
 
@@ -33,21 +34,21 @@
 - `ansible/inventory/tailscale.yml` のシングルノード化
 - `gitops/manifests/prod/authentik/db-cluster.yaml` および `directus/db-cluster.yaml` のインスタンス削減と backup 設定参照
 - `gitops/manifests/prod/stalwart/statefulset.yaml` の nodeSelector 削除
-- `gitops/manifests/prod/hetzner-s3-credentials.yaml`（ExternalSecret 新規作成）
+- `gitops/manifests/prod/authentik/db-cluster.yaml`・`directus/db-cluster.yaml` の instances: 1 + affinity 削除（backup 設定は backup スペック完了済み）
 - Raspberry Pi 上の復旧スクリプト（設計・実装方針）
-- データ移行手順（pg_dump・psql・kubectl cp）
+- データ移行手順（pg_dump・psql・kubectl cp・VolSync restore）
 
 ### Out of Boundary
 
-- Hetzner Object Storage バケット作成・S3認証情報のInfisical登録（`backup`スペック担当）
-- Grafana Alloy デプロイ・Grafana Cloud 接続情報登録（`monitoring`スペック担当）
+- Backblaze B2 バケット作成・S3認証情報のInfisical登録・`b2-credentials` ExternalSecret 作成（`backup`スペック完了済み）
+- Grafana Alloy デプロイ・Grafana Cloud 接続情報登録（`monitoring`スペック完了済み）
 - Grafana Cloud のアラートルール・Contact Point の UI 設定（本スペックでは設計のみ提示）
-- CNPG ScheduledBackup リソースの定義（`backup`スペック担当）
+- CNPG ScheduledBackup・VolSync ReplicationSource の定義（`backup`スペック完了済み）
 
 ### Allowed Dependencies
 
-- `backup`スペック（完了済み前提）: Hetzner S3バケット `aramakisai-backups`・`HETZNER_S3_ACCESS_KEY`・`HETZNER_S3_SECRET_KEY` が Infisical に登録済み
-- `monitoring`スペック（完了済み前提）: Grafana Alloy が全ノードで稼働・Grafana Cloud が `idp.aramakisai.com` を監視済み
+- `backup`スペック（✅ 完了済み）: Backblaze B2バケット `aramakisai-backups`・`b2-credentials` Secret が prod namespace に展開済み・CNPG バックアップおよび VolSync Stalwart バックアップが動作確認済み
+- `monitoring`スペック（✅ 完了済み）: Grafana Alloy が全ノードで稼働・Grafana Cloud が `idp.aramakisai.com` を監視済み
 - Tailscale tailnet（既存）: Raspberry Pi が同じ tailnet に参加済み
 - Terraform Cloud（既存）: tfstate 管理・API トークンが Pi に設定済み
 
@@ -75,7 +76,7 @@
 graph TB
     subgraph "Hetzner Cloud"
         N[prod-node-1<br/>CX33 8GB<br/>K3s single-node]
-        S3[(aramakisai-backups<br/>Hetzner Object Storage)]
+        S3[(aramakisai-backups<br/>Backblaze B2)]
     end
 
     subgraph "prod-node-1 / K3s"
@@ -140,11 +141,6 @@ graph TB
 ### 新規作成
 
 ```
-gitops/
-└── manifests/
-    └── prod/
-        └── hetzner-s3-credentials.yaml    # S3認証情報 ExternalSecret
-
 raspberry-pi/                              # (リポジトリに追加)
 ├── recovery/
 │   ├── recover.py                         # Flask webhook サービス
@@ -155,14 +151,24 @@ raspberry-pi/                              # (リポジトリに追加)
 
 ### 変更ファイル
 
-| ファイル | 変更内容 |
-|---------|---------|
-| `terraform/main.tf` | `local.nodes` を prod-node-1 単体に削減、`server_type = "cx33"` |
-| `terraform/outputs.tf` | `cp_node_ipv6`・`prod_node_2_ipv6` を削除 |
-| `ansible/inventory/tailscale.yml` | `k3s_server_worker` グループ削除、prod-node-1 のみ残す |
-| `gitops/manifests/prod/authentik/db-cluster.yaml` | `instances: 1`、`affinity: {}` 削除、`backup:` ブロック追加 |
-| `gitops/manifests/prod/directus/db-cluster.yaml` | 同上（destinationPath は `cnpg/directus`） |
-| `gitops/manifests/prod/stalwart/statefulset.yaml` | `nodeSelector` ブロックを削除 |
+| ファイル | 変更内容 | 状態 |
+|---------|---------|------|
+| `terraform/main.tf` | `local.nodes` を prod-node-1 単体に削減、`server_type = "cx33"` | 未着手 |
+| `terraform/outputs.tf` | `cp_node_ipv6`・`prod_node_2_ipv6` を削除 | 未着手 |
+| `ansible/inventory/tailscale.yml` | `k3s_server_worker` グループ削除、prod-node-1 のみ残す | 未着手 |
+| `gitops/manifests/prod/authentik/db-cluster.yaml` | `instances: 1`、`affinity` 削除（backup設定は完了済み） | 未着手 |
+| `gitops/manifests/prod/directus/db-cluster.yaml` | 同上 | 未着手 |
+| `gitops/manifests/prod/stalwart/statefulset.yaml` | `nodeSelector` ブロックを削除 | 未着手 |
+
+### 完了済みファイル（backup スペックで実装済み）
+
+| ファイル | 内容 |
+|---------|------|
+| `gitops/manifests/shared/eso/b2-external-secret.yaml` | b2-credentials ExternalSecret（prod namespace） |
+| `gitops/manifests/prod/authentik/db-cluster.yaml` | barmanObjectStore 設定（B2エンドポイント・b2-credentials参照） |
+| `gitops/manifests/prod/directus/db-cluster.yaml` | 同上 |
+| `gitops/apps/prod/volsync.yaml` | VolSync Helm chart Application |
+| `gitops/manifests/prod/stalwart/replication-source.yaml` | Stalwart restic ReplicationSource |
 
 ---
 
@@ -189,11 +195,12 @@ sequenceDiagram
     Operator->>Current: kubectl cp roundcube SQLite
     Current-->>Operator: /tmp/authentik-backup.sql etc.
 
-    Note over Operator,ArgoCD: Phase 2: Terraform
+    Note over Operator,ArgoCD: Phase 2: Tailscale クリーンアップ → Terraform
+    Operator->>Operator: Tailscale API で cp-node・prod-node-1・prod-node-2 を削除<br/>(ephemeral=false のため手動削除が必須)
     Operator->>TF: terraform apply
     TF->>Hetzner: CX33 作成 (prod-node-1)
     TF->>Hetzner: cp-node・prod-node-2 削除
-    Hetzner-->>TF: 新ノード起動・Tailscale 登録
+    Hetzner-->>TF: 新ノード起動・Tailscale に prod-node-1 として登録
 
     Note over Operator,ArgoCD: Phase 3: Ansible
     Operator->>Ansible: ansible-playbook k3s-bootstrap.yml
@@ -207,6 +214,7 @@ sequenceDiagram
     Operator->>New: psql < authentik-backup.sql
     Operator->>New: psql < directus-backup.sql
     Operator->>New: kubectl cp roundcube SQLite
+    Operator->>New: ReplicationDestination で Stalwart PVC を B2 restic から復元
     Operator->>New: kubectl rollout restart
 ```
 
@@ -226,9 +234,10 @@ sequenceDiagram
     GC->>PI: POST /recover<br/>{alertname, status: "firing"}
     PI->>PI: ロックファイル確認<br/>(/tmp/recovery.lock)
     PI->>PI: /tmp/recovery.lock 作成
+    PI->>TS: Tailscale API で prod-node-1 デバイスを削除<br/>(残存デバイスが prod-node-1-1 登録を引き起こすのを防ぐ)
     PI->>TFC: POST /api/v2/runs<br/>(terraform apply トリガー)
     TFC->>Hetzner: CX33 prod-node-1 作成
-    Hetzner-->>TS: Tailscale 自動登録 (cloud-init)
+    Hetzner-->>TS: Tailscale 自動登録 → prod-node-1 として登録 (cloud-init)
     PI->>PI: TS に prod-node-1 登録確認<br/>(最大10分ポーリング)
     PI->>Ansible: ansible-playbook k3s-bootstrap.yml
     Ansible->>New: K3s + Cilium + cloudflared + ArgoCD
@@ -251,10 +260,10 @@ sequenceDiagram
 | 2.1 | Authentik DB 移行 | pg_dump + psql | 移行フロー Phase 1,4 |
 | 2.2 | Directus DB 移行 | pg_dump + psql | 移行フロー Phase 1,4 |
 | 2.3 | Roundcube 移行 | kubectl cp | 移行フロー Phase 1,4 |
-| 2.4 | Stalwart 新規スタート | statefulset nodeSelector 削除 | — |
+| 2.4 | Stalwart VolSync リストア | `replication-source.yaml`（backup完了済み）+ ReplicationDestination | 移行フロー Phase 4 |
 | 3.1 | CNPG instances: 1 | `db-cluster.yaml` × 2 | — |
 | 3.2 | Stalwart nodeSelector 削除 | `statefulset.yaml` | — |
-| 3.3 | S3 認証情報 ExternalSecret | `hetzner-s3-credentials.yaml` | — |
+| 3.3 | S3 認証情報 ExternalSecret | `b2-external-secret.yaml`（backup完了済み） | — |
 | 3.4 | CNPG WAL アーカイブ | `db-cluster.yaml` backup ブロック | — |
 | 4.1 | Grafana Cloud 監視 | `monitoring`スペック前提 | 復旧フロー冒頭 |
 | 4.2 | webhook 通知 | Grafana Contact Point → Pi | 復旧フロー |
@@ -271,9 +280,9 @@ sequenceDiagram
 |--------------|---------|------|------|---------|
 | Terraform ノード定義 | IaC | 1ノード CX33 の宣言 | 1.1, 1.2 | Hetzner API |
 | Ansible インベントリ | 構成管理 | シングルノードブートストラップ | 1.2 | Tailscale SSH |
-| CNPG db-cluster × 2 | GitOps | シングルインスタンス + S3 backup | 3.1, 3.4 | S3 バケット |
+| CNPG db-cluster × 2 | GitOps | シングルインスタンス（backup設定はbackupスペック完了済み） | 3.1, 3.4 | b2-credentials |
 | Stalwart statefulset | GitOps | nodeSelector 削除 | 3.2 | — |
-| hetzner-s3-credentials ES | GitOps | S3 認証情報注入 | 3.3 | Infisical |
+| b2-external-secret（完了済み） | GitOps | B2認証情報注入 | 3.3 | Infisical |
 | Recovery Webhook Service | Pi | アラート受信・復旧トリガー | 4.2, 4.3, 4.4 | Terraform Cloud API, Ansible |
 | Recovery Script | Pi | terraform + ansible 実行 | 4.3, 4.5 | `.env`, SSH key |
 
@@ -347,38 +356,45 @@ all:
 | Intent | instances を 1 に削減、affinity を削除、backup ブロックで WAL アーカイブを有効化 |
 | Requirements | 3.1, 3.4 |
 
-**変更仕様**（authentik を例示、directus は destinationPath のみ異なる）:
+**このスペックで必要な変更**（backup設定はすでに実装済み、instances と affinity のみ変更）:
 ```yaml
 spec:
-  instances: 1
+  instances: 1          # 2 → 1（スタンバイ不要）
   # affinity ブロック全体を削除
+  # backup ブロックは backup スペックで実装済み（B2・b2-credentials参照）
+```
+
+**実際の backup 設定（参照用）:**
+```yaml
   backup:
     retentionPolicy: "7d"
     barmanObjectStore:
-      destinationPath: "s3://aramakisai-backups/cnpg/authentik"
-      endpointURL: "https://fsn1.your-objectstorage.com"
+      destinationPath: "s3://aramakisai-backups/cnpg/authentik-db"
+      endpointURL: "https://s3.us-west-004.backblazeb2.com"
       s3Credentials:
         accessKeyId:
-          name: hetzner-s3-credentials
-          key: ACCESS_KEY
+          name: b2-credentials
+          key: ACCESS_KEY_ID
         secretAccessKey:
-          name: hetzner-s3-credentials
-          key: SECRET_KEY
+          name: b2-credentials
+          key: SECRET_ACCESS_KEY
       wal:
+        compression: gzip
+      data:
         compression: gzip
 ```
 
-**依存**: `hetzner-s3-credentials` Secret が同 namespace に存在すること
+**依存**: `b2-credentials` Secret が prod namespace に存在すること（✅ backup スペックで完了済み）
 
-#### S3 認証情報 ExternalSecret（`hetzner-s3-credentials.yaml`）
+#### B2 認証情報 ExternalSecret（`b2-external-secret.yaml`）
 
 | Field | Detail |
 |-------|--------|
-| Intent | Infisical の HETZNER_S3_ACCESS_KEY / SECRET_KEY を prod namespace の Secret に展開 |
+| Intent | Infisical の B2_KEY_ID / B2_APPLICATION_KEY を prod namespace の `b2-credentials` Secret に展開 |
 | Requirements | 3.3 |
+| Status | ✅ backup スペックで実装済み |
 
-**配置先**: `gitops/manifests/prod/hetzner-s3-credentials.yaml`  
-**ArgoCD Application**: 既存 `namespace-config` Application のパス（`manifests/prod/namespace-config/`）に配置するか、または authentik Application のパスに配置する。
+**配置先**: `gitops/manifests/shared/eso/b2-external-secret.yaml`（既存）  
 
 **Contracts**: ESO ExternalSecret パターン（project structure.md 参照）
 
@@ -436,16 +452,34 @@ WantedBy=multi-user.target
 **実行フロー**:
 ```bash
 # 1. 環境変数チェック（必須: INFISICAL_CLIENT_ID, INFISICAL_CLIENT_SECRET,
-#                         ARGOCD_GITHUB_DEPLOY_KEY, K3S_TOKEN, ...）
-# 2. terraform apply (Terraform Cloud API または local CLI)
-# 3. Tailscale に prod-node-1 が登録されるまでポーリング（最大10分）
-# 4. ansible-playbook k3s-bootstrap.yml
-# 5. 完了通知（オプション: Slack Incoming Webhook）
+#                         ARGOCD_GITHUB_DEPLOY_KEY, K3S_TOKEN,
+#                         TAILSCALE_API_KEY, TAILSCALE_TAILNET, ...）
+
+# 2. Tailscale から旧デバイスを削除（重複ホスト名防止）
+#    ephemeral=false のため障害ノードが tailnet に残り続け、
+#    新ノードが "prod-node-1-1" として登録されてしまうのを防ぐ
+DEVICE_IDS=$(curl -s -H "Authorization: Bearer $TAILSCALE_API_KEY" \
+  "https://api.tailscale.com/api/v2/tailnet/$TAILSCALE_TAILNET/devices" \
+  | jq -r '.devices[] | select(.hostname == "prod-node-1") | .id')
+for ID in $DEVICE_IDS; do
+  curl -s -X DELETE -H "Authorization: Bearer $TAILSCALE_API_KEY" \
+    "https://api.tailscale.com/api/v2/device/$ID"
+done
+
+# 3. terraform apply (Terraform Cloud API または local CLI)
+# 4. Tailscale に prod-node-1 が登録されるまでポーリング（最大10分）
+# 5. ansible-playbook k3s-bootstrap.yml
+# 6. 完了通知（オプション: Slack Incoming Webhook）
 ```
 
 **冪等性**: `terraform apply` は差分なしなら no-op。Ansible の `creates: /usr/local/bin/k3s` で再インストールスキップ。
 
-**タイムアウト**: ステップ3の Tailscale 待機は最大10分。超過した場合はエラー終了してロックを解放。
+**タイムアウト**: ステップ4の Tailscale 待機は最大10分。超過した場合はエラー終了してロックを解放。
+
+**⚠️ Tailscale デバイス削除タイミングの重要性**:  
+`ephemeral: false` により、Hetzner でノードが削除されても Tailscale デバイスは残存する。  
+新ノードが先に起動すると `prod-node-1-1` として登録され Ansible が接続できなくなるため、  
+terraform apply より**前**に Tailscale API でデバイスを削除することが必須。
 
 **CNPG DR 考慮**: `recovery.sh` は通常の `initdb` 経路で起動。S3 からのリストアが必要な場合は、スクリプト末尾で `gitops/manifests/prod/authentik/db-cluster.yaml` の bootstrap を `recovery` に変更するコミットを `git push` する（オプション・上級者向け）。
 
@@ -469,7 +503,7 @@ flowchart TD
     I -->|空| J[手動 patch して ESO resync]
     I -->|OK| K
     J --> K
-    K[データリストア\npsql × 2 + kubectl cp + rollout restart] --> L
+    K[データリストア\npsql × 2 + kubectl cp Roundcube\n+ VolSync ReplicationDestination Stalwart\n+ rollout restart] --> L
     L[動作確認\n全サービス + CNPG backup確認] --> M
     M[Raspberry Pi セットアップ\nrecover.py + recovery.sh + systemd] --> N
     N[Grafana Cloud Webhook 設定\nContact Point → Pi URL] --> END[完了]
@@ -526,6 +560,67 @@ curl -X POST http://localhost:8080/recover \
 - **Webhook 認証**: Grafana Cloud から送信される `X-Grafana-Signature` ヘッダーを HMAC-SHA256 で検証（Shared Secret を Grafana の Contact Point に設定）。
 - **Tailscale ACL**: Raspberry Pi のタグ（`tag:recovery-node`）が `prod-node-1` への SSH を許可するよう ACL を設定。一般デバイスからの SSH は引き続き Tailscale 認証のみで許可。
 - **terraform apply スコープ**: Terraform Cloud の API トークンは `single-node-migration` ワークスペースへのアクセスに限定。
+
+---
+
+## HA 復元パス（将来の予算確保時）
+
+シングルノード構成は**コスト削減のための一時的な選択**であり、将来的な3ノード HA 復帰を前提とした設計を維持する。
+
+### 設計上の保持事項
+
+以下の設計判断は HA 復帰を容易にするために意図的に維持している：
+
+| 項目 | 維持している理由 |
+|------|--------------|
+| `local.nodes` の for_each 構造 | ノード追加は map にエントリを足すだけ |
+| `ansible/playbooks/k3s-bootstrap.yml` の Play 2 | `k3s_server_worker` グループが空なら自動スキップ。削除しない |
+| CNPG の `podAntiAffinityType: preferred` パターン | ノード追加時に instances: 2-3 に戻すだけで機能する |
+| `k3s_server_worker` グループの概念 | inventory に復元するだけで Play 2 が動作する |
+
+### 3ノード HA への復帰手順
+
+**Terraform（`terraform/main.tf`）:**
+```hcl
+locals {
+  nodes = {
+    "prod-node-1" = { private_ip = "10.0.1.1" }   # 既存（CX33 を維持 or CX23 に戻す）
+    "prod-node-2" = { private_ip = "10.0.1.2" }   # 追加
+    "prod-node-3" = { private_ip = "10.0.1.3" }   # 追加（cp-node 相当）
+  }
+}
+```
+
+**Ansible（`ansible/inventory/tailscale.yml`）:**
+```yaml
+all:
+  children:
+    k3s_server:          # etcd cluster-init ノード
+      hosts:
+        prod-node-3:
+          k3s_cluster_init: true
+          k3s_private_ip: 10.0.1.3
+    k3s_server_worker:   # etcd 参加 + ワークロードノード
+      hosts:
+        prod-node-1:
+          k3s_private_ip: 10.0.1.1
+        prod-node-2:
+          k3s_private_ip: 10.0.1.2
+```
+
+**GitOps（`db-cluster.yaml` × 2）:**
+```yaml
+spec:
+  instances: 2    # 1 → 2（Primary + 1 Standby）
+  affinity:
+    podAntiAffinityType: preferred
+    topologyKey: kubernetes.io/hostname
+```
+
+**HA 復帰時の注意事項:**
+- 既存のシングルノード CNPG クラスターへのインスタンス追加は `instances` の変更のみで CNPG Operator が自動でスタンバイを追加する（ダウンタイムなし）
+- 新ノードの Tailscale 登録は `terraform apply` 前に既存ノードのデバイスが登録済みであれば問題なし（ホスト名が重複しない）
+- Play 2 は `k3s_server_worker` グループが埋まった時点で自動的に有効化される
 
 ---
 

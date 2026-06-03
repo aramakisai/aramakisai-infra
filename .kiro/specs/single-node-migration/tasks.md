@@ -5,6 +5,7 @@
 - [ ] 1. 現クラスターからのデータバックアップ
 - [ ] 1.1 (P) Authentik PostgreSQL をダンプする
   - 現クラスターの `authentik-db-rw` Service に port-forward し `pg_dump` を実行する
+  - `--clean --if-exists` フラグを必ず付ける（新クラスターで ArgoCD が Authentik を起動しマイグレーション済みテーブルが存在する状態でリストアしても競合エラーを防ぐため）
   - 出力先: `/tmp/authentik-backup.sql`
   - `wc -l /tmp/authentik-backup.sql` が 0 より大きければ完了
   - _Requirements: 2.1_
@@ -12,6 +13,7 @@
 
 - [ ] 1.2 (P) Directus PostgreSQL をダンプする
   - 現クラスターの `directus-db-rw` Service に port-forward し `pg_dump` を実行する
+  - `--clean --if-exists` フラグを必ず付ける（同上の理由）
   - 出力先: `/tmp/directus-backup.sql`
   - `wc -l /tmp/directus-backup.sql` が 0 より大きければ完了
   - _Requirements: 2.2_
@@ -24,25 +26,25 @@
   - _Boundary: 現クラスター / Roundcube Pod_
 
 - [ ] 2. GitOps・IaC のシングルノード対応変更をコミット
-- [ ] 2.1 (P) CNPG DB クラスターをシングルインスタンス化し S3 バックアップ設定を追加する
-  - `gitops/manifests/prod/authentik/db-cluster.yaml` の `instances` を 1 に変更し、`affinity` ブロックを削除し、`backup.barmanObjectStore` を追加する
-  - `gitops/manifests/prod/directus/db-cluster.yaml` に同様の変更を適用する（`destinationPath` は `cnpg/directus`）
+- [ ] 2.1 (P) CNPG DB クラスターをシングルインスタンス化する
+  - `gitops/manifests/prod/authentik/db-cluster.yaml` の `instances` を 1 に変更し、`affinity` ブロックを削除する（`backup` 設定は backup スペックで実装済みのため変更不要）
+  - `gitops/manifests/prod/directus/db-cluster.yaml` に同様の変更を適用する
   - `kubectl apply --dry-run=client -f db-cluster.yaml` がエラーなく通れば完了
   - _Requirements: 3.1, 3.4_
   - _Boundary: gitops/manifests/prod/authentik, gitops/manifests/prod/directus_
 
-- [ ] 2.2 (P) Stalwart の nodeSelector を削除し S3 認証情報 ExternalSecret を作成する
-  - `gitops/manifests/prod/stalwart/statefulset.yaml` の `nodeSelector` ブロック全体を削除する
-  - `gitops/manifests/prod/hetzner-s3-credentials.yaml` を新規作成し、`HETZNER_S3_ACCESS_KEY` と `HETZNER_S3_SECRET_KEY` を Infisical から取得する ExternalSecret を定義する
-  - `kubectl apply --dry-run=client -f hetzner-s3-credentials.yaml` がエラーなく通れば完了
+- [ ] 2.2 (P) Stalwart の nodeSelector を削除する
+  - `gitops/manifests/prod/stalwart/statefulset.yaml` の `nodeSelector` ブロック全体を削除する（シングルノードなので不要。HA 復帰時もノード名依存をなくすため削除）
+  - S3 認証情報 ExternalSecret（`b2-credentials`）は backup スペックで `gitops/manifests/shared/eso/b2-external-secret.yaml` として実装済みのため作成不要
+  - `kubectl apply --dry-run=client -f statefulset.yaml` がエラーなく通れば完了
   - _Requirements: 3.2, 3.3_
-  - _Boundary: gitops/manifests/prod/stalwart, gitops/manifests/prod/_
+  - _Boundary: gitops/manifests/prod/stalwart_
 
 - [ ] 2.3 (P) Terraform ノード定義をシングル CX33 に変更する
   - `terraform/main.tf` の `local.nodes` を `prod-node-1` 単体に変更し `server_type` を `cx33` に変更する
   - `labels` の `role` 分岐（cp-node 判定）を削除して固定値 `"server"` にする
   - `terraform/outputs.tf` から `cp_node_ipv6` と `prod_node_2_ipv6` を削除する
-  - `terraform plan -var-file="secrets.tfvars"` で「2 to destroy, 1 to add」となれば完了
+  - `terraform plan -var-file="secrets.tfvars"` で「3 to destroy, 1 to add」となれば完了（cp-node・旧 prod-node-1・prod-node-2 の 3 台が削除対象、新 CX33 prod-node-1 が追加対象）
   - _Requirements: 1.1, 1.2_
   - _Boundary: terraform/main.tf, terraform/outputs.tf_
 
@@ -61,11 +63,21 @@
   - _Boundary: ansible/roles/k3s-agent_
 
 - [ ] 3. 新クラスターのプロビジョニング
-- [ ] 3.1 terraform apply で新ノードを作成し旧3ノードを削除する
-  - `.env` を source して全必須環境変数（`HCLOUD_TOKEN`・`TF_VAR_k3s_token` 等）が設定されていることを確認する
+- [ ] 3.1 Tailscale デバイスを削除してから terraform apply で新ノードを作成する
+  - `.env` を source して全必須環境変数（`HCLOUD_TOKEN`・`TF_VAR_k3s_token`・`TAILSCALE_API_KEY`・`TAILSCALE_TAILNET` 等）が設定されていることを確認する
+  - **terraform apply より先に** Tailscale API で cp-node・prod-node-1・prod-node-2 を削除する（`ephemeral=false` のため Hetzner ノード削除後も tailnet に残存し、新ノードが `prod-node-1-1` として登録されるのを防ぐ）
+    ```bash
+    for HOST in cp-node prod-node-1 prod-node-2; do
+      ID=$(curl -s -H "Authorization: Bearer $TAILSCALE_API_KEY" \
+        "https://api.tailscale.com/api/v2/tailnet/$TAILSCALE_TAILNET/devices" \
+        | jq -r --arg h "$HOST" '.devices[] | select(.hostname == $h) | .id')
+      [ -n "$ID" ] && curl -s -X DELETE -H "Authorization: Bearer $TAILSCALE_API_KEY" \
+        "https://api.tailscale.com/api/v2/device/$ID"
+    done
+    ```
   - `terraform apply -var-file="secrets.tfvars"` を実行する
   - Hetzner Cloud コンソールで CX33 の `prod-node-1` が作成され、旧3ノードが削除されていることを確認する
-  - Tailscale 管理コンソールで `prod-node-1` が登録されたことを確認し、旧ノード（cp-node・prod-node-2）を手動削除する
+  - Tailscale 管理コンソールで `prod-node-1`（サフィックスなし）として登録されていることを確認する
   - `dig mail.aramakisai.com AAAA` が新ノードの IPv6 を返せば完了
   - _Requirements: 1.1, 1.2, 1.3_
 
@@ -80,7 +92,8 @@
 - [ ] 4. ArgoCD sync・シークレット注入の確認とデータリストア
 - [ ] 4.1 ArgoCD sync とシークレット注入が正常であることを確認する
   - `kubectl get secret infisical-auth -n argocd -o jsonpath='{.data.clientId}' | base64 -d` が空でないことを確認する
-  - 空の場合は `.env` を source した上で `kubectl -n argocd patch secret infisical-auth` で再注入し、全 ExternalSecret を `force-sync` アノテーションで強制再同期する
+  - `kubectl get secret aramakisai-infra-repo -n argocd -o jsonpath='{.data.sshPrivateKey}' | base64 -d | wc -c` が 0 より大きいことを確認する（2026-06-02 インシデント教訓: 両 Secret が空だと ESO 全停止・ArgoCD git 接続不可になる）
+  - いずれかが空の場合は `.env` を source した上で手動 patch し、全 ExternalSecret を `force-sync` アノテーションで強制再同期する
   - `kubectl get applications -n argocd` で全 Application が `Synced / Healthy` になれば完了
   - _Requirements: 3.1, 3.3, 3.4_
   - _Depends: 3.2_
@@ -110,9 +123,12 @@
   - _Depends: 4.1_
 
 - [ ] 4.5 (P) Stalwart メールデータを VolSync からリストアする
-  - `./scripts/test-volsync-restore.sh` 相当の手順で `ReplicationDestination` を作成し、S3 restic から `stalwart-data` PVC へデータをリストアする
-  - `kubectl rollout restart statefulset/stalwart -n prod` を実行する
-  - メールサーバーが起動し、SMTP(587)/IMAP(993) ポートで疎通が確認されれば完了
+  - Stalwart StatefulSet が PVC（`stalwart-data`）を作成済みであることを確認する（`kubectl get pvc stalwart-data -n prod`）
+  - PVC がマウント中だとリストアできないため、先に Stalwart を停止する: `kubectl scale statefulset stalwart -n prod --replicas=0`
+  - `scripts/volsync-restore.sh` またはリストア用 `ReplicationDestination` を適用し、S3 restic から `stalwart-data` PVC へデータをリストアする
+  - `kubectl wait replicationdestination/stalwart-restore -n prod --for=condition=Reconciled --timeout=30m` でリストア完了を待つ
+  - リストア完了後に Stalwart を再起動: `kubectl scale statefulset stalwart -n prod --replicas=1`
+  - SMTP(587)/IMAP(993) ポートで疎通が確認されれば完了
   - _Requirements: 2.4_
   - _Boundary: Stalwart StatefulSet, Stalwart PVC_
   - _Depends: 4.1_
@@ -128,9 +144,10 @@
 
 - [ ] 5.2 (P) Recovery Script を実装する（recovery.sh）
   - `raspberry-pi/recovery/recovery.sh` を新規作成する
-  - スクリプト冒頭で必須環境変数（`INFISICAL_CLIENT_ID`・`K3S_TOKEN`・`ARGOCD_GITHUB_DEPLOY_KEY` 等）の存在チェックを行い、未設定の場合はエラー終了する
+  - スクリプト冒頭で必須環境変数（`INFISICAL_CLIENT_ID`・`K3S_TOKEN`・`ARGOCD_GITHUB_DEPLOY_KEY`・`TAILSCALE_API_KEY`・`TAILSCALE_TAILNET` 等）の存在チェックを行い、未設定の場合はエラー終了する
+  - **terraform apply より前に** Tailscale API で `prod-node-1` デバイスを削除する（`ephemeral=false` により障害ノードが tailnet に残存し、新ノードが `prod-node-1-1` として登録されるのを防ぐ）
   - Terraform Cloud API（`POST /api/v2/runs`）でプランを作成・適用し、完了を待機する
-  - Tailscale API で `prod-node-1` の登録を最大10分ポーリングし、タイムアウト時はエラー終了してロックを解放する
+  - Tailscale API で `prod-node-1`（サフィックスなし）の登録を最大10分ポーリングし、タイムアウト時はエラー終了してロックを解放する
   - `ansible-playbook -i ansible/inventory/tailscale.yml ansible/playbooks/k3s-bootstrap.yml` を実行する
   - スクリプトが正常終了したとき `/tmp/recovery.lock` が削除されていれば完了
   - _Requirements: 4.3, 4.4, 4.5_
@@ -158,9 +175,11 @@
 - [ ] 6.2 Raspberry Pi と Grafana Cloud の Webhook 連携を設定・確認する
   - Grafana Cloud の Alerting → Contact Points で「Webhook」タイプを追加し URL を `http://<pi-tailscale-ip>:8080/recover` に設定する
   - `idp.aramakisai.com` の Synthetic Monitoring チェックが存在することを確認する（`monitoring`スペック前提）
-  - Pi 上で `curl -X POST http://localhost:8080/recover -d '{"status":"firing","alerts":[{"labels":{"alertname":"ServiceDown"}}]}' -H 'Content-Type: application/json'` を実行し `{"status":"recovery_started"}` が返ることを確認する
-  - `recovery.sh` が実行されて `/tmp/recovery.lock` が作成されることを確認し、スクリプトが完了したらロックが解放されることを確認する
-  - Pi の Tailscale IP から `prod-node-1` への SSH 接続が通ることを確認する
+  - ⚠️ **`/recover` への `status: "firing"` 送信は本番で terraform apply + Tailscale デバイス削除が走るため実施しない**。代わりに以下でサービス起動・ロック機構のみを検証する:
+    - `curl http://localhost:8080/health` が 200 を返すことを確認する（`/health` エンドポイントを recover.py に実装しておく）
+    - `curl -X POST http://localhost:8080/recover -d '{"status":"resolved",...}'` が何もせず 200 を返すことを確認する（resolved は無視する仕様）
+    - `/tmp/recovery.lock` を手動で作成した状態で `status: "firing"` を送ると 409 が返ることを確認する（ロック機構の検証のみ、実際の recovery.sh は起動しない）
+  - Pi の Tailscale IP から `prod-node-1` への SSH 接続が通ることを確認する（`ssh root@prod-node-1.tail7e6b7.ts.net hostname`）
   - 上記すべてが確認できれば完了
   - _Requirements: 4.1, 4.2, 4.3, 4.4, 5.3_
   - _Depends: 5.3, 6.1_
