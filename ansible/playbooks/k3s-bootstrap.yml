@@ -159,9 +159,9 @@
     - name: kubeconfig を Infisical に登録 (Single Source of Truth)
       delegate_to: localhost
       become: false
-      ansible.builtin.shell: >
-        infisical secrets set --env=prod
-        KUBECONFIG="$(cat {{ playbook_dir }}/../../kubeconfig)"
+      ansible.builtin.shell: |
+        KUBECONFIG_CONTENT=$(cat {{ playbook_dir }}/../../kubeconfig)
+        infisical secrets set --env=prod KUBECONFIG="$KUBECONFIG_CONTENT"
       no_log: true
 
 

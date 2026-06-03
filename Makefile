@@ -1,4 +1,6 @@
-.PHONY: lint lint-staged install-hooks setup
+KUBECTL_CONF := /tmp/kubeconfig-aramakisai
+
+.PHONY: lint lint-staged install-hooks setup kubectl
 
 lint: ## Run all linters on all files
 	pre-commit run --all-files
@@ -57,3 +59,7 @@ setup: ## Check prerequisites and install project dependencies
 
 deploy: ## Run terraform apply and ansible bootstrapping sequentially (use ARGS="-y" for auto-approve)
 	./scripts/deploy.sh $(ARGS)
+
+kubectl: ## kubectl を Infisical 経由で実行 (例: make kubectl ARGS="get pods -A")
+	@infisical run -- bash -c \
+		'echo "$$KUBECONFIG" > $(KUBECTL_CONF) && chmod 600 $(KUBECTL_CONF) && kubectl --kubeconfig=$(KUBECTL_CONF) $(ARGS)'
