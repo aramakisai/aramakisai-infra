@@ -7,7 +7,7 @@ metadata:
   namespace: prod
   annotations:
     # DR recovery 時に既存 WAL archive を継続して使うためチェックをスキップ
-    cnpg.io/skipEmptyWalArchiveCheck: "true"
+    cnpg.io/skipEmptyWalArchiveCheck: enabled
 spec:
   instances: 1
 
@@ -18,19 +18,19 @@ spec:
       effective_cache_size: "128MB"
       work_mem: "4MB"
 
-  # B2 の最新バックアップからリストア (DR / シングルノード移行共通経路)
-  # クラスターが既に初期化済みの場合 CNPG はこのセクションを無視する
-  # externalClusters.name をクラスター自身の name と一致させることで
-  # CNPG が「自己継続 (continuation)」と認識し WAL archive チェックをスキップする
+  # DR / 移行共通の recovery bootstrap
+  # skipEmptyWalArchiveCheck: enabled で WAL archive チェックをスキップし、
+  # 同一 S3 パス・同一 serverName で recovery と backup を継続運用する。
   bootstrap:
     recovery:
-      source: directus-db
+      source: directus-db-source
 
   externalClusters:
-    - name: directus-db
+    - name: directus-db-source
       barmanObjectStore:
         destinationPath: "s3://aramakisai-backups/cnpg/directus-db"
         endpointURL: "https://s3.us-west-004.backblazeb2.com"
+        serverName: directus-db
         s3Credentials:
           accessKeyId:
             name: b2-credentials
@@ -45,6 +45,7 @@ spec:
     barmanObjectStore:
       destinationPath: "s3://aramakisai-backups/cnpg/directus-db"
       endpointURL: "https://s3.us-west-004.backblazeb2.com"
+      serverName: directus-db
       s3Credentials:
         accessKeyId:
           name: b2-credentials
