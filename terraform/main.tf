@@ -1,9 +1,9 @@
 locals {
   # ノード定義: 名前 → プライベート IP のマッピング
+  # シングルノード構成 (CX33 8GB)
+  # HA 復帰時は prod-node-2, prod-node-3 を追加する
   nodes = {
-    "cp-node"     = { private_ip = "10.0.1.1" }
-    "prod-node-1" = { private_ip = "10.0.1.2" }
-    "prod-node-2" = { private_ip = "10.0.1.3" }
+    "prod-node-1" = { private_ip = "10.0.1.1" }
   }
 }
 
@@ -22,14 +22,14 @@ resource "hcloud_ssh_key" "default" {
 }
 
 # ============================================================
-# Hetzner ノード (cx23: 2vCPU/4GB/40GB NVMe)
+# Hetzner ノード (cx33: 2vCPU/8GB/80GB NVMe)
 # ============================================================
 
 resource "hcloud_server" "nodes" {
   for_each = local.nodes
 
   name         = each.key
-  server_type  = "cx23"
+  server_type  = "cx33"
   image        = var.hcloud_image
   location     = var.hcloud_location
   ssh_keys     = [hcloud_ssh_key.default.id]
@@ -59,7 +59,7 @@ resource "hcloud_server" "nodes" {
   labels = {
     project = "aramakisai"
     managed = "terraform"
-    role    = each.key == "cp-node" ? "control-plane" : "worker"
+    role    = "server"
   }
 
   depends_on = [
@@ -87,9 +87,7 @@ resource "hcloud_server" "nodes" {
 # resource "null_resource" "ansible_bootstrap" {
 #   # ノードが再作成 (taint) されたときのみ再実行する
 #   triggers = {
-#     cp_node_id     = hcloud_server.nodes["cp-node"].id
 #     prod_node_1_id = hcloud_server.nodes["prod-node-1"].id
-#     prod_node_2_id = hcloud_server.nodes["prod-node-2"].id
 #   }
 #
 #   provisioner "local-exec" {
@@ -107,7 +105,7 @@ resource "hcloud_server" "nodes" {
 #       set -e
 #
 #       echo "=== Waiting for K3s nodes to register in Tailscale ==="
-#       for HOST in cp-node prod-node-1 prod-node-2; do
+#       for HOST in prod-node-1; do
 #         echo "Polling Tailscale API for $HOST..."
 #         RETRIES=0
 #         MAX_RETRIES=60

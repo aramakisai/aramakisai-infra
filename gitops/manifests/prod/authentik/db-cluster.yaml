@@ -7,11 +7,7 @@ metadata:
   name: authentik-db
   namespace: prod
 spec:
-  instances: 2   # 1 Primary + 1 Standby (HA構成)
-
-  affinity:
-    podAntiAffinityType: preferred
-    topologyKey: kubernetes.io/hostname
+  instances: 1
 
   postgresql:
     parameters:
@@ -20,12 +16,26 @@ spec:
       effective_cache_size: "128MB"
       work_mem: "4MB"
 
+  # B2 の最新バックアップからリストア (DR / シングルノード移行共通経路)
+  # クラスターが既に初期化済みの場合 CNPG はこのセクションを無視する
   bootstrap:
-    initdb:
-      database: authentik
-      owner: authentik
-      secret:
-        name: authentik-db-credentials   # ESO が生成する Secret
+    recovery:
+      source: b2-backup
+
+  externalClusters:
+    - name: b2-backup
+      barmanObjectStore:
+        destinationPath: "s3://aramakisai-backups/cnpg/authentik-db"
+        endpointURL: "https://s3.us-west-004.backblazeb2.com"
+        s3Credentials:
+          accessKeyId:
+            name: b2-credentials
+            key: ACCESS_KEY_ID
+          secretAccessKey:
+            name: b2-credentials
+            key: SECRET_ACCESS_KEY
+        wal:
+          compression: gzip
 
   backup:
     barmanObjectStore:

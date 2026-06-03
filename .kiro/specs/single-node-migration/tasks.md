@@ -3,44 +3,39 @@
 ## タスク一覧
 
 - [ ] 1. 現クラスターからのデータバックアップ
-- [ ] 1.1 (P) Authentik PostgreSQL をダンプする
-  - 現クラスターの `authentik-db-rw` Service に port-forward し `pg_dump` を実行する
-  - `--clean --if-exists` フラグを必ず付ける（新クラスターで ArgoCD が Authentik を起動しマイグレーション済みテーブルが存在する状態でリストアしても競合エラーを防ぐため）
-  - 出力先: `/tmp/authentik-backup.sql`
-  - `wc -l /tmp/authentik-backup.sql` が 0 より大きければ完了
+- [x] 1.1 (P) Authentik PostgreSQL — B2 recovery bootstrap で対応（手順不要）
+  - `db-cluster.yaml` の `bootstrap.recovery` + `externalClusters` で新クラスター初回起動時に B2 の最新バックアップから自動リストアされる
+  - 手動の pg_dump・psql は不要（DR と同じ経路）
+  - 確認: `kubectl get cluster authentik-db -n prod -o jsonpath='{.status.phase}'` が `Cluster in healthy state` になれば完了
   - _Requirements: 2.1_
-  - _Boundary: 現クラスター / Authentik DB_
 
-- [ ] 1.2 (P) Directus PostgreSQL をダンプする
-  - 現クラスターの `directus-db-rw` Service に port-forward し `pg_dump` を実行する
-  - `--clean --if-exists` フラグを必ず付ける（同上の理由）
-  - 出力先: `/tmp/directus-backup.sql`
-  - `wc -l /tmp/directus-backup.sql` が 0 より大きければ完了
+- [x] 1.2 (P) Directus PostgreSQL — B2 recovery bootstrap で対応（手順不要）
+  - `db-cluster.yaml` の `bootstrap.recovery` + `externalClusters` で新クラスター初回起動時に B2 の最新バックアップから自動リストアされる
+  - 手動の pg_dump・psql は不要（DR と同じ経路）
+  - 確認: `kubectl get cluster directus-db -n prod -o jsonpath='{.status.phase}'` が `Cluster in healthy state` になれば完了
   - _Requirements: 2.2_
-  - _Boundary: 現クラスター / Directus DB_
 
-- [ ] 1.3 (P) Roundcube SQLite をコピーする
-  - `kubectl cp` で Roundcube Pod の `/var/roundcube/db/` を `/tmp/roundcube-db/` にコピーする
-  - `/tmp/roundcube-db/` 配下にファイルが存在すれば完了
+- [x] 1.3 Roundcube SQLite — 対応不要
+  - SQLite にはセッションデータのみ保存されており、移行後にユーザーが再ログインすれば問題ない
+  - バックアップ・リストアともにスキップする
   - _Requirements: 2.3_
-  - _Boundary: 現クラスター / Roundcube Pod_
 
 - [ ] 2. GitOps・IaC のシングルノード対応変更をコミット
-- [ ] 2.1 (P) CNPG DB クラスターをシングルインスタンス化する
+- [x] 2.1 (P) CNPG DB クラスターをシングルインスタンス化する
   - `gitops/manifests/prod/authentik/db-cluster.yaml` の `instances` を 1 に変更し、`affinity` ブロックを削除する（`backup` 設定は backup スペックで実装済みのため変更不要）
   - `gitops/manifests/prod/directus/db-cluster.yaml` に同様の変更を適用する
   - `kubectl apply --dry-run=client -f db-cluster.yaml` がエラーなく通れば完了
   - _Requirements: 3.1, 3.4_
   - _Boundary: gitops/manifests/prod/authentik, gitops/manifests/prod/directus_
 
-- [ ] 2.2 (P) Stalwart の nodeSelector を削除する
+- [x] 2.2 (P) Stalwart の nodeSelector を削除する
   - `gitops/manifests/prod/stalwart/statefulset.yaml` の `nodeSelector` ブロック全体を削除する（シングルノードなので不要。HA 復帰時もノード名依存をなくすため削除）
   - S3 認証情報 ExternalSecret（`b2-credentials`）は backup スペックで `gitops/manifests/shared/eso/b2-external-secret.yaml` として実装済みのため作成不要
   - `kubectl apply --dry-run=client -f statefulset.yaml` がエラーなく通れば完了
   - _Requirements: 3.2, 3.3_
   - _Boundary: gitops/manifests/prod/stalwart_
 
-- [ ] 2.3 (P) Terraform ノード定義をシングル CX33 に変更する
+- [x] 2.3 (P) Terraform ノード定義をシングル CX33 に変更する
   - `terraform/main.tf` の `local.nodes` を `prod-node-1` 単体に変更し `server_type` を `cx33` に変更する
   - `labels` の `role` 分岐（cp-node 判定）を削除して固定値 `"server"` にする
   - `terraform/outputs.tf` から `cp_node_ipv6` と `prod_node_2_ipv6` を削除する
@@ -48,7 +43,7 @@
   - _Requirements: 1.1, 1.2_
   - _Boundary: terraform/main.tf, terraform/outputs.tf_
 
-- [ ] 2.4 Ansible インベントリをシングルノード構成に変更しコミットする
+- [x] 2.4 Ansible インベントリをシングルノード構成に変更しコミットする
   - `ansible/inventory/tailscale.yml` の `k3s_server_worker` グループ全体を削除する
   - `k3s_server` グループの `prod-node-1` のみ残し、`k3s_cluster_init: true`・`k3s_private_ip: 10.0.1.1` を設定する
   - `ansible -i inventory/tailscale.yml k3s_server -m ping --check` が接続先1台を示せば完了（新ノード稼働後に確認）
@@ -98,28 +93,30 @@
   - _Requirements: 3.1, 3.3, 3.4_
   - _Depends: 3.2_
 
-- [ ] 4.2 (P) Authentik DB にデータをリストアしサービスを再起動する
-  - CNPG の `authentik-db-rw` Service に port-forward し `psql < /tmp/authentik-backup.sql` を実行する
+- [ ] 4.2 (P) Authentik DB リストア確認とサービス再起動
+  - CNPG が B2 から自動リストア済みのため psql 実行は不要
+  - `kubectl get cluster authentik-db -n prod -o jsonpath='{.status.phase}'` が `Cluster in healthy state` であることを確認する
+  - リストアに失敗している場合は `kubectl describe cluster authentik-db -n prod` でログを確認し、`b2-credentials` Secret が存在するか確認する
   - `kubectl rollout restart deployment/authentik-server deployment/authentik-worker -n prod` を実行する
   - `https://idp.aramakisai.com` にブラウザアクセスしてログインが成功すれば完了
   - _Requirements: 2.1_
   - _Boundary: Authentik DB, Authentik Server_
   - _Depends: 4.1_
 
-- [ ] 4.3 (P) Directus DB にデータをリストアしサービスを再起動する
-  - CNPG の `directus-db-rw` Service に port-forward し `psql < /tmp/directus-backup.sql` を実行する
+- [ ] 4.3 (P) Directus DB リストア確認とサービス再起動
+  - CNPG が B2 から自動リストア済みのため psql 実行は不要
+  - `kubectl get cluster directus-db -n prod -o jsonpath='{.status.phase}'` が `Cluster in healthy state` であることを確認する
+  - リストアに失敗している場合は `kubectl describe cluster directus-db -n prod` でログを確認する
   - `kubectl rollout restart deployment/directus -n prod` を実行する
   - `https://api.aramakisai.com/admin` にアクセスしてコンテンツが表示されれば完了
   - _Requirements: 2.2_
   - _Boundary: Directus DB, Directus Deployment_
   - _Depends: 4.1_
 
-- [ ] 4.4 (P) Roundcube SQLite をリストアしサービスを再起動する
-  - `kubectl cp /tmp/roundcube-db/. prod/<roundcube-pod>:/var/roundcube/db/` を実行する
-  - `kubectl rollout restart deployment/roundcube -n prod` を実行する
-  - `https://webmail.aramakisai.com` にアクセスして画面が表示されれば完了
+- [x] 4.4 Roundcube — 対応不要
+  - セッションデータのみのため移行後は空の状態で起動し、ユーザーが再ログインする
+  - `https://webmail.aramakisai.com` にアクセスして画面が表示されれば完了（データリストアなし）
   - _Requirements: 2.3_
-  - _Boundary: Roundcube Deployment_
   - _Depends: 4.1_
 
 - [ ] 4.5 (P) Stalwart メールデータを VolSync からリストアする
@@ -134,7 +131,7 @@
   - _Depends: 4.1_
 
 - [ ] 5. Raspberry Pi 復旧サービスの実装
-- [ ] 5.1 (P) Recovery Webhook Service を実装する（recover.py）
+- [x] 5.1 (P) Recovery Webhook Service を実装する（recover.py）
   - `raspberry-pi/recovery/recover.py` を新規作成し、`POST /recover` エンドポイントを Flask で実装する
   - `/tmp/recovery.lock` によるロック機構を実装し、多重実行時に HTTP 409 を返すようにする
   - Grafana Cloud Webhook の `status: "firing"` のみを復旧トリガーとし、`status: "resolved"` は無視する
@@ -142,7 +139,7 @@
   - _Requirements: 4.2, 4.3, 4.4_
   - _Boundary: raspberry-pi/recovery/recover.py_
 
-- [ ] 5.2 (P) Recovery Script を実装する（recovery.sh）
+- [x] 5.2 (P) Recovery Script を実装する（recovery.sh）
   - `raspberry-pi/recovery/recovery.sh` を新規作成する
   - スクリプト冒頭で必須環境変数（`INFISICAL_CLIENT_ID`・`K3S_TOKEN`・`ARGOCD_GITHUB_DEPLOY_KEY`・`TAILSCALE_API_KEY`・`TAILSCALE_TAILNET` 等）の存在チェックを行い、未設定の場合はエラー終了する
   - **terraform apply より前に** Tailscale API で `prod-node-1` デバイスを削除する（`ephemeral=false` により障害ノードが tailnet に残存し、新ノードが `prod-node-1-1` として登録されるのを防ぐ）
@@ -153,9 +150,14 @@
   - _Requirements: 4.3, 4.4, 4.5_
   - _Boundary: raspberry-pi/recovery/recovery.sh_
 
-- [ ] 5.3 systemd unit を設定して Recovery Service を常駐させる
-  - `raspberry-pi/recovery/recovery.service` を新規作成し、`/opt/recovery/.env` を `EnvironmentFile` として指定する
-  - `/opt/recovery/.env` に必要な全環境変数を記載し `chmod 600` で保護する
+- [x] 5.3 systemd unit を設定して Recovery Service を常駐させる
+  - `raspberry-pi/recovery/recovery.service` を新規作成し、`infisical run --` でサービスを起動する設定にする
+  - `/opt/recovery/.infisical-auth` に Infisical 認証情報のみ記載し `chmod 600` で保護する（シークレット本体は Infisical から自動注入されるため置かない）
+    ```
+    INFISICAL_CLIENT_ID=...
+    INFISICAL_CLIENT_SECRET=...
+    INFISICAL_PROJECT_ID=...
+    ```
   - `systemctl enable --now recovery` で自動起動を有効化する
   - `systemctl status recovery` が `active (running)` を示せば完了
   - _Requirements: 4.2, 4.3_

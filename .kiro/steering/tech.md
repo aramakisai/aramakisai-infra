@@ -5,13 +5,13 @@
 3 層構成: **Terraform (IaC)** → **Ansible (構成管理)** → **ArgoCD GitOps (アプリ管理)**
 
 ```
-terraform apply
-  └── Hetzner ノード × 3 + Cloudflare DNS/Tunnel/Access + Tailscale auth key
+infisical run -- terraform apply
+  └── Hetzner ノード × 1 (CX33) + Cloudflare DNS/Tunnel/Access + Tailscale auth key
 
 ↓ Terraform 完了後に手動実行 (null_resource は HCP Terraform 非対応のためコメントアウト済み)
 
-ansible-playbook k3s-bootstrap.yml
-  └── K3s HA → Cilium CNI → cloudflared → ArgoCD → App of Apps
+infisical run -- ansible-playbook k3s-bootstrap.yml
+  └── K3s シングルノード → Cilium CNI → cloudflared → ArgoCD → App of Apps
 ```
 
 ノードへの SSH は Tailscale 経由のみ。パブリックポート 22 は開放しない。
@@ -50,8 +50,8 @@ ansible-playbook k3s-bootstrap.yml
 5. ESO が `sync-wave: "-1"` で先行 sync → 他アプリは `wave: 0`
 
 ### K3s クラスター設計
-- 全ノード (cp-node, prod-node-1, prod-node-2) が etcd + ワークロードを担う (no-schedule taint なし)
-- サーバータイプ: CX23 (2vCPU/4GB/40GB NVMe)
+- シングルノード (prod-node-1) が etcd + ワークロードを担う。障害時は Raspberry Pi + Grafana Cloud Alerting による半自動コールドスタンバイ復旧
+- サーバータイプ: CX33 (2vCPU/8GB/80GB NVMe)
 - `--disable traefik,servicelb`: どちらも GitOps または Cloudflare Tunnel で代替
 - `--embedded-registry`: Spegel によるノード間イメージキャッシュ
 
@@ -81,39 +81,54 @@ terraform >= 1.9
 ansible >= 2.14
 kubectl
 tailscale (管理用SSH接続)
+infisical (シークレット注入)
 jq, curl
 ```
+
+### シークレット管理ルール
+
+**Infisical がすべてのシークレットの Single Source of Truth。**
+
+- `.env` ファイルは使用しない。ローカルにシークレットを置かない
+- コマンド実行時は `infisical run --` プレフィックスで環境変数を注入する
+- `infisical login` で事前にログイン済みであること
 
 ### Common Commands
 ```bash
 # IaC 差分確認
-cd terraform && terraform plan -var-file="../secrets.tfvars"
+infisical run -- terraform -chdir=terraform plan -var-file="../secrets.tfvars"
 
 # IaC 適用
-cd terraform && terraform apply -var-file="../secrets.tfvars"
+infisical run -- terraform -chdir=terraform apply -var-file="../secrets.tfvars"
 
 # Ansible 単体再実行
-ansible-playbook -i ansible/inventory/tailscale.yml ansible/playbooks/k3s-bootstrap.yml
+infisical run -- ansible-playbook -i ansible/inventory/tailscale.yml ansible/playbooks/k3s-bootstrap.yml
 
 # K3s ローリングアップデート
-ansible-playbook -i ansible/inventory/tailscale.yml ansible/playbooks/k3s-bootstrap.yml \
+infisical run -- ansible-playbook -i ansible/inventory/tailscale.yml ansible/playbooks/k3s-bootstrap.yml \
   -e "k3s_version=v1.33.0+k3s1"
 ```
 
-### 必須環境変数
+### Infisical で管理するシークレット一覧
 ```
-# Terraform
+# Terraform プロバイダー認証
 HCLOUD_TOKEN
 CLOUDFLARE_API_TOKEN
 TAILSCALE_OAUTH_CLIENT_ID / TAILSCALE_OAUTH_CLIENT_SECRET
+
+# Terraform 変数 (TF_VAR_ prefix)
 TF_VAR_k3s_token / TF_VAR_tailscale_api_key
 TF_VAR_authentik_cf_client_id / TF_VAR_authentik_cf_client_secret
 
-# Ansible (ブートストラップ時)
+# Ansible ブートストラップ
 K3S_TOKEN
 CLOUDFLARE_TUNNEL_TOKEN / CLOUDFLARE_TUNNEL_ID
 INFISICAL_CLIENT_ID / INFISICAL_CLIENT_SECRET
-ARGOCD_GITHUB_DEPLOY_KEY   ← GitHub Deploy Key 秘密鍵 (Infisical に保存)
+ARGOCD_GITHUB_DEPLOY_KEY
+
+# Raspberry Pi 復旧スクリプト
+TFC_API_TOKEN / TFC_WORKSPACE_ID
+TAILSCALE_API_KEY / TAILSCALE_TAILNET
 ```
 
 ---

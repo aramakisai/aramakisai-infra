@@ -25,12 +25,6 @@ spec:
       labels:
         app: stalwart
     spec:
-      # prod-node-1 に固定:
-      # hostNetwork = true のため Pod が稼働するノードの IP でのみ応答する。
-      # DNS (mail.aramakisai.com) も prod-node-1 の IP 1 件のみを指定している。
-      # PVC は ReadWriteOnce のため、スケジューラーも実質的にこのノードに固定される。
-      nodeSelector:
-        kubernetes.io/hostname: prod-node-1
       # hostNetwork: true — K3s + Cilium 環境では hostPort が機能しないため
       # Pod がホストのネットワーク名前空間を直接使用してポートを公開する
       hostNetwork: true

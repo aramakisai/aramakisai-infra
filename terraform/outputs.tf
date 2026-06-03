@@ -1,16 +1,6 @@
-output "cp_node_ipv6" {
-  description = "cp-node のパブリック IPv6 アドレス (IPv4 は無効)"
-  value       = hcloud_server.nodes["cp-node"].ipv6_address
-}
-
 output "prod_node_1_ipv6" {
   description = "prod-node-1 のパブリック IPv6 アドレス (mail.aramakisai.com AAAA)"
   value       = hcloud_server.nodes["prod-node-1"].ipv6_address
-}
-
-output "prod_node_2_ipv6" {
-  description = "prod-node-2 のパブリック IPv6 アドレス"
-  value       = hcloud_server.nodes["prod-node-2"].ipv6_address
 }
 
 output "tailscale_auth_key" {
