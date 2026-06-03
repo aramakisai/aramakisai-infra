@@ -624,6 +624,75 @@ spec:
 
 ---
 
+## 実装時の知見・注意事項（2026-06-03 移行作業より）
+
+### CNPG recovery bootstrap
+
+**問題**: `bootstrap.recovery` + `backup.barmanObjectStore` を同一 S3 パスで使うと、  
+`barman-cloud-check-wal-archive` が "Expected empty archive" で失敗する。
+
+**解決策**: 以下を両方適用する。
+
+1. **`cnpg.io/skipEmptyWalArchiveCheck: enabled`** アノテーション（値は `enabled`、`"true"` では効かない）
+2. **`imageName: ghcr.io/cloudnative-pg/postgresql:16.8`** を明示指定する
+
+   古い PostgreSQL イメージ（`16.3` など）に埋め込まれた instance manager はこのアノテーションを認識しない。  
+   CNPG Operator と PostgreSQL イメージは独立したバージョン管理のため、operator のバージョン (1.23.3) に合わせたイメージを明示しないと古い instance manager が使われる。
+
+3. `externalClusters[].name` の値は何でもよい（クラスター名と一致させてもスキップは起きない）
+
+**Directus の WAL**: 旧クラスターで WAL アーカイブが設定されていなかったため S3 に `wals/` が存在しない。  
+DR 時は `bootstrap.initdb` で空 DB 起動する設計に変更済み。コンテンツの再投入が必要。
+
+---
+
+### Infisical 設定
+
+- `.infisical.json` の `defaultEnvironment` を `"prod"` にしないと `dev` 環境にフォールバックしてシークレットが取得できない
+- Terraform プロバイダー認証情報 (`HCLOUD_TOKEN` 等) は `terraform login` (Terraform Cloud) で管理  
+  → ローカルで `infisical run -- terraform apply` を実行する際は TFC が認証を担うため追加不要
+- Infisical から注入される `KUBECONFIG` はファイルパスではなく YAML 内容そのもの  
+  → `make kubectl ARGS="..."` が内容を `/tmp/kubeconfig-aramakisai` に書き出してから使う設計
+
+---
+
+### CNPG クラスター削除・再作成時の落とし穴
+
+クラスターを何度も削除・再作成すると以下の問題が起きる:
+
+- **PVC が `initializing` のまま stuck**: 古い `full-recovery` Job が残っていると新しい PVC を CNPG が使えない。  
+  解決: `kubectl delete jobs -n prod -l cnpg.io/cluster=<name>` で古い Job を削除してからクラスターを再作成する
+- **`bootstrap` 切り替え後も古いモードの Pod が動き続ける**: ArgoCD sync の前に古い cluster が残っている場合。  
+  解決: `kubectl delete cluster <name> -n prod` でクラスターを手動削除してから ArgoCD に再作成させる
+
+---
+
+### Stalwart TLS (`mail-tls`) の ArgoCD タイミング問題
+
+初回 DR 時、cert-manager の `Certificate` リソースが ArgoCD sync タイミングによっては適用されず、  
+`stalwart-0` が `ContainerCreating` のまま止まる (`MountVolume.SetUp failed: secret "mail-tls" not found`)。
+
+解決（手動）:
+```bash
+make kubectl ARGS="apply \
+  -f gitops/manifests/prod/stalwart/certificate.yaml \
+  -f gitops/manifests/prod/stalwart/external-secret.yaml \
+  -f gitops/manifests/prod/stalwart/restic-external-secret.yaml"
+```
+
+自動化の余地あり: `recovery.sh` にこの apply を追加するか、ArgoCD の sync-wave を調整する。
+
+---
+
+### recovery.sh の設計
+
+- `infisical run -- python3 recover.py` 経由で起動されるため、Infisical の全シークレットが環境変数として引き継がれる
+- `KUBECONFIG` 環境変数（内容）を `/tmp/kubeconfig-recovery` に書き出して kubectl を実行する
+- Stalwart VolSync リストアはステップ 7 に組み込み済み（停止→リストア→再起動→削除）
+- Ansible 完了後に Infisical から kubeconfig を再取得する（bootstrap で新しい kubeconfig が登録されるため）
+
+---
+
 ## Supporting References
 
 - research.md: Terraform依存関係分析・Ansible Playbook構造・CNPG recovery戦略の詳細

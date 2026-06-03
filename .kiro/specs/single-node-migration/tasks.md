@@ -1,5 +1,22 @@
 # タスク定義 (Tasks) - シングルノード移行
 
+## 実施結果サマリー（2026-06-03 移行完了）
+
+| サービス | 状態 | 備考 |
+|---------|------|------|
+| Authentik DB | ✅ B2 recovery 成功 | `skipEmptyWalArchiveCheck: enabled` + `imageName: postgresql:16.8` が必要だった |
+| Directus DB | ⚠️ initdb（空DB）| WAL アーカイブが旧クラスターで未設定。DR 時も空DB起動 |
+| Stalwart | ✅ VolSync リストア成功 | `replication-destination.yaml` を適用して復元 |
+| Roundcube | ✅ 起動（セッション空） | 設計通り |
+
+**重要な設計変更**（次回以降の参考）:
+- CNPG: `imageName: ghcr.io/cloudnative-pg/postgresql:16.8` を必ず明示すること
+- CNPG: `cnpg.io/skipEmptyWalArchiveCheck: enabled`（`"true"` では効かない）
+- Infisical: `.infisical.json` の `defaultEnvironment: "prod"` を確認すること
+- kubectl: `make kubectl ARGS="..."` を使う（KUBECONFIG を Infisical から /tmp に展開）
+- DR ランブック: `docs/dr-runbook.md` を参照
+- DR 自動化: `raspberry-pi/recovery/recovery.sh` がステップ 1-7 を自動実行
+
 ## タスク一覧
 
 - [ ] 1. 現クラスターからのデータバックアップ
