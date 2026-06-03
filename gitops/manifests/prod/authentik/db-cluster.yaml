@@ -6,6 +6,9 @@ kind: Cluster
 metadata:
   name: authentik-db
   namespace: prod
+  annotations:
+    # DR recovery 時に既存 WAL archive を継続して使うためチェックをスキップ
+    cnpg.io/skipEmptyWalArchiveCheck: "true"
 spec:
   instances: 1
 
