@@ -58,7 +58,7 @@
   - _Boundary: ansible/roles/k3s-agent_
 
 - [ ] 3. 新クラスターのプロビジョニング
-- [ ] 3.1 Tailscale デバイスを削除してから terraform apply で新ノードを作成する
+- [x] 3.1 Tailscale デバイスを削除してから terraform apply で新ノードを作成する
   - `.env` を source して全必須環境変数（`HCLOUD_TOKEN`・`TF_VAR_k3s_token`・`TAILSCALE_API_KEY`・`TAILSCALE_TAILNET` 等）が設定されていることを確認する
   - **terraform apply より先に** Tailscale API で cp-node・prod-node-1・prod-node-2 を削除する（`ephemeral=false` のため Hetzner ノード削除後も tailnet に残存し、新ノードが `prod-node-1-1` として登録されるのを防ぐ）
     ```bash
@@ -76,7 +76,7 @@
   - `dig mail.aramakisai.com AAAA` が新ノードの IPv6 を返せば完了
   - _Requirements: 1.1, 1.2, 1.3_
 
-- [ ] 3.2 Ansible でシングルノード K3s をブートストラップする
+- [x] 3.2 Ansible でシングルノード K3s をブートストラップする
   - `.env` を source して `INFISICAL_CLIENT_ID`・`INFISICAL_CLIENT_SECRET`・`ARGOCD_GITHUB_DEPLOY_KEY`・`K3S_TOKEN`・`CLOUDFLARE_TUNNEL_TOKEN`・`CLOUDFLARE_TUNNEL_ID` が設定されていることを確認する
   - `ansible -i ansible/inventory/tailscale.yml k3s_server -m ping` で prod-node-1 への疎通を確認する
   - `ansible-playbook -i ansible/inventory/tailscale.yml ansible/playbooks/k3s-bootstrap.yml` を実行する（Play 2 は自動スキップ）
@@ -85,7 +85,7 @@
   - _Depends: 3.1_
 
 - [ ] 4. ArgoCD sync・シークレット注入の確認とデータリストア
-- [ ] 4.1 ArgoCD sync とシークレット注入が正常であることを確認する
+- [x] 4.1 ArgoCD sync とシークレット注入が正常であることを確認する
   - `kubectl get secret infisical-auth -n argocd -o jsonpath='{.data.clientId}' | base64 -d` が空でないことを確認する
   - `kubectl get secret aramakisai-infra-repo -n argocd -o jsonpath='{.data.sshPrivateKey}' | base64 -d | wc -c` が 0 より大きいことを確認する（2026-06-02 インシデント教訓: 両 Secret が空だと ESO 全停止・ArgoCD git 接続不可になる）
   - いずれかが空の場合は `.env` を source した上で手動 patch し、全 ExternalSecret を `force-sync` アノテーションで強制再同期する
@@ -93,7 +93,7 @@
   - _Requirements: 3.1, 3.3, 3.4_
   - _Depends: 3.2_
 
-- [ ] 4.2 (P) Authentik DB リストア確認とサービス再起動
+- [x] 4.2 (P) Authentik DB リストア確認とサービス再起動
   - CNPG が B2 から自動リストア済みのため psql 実行は不要
   - `kubectl get cluster authentik-db -n prod -o jsonpath='{.status.phase}'` が `Cluster in healthy state` であることを確認する
   - リストアに失敗している場合は `kubectl describe cluster authentik-db -n prod` でログを確認し、`b2-credentials` Secret が存在するか確認する
@@ -103,7 +103,7 @@
   - _Boundary: Authentik DB, Authentik Server_
   - _Depends: 4.1_
 
-- [ ] 4.3 (P) Directus DB リストア確認とサービス再起動
+- [x] 4.3 (P) Directus DB リストア確認とサービス再起動
   - CNPG が B2 から自動リストア済みのため psql 実行は不要
   - `kubectl get cluster directus-db -n prod -o jsonpath='{.status.phase}'` が `Cluster in healthy state` であることを確認する
   - リストアに失敗している場合は `kubectl describe cluster directus-db -n prod` でログを確認する
@@ -119,7 +119,7 @@
   - _Requirements: 2.3_
   - _Depends: 4.1_
 
-- [ ] 4.5 (P) Stalwart メールデータを VolSync からリストアする
+- [x] 4.5 (P) Stalwart メールデータを VolSync からリストアする
   - Stalwart StatefulSet が PVC（`stalwart-data`）を作成済みであることを確認する（`kubectl get pvc stalwart-data -n prod`）
   - PVC がマウント中だとリストアできないため、先に Stalwart を停止する: `kubectl scale statefulset stalwart -n prod --replicas=0`
   - `scripts/volsync-restore.sh` またはリストア用 `ReplicationDestination` を適用し、S3 restic から `stalwart-data` PVC へデータをリストアする
