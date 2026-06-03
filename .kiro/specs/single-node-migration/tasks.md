@@ -131,6 +131,23 @@
   - _Depends: 4.1_
 
 - [ ] 5. Raspberry Pi 復旧サービスの実装
+
+> **⚠️ 検討事項: 復旧トリガーのアーキテクチャ選択**
+>
+> 現在は Raspberry Pi 上の Flask サービスが Grafana Cloud Webhook を受信して復旧を実行する設計だが、
+> **GitHub Actions を使う方式**も選択肢として検討すること。
+>
+> | | Raspberry Pi | GitHub Actions |
+> |--|--|--|
+> | 常時稼働コスト | Pi の電力・管理が必要 | 無料枠内 (最大6時間/実行) |
+> | 障害依存性 | Pi 自体が障害点になり得る（ただし tailnet 経由のため独立） | GitHub が生きていれば動く（クラウド障害と独立） |
+> | ロック機構 | `/tmp/recovery.lock` で多重実行防止 | Concurrency group で代替可能 |
+> | Ansible 実行環境 | Pi にインストール済み | self-hosted runner または SSH でリモート実行 |
+> | Grafana Cloud 連携 | Webhook URL = Pi の Tailscale IP（外部非公開） | Webhook URL = GitHub API（公開エンドポイント） |
+> | 実装コスト | 完了済み | workflow yaml の追加が必要 |
+>
+> **現状の判断**: Pi 方式で実装済み。GitHub Actions 方式に切り替える場合は `raspberry-pi/` を廃止し
+> `.github/workflows/recovery.yml` に移行する。
 - [x] 5.1 (P) Recovery Webhook Service を実装する（recover.py）
   - `raspberry-pi/recovery/recover.py` を新規作成し、`POST /recover` エンドポイントを Flask で実装する
   - `/tmp/recovery.lock` によるロック機構を実装し、多重実行時に HTTP 409 を返すようにする
