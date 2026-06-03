@@ -156,6 +156,14 @@
         regexp: 'https://127\.0\.0\.1:6443'
         replace: "https://{{ ansible_host }}:6443"
 
+    - name: kubeconfig を Infisical に登録 (Single Source of Truth)
+      delegate_to: localhost
+      become: false
+      ansible.builtin.shell: >
+        infisical secrets set --env=prod
+        KUBECONFIG="$(cat {{ playbook_dir }}/../../kubeconfig)"
+      no_log: true
+
 
 # ============================================================
 # Play 6: ArgoCD の初期 bootstrap
