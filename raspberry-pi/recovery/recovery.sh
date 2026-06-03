@@ -6,6 +6,8 @@
 #   3. Terraform Cloud API でノードを再作成
 #   4. Tailscale に prod-node-1 として登録されるまでポーリング (最大10分)
 #   5. Ansible でシングルノード K3s をブートストラップ
+#   6. ArgoCD sync 完了・CNPG healthy を待機
+#   7. Stalwart メールデータを VolSync で B2 からリストア
 #
 # 注意: このスクリプトは recover.py から呼び出される。
 #       完了後、recover.py が /tmp/recovery.lock を削除する。
@@ -14,6 +16,11 @@ set -euo pipefail
 
 log() { echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') [recovery] $*" >&2; }
 die() { log "ERROR: $*"; exit 1; }
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+KUBECONFIG_FILE="/tmp/kubeconfig-recovery"
+
+kubectl_r() { kubectl --kubeconfig="${KUBECONFIG_FILE}" "$@"; }
 
 # ============================================================
 # 1. 必須環境変数チェック
@@ -30,11 +37,16 @@ REQUIRED_VARS=(
   TFC_WORKSPACE_ID
   CLOUDFLARE_TUNNEL_TOKEN
   CLOUDFLARE_TUNNEL_ID
+  KUBECONFIG
 )
 
 for VAR in "${REQUIRED_VARS[@]}"; do
   [[ -n "${!VAR:-}" ]] || die "必須環境変数が未設定です: $VAR"
 done
+
+# KUBECONFIG 環境変数の内容をファイルに書き出す (kubectl は file path を要求するため)
+echo "${KUBECONFIG}" > "${KUBECONFIG_FILE}"
+chmod 600 "${KUBECONFIG_FILE}"
 
 log "環境変数チェック完了"
 
@@ -97,8 +109,6 @@ RUN_ID=$(echo "$RUN_RESPONSE" | jq -r '.data.id')
 [[ -n "$RUN_ID" && "$RUN_ID" != "null" ]] || die "Terraform Cloud の Run 作成に失敗しました"
 log "Terraform Cloud Run 作成完了: $RUN_ID"
 
-# Run が完了するまで待機 (最大15分)
-log "Terraform Cloud の Apply 完了を待機します"
 TIMEOUT=900
 ELAPSED=0
 SLEEP_INTERVAL=15
@@ -121,9 +131,7 @@ while true; do
       ;;
   esac
 
-  if (( ELAPSED >= TIMEOUT )); then
-    die "Terraform Cloud Apply がタイムアウトしました (${TIMEOUT}s)"
-  fi
+  (( ELAPSED >= TIMEOUT )) && die "Terraform Cloud Apply がタイムアウトしました (${TIMEOUT}s)"
 
   sleep $SLEEP_INTERVAL
   ELAPSED=$(( ELAPSED + SLEEP_INTERVAL ))
@@ -149,9 +157,7 @@ while true; do
     break
   fi
 
-  if (( TS_ELAPSED >= TS_TIMEOUT )); then
-    die "prod-node-1 の Tailscale 登録がタイムアウトしました (${TS_TIMEOUT}s)"
-  fi
+  (( TS_ELAPSED >= TS_TIMEOUT )) && die "prod-node-1 の Tailscale 登録がタイムアウトしました (${TS_TIMEOUT}s)"
 
   log "未登録 (経過: ${TS_ELAPSED}s) — ${TS_SLEEP}s 後に再確認します"
   sleep $TS_SLEEP
@@ -161,8 +167,6 @@ done
 # ============================================================
 # 5. Ansible でシングルノード K3s をブートストラップ
 # ============================================================
-
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 log "Ansible Playbook を実行します"
 ANSIBLE_HOST_KEY_CHECKING=False \
@@ -175,5 +179,90 @@ ANSIBLE_HOST_KEY_CHECKING=False \
   ansible-playbook \
     -i "${REPO_ROOT}/ansible/inventory/tailscale.yml" \
     "${REPO_ROOT}/ansible/playbooks/k3s-bootstrap.yml"
+
+# Ansible が新しい kubeconfig を Infisical に登録するため、再取得して上書きする
+KUBECONFIG_NEW=$(infisical secrets get KUBECONFIG --env=prod --plain 2>/dev/null || true)
+if [[ -n "$KUBECONFIG_NEW" ]]; then
+  echo "${KUBECONFIG_NEW}" > "${KUBECONFIG_FILE}"
+  log "kubeconfig を Infisical から再取得しました"
+fi
+
+# ============================================================
+# 6. ArgoCD sync 完了・CNPG healthy を待機
+# ============================================================
+
+log "ArgoCD sync と CNPG healthy を待機します (最大20分)"
+ARGOCD_TIMEOUT=1200
+ARGOCD_ELAPSED=0
+
+while true; do
+  NOT_HEALTHY=$(kubectl_r get applications -n argocd --no-headers 2>/dev/null \
+    | awk '{print $3}' | grep -cv "Healthy" || echo "99")
+
+  if [[ "$NOT_HEALTHY" -eq 0 ]]; then
+    log "全 ArgoCD Application が Healthy になりました"
+    break
+  fi
+
+  (( ARGOCD_ELAPSED >= ARGOCD_TIMEOUT )) && {
+    log "警告: ArgoCD の Healthy 待機がタイムアウトしました。処理を続行します。"
+    break
+  }
+
+  log "Healthy でない Application: ${NOT_HEALTHY} 件 (経過: ${ARGOCD_ELAPSED}s)"
+  sleep 30
+  ARGOCD_ELAPSED=$(( ARGOCD_ELAPSED + 30 ))
+done
+
+# CNPG クラスターが healthy になるまで待機
+for CLUSTER in authentik-db directus-db; do
+  log "CNPG クラスター ${CLUSTER} の healthy を待機します"
+  kubectl_r wait cluster "${CLUSTER}" -n prod \
+    --for=jsonpath='{.status.phase}'='Cluster in healthy state' \
+    --timeout=600s || log "警告: ${CLUSTER} の healthy 待機がタイムアウトしました"
+done
+
+# ============================================================
+# 7. Stalwart メールデータを VolSync で B2 からリストア
+# ============================================================
+
+log "Stalwart を停止して VolSync リストアを開始します"
+
+kubectl_r scale statefulset stalwart -n prod --replicas=0
+kubectl_r wait pod -n prod -l app=stalwart --for=delete --timeout=60s || true
+
+# ReplicationDestination を適用
+RESTORE_TRIGGER="dr-$(date +%Y%m%dT%H%M%S)"
+kubectl_r apply -f - <<EOF
+apiVersion: volsync.backube/v1alpha1
+kind: ReplicationDestination
+metadata:
+  name: stalwart-restore
+  namespace: prod
+spec:
+  trigger:
+    manual: "${RESTORE_TRIGGER}"
+  restic:
+    repository: stalwart-restic-secret
+    destinationPVC: stalwart-data
+    copyMethod: Direct
+    moverSecurityContext:
+      runAsUser: 0
+      runAsGroup: 0
+      fsGroup: 0
+EOF
+
+log "VolSync リストア完了を待機します (最大30分)"
+kubectl_r wait replicationdestination/stalwart-restore -n prod \
+  --for=condition=Reconciled --timeout=1800s
+
+log "VolSync リストア完了"
+
+# リストア用リソースを削除
+kubectl_r delete replicationdestination stalwart-restore -n prod
+
+# Stalwart を再起動
+kubectl_r scale statefulset stalwart -n prod --replicas=1
+kubectl_r wait pod -n prod -l app=stalwart --for=condition=Ready --timeout=120s
 
 log "復旧完了"
