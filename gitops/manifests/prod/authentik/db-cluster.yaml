@@ -18,12 +18,14 @@ spec:
 
   # B2 の最新バックアップからリストア (DR / シングルノード移行共通経路)
   # クラスターが既に初期化済みの場合 CNPG はこのセクションを無視する
+  # externalClusters.name をクラスター自身の name と一致させることで
+  # CNPG が「自己継続 (continuation)」と認識し WAL archive チェックをスキップする
   bootstrap:
     recovery:
-      source: b2-backup
+      source: authentik-db
 
   externalClusters:
-    - name: b2-backup
+    - name: authentik-db
       barmanObjectStore:
         destinationPath: "s3://aramakisai-backups/cnpg/authentik-db"
         endpointURL: "https://s3.us-west-004.backblazeb2.com"
