@@ -11,6 +11,9 @@ metadata:
     cnpg.io/skipEmptyWalArchiveCheck: enabled
 spec:
   instances: 1
+  # 新しいイメージに skipEmptyWalArchiveCheck アノテーションを認識する
+  # instance manager が含まれているため明示指定する
+  imageName: ghcr.io/cloudnative-pg/postgresql:16.8
 
   postgresql:
     parameters:

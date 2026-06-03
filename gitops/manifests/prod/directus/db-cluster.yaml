@@ -10,6 +10,7 @@ metadata:
     cnpg.io/skipEmptyWalArchiveCheck: enabled
 spec:
   instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:16.8
 
   postgresql:
     parameters:
