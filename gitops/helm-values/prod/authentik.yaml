@@ -37,11 +37,11 @@ server:
   replicas: 1
   resources:
     requests:
-      memory: "256Mi"
-      cpu: "100m"
+      memory: "500Mi"
+      cpu: "250m"
     limits:
-      memory: "1Gi"
-      cpu: "500m"
+      memory: "2Gi"
+      cpu: "1500m"
   # DB パスワードは secretKeyRef で直接注入 (envFrom の $(VAR) 置換は不可)
   env:
     - name: AUTHENTIK_POSTGRESQL__PASSWORD
@@ -74,11 +74,11 @@ worker:
   replicas: 1
   resources:
     requests:
-      memory: "256Mi"
-      cpu: "100m"
+      memory: "500Mi"
+      cpu: "200m"
     limits:
-      memory: "1Gi"
-      cpu: "500m"
+      memory: "2Gi"
+      cpu: "1000m"
   env:
     - name: AUTHENTIK_POSTGRESQL__PASSWORD
       valueFrom:
