@@ -75,6 +75,12 @@ spec:
                 secretKeyRef:
                   name: stalwart-secrets
                   key: STALWART_ADMIN_SECRET
+            # ⚠️ TEMPORARY: Recovery mode — API キー再登録後に削除すること
+            - name: STALWART_RECOVERY_ADMIN
+              valueFrom:
+                secretKeyRef:
+                  name: stalwart-recovery
+                  key: credentials
           volumeMounts:
             - name: data
               mountPath: /opt/stalwart
