@@ -1,0 +1,27 @@
+{
+  "name": "Aramakisai Infra Dev Container",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "HashiCorp.terraform",
+        "redhat.vscode-yaml",
+        "ms-kubernetes-tools.vscode-kubernetes-tools",
+        "ms-python.python",
+        "charliermarsh.ruff",
+        "GitHub.copilot",
+        "ms-azuretools.vscode-docker"
+      ],
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash",
+        "yaml.schemas": {
+          "kubernetes": "gitops/manifests/**/*.yaml"
+        }
+      }
+    }
+  },
+  "remoteUser": "root",
+  "features": {}
+}
