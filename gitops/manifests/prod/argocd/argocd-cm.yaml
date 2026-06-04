@@ -12,5 +12,4 @@ data:
     clientID: argocd
     clientSecret: $argocd-oidc-secret:clientSecret
     requestedScopes: ["openid", "profile", "email", "groups"]
-  # OIDC の動作確認後に false に変更してコミットする
-  admin.enabled: "true"
+  admin.enabled: "false"
