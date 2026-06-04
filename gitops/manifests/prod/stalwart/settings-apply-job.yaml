@@ -103,13 +103,16 @@ spec:
               echo "    ✅ stalwart-cli v1.0.7 取得完了"
 
               # ── Stalwart HTTPS の起動待機 (最大 120 秒) ──────────────────
+              # 認証方式: STALWART_RECOVERY_ADMIN (admin:$(STALWART_ADMIN_SECRET)) を使用。
+              # Authentication.directoryId = authentik-oidc の環境では通常の admin auth が
+              # OIDC バックエンドに回されて拒否されるため、Recovery Admin を常設している。
               STALWART_URL="http://stalwart-mail.prod.svc.cluster.local:8080"
               echo ">>> Stalwart HTTP API の起動を待機中 ($STALWART_URL)..."
               READY=0
               for i in $(seq 1 24); do
                 if /tmp/stalwart-cli \
                     --url "$STALWART_URL" \
-                    --api-key "$STALWART_API_KEY" \
+                    --user admin --password "$STALWART_ADMIN_SECRET" \
                     query Domain > /dev/null 2>&1; then
                   echo "    ✅ Stalwart 応答確認 (attempt $i)"
                   READY=1
@@ -130,7 +133,7 @@ spec:
               echo ">>> settings-update.ndjson を適用中..."
               /tmp/stalwart-cli \
                 --url "$STALWART_URL" \
-                --api-key "$STALWART_API_KEY" \
+                --user admin --password "$STALWART_ADMIN_SECRET" \
                 apply --file /settings/settings-update.ndjson
 
               echo "    ✅ settings-update.ndjson の適用完了"
@@ -141,7 +144,7 @@ spec:
               echo ">>> Domain ID を取得して defaultDomainId を更新中..."
               DOMAIN_ID=$(/tmp/stalwart-cli \
                 --url "$STALWART_URL" \
-                --api-key "$STALWART_API_KEY" \
+                --user admin --password "$STALWART_ADMIN_SECRET" \
                 --no-color \
                 query Domain 2>/dev/null | awk 'NR==2 {print $1}')
 
@@ -149,7 +152,7 @@ spec:
                 printf '{"@type":"update","object":"SystemSettings","value":{"defaultDomainId":"%s"}}\n' "$DOMAIN_ID" \
                   | /tmp/stalwart-cli \
                       --url "$STALWART_URL" \
-                      --api-key "$STALWART_API_KEY" \
+                      --user admin --password "$STALWART_ADMIN_SECRET" \
                       apply --stdin
                 echo "    ✅ defaultDomainId を $DOMAIN_ID に設定しました"
               else
@@ -173,11 +176,11 @@ spec:
                 echo "    ⚠ Pod 削除の HTTP ステータス: $HTTP_CODE (既に再起動済みの可能性あり)"
               fi
           env:
-            - name: STALWART_API_KEY
+            - name: STALWART_ADMIN_SECRET
               valueFrom:
                 secretKeyRef:
                   name: stalwart-secrets
-                  key: STALWART_API_KEY
+                  key: STALWART_ADMIN_SECRET
           volumeMounts:
             - name: settings
               mountPath: /settings

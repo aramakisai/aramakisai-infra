@@ -75,12 +75,11 @@ spec:
                 secretKeyRef:
                   name: stalwart-secrets
                   key: STALWART_ADMIN_SECRET
-            # ⚠️ TEMPORARY: Recovery mode — API キー再登録後に削除すること
+            # STALWART_RECOVERY_ADMIN: OIDC directoryId 設定時は通常の admin 認証が通らないため常設。
+            # STALWART_ADMIN_SECRET と同じパスワードを使い、PostSync Job もこれで認証する。
+            # $(VAR_NAME) は Kubernetes の env 展開機能で STALWART_ADMIN_SECRET の値に置換される。
             - name: STALWART_RECOVERY_ADMIN
-              valueFrom:
-                secretKeyRef:
-                  name: stalwart-recovery
-                  key: credentials
+              value: "admin:$(STALWART_ADMIN_SECRET)"
           volumeMounts:
             - name: data
               mountPath: /opt/stalwart
