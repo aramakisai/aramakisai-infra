@@ -15,11 +15,11 @@
 - Infisical: `.infisical.json` の `defaultEnvironment: "prod"` を確認すること
 - kubectl: `make kubectl ARGS="..."` を使う（KUBECONFIG を Infisical から /tmp に展開）
 - DR ランブック: `docs/dr-runbook.md` を参照
-- DR 自動化: `raspberry-pi/recovery/recovery.sh` がステップ 1-7 を自動実行
+- DR 自動化: `.github/scripts/recovery.sh` + `.github/workflows/dr-recovery.yml`（GitHub Actions 移行済み）
 
 ## タスク一覧
 
-- [ ] 1. 現クラスターからのデータバックアップ
+- [x] 1. 現クラスターからのデータバックアップ
 - [x] 1.1 (P) Authentik PostgreSQL — B2 recovery bootstrap で対応（手順不要）
   - `db-cluster.yaml` の `bootstrap.recovery` + `externalClusters` で新クラスター初回起動時に B2 の最新バックアップから自動リストアされる
   - 手動の pg_dump・psql は不要（DR と同じ経路）
@@ -37,7 +37,7 @@
   - バックアップ・リストアともにスキップする
   - _Requirements: 2.3_
 
-- [ ] 2. GitOps・IaC のシングルノード対応変更をコミット
+- [x] 2. GitOps・IaC のシングルノード対応変更をコミット
 - [x] 2.1 (P) CNPG DB クラスターをシングルインスタンス化する
   - `gitops/manifests/prod/authentik/db-cluster.yaml` の `instances` を 1 に変更し、`affinity` ブロックを削除する（`backup` 設定は backup スペックで実装済みのため変更不要）
   - `gitops/manifests/prod/directus/db-cluster.yaml` に同様の変更を適用する
@@ -74,7 +74,7 @@
   - `git status` で `k3s-agent` の削除が確認されれば完了
   - _Boundary: ansible/roles/k3s-agent_
 
-- [ ] 3. 新クラスターのプロビジョニング
+- [x] 3. 新クラスターのプロビジョニング
 - [x] 3.1 Tailscale デバイスを削除してから terraform apply で新ノードを作成する
   - `.env` を source して全必須環境変数（`HCLOUD_TOKEN`・`TF_VAR_k3s_token`・`TAILSCALE_API_KEY`・`TAILSCALE_TAILNET` 等）が設定されていることを確認する
   - **terraform apply より先に** Tailscale API で cp-node・prod-node-1・prod-node-2 を削除する（`ephemeral=false` のため Hetzner ノード削除後も tailnet に残存し、新ノードが `prod-node-1-1` として登録されるのを防ぐ）
@@ -101,7 +101,7 @@
   - _Requirements: 1.2_
   - _Depends: 3.1_
 
-- [ ] 4. ArgoCD sync・シークレット注入の確認とデータリストア
+- [x] 4. ArgoCD sync・シークレット注入の確認とデータリストア
 - [x] 4.1 ArgoCD sync とシークレット注入が正常であることを確認する
   - `kubectl get secret infisical-auth -n argocd -o jsonpath='{.data.clientId}' | base64 -d` が空でないことを確認する
   - `kubectl get secret aramakisai-infra-repo -n argocd -o jsonpath='{.data.sshPrivateKey}' | base64 -d | wc -c` が 0 より大きいことを確認する（2026-06-02 インシデント教訓: 両 Secret が空だと ESO 全停止・ArgoCD git 接続不可になる）
@@ -147,24 +147,11 @@
   - _Boundary: Stalwart StatefulSet, Stalwart PVC_
   - _Depends: 4.1_
 
-- [ ] 5. Raspberry Pi 復旧サービスの実装
+- [x] 5. Raspberry Pi 復旧サービスの実装 → **GitHub Actions に移行済み（2026-06-04）**
 
-> **⚠️ 検討事項: 復旧トリガーのアーキテクチャ選択**
->
-> 現在は Raspberry Pi 上の Flask サービスが Grafana Cloud Webhook を受信して復旧を実行する設計だが、
-> **GitHub Actions を使う方式**も選択肢として検討すること。
->
-> | | Raspberry Pi | GitHub Actions |
-> |--|--|--|
-> | 常時稼働コスト | Pi の電力・管理が必要 | 無料枠内 (最大6時間/実行) |
-> | 障害依存性 | Pi 自体が障害点になり得る（ただし tailnet 経由のため独立） | GitHub が生きていれば動く（クラウド障害と独立） |
-> | ロック機構 | `/tmp/recovery.lock` で多重実行防止 | Concurrency group で代替可能 |
-> | Ansible 実行環境 | Pi にインストール済み | self-hosted runner または SSH でリモート実行 |
-> | Grafana Cloud 連携 | Webhook URL = Pi の Tailscale IP（外部非公開） | Webhook URL = GitHub API（公開エンドポイント） |
-> | 実装コスト | 完了済み | workflow yaml の追加が必要 |
->
-> **現状の判断**: Pi 方式で実装済み。GitHub Actions 方式に切り替える場合は `raspberry-pi/` を廃止し
-> `.github/workflows/recovery.yml` に移行する。
+> Raspberry Pi を廃止し GitHub Actions (`repository_dispatch: dr-recovery`) に移行した。
+> `.github/workflows/dr-recovery.yml` + `.github/scripts/recovery.sh` が実体。
+> `raspberry-pi/` ディレクトリは削除済み。
 - [x] 5.1 (P) Recovery Webhook Service を実装する（recover.py）
   - `raspberry-pi/recovery/recover.py` を新規作成し、`POST /recover` エンドポイントを Flask で実装する
   - `/tmp/recovery.lock` によるロック機構を実装し、多重実行時に HTTP 409 を返すようにする
@@ -208,14 +195,8 @@
   - 上記すべてが確認できれば完了
   - _Requirements: 5.1, 5.2_
 
-- [ ] 6.2 Raspberry Pi と Grafana Cloud の Webhook 連携を設定・確認する
-  - Grafana Cloud の Alerting → Contact Points で「Webhook」タイプを追加し URL を `http://<pi-tailscale-ip>:8080/recover` に設定する
-  - `idp.aramakisai.com` の Synthetic Monitoring チェックが存在することを確認する（`monitoring`スペック前提）
-  - ⚠️ **`/recover` への `status: "firing"` 送信は本番で terraform apply + Tailscale デバイス削除が走るため実施しない**。代わりに以下でサービス起動・ロック機構のみを検証する:
-    - `curl http://localhost:8080/health` が 200 を返すことを確認する（`/health` エンドポイントを recover.py に実装しておく）
-    - `curl -X POST http://localhost:8080/recover -d '{"status":"resolved",...}'` が何もせず 200 を返すことを確認する（resolved は無視する仕様）
-    - `/tmp/recovery.lock` を手動で作成した状態で `status: "firing"` を送ると 409 が返ることを確認する（ロック機構の検証のみ、実際の recovery.sh は起動しない）
-  - Pi の Tailscale IP から `prod-node-1` への SSH 接続が通ることを確認する（`ssh root@prod-node-1.tail7e6b7.ts.net hostname`）
-  - 上記すべてが確認できれば完了
-  - _Requirements: 4.1, 4.2, 4.3, 4.4, 5.3_
-  - _Depends: 5.3, 6.1_
+- [x] 6.2 Grafana Cloud Webhook 連携の設定 → **GitHub Actions 移行に伴い再定義済み（2026-06-04）**
+
+  - Grafana Cloud Contact Point の Webhook 先を GitHub API (`repository_dispatch`) に変更する設計に移行
+  - 詳細設定・アラート条件（2シグナル AND）は `dr-automation` スペック REQ-01 に引き継ぎ
+  - _Depends: dr-automation スペックの実装_
