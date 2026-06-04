@@ -47,8 +47,10 @@ spec:
             # LDAP 認証構成
             - name: LDAP_ENABLED
               value: "1"
+            - name: ACCOUNT_PROVISIONER
+              value: "LDAP"
             - name: LDAP_SERVER_HOST
-              value: "authentik-ldap-outpost.prod.svc.cluster.local"
+              value: "ldap://authentik-ldap-outpost.prod.svc.cluster.local"
             - name: LDAP_SEARCH_BASE
               value: "dc=ldap,dc=goauthentik,dc=io"
             - name: LDAP_BIND_DN
