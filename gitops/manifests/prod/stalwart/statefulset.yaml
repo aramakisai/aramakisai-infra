@@ -19,7 +19,7 @@ metadata:
     secret.reloader.stakater.com/reload: "mail-tls,stalwart-secrets"
 spec:
   serviceName: stalwart-mail
-  replicas: 1   # メールサーバーはシングルインスタンス推奨 (HA は複雑)
+  replicas: 0   # 移行のため一時的に0へスケールダウン
   selector:
     matchLabels:
       app: stalwart
