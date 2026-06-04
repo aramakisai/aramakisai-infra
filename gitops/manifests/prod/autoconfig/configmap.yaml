@@ -1,0 +1,44 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: autoconfig-xml
+  namespace: prod
+data:
+  config-v1.1.xml: |
+    <?xml version="1.0" encoding="UTF-8"?>
+    <clientConfig version="1.1">
+      <emailProvider id="aramakisai.com">
+        <domain>aramakisai.com</domain>
+        <displayName>荒牧祭メール</displayName>
+        <displayShortName>荒牧祭</displayShortName>
+
+        <incomingServer type="imap">
+          <hostname>mail.aramakisai.com</hostname>
+          <port>993</port>
+          <socketType>SSL</socketType>
+          <authentication>password-cleartext</authentication>
+          <username>%EMAILADDRESS%</username>
+        </incomingServer>
+
+        <outgoingServer type="smtp">
+          <hostname>mail.aramakisai.com</hostname>
+          <port>587</port>
+          <socketType>STARTTLS</socketType>
+          <authentication>password-cleartext</authentication>
+          <username>%EMAILADDRESS%</username>
+        </outgoingServer>
+      </emailProvider>
+    </clientConfig>
+  nginx.conf: |
+    server {
+        listen 80;
+        location /mail/config-v1.1.xml {
+            root /usr/share/nginx/html;
+            default_type application/xml;
+            add_header Access-Control-Allow-Origin *;
+        }
+        location / {
+            return 404;
+        }
+    }
