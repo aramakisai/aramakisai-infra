@@ -141,38 +141,28 @@ make kubectl ARGS="logs -n prod stalwart-0 --since=10m" | grep -i "auth\|401"
 # /tmp/stalwart-debug-job.yaml を参照
 ```
 
-#### 復旧手順: Recovery mode で API キーを再作成する
+#### 再発防止措置 (実施済み)
+
+| 対策 | 内容 |
+|------|------|
+| `STALWART_RECOVERY_ADMIN` 常設 | K8s env 展開 `admin:$(STALWART_ADMIN_SECRET)` で StatefulSet に常設。認証方式を api-key から admin 認証に変更 |
+| Reloader に `stalwart-secrets` 追加 | `STALWART_ADMIN_SECRET` ローテーション時に Pod を自動再起動し、env 展開を更新 |
+| `STALWART_API_KEY` を external-secret から削除 | API キー方式廃止済みのため混乱防止のため除去 |
+
+#### 復旧手順: STALWART_ADMIN_SECRET が Infisical から消えた場合
+
+通常は発生しない。`STALWART_ADMIN_SECRET` は Infisical が Single Source of Truth。
 
 ```bash
-# 1. Recovery admin 用パスワードを生成して Secret に登録
-RECOVERY_PASS=$(openssl rand -hex 16)
-make kubectl ARGS="create secret generic stalwart-recovery -n prod \
-  --from-literal=credentials=admin:${RECOVERY_PASS} --dry-run=client -o yaml" | \
-  make kubectl ARGS="apply -f -"
+# 1. 新しいパスワードを生成して Infisical に登録
+NEW_PASS=$(openssl rand -hex 24)
+infisical secrets set STALWART_ADMIN_SECRET="$NEW_PASS"
 
-# 2. statefulset.yaml に STALWART_RECOVERY_ADMIN を追加してコミット → ArgoCD sync
-# spec.template.spec.containers[0].env に追記:
-#   - name: STALWART_RECOVERY_ADMIN
-#     valueFrom:
-#       secretKeyRef:
-#         name: stalwart-recovery
-#         key: credentials
-
-# 3. port-forward して recovery admin で API キーを作成
-make kubectl ARGS="port-forward -n prod pod/stalwart-0 8080:8080" &
-stalwart-cli --url http://localhost:8080 \
-  --user admin --password "$RECOVERY_PASS" \
-  apply --stdin <<'EOF'
-{"@type":"create","object":"ApiKey","value":{"api-key-job":{"description":"PostSync Job 用","roles":["superuser"],"secret":"<STALWART_API_KEY の値>"}}}
-EOF
-
-# 4. STALWART_RECOVERY_ADMIN を statefulset.yaml から削除してコミット → ArgoCD sync
-# 5. stalwart-recovery Secret を削除
-make kubectl ARGS="delete secret stalwart-recovery -n prod"
+# 2. ESO が Kubernetes secret を更新 (最大 1h / ArgoCD 手動 sync で即時更新可)
+# 3. Reloader が stalwart-secrets 変更を検知 → Stalwart を自動再起動
+#    STALWART_RECOVERY_ADMIN が新パスワードで更新される
+# 4. 次の ArgoCD sync で PostSync Job が新パスワードを使用 → 正常動作を確認
 ```
-
-**注意**: `<STALWART_API_KEY の値>` は Infisical の `STALWART_API_KEY` の値をそのまま使う。  
-API キーの値自体は変えない（Infisical に保存済みの値と一致させる必要がある）。
 
 ---
 
