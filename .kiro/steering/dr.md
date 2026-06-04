@@ -72,9 +72,8 @@ make kubectl ARGS="delete cluster <name> -n prod"
 
 ### Directus の WAL について
 
-Directus は旧クラスターで WAL アーカイブが設定されていなかったため S3 に `wals/` ディレクトリが存在しない。  
-**DR 時は `bootstrap.initdb` で空 DB 起動する**設計（`gitops/manifests/prod/directus/db-cluster.yaml` 参照）。  
-コンテンツの再投入が必要になる。
+移行初期は旧クラスターからの WAL アーカイブが存在しなかったため `initdb` で起動していましたが、現在は B2 に WAL バックアップが蓄積されています。  
+**DR 時は `bootstrap.recovery` で B2 から自動復元される**設計（`gitops/manifests/prod/directus/db-cluster.yaml` 参照）に更新されました。これにより、コンテンツの再投入は原則不要となっています。
 
 ---
 

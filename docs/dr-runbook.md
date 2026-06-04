@@ -9,7 +9,7 @@ prod-node-1 (CX33) が障害になった場合、Grafana Cloud Alerting + GitHub
 自動復旧が失敗した場合のみ、「手動フォールバック」セクションを参照する。
 
 **目標復旧時間 (RTO)**: 30 分  
-**目標復旧時点 (RPO)**: Authentik = 直前まで（CNPG WAL 連続アーカイブ）、Stalwart = 最大 2 時間、Directus = 空DB（WAL 未設定）
+**目標復旧時点 (RPO)**: Authentik = 直前まで（CNPG WAL 連続アーカイブ）、Stalwart = 最大 2 時間、Directus = 直前まで（CNPG WAL 連続アーカイブ）
 
 ---
 
@@ -29,7 +29,7 @@ GitHub Actions (.github/workflows/dr-recovery.yml)
        → K3s / Cilium / cloudflared / ArgoCD / infisical-auth / Deploy Key / App of Apps
   5. ArgoCD sync + CNPG healthy を待機 (最大20分)
        → ESO が Infisical から全シークレットを取得
-       → CNPG が B2 から WAL リストア (Authentik のみ)
+       → CNPG が B2 から WAL リストア (Authentik, Directus)
   6. Stalwart を停止 → VolSync で B2 から stalwart-data をリストア → 再起動
 ```
 
@@ -70,16 +70,15 @@ dig mail.aramakisai.com AAAA
 
 | URL | 確認内容 |
 |-----|---------|
-| `https://idp.aramakisai.com` | ログイン成功 |
-| `https://api.aramakisai.com/admin` | 画面表示（空DB）|
-| `https://webmail.aramakisai.com` | 画面表示 |
+| https://idp.aramakisai.com | ログイン成功 |
+| https://api.aramakisai.com/admin | 画面表示（最新データ復旧済み）|
+| https://webmail.aramakisai.com | 画面表示 |
 | `https://argocd.aramakisai.com` | 管理画面表示 |
 
 ### 既知の想定内事象
 
 | 事象 | 理由 | 対処 |
 |------|------|------|
-| Directus が空 DB で起動 | WAL アーカイブ未設定のため | コンテンツを再投入する |
 | Stalwart のメールが最大 2 時間分消失 | VolSync スナップショット間隔 | 許容範囲内 |
 | Stalwart TLS (`mail-tls`) がない | ArgoCD sync のタイミング次第 | 下記を手動適用 |
 
