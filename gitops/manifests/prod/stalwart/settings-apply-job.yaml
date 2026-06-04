@@ -171,7 +171,7 @@ spec:
                 query Directory 2>/dev/null | awk '/Ldap/ {print $1; exit}')
 
               if [ -n "$DOMAIN_ID" ] && [ -n "$LDAP_DIR_ID" ]; then
-                printf '{"@type":"update","object":"Domain","value":{"%s":{"directoryId":"%s"}}}\n' \
+                printf '{"@type":"update","object":"Domain","id":"%s","value":{"directoryId":"%s"}}\n' \
                   "$DOMAIN_ID" "$LDAP_DIR_ID" \
                   | /tmp/stalwart-cli \
                       --url "$STALWART_URL" \
@@ -198,7 +198,7 @@ spec:
                 --no-color \
                 query Directory 2>/dev/null | awk 'NR>1 {print $1}' | while read DIR_ID; do
                 if [ "$DIR_ID" != "$LDAP_DIR_ID" ] && [ "$DIR_ID" != "$OIDC_DIR_ID" ]; then
-                  printf '{"@type":"destroy","object":"Directory","value":["%s"]}\n' "$DIR_ID" \
+                  printf '{"@type":"destroy","object":"Directory","id":"%s"}\n' "$DIR_ID" \
                     | /tmp/stalwart-cli \
                         --url "$STALWART_URL" \
                         --user admin --password "$STALWART_ADMIN_SECRET" \
