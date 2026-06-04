@@ -145,5 +145,9 @@ spec:
             secretName: mail-tls
         - name: dkim-keys
           secret:
-            secretName: mailserver-dkim
+            defaultMode: 420
             optional: true
+            secretName: mailserver-dkim
+            items:
+              - key: dkim-key
+                path: aramakisai.com/mail.private

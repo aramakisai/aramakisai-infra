@@ -127,21 +127,17 @@ resource "cloudflare_record" "dmarc" {
 }
 
 # ============================================================
-# DKIM 署名鍵
+# DKIM 署名鍵 (DMS 用)
 # ============================================================
-#
-# v0.16.6 の初回起動時に DB が初期化され、旧秘密鍵 (202605e / 202605r) が消失した。
-# 秘密鍵のない公開鍵レコードは無意味なため、Terraform 管理から削除する。
-#
-# 新しい DKIM レコードは Stalwart の dkimManagement: Automatic + dnsManagement が
-# Cloudflare API 経由で自動登録する (gitops/manifests/prod/stalwart/settings-configmap.yaml 参照)。
-# Stalwart が登録するレコードは Terraform state には含まれないため drift は発生しない。
-#
-# 削除手順:
-#   terraform apply \
-#     -target cloudflare_record.dkim_ed25519 \
-#     -target cloudflare_record.dkim_rsa
-# (リソース定義を削除した後に apply すると Cloudflare から削除される)
+
+resource "cloudflare_record" "dkim" {
+  zone_id = var.cloudflare_zone_id
+  name    = "mail._domainkey"
+  value   = "v=DKIM1; h=sha256; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA5B0r+Gw8taECJlZrSjeqpu7ofGRvKguAY03NgLIOdRctFfX95Dn0/IF+ujCGPC7u5qFaPw/AomifYmuZ9f4+eNtQCu3IkJdLiF1SEQHgfWZKezPGmeH+Bd7VyvjkVCJZe2KJNiN4HNc0pCXRt437mSr2xid1pug4niUUe3wiwDveio75+tOpAxdP4sbgmd6/RJbtKhSF/cZ1HCKe/yEjN59a3f1ebzOtJTGImEbz6jvb8IB7U3F82tBKaCSpp11jl8P3Z+SmmcPG278D4E5o2/W0YpwDkqxafMzhqH2yG4LR9spoq4szxQaExHpYeg2pJZU9w5KzpR+0zi5U7WM0AQIDAQAB"
+  type    = "TXT"
+  proxied = false
+  comment = "DKIM public key TXT record for DMS"
+}
 
 # ============================================================
 # Resend バウンスドメイン (send.aramakisai.com)
