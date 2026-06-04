@@ -9,8 +9,8 @@
 #   6. ArgoCD sync 完了・CNPG healthy を待機
 #   7. Stalwart メールデータを VolSync で B2 からリストア
 #
-# 注意: このスクリプトは recover.py から呼び出される。
-#       完了後、recover.py が /tmp/recovery.lock を削除する。
+# 注意: GitHub Actions の dr-recovery ワークフローから呼び出される。
+#       infisical run --env=prod -- bash .github/scripts/recovery.sh で実行すること。
 
 set -euo pipefail
 

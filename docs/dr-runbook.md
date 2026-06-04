@@ -2,8 +2,8 @@
 
 ## 概要
 
-prod-node-1 (CX33) が障害になった場合、Grafana Cloud Alerting + Raspberry Pi の  
-自動復旧サービスが **人手なしで 30 分以内に復旧を完了する**。
+prod-node-1 (CX33) が障害になった場合、Grafana Cloud Alerting + GitHub Actions の  
+自動復旧ワークフローが **人手なしで 30 分以内に復旧を完了する**。
 
 人が行うのは **復旧後の確認のみ**。  
 自動復旧が失敗した場合のみ、「手動フォールバック」セクションを参照する。
@@ -18,9 +18,10 @@ prod-node-1 (CX33) が障害になった場合、Grafana Cloud Alerting + Raspbe
 ```
 Grafana Cloud Synthetic Monitoring
   → idp.aramakisai.com が 3 分間応答なし
-  → Contact Point (Webhook) → POST http://<pi-tailscale-ip>:8080/recover
+  → Contact Point (Webhook) → POST https://api.github.com/repos/aramakisai/aramakisai-infra/dispatches
+                               {"event_type": "dr-recovery"}
 
-Raspberry Pi (recovery.sh)
+GitHub Actions (.github/workflows/dr-recovery.yml)
   1. Tailscale から prod-node-1 デバイスを削除
   2. Terraform Cloud API で CX33 prod-node-1 を再作成 (≈5分)
   3. Tailscale への prod-node-1 登録をポーリング (最大10分)
@@ -163,19 +164,44 @@ make kubectl ARGS="delete -f gitops/manifests/prod/stalwart/replication-destinat
 
 ---
 
-## Raspberry Pi 復旧サービスの管理
+## GitHub Actions 復旧ワークフローの管理
 
-```bash
-# Pi への SSH (Tailscale 経由)
-ssh root@<pi-tailscale-ip>
-
-# サービス状態確認
-systemctl status recovery
-
-# ログ確認
-journalctl -u recovery -f
-
-# ロックが残っている場合 (前回の復旧が中断)
-rm -f /tmp/recovery.lock
-systemctl restart recovery
 ```
+復旧ログ: https://github.com/aramakisai/aramakisai-infra/actions/workflows/dr-recovery.yml
+
+# 手動トリガー (テスト・強制実行)
+curl -X POST \
+  -H "Authorization: Bearer <GITHUB_PAT>" \
+  -H "Accept: application/vnd.github+json" \
+  -H "X-GitHub-Api-Version: 2022-11-28" \
+  https://api.github.com/repos/aramakisai/aramakisai-infra/dispatches \
+  -d '{"event_type":"dr-recovery"}'
+
+# 同時実行制御: concurrency グループ "dr-recovery" で保護済み
+# 前回のジョブが実行中の場合、新規トリガーはキューに入る (cancel-in-progress: false)
+```
+
+### Grafana Cloud Contact Point 設定
+
+| 項目 | 値 |
+|------|-----|
+| URL | `https://api.github.com/repos/aramakisai/aramakisai-infra/dispatches` |
+| HTTP Method | POST |
+| Header: Authorization | `Bearer <GITHUB_PAT>` |
+| Header: Accept | `application/vnd.github+json` |
+| Header: X-GitHub-Api-Version | `2022-11-28` |
+| Body | `{"event_type":"dr-recovery"}` |
+
+**GITHUB_PAT**: Fine-Grained PAT (Actions: write 権限のみ) を Grafana Cloud の Contact Point に設定する。
+
+### GitHub Actions Secrets (要設定)
+
+| Secret 名 | 内容 |
+|-----------|------|
+| `INFISICAL_CLIENT_ID` | Infisical Machine Identity Client ID |
+| `INFISICAL_CLIENT_SECRET` | Infisical Machine Identity Client Secret |
+| `INFISICAL_PROJECT_ID` | Infisical プロジェクト ID |
+| `TS_OAUTH_CLIENT_ID` | Tailscale OAuth Client ID (tag:ci 用) |
+| `TS_OAUTH_SECRET` | Tailscale OAuth Client Secret (tag:ci 用) |
+
+**Tailscale 前提**: Tailscale ACL に `tag:ci` タグを定義し、上記 OAuth Client がそのタグでデバイスを登録できること。
