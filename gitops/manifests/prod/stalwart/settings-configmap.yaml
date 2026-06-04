@@ -48,7 +48,7 @@ data:
     {"@type":"destroy","object":"Directory"}
     {"@type":"create","object":"Directory","value":{"authentik-ldap":{"@type":"Ldap","description":"Authentik LDAP Outpost — IMAP/SMTP パスワード認証 + Stalwart 内蔵 OAuth2 のバックエンド","url":"ldap://ak-outpost-stalwart-ldap-outpost.prod.svc.cluster.local:389","baseDn":"dc=ldap,dc=goauthentik,dc=io","bindDn":"cn=stalwart-service,ou=users,dc=ldap,dc=goauthentik,dc=io","bindSecret":{"@type":"EnvironmentVariable","variableName":"STALWART_JOB_TOKEN"},"filterLogin":"(&(objectClass=inetOrgPerson)(|(mail=?)(uid=?)))","filterMailbox":"(&(objectClass=inetOrgPerson)(|(mail=?)(mailAlias=?)))","filterMemberOf":"(&(objectClass=group)(member=?))","attrEmail":{"mail":true},"attrEmailAlias":{"mailAlias":true},"attrMemberOf":{"memberOf":true},"groupClass":"group"}}}
     {"@type":"create","object":"Directory","value":{"authentik-oidc":{"@type":"Oidc","description":"Authentik OIDC — Roundcube OAUTHBEARER 検証","issuerUrl":"https://idp.aramakisai.com/application/o/roundcube/","requireAudience":"roundcube","requireScopes":{"openid":true,"email":true},"claimUsername":"preferred_username","usernameDomain":"aramakisai.com","claimName":"preferred_username","claimGroups":"groups"}}}
-    {"@type":"update","object":"Authentication","value":{"directoryId":"#authentik-ldap"}}
+    {"@type":"update","object":"Authentication","value":{"directoryId":"#authentik-oidc"}}
     {"@type":"destroy","object":"AllowedIp"}
     {"@type":"create","object":"AllowedIp","value":{"cluster-pod-cidr":{"address":"10.42.0.0/16","reason":"Kubernetes Pod network (Cilium overlay)"},"cluster-node-cidr":{"address":"10.0.1.0/24","reason":"Kubernetes Node network"}}}
     {"@type":"destroy","object":"Tracer"}
@@ -82,7 +82,7 @@ data:
     {"@type":"create","object":"MtaRoute","value":{"resend-relay":{"@type":"Relay","name":"resend-relay","description":"Resend SMTP リレー (Hetzner port 25 新規アカウント制限回避)","address":"smtp.resend.com","port":587,"implicitTls":false,"authUsername":"resend","authSecret":{"@type":"EnvironmentVariable","variableName":"RESEND_API_KEY"}}}}
     {"@type":"update","object":"MtaOutboundStrategy","value":{"route":{"match":{"0":{"if":"is_local_domain(rcpt_domain)","then":"'local'"}},"else":"'resend-relay'"}}}
     {"@type":"update","object":"SystemSettings","value":{"defaultHostname":"mail.aramakisai.com"}}
-    {"@type":"update","object":"Authentication","value":{"directoryId":"#authentik-ldap"}}
+    {"@type":"update","object":"Authentication","value":{"directoryId":"#authentik-oidc"}}
     {"@type":"destroy","object":"AllowedIp"}
     {"@type":"create","object":"AllowedIp","value":{"cluster-pod-cidr":{"address":"10.42.0.0/16","reason":"Kubernetes Pod network (Cilium overlay)"},"cluster-node-cidr":{"address":"10.0.1.0/24","reason":"Kubernetes Node network"}}}
     {"@type":"destroy","object":"Tracer"}
