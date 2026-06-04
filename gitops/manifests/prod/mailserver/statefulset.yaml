@@ -59,7 +59,7 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: mailserver-secrets
-                  key: AUTHENTIK_LDAP_OUTPOST_TOKEN
+                  key: MAILSERVER_LDAP_TOKEN
             - name: LDAP_QUERY_FILTER_USER
               value: "(&(objectClass=inetOrgPerson)(mail=%s)(ak-active=true))"
             - name: LDAP_QUERY_FILTER_ALIAS
