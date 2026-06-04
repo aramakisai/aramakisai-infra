@@ -75,7 +75,6 @@ data:
     {"@type":"destroy","object":"NetworkListener"}
     {"@type":"destroy","object":"Certificate"}
     {"@type":"destroy","object":"MtaRoute"}
-    {"@type":"destroy","object":"Directory"}
     {"@type":"create","object":"Certificate","value":{"cert-main":{"certificate":{"@type":"File","filePath":"/etc/stalwart/tls/tls.crt"},"privateKey":{"@type":"File","filePath":"/etc/stalwart/tls/tls.key"}}}}
     {"@type":"create","object":"Directory","value":{"authentik-ldap":{"@type":"Ldap","description":"Authentik LDAP Outpost — IMAP/SMTP パスワード認証 + Stalwart 内蔵 OAuth2 のバックエンド","url":"ldap://ak-outpost-stalwart-ldap-outpost.prod.svc.cluster.local:389","baseDn":"dc=ldap,dc=goauthentik,dc=io","bindDn":"cn=stalwart-service,ou=users,dc=ldap,dc=goauthentik,dc=io","bindSecret":{"@type":"EnvironmentVariable","variableName":"STALWART_JOB_TOKEN"},"filterLogin":"(&(objectClass=inetOrgPerson)(|(mail=?)(uid=?)))","filterMailbox":"(&(objectClass=inetOrgPerson)(|(mail=?)(mailAlias=?)))","filterMemberOf":"(&(objectClass=group)(member=?))","attrEmail":{"mail":true},"attrEmailAlias":{"mailAlias":true},"attrMemberOf":{"memberOf":true},"groupClass":"group"}}}
     {"@type":"create","object":"Directory","value":{"authentik-oidc":{"@type":"Oidc","description":"Authentik OIDC — Roundcube OAUTHBEARER 検証","issuerUrl":"https://idp.aramakisai.com/application/o/roundcube/","requireAudience":"roundcube","requireScopes":{"openid":true,"email":true},"claimUsername":"preferred_username","usernameDomain":"aramakisai.com","claimName":"preferred_username","claimGroups":"groups"}}}
