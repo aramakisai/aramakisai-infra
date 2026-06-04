@@ -27,11 +27,11 @@ data:
     // base_url ではなく request_url を使う — resolve_url() がこちらを優先するため
     $config['request_url'] = 'https://webmail.aramakisai.com';
 
-    // Authentik OAuth2 ログイン
+    // Authentik OAuth2 ログイン (aramakisai-mail: Roundcube + Thunderbird 共用アプリ)
     $config['oauth_provider'] = 'generic';
     $config['oauth_provider_name'] = 'Authentik';
-    $config['oauth_client_id'] = 'roundcube';  // Authentik 側で同じ値を設定すること
-    $config['oauth_client_secret'] = getenv('ROUNDCUBE_OAUTH2_CLIENT_SECRET');
+    $config['oauth_client_id'] = 'aramakisai-mail';
+    $config['oauth_client_secret'] = getenv('MAIL_OAUTH2_CLIENT_SECRET');
     $config['oauth_auth_uri'] = 'https://idp.aramakisai.com/application/o/authorize/';
     $config['oauth_token_uri'] = 'https://idp.aramakisai.com/application/o/token/';
     $config['oauth_identity_uri'] = 'https://idp.aramakisai.com/application/o/userinfo/';
@@ -39,7 +39,7 @@ data:
     $config['oauth_identity_fields'] = ['email'];
     $config['oauth_login_redirect'] = true;
 
-    // IMAP/SMTP に OAUTHBEARER を使用 (Stalwart が authentik-oidc で token を検証)
+    // IMAP/SMTP に OAUTHBEARER を使用 (Stalwart が aramakisai-mail issuer で token を検証)
     $config['imap_auth_type'] = 'OAUTHBEARER';
     $config['smtp_auth_type'] = 'OAUTHBEARER';
 
@@ -52,8 +52,3 @@ data:
     ];
 
     $config['product_name'] = '荒牧祭 Webmail';
-    $config['support_url'] = '';
-
-    // デバッグ (ログイン問題解決後に削除)
-    $config['debug_level'] = 4;
-    $config['imap_debug'] = true;
