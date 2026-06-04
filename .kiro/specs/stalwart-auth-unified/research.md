@@ -77,6 +77,24 @@
 - 要件 1〜8, 10: ✅ 全て満たす
 - 要件 9: ❌ v0.16 では不可（v0.17+ での改善待ちまたは外部プロキシで回避）
 
+## 追加調査（2026-06-05）
+
+### Roundcube App Password 自動生成プラグイン（有望）
+- GitHub: `laurisvr/stalwart_apppasswords`（要確認）
+- 仕組み:
+  1. ユーザーが Roundcube に Authentik OIDC でログイン
+  2. プラグインが Stalwart API (`/api/account/auth` 等) を叩きその場でアプリパスワードを自動生成
+  3. Roundcube は OAUTHBEARER でなく**自動生成されたアプリパスワード（PLAIN）**で IMAP 接続
+  4. App Password は Stalwart 内部 DB に保存されるためディレクトリを迂回できる可能性
+- 利点: `directoryId` 問題を回避、Roundcube の OIDC ログインはそのまま維持
+- 要確認: App Password が `Authentication.directoryId=OIDC` 環境下でも PLAIN auth として機能するか
+- 参照 GitHub issue: `stalwartlabs/stalwart #2626`（Precreate users with external OIDC provider）
+
+### 却下した案
+- **Stalwart 組み込み OAuth2 サーバー**: Authentik セッションでログインできないため却下
+
+---
+
 ## 解決策の候補
 
 ### 案 A: Dex（OIDC プロキシ）を Stalwart の前段に置く
