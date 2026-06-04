@@ -12,8 +12,11 @@ metadata:
   labels:
     app: stalwart
   annotations:
-    # cert-manager が mail-tls Secret を更新したら Reloader が自動で rollout restart を発行する
-    secret.reloader.stakater.com/reload: "mail-tls"
+    # mail-tls: cert-manager が TLS 証明書を更新したら再起動
+    # stalwart-secrets: STALWART_ADMIN_SECRET がローテーションされたら再起動
+    #   → STALWART_RECOVERY_ADMIN は Pod 起動時の K8s env 展開で解決するため、
+    #     再起動しないと旧パスワードのまま残り PostSync Job が 401 になる
+    secret.reloader.stakater.com/reload: "mail-tls,stalwart-secrets"
 spec:
   serviceName: stalwart-mail
   replicas: 1   # メールサーバーはシングルインスタンス推奨 (HA は複雑)
