@@ -49,6 +49,11 @@ spec:
               value: "sqlite"
             - name: ROUNDCUBEMAIL_SKIN
               value: "elastic"
+            - name: STALWART_WEBUI_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: roundcube-secrets
+                  key: STALWART_WEBUI_CLIENT_SECRET
             - name: ROUNDCUBEMAIL_DES_KEY
               valueFrom:
                 secretKeyRef:
