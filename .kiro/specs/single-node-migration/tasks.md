@@ -185,8 +185,8 @@
   - _Boundary: raspberry-pi/recovery/recovery.service_
   - _Depends: 5.1, 5.2_
 
-- [ ] 6. 移行後検証と Grafana Cloud Webhook 連携
-- [ ] 6.1 移行後の全サービス動作確認と CNPG バックアップ確認を行う
+- [x] 6. 移行後検証と Grafana Cloud Webhook 連携
+- [x] 6.1 移行後の全サービス動作確認と CNPG バックアップ確認を行う
   - `kubectl top nodes` で prod-node-1 のメモリ使用率が 60% 以下であることを確認する
   - `kubectl get applications -n argocd` で全 Application が `Synced / Healthy` であることを確認する
   - Authentik（`https://idp.aramakisai.com`）・Directus（`https://api.aramakisai.com/admin`）・Roundcube（`https://webmail.aramakisai.com`）への疎通を確認する
