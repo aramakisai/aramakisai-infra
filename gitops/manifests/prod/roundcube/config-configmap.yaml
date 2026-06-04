@@ -27,11 +27,11 @@ data:
     // base_url ではなく request_url を使う — resolve_url() がこちらを優先するため
     $config['request_url'] = 'https://webmail.aramakisai.com';
 
-    // Authentik OAuth2 ログイン (stalwart-webui: Roundcube + アカウントポータル共用 Public client)
+    // Authentik OAuth2 ログイン (aramakisai-mail: Roundcube 用 Confidential client)
     $config['oauth_provider'] = 'generic';
     $config['oauth_provider_name'] = 'Authentik';
-    $config['oauth_client_id'] = 'stalwart-webui';
-    $config['oauth_client_secret'] = getenv('STALWART_WEBUI_CLIENT_SECRET');
+    $config['oauth_client_id'] = 'aramakisai-mail';
+    $config['oauth_client_secret'] = getenv('MAIL_OAUTH2_CLIENT_SECRET');
     $config['oauth_auth_uri'] = 'https://idp.aramakisai.com/application/o/authorize/';
     $config['oauth_token_uri'] = 'https://idp.aramakisai.com/application/o/token/';
     $config['oauth_identity_uri'] = 'https://idp.aramakisai.com/application/o/userinfo/';
