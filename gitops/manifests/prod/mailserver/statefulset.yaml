@@ -1,0 +1,147 @@
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mailserver
+  namespace: prod
+  labels:
+    app: mailserver
+  annotations:
+    secret.reloader.stakater.com/reload: "mail-tls,mailserver-secrets,mailserver-config"
+spec:
+  serviceName: mailserver
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mailserver
+  template:
+    metadata:
+      labels:
+        app: mailserver
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      terminationGracePeriodSeconds: 30
+      nodeSelector:
+        kubernetes.io/hostname: prod-node-1
+      containers:
+        - name: mailserver
+          image: mailserver/docker-mailserver:14.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: smtp
+              containerPort: 25
+            - name: submission
+              containerPort: 587
+            - name: smtps
+              containerPort: 465
+            - name: imap
+              containerPort: 143
+            - name: imaps
+              containerPort: 993
+          env:
+            - name: OVERRIDE_HOSTNAME
+              value: "mail.aramakisai.com"
+            - name: TLS_LEVEL
+              value: "modern"
+            # LDAP 認証構成
+            - name: LDAP_ENABLED
+              value: "1"
+            - name: LDAP_SERVER_HOST
+              value: "authentik-ldap-outpost.prod.svc.cluster.local"
+            - name: LDAP_SEARCH_BASE
+              value: "dc=ldap,dc=goauthentik,dc=io"
+            - name: LDAP_BIND_DN
+              value: "cn=stalwart-service,ou=users,dc=ldap,dc=goauthentik,dc=io"
+            - name: LDAP_BIND_PW
+              valueFrom:
+                secretKeyRef:
+                  name: mailserver-secrets
+                  key: AUTHENTIK_LDAP_OUTPOST_TOKEN
+            - name: LDAP_QUERY_FILTER_USER
+              value: "(&(objectClass=inetOrgPerson)(mail=%s)(ak-active=true))"
+            - name: LDAP_QUERY_FILTER_ALIAS
+              value: "(&(objectClass=inetOrgPerson)(mailAlias=%s)(ak-active=true))"
+            - name: DOVECOT_USER_FILTER
+              value: "(&(objectClass=inetOrgPerson)(mail=%u)(ak-active=true))"
+            - name: DOVECOT_PASS_FILTER
+              value: "(&(objectClass=inetOrgPerson)(mail=%u)(ak-active=true))"
+            # SMTP リレー設定 (Resend)
+            - name: RELAYHOST
+              value: "[smtp.resend.com]:587"
+            - name: RELAY_USER
+              value: "resend"
+            - name: RELAY_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mailserver-secrets
+                  key: RESEND_API_KEY
+            # セキュリティ・スパム設定
+            - name: ENABLE_RSPAMD
+              value: "1"
+            - name: ENABLE_CLAMAV
+              value: "0"
+            # TLS 設定 (cert-manager 証明書マウント位置の指定)
+            - name: SSL_TYPE
+              value: "manual"
+            - name: SSL_CERT_PATH
+              value: "/etc/dms/tls/tls.crt"
+            - name: SSL_KEY_PATH
+              value: "/etc/dms/tls/tls.key"
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          volumeMounts:
+            - name: data
+              mountPath: /var/mail
+            - name: dms-config
+              mountPath: /tmp/docker-mailserver/dovecot.cf
+              subPath: dovecot.cf
+              readOnly: true
+            - name: dovecot-oauth2
+              mountPath: /etc/dovecot/dovecot-oauth2.conf.ext
+              subPath: dovecot-oauth2.conf.ext
+              readOnly: true
+            - name: tls
+              mountPath: /etc/dms/tls
+              readOnly: true
+            - name: dkim-keys
+              mountPath: /tmp/docker-mailserver/opendkim/keys
+              readOnly: true
+          livenessProbe:
+            tcpSocket:
+              port: 25
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            tcpSocket:
+              port: 25
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: mailserver-data
+        - name: dms-config
+          configMap:
+            name: mailserver-config
+            items:
+              - key: dovecot.cf
+                path: dovecot.cf
+        - name: dovecot-oauth2
+          configMap:
+            name: mailserver-config
+            items:
+              - key: dovecot-oauth2.conf.ext
+                path: dovecot-oauth2.conf.ext
+        - name: tls
+          secret:
+            secretName: mail-tls
+        - name: dkim-keys
+          secret:
+            secretName: mailserver-dkim
+            optional: true

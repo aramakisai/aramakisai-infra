@@ -1,0 +1,21 @@
+---
+apiVersion: volsync.backube/v1alpha1
+kind: ReplicationSource
+metadata:
+  name: mailserver-backup
+  namespace: prod
+spec:
+  sourcePVC: mailserver-data
+  trigger:
+    schedule: "0 */2 * * *"
+  restic:
+    pruneIntervalDays: 1
+    repository: mailserver-restic-secret
+    retain:
+      hourly: 12
+      daily: 7
+    copyMethod: Direct
+    moverSecurityContext:
+      runAsUser: 0
+      runAsGroup: 0
+      fsGroup: 0

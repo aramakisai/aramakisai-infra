@@ -1,0 +1,28 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mailserver-config
+  namespace: prod
+data:
+  # Dovecot 認証設定オーバーライド
+  dovecot.cf: |
+    # OAUTHBEARER 認証メカニズムの有効化
+    auth_mechanisms = plain login oauthbearer xoauth2
+
+    # OAUTHBEARER 用 passdb の追加定義
+    passdb {
+      driver = oauth2
+      mechanisms = oauthbearer xoauth2
+      args = /etc/dovecot/dovecot-oauth2.conf.ext
+    }
+  # Dovecot OIDC トークン検証設定
+  dovecot-oauth2.conf.ext: |
+    # Authentik UserInfo エンドポイント経由でのトークン検証
+    tokeninfo_url = https://idp.aramakisai.com/application/o/userinfo/
+
+    # トークンの所有メールアドレスをユーザー名（メールボックス名）としてバインド
+    username_attribute = email
+
+    # クラスター内通信の TLS 検証を有効化
+    tls_verify_peer = yes
