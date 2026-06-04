@@ -38,11 +38,11 @@ spec:
               containerPort: 80
           env:
             - name: ROUNDCUBEMAIL_DEFAULT_HOST
-              value: "ssl://stalwart-mail.prod.svc.cluster.local"
+              value: "ssl://mailserver.prod.svc.cluster.local"
             - name: ROUNDCUBEMAIL_DEFAULT_PORT
               value: "993"
             - name: ROUNDCUBEMAIL_SMTP_SERVER
-              value: "tls://stalwart-mail.prod.svc.cluster.local"
+              value: "tls://mailserver.prod.svc.cluster.local"
             - name: ROUNDCUBEMAIL_SMTP_PORT
               value: "587"
             - name: ROUNDCUBEMAIL_DB_TYPE
