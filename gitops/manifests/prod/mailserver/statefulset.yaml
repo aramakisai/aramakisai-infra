@@ -87,9 +87,9 @@ spec:
             - name: SSL_TYPE
               value: "manual"
             - name: SSL_CERT_PATH
-              value: "/etc/dms/tls/tls.crt"
+              value: "/etc/dms/tls-secret/tls.crt"
             - name: SSL_KEY_PATH
-              value: "/etc/dms/tls/tls.key"
+              value: "/etc/dms/tls-secret/tls.key"
           resources:
             requests:
               cpu: "200m"
@@ -109,7 +109,7 @@ spec:
               subPath: dovecot-oauth2.conf.ext
               readOnly: true
             - name: tls
-              mountPath: /etc/dms/tls
+              mountPath: /etc/dms/tls-secret
               readOnly: true
             - name: dkim-keys
               mountPath: /tmp/docker-mailserver/opendkim/keys
