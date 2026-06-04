@@ -108,30 +108,71 @@ settings.ndjson の `destroy Directory` + `create Directory` でアカウント 
 **解決策**: VolSync バックアップは必ず settings.ndjson 適用済み・LDAP 接続確認済みの状態で取ること。  
 `stalwart-cli query Account` で accounts が存在することを確認してからバックアップを信頼する。
 
-### Stalwart v0.16 管理 API の認証
+### Stalwart v0.16 管理 API の認証 と PostSync Job 障害
 
-v0.16 で `STALWART_ADMIN_SECRET` は廃止。API キー (Bearer token) 方式に変更。  
-API キーを失った場合の正式な復旧手順:
+#### 根本原因（繰り返し発生する既知の障害）
+
+`stalwart-settings-apply` PostSync Job が HTTP 401 で失敗するパターンが 2 つある。
+
+**パターン A: STALWART_API_KEY が DB に存在しない**
+
+- Stalwart の API キーは Infisical に保存されているだけでは機能しない。Stalwart の DB に明示的に作成する必要がある
+- DB がリセット・初期化されると API キーも消える（v0.16.6 へのアップグレード時に発生した）
+- Job ログ: `error: authentication failed (HTTP 401)`
+
+**パターン B: Authentication.directoryId = authentik-oidc のときは --user/--password も通らない**
+
+- `settings-update.ndjson` で `Authentication.directoryId` が `authentik-oidc` に設定されると、HTTP API の認証もすべて OIDC バックエンドに回される
+- OIDC バックエンドはユーザー名/パスワード形式を受け付けないため `--user admin --password` も 401 になる
+- Stalwart ログ: `reason = "Unsupported credentials type for OIDC backend"`
+- **つまり: API キーを失ったら管理者パスワードでも入れない。Recovery mode 必須**
+
+#### 診断コマンド
 
 ```bash
-# 1. STALWART_RECOVERY_ADMIN を環境変数として StatefulSet に追加
-kubectl create secret generic stalwart-recovery -n prod \
-  --from-literal=credentials="admin:$(openssl rand -hex 16)"
+# 1. Job の失敗確認
+make kubectl ARGS="get application stalwart -n argocd -o json" | \
+  jq '.status.operationState.syncResult.resources[] | select(.hookPhase=="Failed")'
 
-# statefulset.yaml に以下を追加してデプロイ:
-# - name: STALWART_RECOVERY_ADMIN
-#   valueFrom:
-#     secretKeyRef:
-#       name: stalwart-recovery
-#       key: credentials
+# 2. Stalwart ログで認証エラーを確認
+make kubectl ARGS="logs -n prod stalwart-0 --since=10m" | grep -i "auth\|401"
 
-# 2. recovery admin で settings.ndjson を適用
-stalwart-cli --url https://mail.aramakisai.com \
-  --user admin --password "<recovery-password>" \
-  apply --file /tmp/stalwart-settings.ndjson
-
-# 3. 完了後、STALWART_RECOVERY_ADMIN を削除（セキュリティ上必須）
+# 3. API キーの疎通テスト (debug job を使う)
+# /tmp/stalwart-debug-job.yaml を参照
 ```
+
+#### 復旧手順: Recovery mode で API キーを再作成する
+
+```bash
+# 1. Recovery admin 用パスワードを生成して Secret に登録
+RECOVERY_PASS=$(openssl rand -hex 16)
+make kubectl ARGS="create secret generic stalwart-recovery -n prod \
+  --from-literal=credentials=admin:${RECOVERY_PASS} --dry-run=client -o yaml" | \
+  make kubectl ARGS="apply -f -"
+
+# 2. statefulset.yaml に STALWART_RECOVERY_ADMIN を追加してコミット → ArgoCD sync
+# spec.template.spec.containers[0].env に追記:
+#   - name: STALWART_RECOVERY_ADMIN
+#     valueFrom:
+#       secretKeyRef:
+#         name: stalwart-recovery
+#         key: credentials
+
+# 3. port-forward して recovery admin で API キーを作成
+make kubectl ARGS="port-forward -n prod pod/stalwart-0 8080:8080" &
+stalwart-cli --url http://localhost:8080 \
+  --user admin --password "$RECOVERY_PASS" \
+  apply --stdin <<'EOF'
+{"@type":"create","object":"ApiKey","value":{"api-key-job":{"description":"PostSync Job 用","roles":["superuser"],"secret":"<STALWART_API_KEY の値>"}}}
+EOF
+
+# 4. STALWART_RECOVERY_ADMIN を statefulset.yaml から削除してコミット → ArgoCD sync
+# 5. stalwart-recovery Secret を削除
+make kubectl ARGS="delete secret stalwart-recovery -n prod"
+```
+
+**注意**: `<STALWART_API_KEY の値>` は Infisical の `STALWART_API_KEY` の値をそのまま使う。  
+API キーの値自体は変えない（Infisical に保存済みの値と一致させる必要がある）。
 
 ---
 
