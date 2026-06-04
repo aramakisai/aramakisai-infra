@@ -54,12 +54,12 @@ spec:
             - name: LDAP_SEARCH_BASE
               value: "dc=ldap,dc=goauthentik,dc=io"
             - name: LDAP_BIND_DN
-              value: "cn=stalwart-service,ou=users,dc=ldap,dc=goauthentik,dc=io"
+              value: "cn=ldapservice,ou=users,dc=ldap,dc=goauthentik,dc=io"
             - name: LDAP_BIND_PW
               valueFrom:
                 secretKeyRef:
                   name: mailserver-secrets
-                  key: MAILSERVER_LDAP_TOKEN
+                  key: LDAP_BIND_PASSWORD
             - name: LDAP_QUERY_FILTER_USER
               value: "(&(objectClass=inetOrgPerson)(mail=%s)(ak-active=true))"
             - name: LDAP_QUERY_FILTER_ALIAS
