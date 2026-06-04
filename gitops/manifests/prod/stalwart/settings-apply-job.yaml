@@ -182,31 +182,6 @@ spec:
                 echo "    ⚠ Domain または Ldap Directory が見つかりません。スキップします。"
               fi
 
-              # ── 古い Directory を削除 ────────────────────────────────────
-              # settings-update.ndjson は毎 sync で LDAP+OIDC を新規作成するため蓄積する。
-              # 最新の LDAP (Domain が参照) と最新の OIDC (Authentication が参照) のみ残す。
-              echo ">>> 古い Directory を削除中..."
-              OIDC_DIR_ID=$(/tmp/stalwart-cli \
-                --url "$STALWART_URL" \
-                --user admin --password "$STALWART_ADMIN_SECRET" \
-                --no-color \
-                query Directory 2>/dev/null | awk '/Oidc/ {print $1; exit}')
-
-              /tmp/stalwart-cli \
-                --url "$STALWART_URL" \
-                --user admin --password "$STALWART_ADMIN_SECRET" \
-                --no-color \
-                query Directory 2>/dev/null | awk 'NR>1 {print $1}' | while read DIR_ID; do
-                if [ "$DIR_ID" != "$LDAP_DIR_ID" ] && [ "$DIR_ID" != "$OIDC_DIR_ID" ]; then
-                  printf '{"@type":"destroy","object":"Directory","id":"%s"}\n' "$DIR_ID" \
-                    | /tmp/stalwart-cli \
-                        --url "$STALWART_URL" \
-                        --user admin --password "$STALWART_ADMIN_SECRET" \
-                        apply --stdin 2>&1 | grep -v "^Plan\|^Done" || true
-                fi
-              done
-              echo "    ✅ Directory クリーンアップ完了"
-
               echo "    ✅ 設定の適用が完了しました"
 
               # ── Stalwart Pod を再起動して設定をロード ────────────────────
