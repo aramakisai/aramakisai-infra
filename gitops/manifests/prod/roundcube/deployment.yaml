@@ -54,11 +54,6 @@ spec:
                 secretKeyRef:
                   name: roundcube-secrets
                   key: ROUNDCUBE_DES_KEY
-            - name: MAIL_OAUTH2_CLIENT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: roundcube-secrets
-                  key: MAIL_OAUTH2_CLIENT_SECRET
           volumeMounts:
             - name: db
               mountPath: /var/roundcube/db
