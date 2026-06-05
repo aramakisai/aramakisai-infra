@@ -5,21 +5,28 @@ metadata:
   name: mailserver-config
   namespace: prod
 data:
+  # LDAP passdb オーバーライド:
+  # result_failure = continue により、LDAP 認証失敗時に oauth2 passdb へ fallthrough させる
+  # (OAUTHBEARER を使う Roundcube が LDAP bind 失敗後に oauth2 passdb で認証できるようにする)
+  auth-ldap.conf.ext: |
+    passdb {
+      driver = ldap
+      args = /etc/dovecot/dovecot-ldap.conf.ext
+      result_failure = continue
+      result_internalfail = continue
+    }
+    userdb {
+      driver = ldap
+      args = /etc/dovecot/dovecot-ldap.conf.ext
+    }
   # Dovecot 認証設定オーバーライド
   dovecot.cf: |
-    # OAUTHBEARER 認証メカニズムの有効化
     auth_mechanisms = plain login oauthbearer xoauth2
 
-    # OAUTHBEARER 用 passdb の追加定義
+    # OAUTHBEARER: Authentik introspection endpoint でトークン検証
+    # client_secret は MAIL_OAUTH2_CLIENT_SECRET 環境変数から展開
     passdb {
       driver = oauth2
       mechanisms = oauthbearer xoauth2
-      args = /etc/dovecot/dovecot-oauth2.conf.ext
+      args = introspection_url=https://idp.aramakisai.com/application/o/roundcube/introspect/ introspection_mode=post client_id=aramakisai-mail client_secret=%{env:MAIL_OAUTH2_CLIENT_SECRET} username_attribute=email active_attribute=active active_value=true
     }
-  # Dovecot OIDC トークン検証設定
-  dovecot-oauth2.conf.ext: |
-    # Authentik UserInfo エンドポイント経由でのトークン検証
-    tokeninfo_url = https://idp.aramakisai.com/application/o/userinfo/
-
-    # トークンの所有メールアドレスをユーザー名（メールボックス名）としてバインド
-    username_attribute = email

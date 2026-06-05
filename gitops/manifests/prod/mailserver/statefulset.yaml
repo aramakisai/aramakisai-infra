@@ -71,6 +71,15 @@ spec:
               value: "(&(objectClass=inetOrgPerson)(mail=%u)(ak-active=true))"
             - name: DOVECOT_PASS_FILTER
               value: "(&(objectClass=inetOrgPerson)(mail=%u)(ak-active=true))"
+            # auth_bind=yes: Dovecot が LDAP に直接バインドしてユーザー認証 (PLAIN auth)
+            - name: DOVECOT_AUTH_BIND
+              value: "yes"
+            # Roundcube OAuth2 クライアントシークレット (OAUTHBEARER introspection 用)
+            - name: MAIL_OAUTH2_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: mailserver-secrets
+                  key: MAIL_OAUTH2_CLIENT_SECRET
             # SMTP リレー設定 (Resend)
             - name: RELAYHOST
               value: "[smtp.resend.com]:587"
@@ -107,9 +116,9 @@ spec:
               mountPath: /tmp/docker-mailserver/dovecot.cf
               subPath: dovecot.cf
               readOnly: true
-            - name: dovecot-oauth2
-              mountPath: /etc/dovecot/dovecot-oauth2.conf.ext
-              subPath: dovecot-oauth2.conf.ext
+            - name: dms-config
+              mountPath: /etc/dovecot/conf.d/auth-ldap.conf.ext
+              subPath: auth-ldap.conf.ext
               readOnly: true
             - name: tls
               mountPath: /etc/dms/tls-secret
@@ -137,12 +146,8 @@ spec:
             items:
               - key: dovecot.cf
                 path: dovecot.cf
-        - name: dovecot-oauth2
-          configMap:
-            name: mailserver-config
-            items:
-              - key: dovecot-oauth2.conf.ext
-                path: dovecot-oauth2.conf.ext
+              - key: auth-ldap.conf.ext
+                path: auth-ldap.conf.ext
         - name: tls
           secret:
             secretName: mail-tls
