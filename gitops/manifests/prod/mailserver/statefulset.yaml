@@ -85,7 +85,8 @@ spec:
                   name: mailserver-secrets
                   key: MAIL_OAUTH2_CLIENT_SECRET
             # SMTP リレー設定 (Resend)
-            - name: RELAYHOST
+            # DMS は RELAYHOST ではなく DEFAULT_RELAY_HOST を使う
+            - name: DEFAULT_RELAY_HOST
               value: "[smtp.resend.com]:587"
             - name: RELAY_USER
               value: "resend"
@@ -116,6 +117,10 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /var/mail
+            - name: dms-config
+              mountPath: /tmp/docker-mailserver/postfix-main.cf
+              subPath: postfix-main.cf
+              readOnly: true
             - name: dms-config
               mountPath: /tmp/docker-mailserver/dovecot.cf
               subPath: dovecot.cf
@@ -152,6 +157,8 @@ spec:
           configMap:
             name: mailserver-config
             items:
+              - key: postfix-main.cf
+                path: postfix-main.cf
               - key: dovecot.cf
                 path: dovecot.cf
               - key: auth-ldap.conf.ext

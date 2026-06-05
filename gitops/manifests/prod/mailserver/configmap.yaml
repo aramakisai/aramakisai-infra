@@ -5,6 +5,11 @@ metadata:
   name: mailserver-config
   namespace: prod
 data:
+  # Postfix 設定オーバーライド:
+  # virtual_mailbox_domains から LDAP lookup を除外 (query_filter が空で Operations error になるため)
+  # /etc/postfix/vhost に aramakisai.com が静的に書かれているのでそれだけで十分
+  postfix-main.cf: |
+    virtual_mailbox_domains = /etc/postfix/vhost
   # LDAP passdb オーバーライド:
   # result_failure = continue により、LDAP 認証失敗時に oauth2 passdb へ fallthrough させる
   # (OAUTHBEARER を使う Roundcube が LDAP bind 失敗後に oauth2 passdb で認証できるようにする)
