@@ -42,6 +42,7 @@ if ACCEPTED_GUILD_ID:
 
 return {
     "attributes.avatar": avatar_base64,
+    "attributes.mailAlias": [],
     "groups": user_groups
 }
 EOT

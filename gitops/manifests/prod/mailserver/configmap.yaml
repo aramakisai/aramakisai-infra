@@ -26,8 +26,3 @@ data:
 
     # クラスター内通信の TLS 検証を有効化
     tls_verify_peer = yes
-
-  # Postfix 仮想エイリアス設定
-  postfix-virtual.cf: |
-    postmaster@aramakisai.com admin@aramakisai.com
-    abuse@aramakisai.com admin@aramakisai.com

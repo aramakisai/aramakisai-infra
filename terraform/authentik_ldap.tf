@@ -40,4 +40,7 @@ resource "authentik_user" "dms_service" {
   username = "mailserver-service"
   name     = "DMS LDAP Service Account"
   password = var.mailserver_ldap_bind_password
+  attributes = jsonencode({
+    mailAlias = []
+  })
 }
