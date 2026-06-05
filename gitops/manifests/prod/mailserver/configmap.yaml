@@ -23,6 +23,3 @@ data:
 
     # トークンの所有メールアドレスをユーザー名（メールボックス名）としてバインド
     username_attribute = email
-
-    # クラスター内通信の TLS 検証を有効化
-    tls_verify_peer = yes
