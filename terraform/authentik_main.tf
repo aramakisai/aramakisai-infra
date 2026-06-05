@@ -35,3 +35,8 @@ data "authentik_property_mapping_provider_scope" "oauth_scope_profile" {
 data "authentik_property_mapping_provider_scope" "oauth_scope_email" {
   managed = "goauthentik.io/providers/oauth2/scope-email"
 }
+
+# デフォルト自己署名証明書（RS256署名用）
+data "authentik_certificate_key_pair" "default" {
+  name = "authentik Self-signed Certificate"
+}

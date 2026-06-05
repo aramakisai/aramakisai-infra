@@ -18,6 +18,7 @@ resource "authentik_provider_oauth2" "roundcube" {
   name          = "Roundcube"
   client_id     = "aramakisai-mail"
   client_secret = var.roundcube_oauth2_client_secret
+  signing_key   = data.authentik_certificate_key_pair.default.id
 
   authorization_flow = data.authentik_flow.default_authorization.id
   invalidation_flow  = data.authentik_flow.default_invalidation.id
@@ -50,6 +51,7 @@ resource "authentik_provider_oauth2" "argocd" {
   name          = "ArgoCD"
   client_id     = "argocd"
   client_secret = var.argocd_oidc_client_secret
+  signing_key   = data.authentik_certificate_key_pair.default.id
 
   authorization_flow = data.authentik_flow.default_authorization.id
   invalidation_flow  = data.authentik_flow.default_invalidation.id
@@ -83,6 +85,7 @@ resource "authentik_provider_oauth2" "cloudflare" {
   name          = "Cloudflare Access"
   client_id     = var.authentik_cf_client_id
   client_secret = var.authentik_cf_client_secret
+  signing_key   = data.authentik_certificate_key_pair.default.id
 
   authorization_flow = data.authentik_flow.default_authorization.id
   invalidation_flow  = data.authentik_flow.default_invalidation.id
