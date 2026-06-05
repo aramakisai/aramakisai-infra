@@ -23,10 +23,9 @@ data:
   dovecot.cf: |
     auth_mechanisms = plain login oauthbearer xoauth2
 
-    # OAUTHBEARER: Authentik introspection endpoint でトークン検証
-    # client_secret は MAIL_OAUTH2_CLIENT_SECRET 環境変数から展開
+    # OAUTHBEARER: Authentik introspection endpoint でトークン検証 (ファイル参照)
     passdb {
       driver = oauth2
       mechanisms = oauthbearer xoauth2
-      args = introspection_url=https://idp.aramakisai.com/application/o/roundcube/introspect/ introspection_mode=post client_id=aramakisai-mail client_secret=%{env:MAIL_OAUTH2_CLIENT_SECRET} username_attribute=email active_attribute=active active_value=true
+      args = /etc/dovecot/dovecot-oauth2.conf.ext
     }

@@ -120,6 +120,10 @@ spec:
               mountPath: /etc/dovecot/conf.d/auth-ldap.conf.ext
               subPath: auth-ldap.conf.ext
               readOnly: true
+            - name: dovecot-oauth2
+              mountPath: /etc/dovecot/dovecot-oauth2.conf.ext
+              subPath: dovecot-oauth2.conf.ext
+              readOnly: true
             - name: tls
               mountPath: /etc/dms/tls-secret
               readOnly: true
@@ -148,6 +152,9 @@ spec:
                 path: dovecot.cf
               - key: auth-ldap.conf.ext
                 path: auth-ldap.conf.ext
+        - name: dovecot-oauth2
+          secret:
+            secretName: dovecot-oauth2-config
         - name: tls
           secret:
             secretName: mail-tls
