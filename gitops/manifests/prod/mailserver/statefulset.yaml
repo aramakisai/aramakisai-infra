@@ -54,7 +54,7 @@ spec:
             - name: LDAP_SEARCH_BASE
               value: "dc=ldap,dc=goauthentik,dc=io"
             - name: LDAP_BIND_DN
-              value: "cn=ldapservice,ou=users,dc=ldap,dc=goauthentik,dc=io"
+              value: "cn=ak-outpost-5b9b4cd437cd4478a011a2897402a5b9,ou=users,dc=ldap,dc=goauthentik,dc=io"
             - name: LDAP_BIND_PW
               valueFrom:
                 secretKeyRef:
