@@ -14,10 +14,10 @@ done
 
 echo "=== 1. Terraform Apply ==="
 if [ -f terraform/secrets.tfvars ]; then
-    (cd terraform && terraform apply -var-file="secrets.tfvars" ${AUTO_APPROVE})
+    (cd terraform && infisical run -- terraform apply -var-file="secrets.tfvars" ${AUTO_APPROVE})
 else
     echo "Warning: secrets.tfvars not found. Running terraform apply..."
-    (cd terraform && terraform apply ${AUTO_APPROVE})
+    (cd terraform && infisical run -- terraform apply ${AUTO_APPROVE})
 fi
 
 echo "=== 2. Waiting for Tailscale SSH Connection ==="

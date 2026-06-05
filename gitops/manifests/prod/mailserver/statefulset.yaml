@@ -64,6 +64,8 @@ spec:
               value: "(&(objectClass=inetOrgPerson)(mail=%s)(ak-active=true))"
             - name: LDAP_QUERY_FILTER_ALIAS
               value: "(&(objectClass=inetOrgPerson)(mailAlias=%s)(ak-active=true))"
+            - name: LDAP_QUERY_FILTER_GROUP
+              value: "(&(objectClass=group)(mail=%s)(ak-active=true))"
             - name: DOVECOT_USER_FILTER
               value: "(&(objectClass=inetOrgPerson)(mail=%u)(ak-active=true))"
             - name: DOVECOT_PASS_FILTER
