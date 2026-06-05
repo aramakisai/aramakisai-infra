@@ -150,3 +150,10 @@ variable "discord_guild_id" {
   type        = string
   default     = ""
 }
+
+variable "mailserver_ldap_bind_password" {
+  description = "LDAP Bind Password for DMS service account"
+  type        = string
+  sensitive   = true
+  default     = ""
+}

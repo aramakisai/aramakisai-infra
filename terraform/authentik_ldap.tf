@@ -34,3 +34,10 @@ resource "authentik_outpost" "dms_ldap" {
     log_level               = "info"
   })
 }
+
+# DMS LDAP 検索・バインド用ユーザー
+resource "authentik_user" "dms_service" {
+  username = "mailserver-service"
+  name     = "DMS LDAP Service Account"
+  password = var.mailserver_ldap_bind_password
+}

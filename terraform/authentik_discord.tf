@@ -53,8 +53,8 @@ resource "authentik_source_oauth" "discord" {
   slug          = "discord"
   provider_type = "discord"
 
-  consumer_key    = var.discord_client_id
-  consumer_secret = var.discord_client_secret
+  consumer_key    = var.discord_client_id != "" ? var.discord_client_id : "dummy_discord_client_id"
+  consumer_secret = var.discord_client_secret != "" ? var.discord_client_secret : "dummy_discord_client_secret"
 
   authentication_flow = data.authentik_flow.default_source_authentication.id
   enrollment_flow     = data.authentik_flow.default_source_enrollment.id
