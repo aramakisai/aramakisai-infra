@@ -94,3 +94,59 @@ variable "k3s_token" {
   sensitive   = true
   # 環境変数 TF_VAR_k3s_token で渡す
 }
+
+# ============================================================
+# Authentik IaC
+# ============================================================
+
+variable "authentik_url" {
+  description = "Authentik API Endpoint URL"
+  type        = string
+  default     = "https://idp.aramakisai.com"
+}
+
+variable "authentik_token" {
+  description = "Authentik Admin API Token"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "discord_client_id" {
+  description = "Discord OAuth2 Client ID"
+  type        = string
+  default     = ""
+}
+
+variable "discord_client_secret" {
+  description = "Discord OAuth2 Client Secret"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "roundcube_oauth2_client_secret" {
+  description = "Roundcube OAuth2 Client Secret (aramakisai-mail)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "argocd_oidc_client_secret" {
+  description = "ArgoCD OIDC Client Secret (argocd)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "cloudflare_access_redirect_uris" {
+  description = "Cloudflare Access OIDC Redirect URIs"
+  type        = list(string)
+  default     = ["https://aramakisai.cloudflareaccess.com/cdn-cgi/access/callback"]
+}
+
+variable "discord_guild_id" {
+  description = "Discord Server/Guild ID to sync roles and membership from"
+  type        = string
+  default     = ""
+}

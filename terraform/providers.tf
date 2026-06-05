@@ -18,6 +18,10 @@ terraform {
       source  = "hashicorp/null"
       version = "~> 3.0"
     }
+    authentik = {
+      source  = "goauthentik/authentik"
+      version = ">= 2024.12.0"
+    }
   }
 
   # Terraform Cloud (HCP Terraform) 無料枠
@@ -45,3 +49,8 @@ provider "tailscale" {
 provider "cloudflare" {}
 
 provider "null" {}
+
+provider "authentik" {
+  url   = var.authentik_url
+  token = var.authentik_token
+}
