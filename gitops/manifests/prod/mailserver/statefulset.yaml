@@ -74,6 +74,10 @@ spec:
             # auth_bind=yes: Dovecot が LDAP に直接バインドしてユーザー認証 (PLAIN auth)
             - name: DOVECOT_AUTH_BIND
               value: "yes"
+            # Authentik LDAP は mailUidNumber/mailGidNumber/mailHomeDirectory を持たないため
+            # UID/GID に docker(5000) を使い、メールパスを静的に指定する
+            - name: DOVECOT_USER_ATTRS
+              value: "=uid=5000,=gid=5000,=home=/var/mail/%d/%n,=mail=maildir:/var/mail/%d/%n"
             # Roundcube OAuth2 クライアントシークレット (OAUTHBEARER introspection 用)
             - name: MAIL_OAUTH2_CLIENT_SECRET
               valueFrom:
