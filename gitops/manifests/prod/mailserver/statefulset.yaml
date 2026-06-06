@@ -7,7 +7,7 @@ metadata:
   labels:
     app: mailserver
   annotations:
-    secret.reloader.stakater.com/reload: "mail-tls,mailserver-secrets"
+    secret.reloader.stakater.com/reload: "mail-tls,mailserver-secrets,dovecot-oauth2-config"
     configmap.reloader.stakater.com/reload: "mailserver-config"
 spec:
   serviceName: mailserver
