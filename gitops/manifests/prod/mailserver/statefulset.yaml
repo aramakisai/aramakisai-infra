@@ -96,6 +96,8 @@ spec:
                   name: mailserver-secrets
                   key: RESEND_API_KEY
             # セキュリティ・スパム設定
+            - name: ENABLE_FAIL2BAN
+              value: "1"
             - name: ENABLE_RSPAMD
               value: "1"
             - name: ENABLE_CLAMAV
