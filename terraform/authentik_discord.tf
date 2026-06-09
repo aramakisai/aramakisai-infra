@@ -2,6 +2,12 @@
 # Discord ソーシャルログイン連携 (アバター & ロール同期)
 # ============================================================
 
+# Discord 連携済みユーザーを識別するグループ
+# このグループへの所属が他アプリへのアクセス条件になる (require-discord-link-policy)
+resource "authentik_group" "discord_linked_users" {
+  name = "discord-linked-users"
+}
+
 # 1. Discord Property Mapping (アバターおよび所属ロール/グループ同期)
 resource "authentik_property_mapping_source_oauth" "discord_sync" {
   name       = "discord-avatar-role-mapping"
@@ -34,9 +40,12 @@ if ACCEPTED_GUILD_ID:
         guild_response = client.do_request("GET", guild_url, token=token)
         discord_roles = guild_response.json().get("roles", [])
 
+        # Guild API 呼び出し成功 = Discord 連携済みとみなして連携済みグループを付与
+        user_groups.append("discord-linked-users")
+
         # attributes.discord_role_id (単数形) に Discord ロールIDを持つグループを取得
         matched_groups = Group.objects.filter(attributes__discord_role_id__in=discord_roles)
-        user_groups = [group.name for group in matched_groups]
+        user_groups.extend([g.name for g in matched_groups])
 
         # attributes.discord_role_ids (複数形) を持つメーリングリストグループを動的スキャン
         # MLグループには {"mail": ["list@..."], "discord_role_ids": ["ID1", "ID2"]} を設定する
