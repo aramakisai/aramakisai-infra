@@ -13,7 +13,6 @@ ACCEPTED_GUILD_ID = "${var.discord_guild_id}"
 AVATAR_SIZE = "64"
 
 avatar_base64 = None
-avatar_url = None
 
 # Discord アバター画像の取得・Base64化
 if info.get("avatar"):
@@ -26,24 +25,33 @@ if info.get("avatar"):
         avatar_base64 = None
 
 user_groups = []
+ml_groups = []
+
 # Discord サーバーの所属ロールを検証して Authentik グループに同期
 if ACCEPTED_GUILD_ID:
     try:
         guild_url = f"https://discord.com/api/v10/users/@me/guilds/{ACCEPTED_GUILD_ID}/member"
         guild_response = client.do_request("GET", guild_url, token=token)
-        guild_data = guild_response.json()
-        discord_roles = guild_data.get("roles", [])
+        discord_roles = guild_response.json().get("roles", [])
 
-        # attributes.discord_role_id に Discord ロールIDを持つグループを取得
+        # attributes.discord_role_id (単数形) に Discord ロールIDを持つグループを取得
         matched_groups = Group.objects.filter(attributes__discord_role_id__in=discord_roles)
         user_groups = [group.name for group in matched_groups]
+
+        # attributes.discord_role_ids (複数形) を持つメーリングリストグループを動的スキャン
+        # MLグループには {"mail": ["list@..."], "discord_role_ids": ["ID1", "ID2"]} を設定する
+        for ml_group in Group.objects.filter(attributes__discord_role_ids__isnull=False):
+            role_ids = ml_group.attributes.get("discord_role_ids", [])
+            if any(r in role_ids for r in discord_roles):
+                ml_groups.append(ml_group.name)
+
     except Exception:
         pass
 
 return {
     "attributes.avatar": avatar_base64,
     "attributes.mailAlias": [],
-    "groups": user_groups
+    "groups": user_groups + list(set(ml_groups)),
 }
 EOT
 }
