@@ -51,6 +51,7 @@ provider "cloudflare" {}
 provider "null" {}
 
 provider "authentik" {
-  url   = var.authentik_url
-  token = var.authentik_token
+  url = var.authentik_url
+  # 空文字の場合は AUTHENTIK_TOKEN 環境変数にフォールバックさせる
+  token = var.authentik_token != "" ? var.authentik_token : null
 }
