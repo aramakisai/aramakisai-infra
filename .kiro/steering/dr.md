@@ -77,91 +77,21 @@ make kubectl ARGS="delete cluster <name> -n prod"
 
 ---
 
-## Stalwart の注意事項
+## メールサーバー (Docker Mailserver) の注意事項
 
-### TLS 証明書 (`mail-tls`) のタイミング問題
+Stalwart から Docker Mailserver (DMS) v14 に移行済み。管理 CLI やアドミン Web UI は存在しない。
 
-DR 後、`stalwart-0` が `ContainerCreating` のまま止まる場合がある。  
-原因: cert-manager の `Certificate` リソースが ArgoCD sync タイミングにより未適用。
+### メールデータのバックアップ・復元
 
-```bash
-# mail-tls が存在しない場合のみ実行
-make kubectl ARGS="get certificate mail-tls -n prod" || \
-make kubectl ARGS="apply \
-  -f gitops/manifests/prod/stalwart/certificate.yaml \
-  -f gitops/manifests/prod/stalwart/external-secret.yaml \
-  -f gitops/manifests/prod/stalwart/restic-external-secret.yaml"
-```
+メールデータは VolSync (ReplicationSource) で Backblaze B2 に定期バックアップ。  
+DR 時は `recovery.sh` が自動で VolSync リストアを行う。  
+手動で行う場合は `gitops/manifests/prod/mailserver/replication-source.yaml` を参照。
 
-### VolSync リストアとアカウント ID の整合性
+### DKIM / TLS の注意事項
 
-DR 時の Stalwart メールデータ復元は `recovery.sh` が自動で行う（ステップ 7）。  
-手動で行う場合は `gitops/manifests/prod/stalwart/replication-destination.yaml` を apply する。
-
-**重要**: VolSync バックアップが `settings.ndjson` 適用**前**の状態だと、DR 後にメールが消える。
-
-原因: Stalwart v0.16 のアカウント ID は LDAP directory 設定に基づいて生成される。  
-settings.ndjson の `destroy Directory` + `create Directory` でアカウント ID マッピングがリセットされ、  
-旧 DB のメールデータが新アカウント ID からアクセスできなくなる。
-
-**解決策**: VolSync バックアップは必ず settings.ndjson 適用済み・LDAP 接続確認済みの状態で取ること。  
-`stalwart-cli query Account` で accounts が存在することを確認してからバックアップを信頼する。
-
-### Stalwart v0.16 管理 API の認証 と PostSync Job 障害
-
-#### 根本原因（繰り返し発生する既知の障害）
-
-`stalwart-settings-apply` PostSync Job が HTTP 401 で失敗するパターンが 2 つある。
-
-**パターン A: STALWART_API_KEY が DB に存在しない**
-
-- Stalwart の API キーは Infisical に保存されているだけでは機能しない。Stalwart の DB に明示的に作成する必要がある
-- DB がリセット・初期化されると API キーも消える（v0.16.6 へのアップグレード時に発生した）
-- Job ログ: `error: authentication failed (HTTP 401)`
-
-**パターン B: Authentication.directoryId = authentik-oidc のときは --user/--password も通らない**
-
-- `settings-update.ndjson` で `Authentication.directoryId` が `authentik-oidc` に設定されると、HTTP API の認証もすべて OIDC バックエンドに回される
-- OIDC バックエンドはユーザー名/パスワード形式を受け付けないため `--user admin --password` も 401 になる
-- Stalwart ログ: `reason = "Unsupported credentials type for OIDC backend"`
-- **つまり: API キーを失ったら管理者パスワードでも入れない。Recovery mode 必須**
-
-#### 診断コマンド
-
-```bash
-# 1. Job の失敗確認
-make kubectl ARGS="get application stalwart -n argocd -o json" | \
-  jq '.status.operationState.syncResult.resources[] | select(.hookPhase=="Failed")'
-
-# 2. Stalwart ログで認証エラーを確認
-make kubectl ARGS="logs -n prod stalwart-0 --since=10m" | grep -i "auth\|401"
-
-# 3. API キーの疎通テスト (debug job を使う)
-# /tmp/stalwart-debug-job.yaml を参照
-```
-
-#### 再発防止措置 (実施済み)
-
-| 対策 | 内容 |
-|------|------|
-| `STALWART_RECOVERY_ADMIN` 常設 | K8s env 展開 `admin:$(STALWART_ADMIN_SECRET)` で StatefulSet に常設。認証方式を api-key から admin 認証に変更 |
-| Reloader に `stalwart-secrets` 追加 | `STALWART_ADMIN_SECRET` ローテーション時に Pod を自動再起動し、env 展開を更新 |
-| `STALWART_API_KEY` を external-secret から削除 | API キー方式廃止済みのため混乱防止のため除去 |
-
-#### 復旧手順: STALWART_ADMIN_SECRET が Infisical から消えた場合
-
-通常は発生しない。`STALWART_ADMIN_SECRET` は Infisical が Single Source of Truth。
-
-```bash
-# 1. 新しいパスワードを生成して Infisical に登録
-NEW_PASS=$(openssl rand -hex 24)
-infisical secrets set STALWART_ADMIN_SECRET="$NEW_PASS"
-
-# 2. ESO が Kubernetes secret を更新 (最大 1h / ArgoCD 手動 sync で即時更新可)
-# 3. Reloader が stalwart-secrets 変更を検知 → Stalwart を自動再起動
-#    STALWART_RECOVERY_ADMIN が新パスワードで更新される
-# 4. 次の ArgoCD sync で PostSync Job が新パスワードを使用 → 正常動作を確認
-```
+- DKIM 鍵は `dkim-external-secret.yaml` から Infisical 経由で注入。Infisical に鍵が登録済みであること
+- TLS は cert-manager (`mail-tls` Certificate) で管理。DR 後は ArgoCD sync で自動適用される
+  - `mail-tls` が未作成の場合は `gitops/manifests/prod/cert-manager/` を先に手動 apply する
 
 ---
 

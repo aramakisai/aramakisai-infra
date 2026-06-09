@@ -6,7 +6,7 @@
 ## Core Capabilities
 
 - **クラウドプロビジョニング**: Terraform で Hetzner Cloud・Cloudflare・Tailscale を宣言的に管理
-- **K3s HA クラスター**: 3ノード全員が etcd + ワークロードを担う構成で単一障害点なし
+- **K3s シングルノード**: prod-node-1 が etcd + ワークロードを担う。HA 復旧は `.kiro/specs/ha-improvement` で計画中
 - **GitOps 運用**: ArgoCD の App of Apps パターンで Git の状態がそのままクラスターの状態になる
 - **セキュアなシークレット管理**: マニフェストにシークレットを書かず、Infisical + ESO で全注入
 - **外部アクセス管理**: Cloudflare Tunnel + Access で VPN 不要の安全な公開 / 保護
@@ -21,7 +21,7 @@
 
 - **完全自動化されたブートストラップ**: `terraform apply` 一発で VPS 作成 → K3s 構築 → GitOps 起動まで完結
 - **ゼロ秘密漏洩アーキテクチャ**: パブリックリポジトリでも secrets を一切含まない設計
-- **低コスト・高可用**: CX23 (¥700/月) × 3 台で HA etcd クラスターを実現
+- **低コスト運用**: CX33 (約¥1200/月) × 1 台でシングルノード K3s を運用。DR は Raspberry Pi コールドスタンバイ + GitHub Actions で自動復旧
 
 ---
 _Focus on patterns and purpose, not exhaustive feature lists_

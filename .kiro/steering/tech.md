@@ -20,7 +20,7 @@ infisical run -- ansible-playbook k3s-bootstrap.yml
 
 - **IaC**: Terraform >= 1.9、tfstate は Terraform Cloud で管理
 - **構成管理**: Ansible >= 2.14
-- **Kubernetes**: K3s v1.32.3+k3s1 (3ノード HA etcd)
+- **Kubernetes**: K3s v1.32.3+k3s1 (シングルノード、prod-node-1)
 - **CNI**: Cilium (Flannel・NetworkPolicy は無効化)
 - **GitOps**: ArgoCD — App of Apps パターン
 - **シークレット**: Infisical + External Secrets Operator (ESO)
@@ -43,7 +43,7 @@ infisical run -- ansible-playbook k3s-bootstrap.yml
 - **唯一の例外**: `infisical-auth` Secret のみ Ansible が直接 `kubectl apply` (ESO 自体の起動に必要なため)
 
 ### ブートストラップ順序
-1. K3s インストール (cp-node: `--cluster-init` → prod-node-1/2: ローリング `serial: 1`)
+1. K3s インストール (prod-node-1: `--cluster-init`、シングルノード)
 2. **Cilium CNI** を Helm でインストール (`--flannel-backend: none` のため必須。ないと全ノード NotReady)
 3. cloudflared を `gitops/manifests/prod/cloudflared/` から直接 kubectl apply (ArgoCD への外部アクセス経路確保)
 4. ArgoCD インストール → `infisical-auth` Secret 作成 → GitHub Deploy Key 登録 → App of Apps 適用
