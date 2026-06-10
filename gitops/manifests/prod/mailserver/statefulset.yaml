@@ -65,8 +65,10 @@ spec:
               value: "(&(objectClass=inetOrgPerson)(mail=%s)(ak-active=true))"
             - name: LDAP_QUERY_FILTER_ALIAS
               value: "(&(objectClass=inetOrgPerson)(mailAlias=%s)(ak-active=true))"
+            # ak-active はグループエントリには存在しないため、グループでは
+            # mail 属性のみでフィルタする (ユーザーと違いグループに有効/無効の概念はない)
             - name: LDAP_QUERY_FILTER_GROUP
-              value: "(&(objectClass=group)(mail=%s)(ak-active=true))"
+              value: "(&(objectClass=group)(mail=%s))"
             - name: DOVECOT_USER_FILTER
               value: "(&(objectClass=inetOrgPerson)(mail=%u)(ak-active=true))"
             - name: DOVECOT_PASS_FILTER
@@ -131,6 +133,10 @@ spec:
               mountPath: /etc/dovecot/conf.d/auth-ldap.conf.ext
               subPath: auth-ldap.conf.ext
               readOnly: true
+            - name: dms-config
+              mountPath: /tmp/docker-mailserver/ldap-groups.cf
+              subPath: ldap-groups.cf
+              readOnly: true
             - name: dovecot-oauth2
               mountPath: /etc/dovecot/dovecot-oauth2.conf.ext
               subPath: dovecot-oauth2.conf.ext
@@ -165,6 +171,8 @@ spec:
                 path: dovecot.cf
               - key: auth-ldap.conf.ext
                 path: auth-ldap.conf.ext
+              - key: ldap-groups.cf
+                path: ldap-groups.cf
         - name: dovecot-oauth2
           secret:
             secretName: dovecot-oauth2-config
