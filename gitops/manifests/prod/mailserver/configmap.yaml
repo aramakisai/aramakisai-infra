@@ -11,12 +11,15 @@ data:
   postfix-main.cf: |
     virtual_mailbox_domains = /etc/postfix/vhost
   # LDAP passdb オーバーライド:
-  # result_failure = continue により、LDAP 認証失敗時に oauth2 passdb へ fallthrough させる
-  # (OAUTHBEARER を使う Roundcube が LDAP bind 失敗後に oauth2 passdb で認証できるようにする)
+  # mechanisms = plain login により、OAUTHBEARER では LDAP を試みない。
+  # OAUTHBEARER の場合は oauth2 passdb のみを使用する。
+  # LDAP bind を OAUTHBEARER トークンで試みると Authentik のレピュテーションスコアが下がり
+  # mailserver-service の bind も遅延するため、virtual_alias_maps lookup がタイムアウトする。
   auth-ldap.conf.ext: |
     passdb {
       driver = ldap
       args = /etc/dovecot/dovecot-ldap.conf.ext
+      mechanisms = plain login
       result_failure = continue
       result_internalfail = continue
     }

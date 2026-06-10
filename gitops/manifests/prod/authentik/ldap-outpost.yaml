@@ -53,8 +53,10 @@ spec:
               containerPort: 9300
           env:
             - name: AUTHENTIK_HOST
-              # Authentik サーバーの URL (Cloudflare Tunnel 経由)
-              value: "https://idp.aramakisai.com"
+              # Authentik サーバーの URL (クラスター内 Service 経由)
+              # 外部URL (Cloudflare Tunnel) を指定すると LDAP bind のたびに
+              # インターネット往復が発生しレイテンシが悪化するため使わない
+              value: "http://authentik-server.prod.svc.cluster.local"
             - name: AUTHENTIK_INSECURE
               value: "false"
             - name: AUTHENTIK_TOKEN
