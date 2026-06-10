@@ -40,7 +40,10 @@ data:
   # Postfix LDAP グループマップ オーバーライド (メーリングリスト用):
   # DMS が自動生成する ldap-groups.cf は result_attribute=mail のみのため、
   # マッチしたグループ自身の mail (= 検索キーと同じ) が返るだけでメンバーに展開されない。
-  # special_result_attribute=member を追加し、member DN の mail 属性を取得して展開する。
+  # special_result_attribute=member でメンバー DN を取得し、leaf_result_attribute=mail で
+  # 各メンバーの mail 属性に展開する。result_attribute は空にすることで、
+  # マッチしたグループ自身の mail (検索キーと同一アドレス) が結果に混入し
+  # 「グループ自身宛の配送が宛先不明でバウンスする」問題を回避する。
   # bind/bind_dn/bind_pw/query_filter/search_base/server_host/start_tls/version は
   # LDAP_* 環境変数から _replace_by_env_in_file により自動置換される (DMS ldap.sh)。
   ldap-groups.cf: |
@@ -48,7 +51,8 @@ data:
     bind_dn =
     bind_pw =
     query_filter =
-    result_attribute = mail
+    result_attribute =
+    leaf_result_attribute = mail
     search_base =
     server_host =
     special_result_attribute = member
