@@ -73,16 +73,18 @@ resource "cloudflare_record" "mail_prod_node_1_ipv4" {
   comment = "Stalwart mail IPv4 (prod-node-1 固定)"
 }
 
-# ⚠️  terraform apply 後に Hetzner PTR (rDNS) の設定が必要
-# IPv6 は apply でサーバーを作成して初めて割り当てられるため、apply 後に実施する。
-#
-# 手順:
-#   1. terraform apply 完了後
-#   2. terraform output prod_node_1_ipv6 で IPv6 アドレスを確認
-#   3. Hetzner Console → Servers → prod-node-1 → Networking → IPv6 → PTR
-#      <IPv6 アドレス> → mail.aramakisai.com を設定
-#
-# PTR レコードがないと外部 MTA (Gmail 等) に spam 判定されメールが届かない
+# PTR (rDNS): Hetzner が管理する逆引き DNS。外部 MTA がスパム判定に使用する。
+resource "hcloud_rdns" "mail_ipv4" {
+  server_id  = hcloud_server.nodes["prod-node-1"].id
+  ip_address = hcloud_server.nodes["prod-node-1"].ipv4_address
+  dns_ptr    = "mail.aramakisai.com"
+}
+
+resource "hcloud_rdns" "mail_ipv6" {
+  server_id  = hcloud_server.nodes["prod-node-1"].id
+  ip_address = hcloud_server.nodes["prod-node-1"].ipv6_address
+  dns_ptr    = "mail.aramakisai.com"
+}
 
 # MX レコード: aramakisai.com のメールを mail.aramakisai.com に転送
 resource "cloudflare_record" "mx" {
@@ -96,11 +98,10 @@ resource "cloudflare_record" "mx" {
 }
 
 # SPF (ドメイン全体): MX で許可されたサーバーからの送信を許可
-# ra=postmaster: SPF 失敗の集計レポートを postmaster@ に送信 (Stalwart 推奨)
 resource "cloudflare_record" "spf" {
   zone_id = var.cloudflare_zone_id
   name    = "@"
-  value   = "v=spf1 mx ra=postmaster -all"
+  value   = "v=spf1 mx -all"
   type    = "TXT"
   proxied = false
   comment = "SPF record"
@@ -110,7 +111,7 @@ resource "cloudflare_record" "spf" {
 resource "cloudflare_record" "spf_mail" {
   zone_id = var.cloudflare_zone_id
   name    = "mail"
-  value   = "v=spf1 a ra=postmaster -all"
+  value   = "v=spf1 a -all"
   type    = "TXT"
   proxied = false
   comment = "SPF record for mail subdomain (Stalwart)"
