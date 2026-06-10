@@ -28,7 +28,12 @@ resource "authentik_outpost" "dms_ldap" {
 
   # Outpost の設定値 (JSON形式の文字列)
   config = jsonencode({
-    authentik_host          = var.authentik_url
+    # authentik_host: Outpost → Authentik API のエンドポイント。
+    # クラスター内通信のため Service 経由 (cluster.local) を使う。
+    # 外部URL (Cloudflare Tunnel経由) を指定すると、LDAP bind のたびに
+    # インターネット往復が発生しレイテンシが数秒〜数十秒に悪化する
+    # (Postfix の virtual_alias_maps LDAP lookup がタイムアウトしメール送信不可になる)
+    authentik_host          = "http://authentik-server.prod.svc.cluster.local"
     authentik_host_browser  = var.authentik_url
     authentik_host_insecure = false
     log_level               = "info"
