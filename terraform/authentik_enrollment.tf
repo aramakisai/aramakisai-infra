@@ -1,0 +1,168 @@
+# ============================================================
+# 招待制ユーザー登録フロー (invitation-enrollment) 定義
+# ============================================================
+# Authentik 管理画面で手動作成済みのフローを authentik_imports.tf
+# 経由でインポートし、IaC 管理下に置く。
+
+# Authentik デフォルトの共有プロンプトフィールド/ポリシー ID
+# これらは Authentik の初期ブループリントが作成するオブジェクトで、
+# default-user-settings-flow / initial-setup フローからも参照されているため、
+# Terraformではインポートせず ID 直参照のみとする。
+locals {
+  default_locale_field_id          = "dfc629b0-8f69-420e-993b-1708cc6972cd" # default-user-settings-field-locale
+  default_password_field_id        = "58ae2c86-d6c2-4618-8074-90c5c1c0246b" # initial-setup-field-password
+  default_password_repeat_field_id = "f5c79017-50fc-4d97-9e4f-af57da5c2d13" # initial-setup-field-password-repeat
+  default_password_policy_id       = "3d21cb87-d99b-4e66-85d9-80bdfbb96296" # default-password-change-password-policy
+}
+
+# フロー本体
+resource "authentik_flow" "invitation_enrollment" {
+  name               = "invitation-enrollment"
+  slug               = "invitation-enrollment"
+  title              = "荒牧祭実行委員会SSO登録"
+  designation        = "enrollment"
+  background         = ""
+  compatibility_mode = false
+}
+
+# Stage 1 (order=10): 招待コード検証 (Invitation Stage)
+resource "authentik_stage_invitation" "invitation_verification" {
+  name                             = "invitation-verification-stage"
+  continue_flow_without_invitation = false
+}
+
+# Stage 2 (order=20): プロフィール入力 (Prompt Stage) で使用するフィールド
+resource "authentik_stage_prompt_field" "enrollment_username" {
+  name        = "username"
+  field_key   = "username"
+  label       = "ユーザー名"
+  type        = "username"
+  required    = true
+  placeholder = "メールアドレスに使用されます"
+}
+
+resource "authentik_stage_prompt_field" "enrollment_displayname" {
+  name        = "displayname"
+  field_key   = "name"
+  label       = "表示名"
+  type        = "text"
+  required    = true
+  placeholder = "山田太郎"
+}
+
+resource "authentik_stage_prompt_field" "enrollment_student_id" {
+  name      = "student-id-prompt"
+  field_key = "attributes.student_id"
+  label     = "学籍番号"
+  type      = "text"
+  required  = true
+}
+
+# Stage 2 (order=20): プロフィール入力 (Prompt Stage)
+resource "authentik_stage_prompt" "enrollment_user_profile" {
+  name = "user-profile-prompt-stage"
+
+  fields = [
+    local.default_locale_field_id,
+    authentik_stage_prompt_field.enrollment_username.id,
+    authentik_stage_prompt_field.enrollment_displayname.id,
+    authentik_stage_prompt_field.enrollment_student_id.id,
+  ]
+
+  validation_policies = []
+}
+
+# Stage 3 (order=30): パスワード入力 (Prompt Stage)
+resource "authentik_stage_prompt" "enrollment_user_password" {
+  name = "user-password-prompt-stage"
+
+  fields = [
+    local.default_password_field_id,
+    local.default_password_repeat_field_id,
+  ]
+
+  validation_policies = [
+    local.default_password_policy_id,
+  ]
+}
+
+# Stage 4 (order=40): ユーザー作成 (User Write Stage)
+resource "authentik_stage_user_write" "enrollment_user_write" {
+  name                     = "user-write-stage"
+  user_creation_mode       = "create_when_required"
+  create_users_as_inactive = false
+  user_type                = "internal"
+}
+
+# Stage 5 (order=50): 自動ログイン (User Login Stage)
+resource "authentik_stage_user_login" "enrollment_user_login" {
+  name                     = "user-login-stage"
+  session_duration         = "seconds=0"
+  terminate_other_sessions = false
+  remember_me_offset       = "seconds=0"
+  network_binding          = "bind_asn"
+  geoip_binding            = "bind_continent"
+  remember_device          = "days=30"
+}
+
+# Stage 6 (order=60): Discord連携へのリダイレクト (Redirect Stage)
+# Source Stage (フロー内でソース連携を行う) は Authentik Enterprise の有償機能のため、
+# 代わりに Redirect Stage で Discord OAuth ソースのログイン URL に飛ばす。
+# 登録直後はログイン済み状態のため、Discord 認証後は SourceFlowManager が
+# LINK アクションとして処理し、authentik_discord.tf の
+# discord_group_sync_auth_policy (default-source-authentication の
+# UserLoginStage にバインド) によりロール同期・グループ付与が行われる。
+resource "authentik_stage_redirect" "enrollment_discord_redirect" {
+  name          = "discord-link-redirect-stage"
+  mode          = "static"
+  target_static = "/source/oauth/login/discord/"
+}
+
+# フローとステージのバインディング
+resource "authentik_flow_stage_binding" "enrollment_invitation_bind" {
+  target               = authentik_flow.invitation_enrollment.uuid
+  stage                = authentik_stage_invitation.invitation_verification.id
+  order                = 10
+  evaluate_on_plan     = false
+  re_evaluate_policies = true
+}
+
+resource "authentik_flow_stage_binding" "enrollment_user_profile_bind" {
+  target               = authentik_flow.invitation_enrollment.uuid
+  stage                = authentik_stage_prompt.enrollment_user_profile.id
+  order                = 20
+  evaluate_on_plan     = false
+  re_evaluate_policies = true
+}
+
+resource "authentik_flow_stage_binding" "enrollment_user_password_bind" {
+  target               = authentik_flow.invitation_enrollment.uuid
+  stage                = authentik_stage_prompt.enrollment_user_password.id
+  order                = 30
+  evaluate_on_plan     = false
+  re_evaluate_policies = true
+}
+
+resource "authentik_flow_stage_binding" "enrollment_user_write_bind" {
+  target               = authentik_flow.invitation_enrollment.uuid
+  stage                = authentik_stage_user_write.enrollment_user_write.id
+  order                = 40
+  evaluate_on_plan     = false
+  re_evaluate_policies = true
+}
+
+resource "authentik_flow_stage_binding" "enrollment_user_login_bind" {
+  target               = authentik_flow.invitation_enrollment.uuid
+  stage                = authentik_stage_user_login.enrollment_user_login.id
+  order                = 50
+  evaluate_on_plan     = false
+  re_evaluate_policies = true
+}
+
+resource "authentik_flow_stage_binding" "enrollment_discord_redirect_bind" {
+  target               = authentik_flow.invitation_enrollment.uuid
+  stage                = authentik_stage_redirect.enrollment_discord_redirect.id
+  order                = 60
+  evaluate_on_plan     = false
+  re_evaluate_policies = true
+}
