@@ -23,7 +23,35 @@ data:
       targets = [{
         __address__ = "kube-state-metrics.monitoring.svc.cluster.local:8080",
       }]
+      forward_to = [prometheus.relabel.trim_ksm.receiver]
+    }
+
+    // kube-state-metrics はデフォルトで全リソースの全フィールドを公開し、
+    // 監視に使っていない高カーディナリティなメトリクス (kube_secret_* 等) が
+    // 無料枠 (10,000 series) を圧迫するため不要なものを除外する
+    prometheus.relabel "trim_ksm" {
       forward_to = [prometheus.remote_write.default.receiver]
+
+      rule {
+        source_labels = ["__name__"]
+        regex         = "kube_pod_status_(reason|qos_class|ready|scheduled|container_ready_time|ready_time|initialized_time|scheduled_time)"
+        action        = "drop"
+      }
+      rule {
+        source_labels = ["__name__"]
+        regex         = "kube_pod_(tolerations|ips|owner|restart_policy|scheduler|service_account|created|start_time|completion_time|spec_volumes_persistentvolumeclaims_info|spec_volumes_persistentvolumeclaims_readonly)"
+        action        = "drop"
+      }
+      rule {
+        source_labels = ["__name__"]
+        regex         = "kube_(replicaset|endpoint|secret|configmap|lease|networkpolicy)_.*"
+        action        = "drop"
+      }
+      rule {
+        source_labels = ["__name__"]
+        regex         = "kube_(validating|mutating)webhookconfiguration_.*"
+        action        = "drop"
+      }
     }
 ---
 apiVersion: apps/v1

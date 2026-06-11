@@ -617,7 +617,7 @@ kubectl apply -f manifests/prod/<service>/
 ## 注意事項
 
 * **シークレットを直接 manifest に書かない** (ExternalSecret を使う)
-* `main` への直接 push は禁止 (ブランチ保護ルール)
+* 0→1 検証フェーズかつ1人メンテナーのため `main` への直接 push 可 (ブランチ保護ルールは未設定。`.kiro/specs/repo-governance/` は導入検討中の未承認spec)
 * Helm values を変更した場合は必ず staging で動作確認してから prod に適用
 * CloudNativePG のバージョンアップは DB migration を伴う可能性があるため単独 PR で行う
 * シークレット・内部トークンをコードや PR コメント・Issue に貼らない

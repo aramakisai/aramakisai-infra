@@ -245,4 +245,4 @@ spec:
 - tfstate は Terraform Cloud で管理 (ローカルに置かない)
 - ポート 22 は公開しない (Tailscale SSH を使用)
 - staging から prod の DB へのアクセス禁止 (別 Namespace / 別 CNPG Cluster)
-- `main` への直接 push 禁止 (ブランチ保護ルール)
+- 0→1 検証フェーズかつ1人メンテナーのため `main` への直接 push 可 (ブランチ保護ルールは未設定。`.kiro/specs/repo-governance/` は導入検討中の未承認spec)
