@@ -1,5 +1,12 @@
 # Requirements Document
 
+> **⚠️ 2026-06-11: 本specは cancelled (supersededed)**
+> `mail-server-migration` spec により Stalwart メールサーバー自体が Docker Mailserver (DMS) に
+> 置き換えられたため、本spec が前提としていた「Stalwart + Dex」構成は不要になった。
+> DMS では Dovecot が Authentik の UserInfo エンドポイントを直接検証することで OAUTHBEARER を
+> 実現しており (`gitops/manifests/prod/mailserver/configmap.yaml`)、Dex は導入されていない。
+> 本ドキュメントは調査経緯の記録として保持する。実装作業は `mail-server-migration` を参照。
+
 ## はじめに
 
 Stalwart メールサーバーの認証を Authentik を唯一のユーザーソースとして統一する。

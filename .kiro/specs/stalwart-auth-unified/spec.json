@@ -1,9 +1,9 @@
 {
   "feature_name": "stalwart-auth-unified",
   "created_at": "2026-06-04T15:42:42Z",
-  "updated_at": "2026-06-05T01:00:00Z",
+  "updated_at": "2026-06-11T00:00:00+09:00",
   "language": "ja",
-  "phase": "requirements-generated",
+  "phase": "cancelled",
   "approvals": {
     "requirements": {
       "generated": true,
@@ -18,5 +18,7 @@
       "approved": false
     }
   },
-  "ready_for_implementation": false
+  "ready_for_implementation": false,
+  "status": "cancelled",
+  "status_note": "mail-server-migration spec により Stalwart 自体が Docker Mailserver (DMS) に置き換えられたため、本spec (Dex導入によるStalwart OAUTHBEARER対応) は前提が消滅し supersede された。Dexは未導入・gitops上に存在しない。"
 }
