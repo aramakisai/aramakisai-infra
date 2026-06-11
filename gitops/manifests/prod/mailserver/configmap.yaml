@@ -44,6 +44,9 @@ data:
   # 各メンバーの mail 属性に展開する。result_attribute は空にすることで、
   # マッチしたグループ自身の mail (検索キーと同一アドレス) が結果に混入し
   # 「グループ自身宛の配送が宛先不明でバウンスする」問題を回避する。
+  # timeout=30: special_result_attribute による複数回の LDAP ラウンドトリップが
+  # デフォルトの 10 秒を超えることがあり、"map lookup problem ... try again later"
+  # でメッセージが受理されず消失することがあるため延長する。
   # bind/bind_dn/bind_pw/query_filter/search_base/server_host/start_tls/version は
   # LDAP_* 環境変数から _replace_by_env_in_file により自動置換される (DMS ldap.sh)。
   ldap-groups.cf: |
@@ -57,4 +60,5 @@ data:
     server_host =
     special_result_attribute = member
     start_tls = no
+    timeout = 30
     version = 3
