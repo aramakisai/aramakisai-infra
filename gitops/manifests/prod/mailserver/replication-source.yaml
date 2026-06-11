@@ -5,11 +5,14 @@ metadata:
   name: mailserver-backup
   namespace: prod
 spec:
+  # B2 Application Key がトランザクションキャップに到達したため一時停止中。
+  # B2 ダッシュボードでキャップを引き上げ後、paused を false に戻すこと。
+  paused: true
   sourcePVC: mailserver-data
   trigger:
-    schedule: "0 */2 * * *"
+    schedule: "0 */6 * * *"
   restic:
-    pruneIntervalDays: 1
+    pruneIntervalDays: 7
     repository: mailserver-restic-secret
     retain:
       hourly: 12
