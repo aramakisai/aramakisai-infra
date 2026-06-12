@@ -19,6 +19,11 @@ setup: ## Check prerequisites and install project dependencies
 		exit 1; \
 	fi
 	@echo "✅ uv found."
+	@if ! command -v gitleaks >/dev/null 2>&1; then \
+		echo "⚠️  gitleaks is not installed. (Recommended for pre-commit secret scanning)"; \
+	else \
+		echo "✅ gitleaks found."; \
+	fi
 	uv tool install pre-commit || true
 	uv tool install yamllint || true
 	uv tool install ansible-lint || true
@@ -46,9 +51,13 @@ setup: ## Check prerequisites and install project dependencies
 	@echo "  echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.32/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list"
 	@echo "  sudo apt-get update && sudo apt-get install -y kubectl"
 	@echo ""
+	@echo "  # 5. Install Gitleaks"
+	@echo "  wget https://github.com/gitleaks/gitleaks/releases/download/v8.23.0/gitleaks_8.23.0_linux_x64.tar.gz"
+	@echo "  tar -xzf gitleaks_8.23.0_linux_x64.tar.gz gitleaks && sudo mv gitleaks /usr/local/bin/ && rm gitleaks_8.23.0_linux_x64.tar.gz"
+	@echo ""
 	@echo "💻  Option B: EndeavourOS (pacman/yay)"
 	@echo "---------------------------------------------------------------------"
-	@echo "  sudo pacman -S terraform ansible kubectl jq shellcheck"
+	@echo "  sudo pacman -S terraform ansible kubectl jq shellcheck gitleaks"
 	@echo "  yay -S infisical-cli"
 	@echo ""
 	@echo "🔧  Other Utility Tools (All OS):"

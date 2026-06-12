@@ -57,5 +57,13 @@ RUN uv tool install pre-commit \
 RUN curl -fsSL https://antigravity.google/cli/install.sh | bash \
     && if [ -f /root/.local/bin/agy ]; then mv /root/.local/bin/agy /usr/local/bin/agy; fi
 
+# 7. Install Gitleaks
+RUN GITLEAKS_VERSION="8.23.0" \
+    && curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" -o gitleaks.tar.gz \
+    && tar -xzf gitleaks.tar.gz gitleaks \
+    && mv gitleaks /usr/local/bin/gitleaks \
+    && chmod +x /usr/local/bin/gitleaks \
+    && rm gitleaks.tar.gz
+
 # Set working directory inside container
 WORKDIR /workspace

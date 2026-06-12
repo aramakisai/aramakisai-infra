@@ -1,0 +1,13 @@
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Ignore disabled mock secret files and examples"
+paths = [
+    '''\.env$''',
+    '''\.env\.app-secrets$''',
+    '''\.env\.app-secrets\.example$''',
+    '''kubeconfig$''',
+    '''terraform/secrets\.tfvars$''',
+    '''secrets\.tfvars\.example$'''
+]

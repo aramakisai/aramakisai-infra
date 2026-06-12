@@ -50,3 +50,9 @@ repos:
         language: system
         files: ^gitops/manifests/.*\.yaml$
         types: [yaml]
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.23.0
+    hooks:
+      - id: gitleaks
+        args: ["--config=.gitleaks.toml"]
