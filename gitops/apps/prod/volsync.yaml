@@ -1,6 +1,6 @@
 ---
 # VolSync — PVC バックアップ/レプリケーション operator
-# wave: -1 — ReplicationSource CRD を stalwart より先に提供する
+# wave: -1 — ReplicationSource CRD を mailserver より先に提供する
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:

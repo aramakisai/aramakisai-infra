@@ -230,7 +230,7 @@ resource "cloudflare_record" "srv_imaps" {
     port     = 993
     target   = "mail.aramakisai.com"
   }
-  comment = "IMAPS SRV (Stalwart)"
+  comment = "IMAPS SRV (Mailserver)"
 }
 
 resource "cloudflare_record" "srv_imap" {
@@ -244,7 +244,7 @@ resource "cloudflare_record" "srv_imap" {
     port     = 143
     target   = "mail.aramakisai.com"
   }
-  comment = "IMAP SRV (Stalwart)"
+  comment = "IMAP SRV (Mailserver)"
 }
 
 resource "cloudflare_record" "srv_submissions" {
@@ -258,7 +258,7 @@ resource "cloudflare_record" "srv_submissions" {
     port     = 465
     target   = "mail.aramakisai.com"
   }
-  comment = "SMTPS SRV (Stalwart)"
+  comment = "SMTPS SRV (Mailserver)"
 }
 
 resource "cloudflare_record" "srv_submission" {
@@ -272,5 +272,5 @@ resource "cloudflare_record" "srv_submission" {
     port     = 587
     target   = "mail.aramakisai.com"
   }
-  comment = "SMTP Submission SRV (Stalwart)"
+  comment = "SMTP Submission SRV (Mailserver)"
 }

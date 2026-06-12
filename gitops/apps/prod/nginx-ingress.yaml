@@ -1,6 +1,6 @@
 ---
 # nginx-ingress — SNI 対応 TLS リバースプロキシ
-# wave: 1 — stalwart (wave: 0) が port 443 を解放してから起動
+# wave: 1 — mailserver (wave: 0) が port 443 を解放してから起動
 #
 # hostNetwork: true で prod-node-1 の port 443/80 を直接バインドする。
 # K3s + Cilium 環境では hostPort が機能しないため hostNetwork を使用。
@@ -32,8 +32,8 @@ spec:
           hostPort:
             enabled: false
           # admission webhook を無効化:
-          # stalwart sync 時に nginx-ingress がまだ起動していないと循環デッドロックになるため
-          # (stalwart sync → Ingress webhook → nginx-ingress 未起動 → 失敗 → port 443 解放されず)
+          # mailserver sync 時に nginx-ingress がまだ起動していないと循環デッドロックになるため
+          # (mailserver sync → Ingress webhook → nginx-ingress 未起動 → 失敗 → port 443 解放されず)
           admissionWebhooks:
             enabled: false
           # ClusterIP のみ: hostNetwork で直接バインドするため外部 LB は不要

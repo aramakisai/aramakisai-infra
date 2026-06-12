@@ -6,7 +6,7 @@
 # 指定 Secret が更新されたとき自動で rollout restart が発行される:
 #   secret.reloader.stakater.com/reload: "<secret-name>"
 #
-# 用途: cert-manager が mail-tls を更新した際に stalwart を自動再起動する
+# 用途: cert-manager が mail-tls を更新した際に mailserver を自動再起動する
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -25,7 +25,7 @@ spec:
     helm:
       valuesObject:
         reloader:
-          # 監視対象を prod namespace の stalwart に絞る必要はない
+          # 監視対象を prod namespace の mailserver に絞る必要はない
           # (クラスター全体を監視するがアノテーションがない Pod には何もしない)
           deployment:
             resources:

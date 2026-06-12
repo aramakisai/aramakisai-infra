@@ -1,7 +1,7 @@
 {
   "feature_name": "mail-server-migration",
   "created_at": "2026-06-05T01:38:23+09:00",
-  "updated_at": "2026-06-05T01:57:15+09:00",
+  "updated_at": "2026-06-12T00:00:00+09:00",
   "language": "ja",
   "phase": "implementation",
   "approvals": {
@@ -18,5 +18,7 @@
       "approved": true
     }
   },
-  "ready_for_implementation": true
+  "ready_for_implementation": true,
+  "status": "mostly_complete",
+  "status_note": "Milestone 1-6 はコード上実装済み。5.2 (旧PVC削除) は確認済みで完了。Milestone 6 (Stalwart名称参照のクリーンアップ 6.1-6.8) は2026-06-12完了 — terraform/access.tf, firewall.tf, dns.tf (SRVレコード), gitops/manifests/prod/roundcube, authentik/ldap-outpost.yaml, apps/prod/{nginx-ingress,volsync,reloader}.yaml, namespace-config/namespace.yaml, ansible/playbooks/k3s-bootstrap.yml, .kiro/steering/structure.md を更新。なお terraform/dns.tf には6.3で対象外だった \"Stalwart\" 表記 (mail_prod_node_1系コメント, mx, spf_mail, autoconfig, autodiscover) が残存 — 機能影響なし、別タスク化を検討。残タスク: 4.5 実環境テスト (コードからは検証不可)。5.4 は2026-06-12にorphanキー (STALWART_ADMIN_SECRET/API_KEY/JOB_TOKEN/WEBUI_CLIENT_SECRET/RESTIC_REPOSITORY/RESTIC_PASSWORD) をInfisical/.envから削除完了。B2側のvolsync/stalwartバックアップデータ削除はB2 transaction cap超過の障害継続中のため見送り。STALWART_CF_API_TOKENは現役のため削除・リネーム共に未実施。⚠️ 2026-06-11: Requirement 4 (DR/バックアップ) について、VolSync mailserver-backup が B2 アカウントの transaction cap exceeded により2026-06-10 04:00 UTC頃から失敗し続けている (mailserver-migration固有の問題ではなくB2アカウント全体の制限)。要ユーザー対応 (B2コンソールでcap引き上げ)。"
 }

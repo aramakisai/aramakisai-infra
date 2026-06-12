@@ -72,7 +72,7 @@ gitops/
 
 - **Terraform リソース**: `snake_case` (例: `hcloud_server.nodes`, `cloudflare_zero_trust_tunnel_cloudflared.main`)
 - **Kubernetes リソース名**: `kebab-case` (例: `cloudflared-token`, `directus-secrets`)
-- **ArgoCD Application 名**: サービス名そのまま (例: `external-secrets`, `stalwart`)
+- **ArgoCD Application 名**: サービス名そのまま (例: `external-secrets`, `mailserver`)
 - **Namespace**: サービス名またはドメイン (例: `prod`, `staging`, `external-secrets`, `monitoring`)
 
 ## ExternalSecret パターン
@@ -100,7 +100,7 @@ spec:
 ## ArgoCD Sync Wave パターン
 
 - `sync-wave: "-1"` → ESO・ClusterSecretStore・CloudNativePG Operator・cert-manager・nginx-ingress (他 App の前提)
-- `sync-wave: "0"` (デフォルト) → Authentik・Directus・Stalwart・Roundcube・cloudflared など
+- `sync-wave: "0"` (デフォルト) → Authentik・Directus・mailserver・Roundcube・cloudflared など
 
 **CloudNativePG はマニフェストなし**: CNPG Operator は Helm chart (`cloudnativepg.yaml`) のみで管理。各サービスの DB Cluster は `manifests/prod/<service>/db-cluster.yaml` に置く。
 

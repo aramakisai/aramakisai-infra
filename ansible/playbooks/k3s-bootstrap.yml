@@ -235,5 +235,5 @@
       ansible.builtin.command: kubectl apply -n argocd -f /tmp/root.yaml
       # 適用後は ArgoCD が自律的に sync を開始:
       #   wave: -1  ESO (Helm Chart) + ClusterSecretStore
-      #   wave: 0   Authentik, Directus, Stalwart, cloudflared (adopt), ...
+      #   wave: 0   Authentik, Directus, mailserver, cloudflared (adopt), ...
       # cloudflared は既に稼働しているため ArgoCD が同名リソースを adopt する

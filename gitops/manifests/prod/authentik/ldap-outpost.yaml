@@ -2,17 +2,16 @@
 # Authentik LDAP Outpost — K3s クラスター内 LDAP サービス
 #
 # 役割:
-#   Stalwart Mail Server の IMAP/SMTP 認証を Authentik に委譲するためのプロキシ。
+#   Docker Mailserver (DMS) の IMAP/SMTP 認証を Authentik に委譲するためのプロキシ。
 #   クラスター内から ldap://authentik-ldap-outpost.prod.svc.cluster.local:389 で到達できる。
 #
 # アクセス制限:
-#   制限はなく、Authentik に登録されている全ユーザーが Stalwart を利用できます。
+#   制限はなく、Authentik に登録されている全ユーザーが DMS を利用できます。
 #
-# 前提 (Authentik WebUI での設定 — 詳細は下部コメント参照):
-#   1. LDAP Provider "Stalwart LDAP" を作成
-#   2. Application "stalwart-ldap" を作成
-#   3. Outpost (type: LDAP) を作成し Application をアサイン
-#   4. Outpost Token を Infisical に AUTHENTIK_LDAP_OUTPOST_TOKEN として登録
+# 前提:
+#   LDAP Provider ("DMS LDAP") / Application ("dms-ldap") / Outpost ("dms-ldap-outpost")
+#   は terraform/authentik_ldap.tf で管理する (詳細は下部コメント参照)。
+#   Outpost Token のみ手動で取得し Infisical に AUTHENTIK_LDAP_OUTPOST_TOKEN として登録する。
 #
 # バージョン管理:
 #   Authentik Helm chart (helm-values/prod/authentik.yaml: targetRevision: "2026.*") と
@@ -106,10 +105,12 @@ spec:
 ---
 # Authentik LDAP Outpost サービストークン
 #
-# このトークンは 2 箇所で使用する:
-#   1. LDAP Outpost コンテナ (AUTHENTIK_TOKEN): Authentik API への接続認証
-#   2. Stalwart の LDAP bind (AUTHENTIK_LDAP_OUTPOST_TOKEN):
-#      cn=ldapservice の bindSecret として使用 (同じトークン値)
+# このトークンは LDAP Outpost コンテナ (AUTHENTIK_TOKEN) の
+# Authentik API への接続認証にのみ使用する。
+#
+# DMS の LDAP bind (cn=mailserver-service) は別の認証情報
+# (Infisical: MAILSERVER_LDAP_BIND_PASSWORD) を使用する。
+# (gitops/manifests/prod/mailserver/external-secret.yaml 参照)
 #
 # Infisical キー名: AUTHENTIK_LDAP_OUTPOST_TOKEN
 # 取得方法: Authentik WebUI → Admin → Outposts → <outpost名> →
@@ -133,47 +134,20 @@ spec:
         key: AUTHENTIK_LDAP_OUTPOST_TOKEN
 
 # ============================================================
-# Authentik WebUI での設定手順 (初回のみ)
+# Authentik 設定手順 (初回のみ)
 # ============================================================
 #
-# ① LDAP Provider 作成
-#    Admin → Applications → Providers → Create → LDAP Provider
-#    Name: Stalwart LDAP
-#    Bind flow: default-authentication-flow (または任意)
-#    Search group: 任意 (全ユーザーを許可する場合は指定しない)
-#    Certificate: 任意 (LDAP over TLS が必要な場合のみ)
+# ①〜③ LDAP Provider ("DMS LDAP") / Application ("dms-ldap") / Outpost
+#       ("dms-ldap-outpost") は terraform/authentik_ldap.tf
+#       (authentik_provider_ldap.dms / authentik_application.dms_ldap /
+#       authentik_outpost.dms_ldap) で管理する。terraform apply 後、
+#       Admin → Applications → Outposts → dms-ldap-outpost →
+#       "View Deployment Info" → TOKEN 値をコピーし、
+#       Infisical に AUTHENTIK_LDAP_OUTPOST_TOKEN として登録する。
 #
-# ② Application 作成
-#    Admin → Applications → Applications → Create
-#    Name: Stalwart LDAP
-#    Slug: stalwart-ldap
-#    Provider: Stalwart LDAP (上記)
-#    (※ 特定のグループに限定しないため、Policy/Group binding は設定不要)
-#
-# ③ LDAP Outpost 作成
-#    Admin → Applications → Outposts → Create
-#    Name: stalwart-ldap-outpost
-#    Type: LDAP
-#    Applications: Stalwart LDAP (上記)
-#    → 作成後: "View Deployment Info" → TOKEN 値をコピー
-#    → Infisical に AUTHENTIK_LDAP_OUTPOST_TOKEN として登録
-#
-# ④ OAuth2 / OIDC Provider 作成 (OAUTHBEARER / WebUI SSO 用)
-#    Admin → Applications → Providers → Create → OAuth2/OpenID Provider
-#    Name: Stalwart Mail
-#    Client ID: stalwart-mail (固定値 — Stalwart OIDC Directory の requireAudience と一致させる)
-#    Client Secret: 任意 (メモしておく)
-#    Redirect URIs: https://mail.aramakisai.com/auth/callback
-#    Signing key: authentik Self-signed Certificate (デフォルト)
-#    Scopes: openid, email, profile, Groups (カスタムスコープ)
-#    → Groups スコープマッピングを追加:
-#       Admin → Customisation → Scope Mappings → Create
-#       Name: groups, Expression: return ak_user_by(username=request.user.username).groups.all()
-#       ↑ 既存の "authentik default OAuth Mapping: OpenID 'groups'" があればそれを使う
-#
-# ⑤ Application 作成 (OAuth2)
-#    Name: Stalwart Mail
-#    Slug: stalwart-mail
-#    Provider: Stalwart Mail (上記)
-#    (※ 特定のグループに限定しないため、Policy/Group binding は設定不要)
+# ④⑤ OAuth2/OIDC Provider ("Roundcube", client_id: aramakisai-mail) /
+#       Application は terraform/authentik_apps.tf
+#       (authentik_provider_oauth2.roundcube) で管理する。
+#       Webmail SSO と DMS (Dovecot) の OAUTHBEARER token 検証
+#       (introspection endpoint) の両方でこの client を使用する。
 # ============================================================

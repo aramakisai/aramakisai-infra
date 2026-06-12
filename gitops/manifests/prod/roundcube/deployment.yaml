@@ -5,7 +5,7 @@
 # 更新手順: image タグを変更 → GitOps PR → ArgoCD が自動 sync
 #
 # 認証方式: Authentik OAuth2 (oauth_login_redirect: true でログイン時に自動リダイレクト)
-#   - IMAP/SMTP 接続は OAUTHBEARER SASL (Stalwart が authentik-oidc directory で token を検証)
+#   - IMAP/SMTP 接続は OAUTHBEARER SASL (DMS の Dovecot が Authentik introspection エンドポイントで token を検証)
 #   - カスタムプラグイン不要 (Roundcube 1.6 ネイティブサポート)
 #
 # DB: SQLite (/var/roundcube/db/ に PVC をマウント)

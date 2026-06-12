@@ -47,7 +47,6 @@ resource "cloudflare_zero_trust_access_identity_provider" "authentik" {
 #   webmail.aramakisai.com   Roundcube が Authentik OAuth2 で保護
 #                            CF Access を重ねると二重認証になるため除外
 #   argocd.aramakisai.com    ArgoCD 自前認証 (admin / Authentik SSO) で保護
-#   mail-admin.aramakisai.com  Stalwart 独自ログインで保護
 # ============================================================
 
 resource "cloudflare_zero_trust_access_application" "stg" {

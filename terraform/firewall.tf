@@ -24,9 +24,9 @@ resource "hcloud_firewall" "k3s_nodes" {
   }
 
   # ============================================================
-  # Stalwart メールサーバー (hostPort 経由)
+  # Docker Mailserver (DMS) (hostNetwork 経由)
   #
-  # StatefulSet に hostPort を設定し prod-node-1 に固定しているため、
+  # StatefulSet を hostNetwork で起動し prod-node-1 に固定しているため、
   # 標準ポートをそのまま開放する。NodePort (30xxx) は不要。
   #
   # ⚠️  Hetzner はデフォルトでポート 25 をブロックしている。
@@ -34,14 +34,14 @@ resource "hcloud_firewall" "k3s_nodes" {
   #     申請方法: https://docs.hetzner.com/cloud/servers/faq/#why-can-i-not-send-any-mails-from-my-server
   # ============================================================
 
-  # SMTP 25: MTA 間の受信 (外部 MTA → Stalwart)
+  # SMTP 25: MTA 間の受信 (外部 MTA → Mailserver)
   # MX レコードはポートを指定できないため標準ポート 25 が必須
   rule {
     direction   = "in"
     protocol    = "tcp"
     port        = "25"
     source_ips  = ["0.0.0.0/0", "::/0"]
-    description = "Stalwart SMTP"
+    description = "Mailserver SMTP"
   }
 
   # SMTP Submission 587: MUA → MTA (STARTTLS)
@@ -50,7 +50,7 @@ resource "hcloud_firewall" "k3s_nodes" {
     protocol    = "tcp"
     port        = "587"
     source_ips  = ["0.0.0.0/0", "::/0"]
-    description = "Stalwart Submission"
+    description = "Mailserver Submission"
   }
 
   # SMTPS 465: MUA → MTA (Implicit TLS)
@@ -59,7 +59,7 @@ resource "hcloud_firewall" "k3s_nodes" {
     protocol    = "tcp"
     port        = "465"
     source_ips  = ["0.0.0.0/0", "::/0"]
-    description = "Stalwart SMTPS"
+    description = "Mailserver SMTPS"
   }
 
   # IMAP 143: メールクライアント (STARTTLS)
@@ -68,7 +68,7 @@ resource "hcloud_firewall" "k3s_nodes" {
     protocol    = "tcp"
     port        = "143"
     source_ips  = ["0.0.0.0/0", "::/0"]
-    description = "Stalwart IMAP"
+    description = "Mailserver IMAP"
   }
 
   # IMAPS 993: メールクライアント (Implicit TLS)
@@ -77,18 +77,18 @@ resource "hcloud_firewall" "k3s_nodes" {
     protocol    = "tcp"
     port        = "993"
     source_ips  = ["0.0.0.0/0", "::/0"]
-    description = "Stalwart IMAPS"
+    description = "Mailserver IMAPS"
   }
 
-  # HTTPS 443: Stalwart Web Admin / JMAP / Autoconfig
+  # HTTPS 443: autoconfig.aramakisai.com (メールクライアント自動設定)
   # mail.aramakisai.com は proxied=false (直接 AAAA) のため Cloudflare 経由にならない
-  # Stalwart 独自の TLS (Let's Encrypt DNS-01 ACME) で保護
+  # cert-manager TLS (Let's Encrypt DNS-01 ACME) で保護
   rule {
     direction   = "in"
     protocol    = "tcp"
     port        = "443"
     source_ips  = ["0.0.0.0/0", "::/0"]
-    description = "Stalwart HTTPS (Admin / JMAP)"
+    description = "Mailserver HTTPS (Autoconfig)"
   }
 
   # TCP 22 (SSH) は意図的に未定義
