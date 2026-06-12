@@ -18,6 +18,7 @@ spec:
       shared_buffers: "64MB"
       effective_cache_size: "128MB"
       work_mem: "4MB"
+      wal_compression: "on"
 
   # DR / 移行共通の recovery bootstrap
   # S3から最新バックアップをリストアする
@@ -57,7 +58,7 @@ spec:
         compression: gzip
       data:
         compression: gzip
-    retentionPolicy: "7d"
+    retentionPolicy: "3d"
 
   storage:
     size: 10Gi   # Directus はアセットを DB に保存するため authentik より大きめ

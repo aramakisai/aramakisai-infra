@@ -21,6 +21,7 @@ spec:
       shared_buffers: "64MB"
       effective_cache_size: "128MB"
       work_mem: "4MB"
+      wal_compression: "on"
 
   # DR / 移行共通の recovery bootstrap
   # skipEmptyWalArchiveCheck: enabled で WAL archive チェックをスキップし、
@@ -62,7 +63,7 @@ spec:
         compression: gzip
       data:
         compression: gzip
-    retentionPolicy: "7d"
+    retentionPolicy: "14d"
 
   storage:
     size: 5Gi
