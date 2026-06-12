@@ -64,12 +64,12 @@ cd terraform
 terraform init
 
 # 差分確認
-infisical run --env=prod --projectId=$INFISICAL_PROJECT_ID -- \
-  terraform plan -var-file="secrets.tfvars"
+infisical run --env=prod -- \
+  terraform plan
 
 # 適用 (ノード作成 → Ansible 自動実行)
-infisical run --env=prod --projectId=$INFISICAL_PROJECT_ID -- \
-  terraform apply -var-file="secrets.tfvars"
+infisical run --env=prod -- \
+  terraform apply
 ```
 
 ```bash
@@ -90,12 +90,12 @@ ansible-playbook -i ansible/inventory/tailscale.yml \
 
 ## 変数・シークレット管理
 
-* `secrets.tfvars` はコミット**禁止** (`.gitignore` 済み)
-* シークレットは環境変数または Infisical から取得
+* `.env`, `.env.app-secrets`, `terraform/secrets.tfvars`, `kubeconfig` などのローカルシークレットファイルはすべて**無効化**されています（誤使用や漏洩を防ぐため）。
+* **Infisical が Single Source of Truth** であり、開発時は `infisical run` を介して環境変数（`TF_VAR_*` など）を注入して動作させます。
 * Tailscale auth key は 1 時間で失効するため terraform apply のたびに再発行される
 
 ```
-必須環境変数 (すべて .env で管理 / source .env で読み込む):
+必須環境変数 (すべて Infisical で管理 / infisical run 経由で自動注入):
 
   # Terraform プロバイダー認証
   HCLOUD_TOKEN                        Hetzner Cloud API トークン

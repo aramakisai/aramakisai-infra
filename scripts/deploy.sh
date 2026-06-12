@@ -13,12 +13,7 @@ for arg in "$@"; do
 done
 
 echo "=== 1. Terraform Apply ==="
-if [ -f terraform/secrets.tfvars ]; then
-    (cd terraform && infisical run -- bash -c "export TF_VAR_authentik_token=\$AUTHENTIK_TOKEN && terraform apply -var-file=\"secrets.tfvars\" ${AUTO_APPROVE}")
-else
-    echo "Warning: secrets.tfvars not found. Running terraform apply..."
-    (cd terraform && infisical run -- bash -c "export TF_VAR_authentik_token=\$AUTHENTIK_TOKEN && terraform apply ${AUTO_APPROVE}")
-fi
+(cd terraform && infisical run -- bash -c "export TF_VAR_authentik_token=\$AUTHENTIK_TOKEN && terraform apply ${AUTO_APPROVE}")
 
 echo "=== 2. Waiting for Tailscale SSH Connection ==="
 echo "Polling ansible ping to verify SSH reachability..."

@@ -164,6 +164,34 @@
         infisical secrets set --env=prod KUBECONFIG="$KUBECONFIG_CONTENT"
       no_log: true
 
+    - name: ローカルの kubeconfig を無効化 (Infisical が Single Source of Truth のため)
+      delegate_to: localhost
+      become: false
+      ansible.builtin.copy:
+        dest: "{{ playbook_dir }}/../../kubeconfig"
+        content: |
+          # ============================================================
+          # kubeconfig [DISABLED]
+          # ============================================================
+          # DO NOT USE THIS FILE. USE INFISICAL INSTEAD.
+          # RUN commands via Makefile (e.g., make kubectl ARGS="get pods -A")
+          # ============================================================
+          apiVersion: v1
+          kind: Config
+          clusters:
+          - cluster:
+              server: https://do-not-use-this-file.use-infisical.invalid
+            name: do-not-use
+          contexts:
+          - context:
+              cluster: do-not-use
+              user: do-not-use
+            name: do-not-use
+          current-context: do-not-use
+          users:
+          - name: do-not-use
+            user: {}
+
 
 # ============================================================
 # Play 6: ArgoCD の初期 bootstrap

@@ -6,9 +6,10 @@ set -euo pipefail
 #
 # 使い方:
 #   1. infisical login        # ブラウザ認証 (初回のみ)
-#   2. cp .env.app-secrets.example .env.app-secrets
-#      vi .env.app-secrets    # 実際の値を記入
-#   3. ./scripts/push-secrets-to-infisical.sh
+#   2. cp .env.app-secrets.example secrets.tmp
+#      vi secrets.tmp         # 実際の値を記入 (⚠コミットしないこと)
+#   3. ./scripts/push-secrets-to-infisical.sh secrets.tmp
+#   4. rm secrets.tmp         # 反映後に必ず削除すること
 #
 # 引数 (省略可):
 #   $1  読み込む .env ファイルパス  (デフォルト: .env.app-secrets)
@@ -49,8 +50,20 @@ echo "  ✅ INFISICAL_PROJECT_ID=${INFISICAL_PROJECT_ID}"
 if [[ ! -f "${ENV_FILE}" ]]; then
   echo ""
   echo "❌ ${ENV_FILE} が見つかりません。"
-  echo "   cp .env.app-secrets.example .env.app-secrets"
-  echo "   # 値を埋めてから再実行してください"
+  echo "   cp .env.app-secrets.example secrets.tmp"
+  echo "   # 値を記入後、以下のように一時ファイルを指定して実行してください:"
+  echo "   ./scripts/push-secrets-to-infisical.sh secrets.tmp"
+  exit 1
+fi
+
+if grep -q "DO NOT USE THIS FILE" "${ENV_FILE}" 2>/dev/null; then
+  echo ""
+  echo "❌ ${ENV_FILE} は無効化されています (Infisical が Single Source of Truth のため)。"
+  echo "   シークレットを登録したい場合は、一時ファイルを作成して指定してください:"
+  echo "   cp .env.app-secrets.example secrets.tmp"
+  echo "   # 値を記入後、以下のように実行します:"
+  echo "   ./scripts/push-secrets-to-infisical.sh secrets.tmp"
+  echo "   # 実行後に secrets.tmp は削除してください"
   exit 1
 fi
 echo "  ✅ シークレットファイル: ${ENV_FILE}"

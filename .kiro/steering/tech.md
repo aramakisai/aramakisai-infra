@@ -89,17 +89,17 @@ jq, curl
 
 **Infisical がすべてのシークレットの Single Source of Truth。**
 
-- `.env` ファイルは使用しない。ローカルにシークレットを置かない
+- `.env`, `.env.app-secrets`, `secrets.tfvars`, `kubeconfig` は使用しない（無効化済み）。ローカルにシークレットを置かない
 - コマンド実行時は `infisical run --` プレフィックスで環境変数を注入する
 - `infisical login` で事前にログイン済みであること
 
 ### Common Commands
 ```bash
 # IaC 差分確認
-infisical run -- terraform -chdir=terraform plan -var-file="../secrets.tfvars"
+infisical run -- terraform -chdir=terraform plan
 
 # IaC 適用
-infisical run -- terraform -chdir=terraform apply -var-file="../secrets.tfvars"
+infisical run -- terraform -chdir=terraform apply
 
 # Ansible 単体再実行
 infisical run -- ansible-playbook -i ansible/inventory/tailscale.yml ansible/playbooks/k3s-bootstrap.yml

@@ -117,7 +117,7 @@ done
 
 ```bash
 cd terraform
-infisical run -- terraform apply -var-file="../secrets.tfvars" -auto-approve
+infisical run -- terraform apply -auto-approve
 cd ..
 ```
 

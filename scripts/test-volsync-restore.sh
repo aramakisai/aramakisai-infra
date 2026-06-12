@@ -11,7 +11,7 @@ set -euo pipefail
 #   ./scripts/test-volsync-restore.sh
 #
 # 前提:
-#   - KUBECONFIG が設定済みであること
+#   - Infisical を経由して実行すること (例: infisical run -- ./scripts/test-volsync-restore.sh)
 #   - VolSync ReplicationSource が少なくとも 1 回成功していること
 #     (kubectl get replicationsource stalwart-backup -n prod で lastSyncTime を確認)
 #   - prod-node-1 に ssh 接続できること (SMTP/IMAP 確認用)

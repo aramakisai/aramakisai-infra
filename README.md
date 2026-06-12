@@ -94,22 +94,17 @@ curl
 
 ## 初回セットアップ
 
-### 1. シークレット準備
+### 1. Infisical ログイン
+
+このプロジェクトでは Infisical を Single Source of Truth (SSoT) として使用するため、`.env` や `secrets.tfvars` などのローカルシークレットファイルはすべて無効化されています。
+
+シークレット情報をロードして動作させるには、まず Infisical CLI を使用してログインします。
 
 ```bash
-cp secrets.tfvars.example secrets.tfvars
-# secrets.tfvars を編集して各値を記入
+# ログイン (ブラウザが開くので認証します)
+infisical login
 
-# 必須環境変数を設定
-export HCLOUD_TOKEN="..."
-export CLOUDFLARE_API_TOKEN="..."
-export TAILSCALE_OAUTH_CLIENT_ID="..."
-export TAILSCALE_OAUTH_CLIENT_SECRET="..."
-export TF_VAR_tailscale_api_key="..."        # tailscale admin > Settings > Keys
-export TF_VAR_k3s_token="$(openssl rand -hex 32)"
-export TF_VAR_authentik_cf_client_id="..."
-export TF_VAR_authentik_cf_client_secret="..."
-export INFISICAL_SERVICE_TOKEN="..."
+# プロジェクトID等はリポジトリ直下の .infisical.json から自動的に読み込まれます
 ```
 
 ### 2. Terraform Cloud 設定
@@ -127,11 +122,17 @@ cloud {
 
 ### 3. Terraform 初期化・適用
 
+`infisical run` を使用して、Infisical に保存されている環境変数（`TF_VAR_*` など）を注入しながら実行します。
+
 ```bash
 cd terraform
 terraform init
-terraform plan -var-file="../secrets.tfvars"
-terraform apply -var-file="../secrets.tfvars"
+
+# 差分確認
+infisical run --env=prod -- terraform plan
+
+# 適用 (ノード作成 → Ansible 自動実行)
+infisical run --env=prod -- terraform apply
 ```
 
 `terraform apply` は以下を自動で実行する:
@@ -240,8 +241,8 @@ spec:
 
 ## 注意事項
 
-- `secrets.tfvars` はコミット禁止 (`.gitignore` 済み)
-- `ansible/kubeconfig` はコミット禁止 (`.gitignore` 済み)
+- `.env`, `.env.app-secrets`, `terraform/secrets.tfvars`, `kubeconfig` などのローカルシークレットファイルはすべて無効化されています。
+- シークレットおよび `kubeconfig` は Infisical から取得します（`ansible/kubeconfig` は Git 管理から除外されています）。
 - tfstate は Terraform Cloud で管理 (ローカルに置かない)
 - ポート 22 は公開しない (Tailscale SSH を使用)
 - staging から prod の DB へのアクセス禁止 (別 Namespace / 別 CNPG Cluster)

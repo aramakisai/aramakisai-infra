@@ -4,6 +4,7 @@
 *.tfstate.*
 *.tfvars
 !*.tfvars.example
+!terraform/secrets.tfvars
 .terraform.lock.hcl
 crash.log
 crash.*.log
@@ -19,8 +20,6 @@ ansible/kubeconfig
 __pycache__/
 
 # 環境変数
-.env
-.env.app-secrets
 *.env.local
 
 # エディタ
@@ -33,7 +32,6 @@ __pycache__/
 *.pem
 
 # Kubernetes
-kubeconfig
 
 # Infisical
 .infisical.json

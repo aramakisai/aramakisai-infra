@@ -15,7 +15,7 @@ set -euo pipefail
 #       例: "2026-06-02 10:00:00"
 #
 # 前提:
-#   - KUBECONFIG が設定済みであること (kubeconfig ファイルを source .env で読み込む)
+#   - Infisical を経由して実行すること (例: infisical run -- ./scripts/test-cnpg-restore.sh)
 #   - 対象 DB の barmanObjectStore バックアップが B2 に存在すること
 #   - kubectl が使用可能であること
 # ============================================================
