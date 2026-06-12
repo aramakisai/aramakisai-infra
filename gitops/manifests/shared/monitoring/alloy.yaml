@@ -152,72 +152,8 @@ data:
       forward_to = [prometheus.relabel.keep_essential_metrics.receiver]
     }
 ---
-apiVersion: apps/v1
-kind: DaemonSet
-metadata:
-  name: alloy
-  namespace: monitoring
-  labels:
-    app: alloy
-spec:
-  selector:
-    matchLabels:
-      app: alloy
-  template:
-    metadata:
-      labels:
-        app: alloy
-    spec:
-      serviceAccountName: alloy
-      containers:
-        - name: alloy
-          image: grafana/alloy:v1.3.1
-          args:
-            - run
-            - /etc/alloy/config.alloy
-          env:
-            - name: MY_NODE_NAME
-              valueFrom:
-                fieldRef:
-                  fieldPath: spec.nodeName
-          envFrom:
-            - secretRef:
-                name: alloy-secrets   # ESO が生成
-          volumeMounts:
-            - name: config
-              mountPath: /etc/alloy
-            - name: varlog
-              mountPath: /var/log
-              readOnly: true
-            - name: proc
-              mountPath: /proc
-              readOnly: true
-            - name: sys
-              mountPath: /sys
-              readOnly: true
-          resources:
-            requests:
-              memory: "256Mi"
-              cpu: "100m"
-            limits:
-              memory: "512Mi"
-              cpu: "300m"
-      volumes:
-        - name: config
-          configMap:
-            name: alloy-config
-        - name: varlog
-          hostPath:
-            path: /var/log
-        - name: proc
-          hostPath:
-            path: /proc
-        - name: sys
-          hostPath:
-            path: /sys
-      tolerations:
-        - operator: Exists   # 全ノードにデプロイ (taint があっても)
----
+# DaemonSet "alloy" は Grafana Cloud 利用停止 (無料枠超過のためアカウント削除依頼中) により停止。
+# ConfigMap / RBAC は VictoriaMetrics 等への移行検討用に残す。
 apiVersion: v1
 kind: ServiceAccount
 metadata:
