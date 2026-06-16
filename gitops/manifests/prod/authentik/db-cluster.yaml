@@ -7,12 +7,10 @@ metadata:
   name: authentik-db
   namespace: prod
   annotations:
-    # DR recovery 時に既存 WAL archive を継続して使うためチェックをスキップ
     cnpg.io/skipEmptyWalArchiveCheck: enabled
 spec:
   instances: 1
-  # 新しいイメージに skipEmptyWalArchiveCheck アノテーションを認識する
-  # instance manager が含まれているため明示指定する
+  # skipEmptyWalArchiveCheck アノテーションを認識する instance manager が含まれているため明示指定する
   imageName: ghcr.io/cloudnative-pg/postgresql:16.8
 
   postgresql:
@@ -23,41 +21,20 @@ spec:
       work_mem: "4MB"
       wal_compression: "on"
 
-  # DR / 移行共通の recovery bootstrap
-  # skipEmptyWalArchiveCheck: enabled で WAL archive チェックをスキップし、
-  # 同一 S3 パス・同一 serverName で recovery と backup を継続運用する。
-  # → DR を何度繰り返しても常に最新バックアップから復元される。
   bootstrap:
-    recovery:
-      source: authentik-db-source
-
-  externalClusters:
-    - name: authentik-db-source
-      barmanObjectStore:
-        destinationPath: "s3://aramakisai-backups/cnpg/authentik-db"
-        endpointURL: "https://s3.us-west-004.backblazeb2.com"
-        serverName: authentik-db
-        s3Credentials:
-          accessKeyId:
-            name: b2-credentials
-            key: ACCESS_KEY_ID
-          secretAccessKey:
-            name: b2-credentials
-            key: SECRET_ACCESS_KEY
-        wal:
-          compression: gzip
+    initdb: {}
 
   backup:
     barmanObjectStore:
       destinationPath: "s3://aramakisai-backups/cnpg/authentik-db"
-      endpointURL: "https://s3.us-west-004.backblazeb2.com"
+      endpointURL: "https://fsn1.your-objectstorage.com"
       serverName: authentik-db
       s3Credentials:
         accessKeyId:
-          name: b2-credentials
+          name: hetzner-os-credentials
           key: ACCESS_KEY_ID
         secretAccessKey:
-          name: b2-credentials
+          name: hetzner-os-credentials
           key: SECRET_ACCESS_KEY
       wal:
         compression: gzip

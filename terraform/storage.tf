@@ -5,8 +5,8 @@
 #         サポートしていない。バケットは Hetzner Robot ダッシュボードで手動作成し、
 #         アクセスキーを Infisical に保存すること。
 #
-# 用途: Velero / Longhorn のバックアップ保存先 (S3 互換 API)
-# エンドポイント: https://<location>.your-objectstorage.com
+# 用途: CNPG WAL アーカイブ + VolSync restic バックアップ
+# エンドポイント: https://fsn1.your-objectstorage.com
 # バケット名: aramakisai-backups
 # ============================================================
 
