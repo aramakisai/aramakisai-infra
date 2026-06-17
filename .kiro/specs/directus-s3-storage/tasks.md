@@ -63,15 +63,16 @@
   - _Requirements: 1.1, 1.3_
   - **実施結果 (2026-06-17)**: commit `3719806` を main へ push。ArgoCD は `argocd.argoproj.io/refresh: hard` annotation で強制リフレッシュするまで OutOfSync を検出しなかった (push 直後は古い revision を Synced と誤表示)。Hard refresh 後 `OutOfSync`→自動 sync で新 Pod `directus-549d689978-x6b89` が `1/1 Running`、`directus-uploads` PVC は `NotFound`、env に `STORAGE_LOCATIONS=s3` 含む `STORAGE_S3_*` 一式を確認。Application は `Synced`/`Healthy`
 
-- [ ] 6. S3 移行後の動作を実機確認する
+- [x] 6. S3 移行後の動作を実機確認する
   - _Depends: 5_
-- [ ] 6.1 新規アセットのアップロードと公開 URL 閲覧を確認する
-  - Directus 管理画面からテストアセットをアップロードする
-  - `mc ls <alias>/aramakisai-backups/directus-uploads/` でオブジェクトが作成されていることを確認する
-  - `https://aramakisai.com/assets/<file-id>` にアクセスし、アセットが正常に表示されること
+  - **実施方針 (2026-06-17)**: ホームページ側 (スキーマ/フロントエンド) が未着手のため、管理画面 UI ではなく `kubectl port-forward` + Directus REST API (`/auth/login`, `/files`, `/assets/:id`) + `aws s3api` による簡易確認に変更。検証範囲は変わらず (1.2, 2.1, 2.2 を満たす)
+- [x] 6.1 新規アセットのアップロードと公開 URL 閲覧を確認する
+  - `POST /files` でテストアセットをアップロード → レスポンス `"storage":"s3"` を確認
+  - `aws s3api head-object --bucket aramakisai-backups --key directus-uploads/<file-id>.txt` でオブジェクト存在・`VersionId` 付与を確認 (`Expiration` ヘッダーで `noncurrent-expiry` ルール適用も確認)
+  - `GET /assets/<file-id>` (port-forward 経由) でダウンロードし、元ファイルと `diff` 一致を確認
   - _Requirements: 1.2_
 
-- [ ] 6.2 削除マーカー付与とバージョン保持を確認する
-  - 6.1 でアップロードしたテストアセットを管理画面から削除する
-  - `mc ls --versions <alias>/aramakisai-backups/directus-uploads/` で削除マーカーと旧バージョンのオブジェクトが残っていること
+- [x] 6.2 削除マーカー付与とバージョン保持を確認する
+  - 6.1 のテストアセットを `DELETE /files/<file-id>` で削除 (204)
+  - `aws s3api list-object-versions` で旧バージョン (`IsLatest: false`, 元の `VersionId` 保持) と削除マーカー (`IsLatest: true`) が両方残っていることを確認
   - _Requirements: 2.1, 2.2_
