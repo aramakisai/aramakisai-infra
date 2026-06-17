@@ -5,7 +5,7 @@
 #         サポートしていない。バケットは Hetzner Robot ダッシュボードで手動作成し、
 #         アクセスキーを Infisical に保存すること。
 #
-# 用途: CNPG WAL アーカイブ + VolSync restic バックアップ
+# 用途: CNPG WAL アーカイブ + VolSync restic バックアップ + Directus アセット (directus-uploads/)
 # エンドポイント: https://fsn1.your-objectstorage.com
 # バケット名: aramakisai-backups
 # ============================================================

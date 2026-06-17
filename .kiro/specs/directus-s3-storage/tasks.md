@@ -34,24 +34,20 @@
   - _Requirements: 4.2_
   - _Boundary: DR ランブック更新_
 
-- [ ] 4. 既存 PVC アセットを Hetzner OS へ移行する手順を作成し実行する
-- [ ] 4.1 (P) 既存アセット移行手順書を作成する
-  - `docs/directus-s3-migration.md` を新規作成し、`rclone`(または aws-cli) を用いて `directus-uploads` PVC の内容を `s3://aramakisai-backups/directus-uploads/` へ転送するコマンド例を記載する
-  - 転送後にファイル数・合計サイズを PVC 側と Hetzner OS 側で照合する手順を含める
-  - `docs/directus-s3-migration.md` が作成され、転送コマンドと照合手順が記載されていること
+- [x] 4. 既存 PVC アセットを Hetzner OS へ移行する手順を作成し実行する
+  - **確認結果 (2026-06-17)**: `kubectl exec -n prod deploy/directus -- find /directus/uploads -type f | wc -l` = `0` (`du -sh` も `4.0K` = 空ディレクトリのみ)。本番運用開始前の初期状態であり既存アセットが一切存在しないため、移行作業 (4.1/4.2) は不要と判断しスキップする
+- [x] 4.1 (P) 既存アセット移行手順書を作成する
+  - **スキップ**: PVC 内アセットが 0 件のため転送対象が存在せず、`docs/directus-s3-migration.md` の作成は不要と判断
   - _Requirements: 3.1_
   - _Boundary: 既存アセット移行手順_
 
-- [ ] 4.2 既存 PVC アセットを Hetzner OS へ転送し照合を完了する
-  - 一時 Pod (rclone/aws-cli イメージ、`directus-uploads` PVC をマウント) を起動し、`docs/directus-s3-migration.md` の手順で転送を実行する
-  - 転送完了後、PVC 側のファイル数・合計サイズと `mc ls`/`mc du` で確認した Hetzner OS 側の値が一致することを確認する
-  - 作業完了後に一時 Pod を削除する
-  - `s3://aramakisai-backups/directus-uploads/` のオブジェクト数・合計サイズが PVC 側と一致すること
+- [x] 4.2 既存 PVC アセットを Hetzner OS へ転送し照合を完了する
+  - **スキップ**: 4.1 と同理由 (転送対象アセットが存在しない)。照合も 0 件 = 0 件で自明に一致
   - _Depends: 4.1, 1.2, 2_
   - _Requirements: 3.1_
   - _Boundary: 既存アセット移行手順_
 
-- [ ] 4.3 (P) terraform/storage.tf のコメントに Directus アセットの用途を追記する
+- [x] 4.3 (P) terraform/storage.tf のコメントに Directus アセットの用途を追記する
   - `terraform/storage.tf` のバケット用途コメントに「Directus アセット (`directus-uploads/`)」を追記する (IaC リソース定義は変更しない)
   - コメントに CNPG WAL アーカイブ・VolSync バックアップ・Directus アセットの3用途が記載されていること
   - _Requirements: 1.1_
