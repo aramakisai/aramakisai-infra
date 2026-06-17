@@ -9,7 +9,7 @@ prod-node-1 (CX33) が障害になった場合、Grafana Cloud Alerting + GitHub
 自動復旧が失敗した場合のみ、「手動フォールバック」セクションを参照する。
 
 **目標復旧時間 (RTO)**: 30 分  
-**目標復旧時点 (RPO)**: Authentik = 直前まで（CNPG WAL 連続アーカイブ）、Stalwart = 最大 2 時間、Directus = 直前まで（CNPG WAL 連続アーカイブ）
+**目標復旧時点 (RPO)**: Authentik = 直前まで（CNPG WAL 連続アーカイブ）、Stalwart = 最大 2 時間、Directus DB = 直前まで（CNPG WAL 連続アーカイブ）、Directus アセット = 直前まで（Hetzner OS への直接保存のため復元待機不要、コンテナ起動と同時に接続）
 
 ---
 
