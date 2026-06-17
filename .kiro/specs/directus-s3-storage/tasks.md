@@ -53,7 +53,7 @@
   - _Requirements: 1.1_
   - _Boundary: terraform/storage.tf_
 
-- [ ] 5. Directus のストレージ設定を S3 に切替え PVC を削除する
+- [x] 5. Directus のストレージ設定を S3 に切替え PVC を削除する
   - _Depends: 4.2_
   - `gitops/manifests/prod/directus/deployment.yaml` を編集する (コミット2、アトミックに適用)
     - `STORAGE_LOCATIONS=s3`、`STORAGE_S3_DRIVER=s3`、`STORAGE_S3_BUCKET=aramakisai-backups`、`STORAGE_S3_ROOT=directus-uploads`、`STORAGE_S3_ENDPOINT=https://fsn1.your-objectstorage.com`、`STORAGE_S3_REGION=fsn1`、`STORAGE_S3_FORCE_PATH_STYLE=false` を設定する
@@ -61,6 +61,7 @@
   - 変更を main へ直接 push し ArgoCD sync を待つ
   - Directus Pod が `Ready` になり、`make kubectl ARGS="get pvc directus-uploads -n prod"` が `NotFound` を返すこと
   - _Requirements: 1.1, 1.3_
+  - **実施結果 (2026-06-17)**: commit `3719806` を main へ push。ArgoCD は `argocd.argoproj.io/refresh: hard` annotation で強制リフレッシュするまで OutOfSync を検出しなかった (push 直後は古い revision を Synced と誤表示)。Hard refresh 後 `OutOfSync`→自動 sync で新 Pod `directus-549d689978-x6b89` が `1/1 Running`、`directus-uploads` PVC は `NotFound`、env に `STORAGE_LOCATIONS=s3` 含む `STORAGE_S3_*` 一式を確認。Application は `Synced`/`Healthy`
 
 - [ ] 6. S3 移行後の動作を実機確認する
   - _Depends: 5_
