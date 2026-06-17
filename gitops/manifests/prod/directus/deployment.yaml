@@ -40,12 +40,19 @@ spec:
             - name: PUBLIC_URL
               value: https://aramakisai.com   # 本番 URL (要変更)
             - name: STORAGE_LOCATIONS
-              value: local
-            - name: STORAGE_LOCAL_ROOT
-              value: /directus/uploads
-          volumeMounts:
-            - name: uploads
-              mountPath: /directus/uploads
+              value: s3
+            - name: STORAGE_S3_DRIVER
+              value: s3
+            - name: STORAGE_S3_BUCKET
+              value: aramakisai-backups
+            - name: STORAGE_S3_ROOT
+              value: directus-uploads
+            - name: STORAGE_S3_ENDPOINT
+              value: https://fsn1.your-objectstorage.com
+            - name: STORAGE_S3_REGION
+              value: fsn1
+            - name: STORAGE_S3_FORCE_PATH_STYLE
+              value: "false"
           resources:
             requests:
               memory: "256Mi"
@@ -59,19 +66,3 @@ spec:
               port: 8055
             initialDelaySeconds: 15
             periodSeconds: 10
-      volumes:
-        - name: uploads
-          persistentVolumeClaim:
-            claimName: directus-uploads
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: directus-uploads
-  namespace: prod
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 10Gi
