@@ -3,7 +3,7 @@
 # wave: 0
 #
 # staging から prod へのアクセス禁止 (別 DB を使用)
-# Cloudflare Access (stg.aramakisai.com, api.stg.aramakisai.com) で保護済み
+# Cloudflare Access (stg.aramakisai.com, stg-api.aramakisai.com) で保護済み
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:

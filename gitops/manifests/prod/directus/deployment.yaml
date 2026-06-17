@@ -38,7 +38,7 @@ spec:
               value: directus
             # DB_PASSWORD は directus-secrets Secret から注入
             - name: PUBLIC_URL
-              value: https://aramakisai.com   # 本番 URL (要変更)
+              value: https://api.aramakisai.com
             - name: STORAGE_LOCATIONS
               value: s3
             - name: STORAGE_S3_DRIVER

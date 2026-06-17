@@ -34,13 +34,25 @@ resource "cloudflare_record" "stg" {
 }
 
 # Staging API
+# api.stg (2階層) は Cloudflare Universal SSL のカバー範囲外 (TLS handshake failure) のため
+# stg-api (1階層、*.aramakisai.com ワイルドカードでカバー) に変更
 resource "cloudflare_record" "api_stg" {
   zone_id = var.cloudflare_zone_id
-  name    = "api.stg"
+  name    = "stg-api"
   value   = local.tunnel_cname
   type    = "CNAME"
   proxied = true
   comment = "Staging API (Cloudflare Tunnel)"
+}
+
+# Production API (Directus)
+resource "cloudflare_record" "api" {
+  zone_id = var.cloudflare_zone_id
+  name    = "api"
+  value   = local.tunnel_cname
+  type    = "CNAME"
+  proxied = true
+  comment = "Directus API (Cloudflare Tunnel)"
 }
 
 # ============================================================

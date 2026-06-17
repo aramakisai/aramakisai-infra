@@ -41,7 +41,10 @@ resource "cloudflare_zero_trust_access_identity_provider" "authentik" {
 #
 # 保護対象:
 #   stg.aramakisai.com       Staging Frontend (Authentik OIDC)
-#   api.stg.aramakisai.com   Staging API      (Authentik OIDC)
+#   stg-api.aramakisai.com   Staging API      (Authentik OIDC)
+#                            ※ api.stg.aramakisai.com (2階層) は Cloudflare Universal SSL の
+#                              カバー範囲外 (aramakisai.com / *.aramakisai.com のみ) のため
+#                              TLS handshake failure になる。1階層hostnameに変更して回避。
 #
 # 非保護 (自前認証あり):
 #   webmail.aramakisai.com   Roundcube が Authentik OAuth2 で保護
@@ -64,7 +67,7 @@ resource "cloudflare_zero_trust_access_application" "stg" {
 resource "cloudflare_zero_trust_access_application" "api_stg" {
   account_id       = var.cloudflare_account_id
   name             = "Staging API"
-  domain           = "api.stg.aramakisai.com"
+  domain           = "stg-api.aramakisai.com"
   type             = "self_hosted"
   session_duration = "24h"
 

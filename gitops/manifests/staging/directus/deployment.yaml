@@ -42,7 +42,7 @@ spec:
             - name: DB_USER
               value: directus
             - name: PUBLIC_URL
-              value: https://stg.aramakisai.com
+              value: https://stg-api.aramakisai.com
             - name: STORAGE_LOCATIONS
               value: local
             - name: STORAGE_LOCAL_ROOT

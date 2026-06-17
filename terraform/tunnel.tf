@@ -38,10 +38,16 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "main" {
       service  = "http://frontend.staging.svc.cluster.local:80"
     }
 
-    # Staging API
+    # Staging API (Directus)
     ingress_rule {
-      hostname = "api.stg.aramakisai.com"
-      service  = "http://api.staging.svc.cluster.local:80"
+      hostname = "stg-api.aramakisai.com"
+      service  = "http://directus.staging.svc.cluster.local:80"
+    }
+
+    # Production API (Directus)
+    ingress_rule {
+      hostname = "api.aramakisai.com"
+      service  = "http://directus.prod.svc.cluster.local:80"
     }
 
     # フォールバック (いずれのホスト名にもマッチしない場合)
