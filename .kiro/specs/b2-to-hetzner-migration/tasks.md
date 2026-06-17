@@ -83,8 +83,8 @@
   - _Requirements: 7.1, 7.2, 7.3, 7.4_
   - _Boundary: .kiro/specs/backup/_
 
-- [ ] 5. ArgoCD sync 後の動作確認
-- [ ] 5.1 ESO Secret 状態と CNPG クラスターの起動を確認する
+- [x] 5. ArgoCD sync 後の動作確認
+- [x] 5.1 ESO Secret 状態と CNPG クラスターの起動を確認する
   - タスク 2〜4 の変更を 1 つの PR にまとめ、タスク 1 の Infisical 準備完了後にマージする
   - `make kubectl ARGS="get secret hetzner-os-credentials -n prod"` で Secret の存在を確認する
   - `make kubectl ARGS="get secret b2-credentials -n prod"` で Secret が削除済み (NotFound) であることを確認する
@@ -92,14 +92,14 @@
   - 両 CNPG クラスターが `Ready` 状態になり WAL アーカイブが Hetzner OS バケットに書き込まれること
   - _Requirements: 3.3, 4.6_
 
-- [ ] 5.2 VolSync 次バックアップサイクルの Hetzner OS への書き込みを確認する
+- [x] 5.2 VolSync 次バックアップサイクルの Hetzner OS への書き込みを確認する
   - 次のスケジュール (`0 */6 * * *`) が到来するまで待機する (最大 6 時間)
   - `make kubectl ARGS="get replicationsource mailserver-backup -n prod -o jsonpath='{.status}'"` で `lastSyncTime` が更新されていることを確認する
   - Hetzner OS バケット内に `mailserver/restic/` パス以下の restic オブジェクト (config, index/ 等) が作成されること
   - _Requirements: 5.3, 5.4, 5.5_
 
-- [ ] 6. B2 orphan シークレットをクリーンアップする
-- [ ] 6.1 Infisical と Backblaze B2 コンソールから旧認証情報を削除する
+- [x] 6. B2 orphan シークレットをクリーンアップする
+- [x] 6.1 Infisical と Backblaze B2 コンソールから旧認証情報を削除する
   - タスク 5 の全確認完了後に実施する
   - Infisical の prod 環境から `B2_KEY_ID` / `B2_APPLICATION_KEY` を削除する
   - Backblaze B2 コンソール (`secure.backblaze.com`) で当該 Application Key を失効・削除する

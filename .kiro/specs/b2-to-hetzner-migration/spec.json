@@ -1,9 +1,9 @@
 {
   "feature_name": "b2-to-hetzner-migration",
   "created_at": "2026-06-16T00:00:00+09:00",
-  "updated_at": "2026-06-16T00:00:00+09:00",
+  "updated_at": "2026-06-17T00:00:00+09:00",
   "language": "ja",
-  "phase": "implementation",
+  "phase": "completed",
   "approvals": {
     "requirements": {
       "generated": true,
