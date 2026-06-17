@@ -110,7 +110,7 @@ DMS 内で送信メール署名用の DKIM キーを生成し、Terraform で DN
   - 設計時に検討されていた `stalwart-auth-unified` (Dex 導入案) は、本 spec の DMS 移行により**不要となり実装されなかった** (詳細は `stalwart-auth-unified` spec 参照、cancelled に更新済み)。`gitops/` 内に Dex 関連リソースは存在しない。
   - Terraform (`authentik_apps.tf` / `authentik_imports.tf`) 上に Stalwart 専用リソースは存在しない。
   - **要確認**: Authentik 管理画面上に手動作成された "Stalwart LDAP" / "Stalwart Mail" Provider/Application が残っている場合は削除すること（`gitops/manifests/prod/authentik/ldap-outpost.yaml` のセットアップ手順コメントが旧名称のまま — Milestone 6 参照）。
-- [ ] **Task 5.4**: Infisical の WebUI または CLI から、不要になった環境変数を削除する。
+- [x] **Task 5.4**: Infisical の WebUI または CLI から、不要になった環境変数を削除する。
   - **2026-06-12 完了**: 以下 6 キーは orphan (コード上どこからも参照されていない) と確認の上、`infisical secrets delete --env=prod --type=shared` で削除済み。`.env.app-secrets` / `.env.app-secrets.example` の対応する行・セクションも削除済み。
     - `STALWART_ADMIN_SECRET`
     - `STALWART_API_KEY`
