@@ -53,7 +53,7 @@
   - _Requirements: 5.1, 5.3, 7.1, 7.2, 8.1_
   - _Boundary: MailserverBackupHealthcheck_
 
-- [ ] 4. (P) UptimeRobotで公開エンドポイントのMonitorをTerraformリソースとして定義する
+- [x] 4. (P) UptimeRobotで公開エンドポイントのMonitorをTerraformリソースとして定義する
   - `terraform/uptimerobot.tf` に `uptimerobot_monitor` リソースを定義し、本体サイト・staging・ArgoCD管理画面・Webmail・Authentik IdP・autoconfigエンドポイント・mail.aramakisai.comのTCP到達性(443)を監視対象に含める
   - `terraform plan` で全Monitorの作成計画が表示されること
   - apply後、UptimeRobot管理画面で各Monitorが登録され `UP` 表示されること
