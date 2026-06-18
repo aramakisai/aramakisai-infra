@@ -1,0 +1,63 @@
+---
+# Netdata Cloud child agent — btop相当の即時可視化 (軽量メトリクス監視)
+# wave: 0
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: netdata
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://netdata.github.io/helmchart
+    chart: netdata
+    targetRevision: "3.*"
+    helm:
+      valuesObject:
+        parent:
+          enabled: false
+        k8sState:
+          enabled: false
+        child:
+          enabled: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 150Mi
+          configs:
+            netdata:
+              enabled: true
+              path: /etc/netdata/netdata.conf
+              data: |
+                [db]
+                  mode = ram
+                [web]
+                  bind to = localhost:19999
+                [health]
+                  enabled = no
+                [ml]
+                  enabled = no
+          claiming:
+            enabled: true
+            url: "https://api.netdata.cloud"
+            # token/rooms は平文記載しない (envFrom で Secret から注入する)
+          envFrom:
+            - secretRef:
+                name: netdata-secrets
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
