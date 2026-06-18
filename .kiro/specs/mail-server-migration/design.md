@@ -128,7 +128,7 @@ DMS の Dovecot で OAUTHBEARER および XOAUTH2 認証を有効にし、Authen
 
 ### 2.2. Roundcube Webmail 設定の維持
 
-Roundcube ([config-configmap.yaml](gitops/manifests/prod/roundcube/config-configmap.yaml)) は Authentik セッションを使用した OAUTHBEARER 接続を行うため、**基本的に既存の OAuth2 連携設定を維持する**。
+Roundcube ([config-configmap.yaml](../../../gitops/manifests/prod/roundcube/config-configmap.yaml)) は Authentik セッションを使用した OAUTHBEARER 接続を行うため、**基本的に既存の OAuth2 連携設定を維持する**。
 
 - 以下の既存設定がそのまま機能する：
   ```php

@@ -31,11 +31,11 @@
 ## File Structure Plan
 
 ### New Files
-- [.github/pull_request_template.md](.github/pull_request_template.md) — レビュー品質向上のためのチェックリストとフォーマット。
-- [.github/workflows/pr-validation.yml](.github/workflows/pr-validation.yml) — PR作成・更新時に `make lint` を実行するGitHub Actionsワークフロー。
+- [.github/pull_request_template.md](../../.github/pull_request_template.md) — レビュー品質向上のためのチェックリストとフォーマット。
+- [.github/workflows/pr-validation.yml](../../.github/workflows/pr-validation.yml) — PR作成・更新時に `make lint` を実行するGitHub Actionsワークフロー。
 
 ### Modified Files
-- [.kiro/specs/repo-governance/spec.json](.kiro/specs/repo-governance/spec.json) — 進捗ステータスおよび承認状態の更新。
+- [.kiro/specs/repo-governance/spec.json](spec.json) — 進捗ステータスおよび承認状態の更新。
 
 ---
 

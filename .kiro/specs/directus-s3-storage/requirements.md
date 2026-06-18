@@ -14,7 +14,7 @@
 
 - **In-Scope**:
   - Directus (`deployment.yaml`) の環境変数修正による S3 (B2) 保存への切り替え
-  - [deployment.yaml](gitops/manifests/prod/directus/deployment.yaml) 内の `directus-uploads` PVC 定義およびマウントの削除
+  - [deployment.yaml](../../../gitops/manifests/prod/directus/deployment.yaml) 内の `directus-uploads` PVC 定義およびマウントの削除
   - Infisical への Directus 用 S3 認証情報の追加と、ExternalSecret の更新
   - 対象 Hetzner Object Storage バケットに対するオブジェクトバージョニングおよびライフサイクルルール（30日保持）の適用（手動設定）
   - 移行期における、既存 PVC 内アセットの Hetzner OS への移行手順の確立
@@ -49,7 +49,7 @@
 - **概要**: アセットがS3化されたことに伴い、DR ランブックや復旧スクリプトから Directus PVC の復旧に関する手順が完全に不要化されていることを確認する。
 - **アクセプタンス基準**:
   1. `recovery.sh` において Directus の PVC 復元（VolSync）に関する処理を追加する必要がないことを確認する。
-  2. [dr-runbook.md](docs/dr-runbook.md) の復旧手順にアセットの復元待機が含まれていないこと。
+  2. [dr-runbook.md](../../../docs/dr-runbook.md) の復旧手順にアセットの復元待機が含まれていないこと。
 
 ---
 

@@ -29,7 +29,7 @@ Grafana Cloud の無料枠（10,000 active series）に収めるため、Grafana
 ## File Structure Plan
 
 ### Modified Files
-- [alloy.yaml](gitops/manifests/shared/monitoring/alloy.yaml) — `prometheus.relabel` の追加および各スクレイプジョブの `forward_to` の書き換え。
+- [alloy.yaml](../../../gitops/manifests/shared/monitoring/alloy.yaml) — `prometheus.relabel` の追加および各スクレイプジョブの `forward_to` の書き換え。
 
 ---
 
