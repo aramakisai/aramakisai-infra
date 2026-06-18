@@ -1,0 +1,41 @@
+---
+# Room Presence Tracker 用 PostgreSQL Cluster (CNPG) + アプリシークレット
+# wave: -1 — room-presence (wave 0) の Helm chart は migrate Job を
+# pre-install/pre-upgrade hook (PreSync) として持つため、DB が Sync フェーズで
+# 後から作られると DB 接続不可で migrate Job が永久に失敗する。
+# DB を別 wave で先行 Sync し、room-presence の PreSync 開始時には
+# 既に Healthy な状態にしておく。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: room-presence-db
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:aramakisai/aramakisai-infra.git
+    targetRevision: main
+    path: gitops/manifests/prod/room-presence
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: prod
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - RespectIgnoreDifferences=true
+  ignoreDifferences:
+    - group: external-secrets.io
+      kind: ExternalSecret
+      jqPathExpressions:
+        - .spec.data[].remoteRef.conversionStrategy
+        - .spec.data[].remoteRef.decodingStrategy
+        - .spec.data[].remoteRef.metadataPolicy
+        - .spec.target.deletionPolicy
