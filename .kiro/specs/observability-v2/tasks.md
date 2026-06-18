@@ -35,7 +35,7 @@
   - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 7.1, 7.2, 8.1_
   - _Boundary: NetdataAgent_
 
-- [ ] 3. バックアップのDead Man's Switchを構築する
+- [x] 3. バックアップのDead Man's Switchを構築する
 - [x] 3.1 (P) Healthchecks.io checkのTerraformリソースを定義する
   - `terraform/healthchecksio.tf` に `healthchecksio_check` リソースを定義し、6時間インターバル+grace 1-2時間を設定する
   - Discord連携を設定する場合はHealthchecks.ioコンソールへ `DISCORD_OPS_WEBHOOK_URL` を直接入力し、同値をInfisicalにも記録する (Requirement 7.3の例外)
@@ -44,7 +44,7 @@
   - _Requirements: 5.1, 5.2, 9.2, 9.4, 7.3_
   - _Boundary: HealthchecksIoCheck_
 
-- [ ] 3.2 (P) VolSync ReplicationSourceを確認しpingを送信するCronJobを実装する
+- [x] 3.2 (P) VolSync ReplicationSourceを確認しpingを送信するCronJobを実装する
   - `gitops/manifests/prod/mailserver/backup-healthcheck-rbac.yaml` で専用ServiceAccount+Role(`get`/`list` on `replicationsources.volsync.backube`, namespace `prod`)を作成する
   - `gitops/manifests/prod/mailserver/backup-healthcheck-cronjob.yaml` でVolSyncのバックアップスケジュール完了後にずらして実行するCronJobを定義し、`status.lastSyncTime`/`status.conditions`(Synchronized)が想定インターバル内なら正常時のみHealthchecks.ioへpingする
   - `gitops/manifests/prod/mailserver/healthchecks-external-secret.yaml` で `HEALTHCHECKS_MAILSERVER_BACKUP_PING_URL` をInfisicalから取得しCronJob envへ注入する

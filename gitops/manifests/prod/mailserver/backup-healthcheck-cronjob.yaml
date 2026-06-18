@@ -52,6 +52,7 @@ spec:
                   sys.exit(0 if (result == 'Successful' and age_seconds < 7 * 3600) else 1)
                   "; then
                     curl -fsS -m 10 --retry 3 "$HEALTHCHECKS_MAILSERVER_BACKUP_PING_URL"
+                    echo
                     echo "backup healthy, ping sent"
                   else
                     echo "backup stale or unsuccessful, skipping ping (Healthchecks.io will alert after grace period)"
