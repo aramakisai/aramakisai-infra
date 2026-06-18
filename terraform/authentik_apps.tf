@@ -124,9 +124,19 @@ resource "authentik_property_mapping_provider_scope" "oauth_scope_student_id" {
 resource "authentik_property_mapping_provider_scope" "oauth_scope_discord_id" {
   name       = "Room Presence: discord_id"
   scope_name = "discord_id"
+  # request.user.socialaccount_set は django-allauth の属性で Authentik には存在しない
+  # (AttributeError -> /authorize が invalid_request:malformed を返しログイン不能になっていた)。
+  # Authentik 本来の OAuth Source Connection モデルを使う。例外時はNoneを返し、
+  # discord連携が未完了/取得失敗でもログイン自体は通すフェイルセーフにする。
   expression = <<-EOT
-    social = request.user.socialaccount_set.filter(provider="discord").first()
-    return social.uid if social else None
+    try:
+        from authentik.sources.oauth.models import UserOAuthSourceConnection
+        connection = UserOAuthSourceConnection.objects.filter(
+            user=request.user, source__slug="discord"
+        ).first()
+        return connection.identifier if connection else None
+    except Exception:
+        return None
   EOT
 }
 
@@ -138,6 +148,12 @@ resource "authentik_provider_oauth2" "room_presence" {
 
   authorization_flow = data.authentik_flow.default_authorization.id
   invalidation_flow  = data.authentik_flow.default_invalidation.id
+
+  # 注意: grant_types はこのTerraform providerのschemaに存在せず設定不可。
+  # 新規作成されたProviderはgrant_typesが空リストになり、response_type=codeの
+  # authorize要求が"invalid_request: malformed"で即時拒否される
+  # (import済みの他provider [argocd等] は元々全種設定済みだったため発覚しなかった)。
+  # Authentik API (PATCH /api/v3/providers/oauth2/{id}/) で直接修正すること。
 
   allowed_redirect_uris = [
     {
