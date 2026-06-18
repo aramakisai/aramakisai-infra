@@ -468,6 +468,42 @@ URL:    https://webmail.aramakisai.com
    - `MAIL_OAUTH2_CLIENT_SECRET` = Authentik で生成されたシークレット
    - `ROUNDCUBE_DES_KEY` = 24文字のランダム文字列 (`openssl rand -base64 18`)
 
+---
+
+## Room Presence Tracker (実行委員室 在室管理)
+
+別リポジトリ (`aramakisai/room-presence-tracker`) の Next.js アプリ。Helm chart はそのリポジトリの `helm/room-presence` に同梱されており、デプロイ用の本番値 (イメージリポジトリ・Authentik 接続情報など) は `gitops/apps/prod/room-presence.yaml` の `helm.valuesObject` で上書きする。**room-presence-tracker リポジトリ自体は CI/CD 関連 (`.github/workflows/`) 以外を変更しない方針** — 設定・本番値の管理はすべてこの infra リポジトリ側で行う。
+
+```
+URL:    https://presence.aramakisai.com (Cloudflare Tunnel 経由, CF Access なし)
+        ※ Discord Interactions エンドポイントが外部公開必須のため CF Access は使えない
+認証:   Authentik OIDC (Auth.js) + Discord Bot (/presence, /toggle)
+DB:     CloudNativePG Cluster `presence-db` (gitops/manifests/prod/room-presence/db-cluster.yaml)
+```
+
+### Authentik 側 (Terraform 管理)
+
+`terraform/authentik_apps.tf` の「4. Room Presence Tracker」ブロックで Provider/Application を宣言的に管理 (Roundcube/ArgoCD と同パターン)。student_id・discord_id はカスタム Property Mapping で id_token に含める。
+
+- `var.authentik_room_presence_client_secret` (Infisical キー: `TF_VAR_authentik_room_presence_client_secret`)
+- k8s ESO 側 (`gitops/manifests/prod/room-presence/external-secret.yaml`) もこの **同じキーを直接参照** する (`AUTHENTIK_CLIENT_SECRET` ← `TF_VAR_authentik_room_presence_client_secret`)。Terraform 用キーを ESO からも読むことで、同値を2キーで重複管理しない
+
+### Infisical に必要なシークレット
+
+| キー名 | 内容 |
+|--------|------|
+| `TF_VAR_authentik_room_presence_client_secret` | Authentik OIDC Client Secret (Terraform と ESO の両方がこのキーを直接参照) |
+| `PRESENCE_AUTH_SECRET` | Auth.js シークレット (`openssl rand -base64 32`) |
+| `PRESENCE_AUTHENTIK_API_TOKEN` | Authentik Admin API Token (ユーザー一覧取得用、`src/lib/authentik.ts`) |
+| `PRESENCE_RESET_SECRET` | 深夜0時リセット CronJob 用 Bearer トークン |
+| `PRESENCE_DISCORD_BOT_TOKEN` | Discord Bot Token (Discord Bot 未作成のため後日登録) |
+
+### 既知のギャップ
+
+- **`AUTHENTIK_API_TOKEN` が Helm chart の Deployment に未配線** (`src/lib/authentik.ts` が参照するが `helm/room-presence/templates/deployment.yaml` に env 定義なし)。ExternalSecret 側には `AUTHENTIK_API_TOKEN` キーを用意済みなので、room-presence-tracker リポジトリ側で Deployment テンプレートに env 追加が必要 (このリポジトリでは変更しない方針のため未対応)
+- Discord Bot (`DISCORD_APPLICATION_ID` / `DISCORD_PUBLIC_KEY` / `DISCORD_BOT_TOKEN`) は未作成。Discord Developer Portal での作成後、Infisical 登録 + `gitops/apps/prod/room-presence.yaml` の valuesObject に ID/Public Key を反映すること
+- Authentik の「kiosk」グループ・キオスクユーザー作成は手動運用 (Terraform 管理外)
+
 # 🚀 CLAUDE.md — gitops
 
 # CLAUDE.md — gitops

@@ -50,6 +50,12 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "main" {
       service  = "http://directus.prod.svc.cluster.local:80"
     }
 
+    # Room Presence Tracker (実行委員室 在室管理)
+    ingress_rule {
+      hostname = "presence.aramakisai.com"
+      service  = "http://room-presence.prod.svc.cluster.local:3000"
+    }
+
     # フォールバック (いずれのホスト名にもマッチしない場合)
     ingress_rule {
       service = "http_status:404"

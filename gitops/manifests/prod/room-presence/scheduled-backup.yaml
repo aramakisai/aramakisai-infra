@@ -1,0 +1,13 @@
+---
+# Room Presence DB 日次フルバックアップ (毎日 03:00 UTC)
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: presence-db-daily
+  namespace: prod
+spec:
+  schedule: "0 3 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: presence-db
+  target: prefer-standby

@@ -139,6 +139,13 @@ variable "argocd_oidc_client_secret" {
   default     = ""
 }
 
+variable "authentik_room_presence_client_secret" {
+  description = "Room Presence Tracker OIDC Client Secret (aramakisai-room-presence)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 variable "cloudflare_access_redirect_uris" {
   description = "Cloudflare Access OIDC Redirect URIs"
   type        = list(string)

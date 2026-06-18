@@ -1,0 +1,62 @@
+---
+# Room Presence Tracker — 実行委員室 在室管理
+# wave: 0 — ESO/CNPG が揃った後にデプロイ
+#
+# multi-source: room-presence-tracker repo の Helm chart + このリポジトリの
+# CNPG Cluster / ExternalSecret manifest を合成。
+# 本番固有の値 (イメージリポジトリ・Authentik 接続情報など) は helm.valuesObject で上書きする
+# (room-presence-tracker repo の values.yaml はテンプレートのプレースホルダーのまま保つ方針)
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: room-presence
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  sources:
+    # room-presence-tracker Helm chart
+    - repoURL: git@github.com:aramakisai/room-presence-tracker.git
+      targetRevision: main
+      path: helm/room-presence
+      helm:
+        valuesObject:
+          image:
+            repository: ghcr.io/aramakisai/room-presence-tracker
+          migrate:
+            image:
+              repository: ghcr.io/aramakisai/room-presence-tracker-migrate
+          app:
+            config:
+              AUTHENTIK_ISSUER: "https://idp.aramakisai.com/application/o/room-presence/"
+              AUTHENTIK_CLIENT_ID: "aramakisai-room-presence"
+              # Discord Bot 未作成のため空欄。作成後に値を設定すること
+              DISCORD_APPLICATION_ID: ""
+              DISCORD_PUBLIC_KEY: ""
+              NEXT_PUBLIC_APP_URL: "https://presence.aramakisai.com"
+    # CNPG Cluster + ExternalSecret
+    - repoURL: git@github.com:aramakisai/aramakisai-infra.git
+      targetRevision: main
+      path: gitops/manifests/prod/room-presence
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: prod
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - RespectIgnoreDifferences=true
+  ignoreDifferences:
+    - group: external-secrets.io
+      kind: ExternalSecret
+      jqPathExpressions:
+        - .spec.data[].remoteRef.conversionStrategy
+        - .spec.data[].remoteRef.decodingStrategy
+        - .spec.data[].remoteRef.metadataPolicy
+        - .spec.target.deletionPolicy

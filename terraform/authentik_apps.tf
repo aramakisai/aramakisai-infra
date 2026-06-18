@@ -109,3 +109,56 @@ resource "authentik_application" "cloudflare" {
   slug              = "cloudflare"
   protocol_provider = authentik_provider_oauth2.cloudflare.id
 }
+
+# ────────────────────────────────────────────────────────────
+# 4. Room Presence Tracker - 新規作成
+# 実行委員室の入退室管理アプリ用 OIDC Provider
+# student_id / discord_id はカスタム Property Mapping で id_token に含める
+# ────────────────────────────────────────────────────────────
+resource "authentik_property_mapping_provider_scope" "oauth_scope_student_id" {
+  name       = "Room Presence: student_id"
+  scope_name = "student_id"
+  expression = "return request.user.attributes.get(\"student_id\", None)"
+}
+
+resource "authentik_property_mapping_provider_scope" "oauth_scope_discord_id" {
+  name       = "Room Presence: discord_id"
+  scope_name = "discord_id"
+  expression = <<-EOT
+    social = request.user.socialaccount_set.filter(provider="discord").first()
+    return social.uid if social else None
+  EOT
+}
+
+resource "authentik_provider_oauth2" "room_presence" {
+  name          = "Room Presence Tracker"
+  client_id     = "aramakisai-room-presence"
+  client_secret = var.authentik_room_presence_client_secret
+  signing_key   = data.authentik_certificate_key_pair.default.id
+
+  authorization_flow = data.authentik_flow.default_authorization.id
+  invalidation_flow  = data.authentik_flow.default_invalidation.id
+
+  allowed_redirect_uris = [
+    {
+      matching_mode = "strict"
+      url           = "https://presence.aramakisai.com/api/auth/callback/authentik"
+    }
+  ]
+
+  property_mappings = [
+    data.authentik_property_mapping_provider_scope.oauth_scope_openid.id,
+    data.authentik_property_mapping_provider_scope.oauth_scope_email.id,
+    data.authentik_property_mapping_provider_scope.oauth_scope_profile.id,
+    authentik_property_mapping_provider_scope.oauth_scope_groups.id,
+    authentik_property_mapping_provider_scope.oauth_scope_student_id.id,
+    authentik_property_mapping_provider_scope.oauth_scope_discord_id.id
+  ]
+}
+
+resource "authentik_application" "room_presence" {
+  name              = "Room Presence Tracker"
+  slug              = "room-presence"
+  protocol_provider = authentik_provider_oauth2.room_presence.id
+  open_in_new_tab   = true
+}

@@ -45,6 +45,16 @@ resource "cloudflare_record" "api_stg" {
   comment = "Staging API (Cloudflare Tunnel)"
 }
 
+# Room Presence Tracker (実行委員室 在室管理)
+resource "cloudflare_record" "presence" {
+  zone_id = var.cloudflare_zone_id
+  name    = "presence"
+  value   = local.tunnel_cname
+  type    = "CNAME"
+  proxied = true
+  comment = "Room Presence Tracker (Cloudflare Tunnel)"
+}
+
 # Production API (Directus)
 resource "cloudflare_record" "api" {
   zone_id = var.cloudflare_zone_id
