@@ -36,7 +36,7 @@
   - _Boundary: NetdataAgent_
 
 - [ ] 3. バックアップのDead Man's Switchを構築する
-- [ ] 3.1 (P) Healthchecks.io checkのTerraformリソースを定義する
+- [x] 3.1 (P) Healthchecks.io checkのTerraformリソースを定義する
   - `terraform/healthchecksio.tf` に `healthchecksio_check` リソースを定義し、6時間インターバル+grace 1-2時間を設定する
   - Discord連携を設定する場合はHealthchecks.ioコンソールへ `DISCORD_OPS_WEBHOOK_URL` を直接入力し、同値をInfisicalにも記録する (Requirement 7.3の例外)
   - `terraform plan` でcheckリソースの作成計画が表示されること
