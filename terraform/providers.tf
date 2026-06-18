@@ -22,6 +22,18 @@ terraform {
       source  = "goauthentik/authentik"
       version = ">= 2024.12.0"
     }
+    uptimerobot = {
+      source  = "uptimerobot/uptimerobot"
+      version = "~> 1.8"
+    }
+    healthchecksio = {
+      source  = "kristofferahl/healthchecksio"
+      version = "~> 1.6"
+    }
+    netdata = {
+      source  = "netdata/netdata"
+      version = "~> 0.4"
+    }
   }
 
   # Terraform Cloud (HCP Terraform) 無料枠
@@ -54,4 +66,16 @@ provider "authentik" {
   url = var.authentik_url
   # 空文字の場合は AUTHENTIK_TOKEN 環境変数にフォールバックさせる
   token = var.authentik_token != "" ? var.authentik_token : null
+}
+
+provider "uptimerobot" {
+  api_key = var.uptimerobot_api_key != "" ? var.uptimerobot_api_key : null
+}
+
+provider "healthchecksio" {
+  api_key = var.healthchecksio_api_key != "" ? var.healthchecksio_api_key : null
+}
+
+provider "netdata" {
+  auth_token = var.netdata_api_token != "" ? var.netdata_api_token : null
 }

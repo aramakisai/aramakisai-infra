@@ -164,3 +164,28 @@ variable "mailserver_ldap_bind_password" {
   sensitive   = true
   default     = ""
 }
+
+# ============================================================
+# Observability SaaS (UptimeRobot / Healthchecks.io / Netdata Cloud)
+# ============================================================
+
+variable "uptimerobot_api_key" {
+  description = "UptimeRobot API キー (UptimeRobot ダッシュボード → My Settings → API Settings で発行)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "healthchecksio_api_key" {
+  description = "Healthchecks.io API キー (Healthchecks.io → Settings → API Access で発行)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "netdata_api_token" {
+  description = "Netdata Cloud API トークン (scope:all、Netdata Cloud → Space Settings → API Tokens で発行)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
