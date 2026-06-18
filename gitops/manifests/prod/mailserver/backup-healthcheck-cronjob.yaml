@@ -1,0 +1,65 @@
+---
+# VolSync ReplicationSource (mailserver-backup) の正常完了を確認し、
+# 想定インターバル内かつ成功時のみ Healthchecks.io へ生存通知 (ping) を送信する。
+# 読み取りのみで副作用を持たないため、何度実行しても安全。
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: mailserver-backup-healthcheck
+  namespace: prod
+spec:
+  # VolSync の "0 */6 * * *" 完了を見込んで15分ずらして実行する
+  schedule: "15 */6 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          serviceAccountName: mailserver-backup-healthcheck
+          restartPolicy: Never
+          containers:
+            - name: healthcheck
+              image: alpine/k8s:1.32.13
+              env:
+                - name: HEALTHCHECKS_MAILSERVER_BACKUP_PING_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: mailserver-backup-healthcheck
+                      key: HEALTHCHECKS_MAILSERVER_BACKUP_PING_URL
+              command:
+                - bash
+                - -c
+                - |
+                  set -uo pipefail
+
+                  JSON=$(kubectl get replicationsource mailserver-backup -n prod -o json)
+
+                  if echo "$JSON" | python3 -c "
+                  import json, sys, datetime
+                  status = json.load(sys.stdin).get('status', {})
+                  last_sync = status.get('lastSyncTime')
+                  result = status.get('latestMoverStatus', {}).get('result')
+                  if not last_sync:
+                      print('lastSyncTime not found', file=sys.stderr)
+                      sys.exit(1)
+                  last_dt = datetime.datetime.strptime(last_sync, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=datetime.timezone.utc)
+                  age_seconds = (datetime.datetime.now(datetime.timezone.utc) - last_dt).total_seconds()
+                  print(f'lastSyncTime={last_sync} age_seconds={age_seconds:.0f} result={result}', file=sys.stderr)
+                  # 6時間スケジュール + 1時間の余裕 (Healthchecks.io 側の grace 2時間より厳しい内部判定)
+                  sys.exit(0 if (result == 'Successful' and age_seconds < 7 * 3600) else 1)
+                  "; then
+                    curl -fsS -m 10 --retry 3 "$HEALTHCHECKS_MAILSERVER_BACKUP_PING_URL"
+                    echo "backup healthy, ping sent"
+                  else
+                    echo "backup stale or unsuccessful, skipping ping (Healthchecks.io will alert after grace period)"
+                  fi
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  cpu: 100m
+                  memory: 64Mi

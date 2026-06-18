@@ -1,0 +1,31 @@
+---
+# mailserver-backup ReplicationSource の status 読み取り専用 ServiceAccount
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mailserver-backup-healthcheck
+  namespace: prod
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: mailserver-backup-healthcheck
+  namespace: prod
+rules:
+  - apiGroups: ["volsync.backube"]
+    resources: ["replicationsources"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: mailserver-backup-healthcheck
+  namespace: prod
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: mailserver-backup-healthcheck
+subjects:
+  - kind: ServiceAccount
+    name: mailserver-backup-healthcheck
+    namespace: prod
