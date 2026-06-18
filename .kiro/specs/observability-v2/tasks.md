@@ -18,7 +18,7 @@
   - _Boundary: SaaSTerraformResources_
 
 - [ ] 2. Netdataによる軽量メトリクス可視化を導入する
-- [ ] 2.1 (P) Netdata Cloud Room/ノード割当のTerraformリソースを定義する
+- [x] 2.1 (P) Netdata Cloud Room/ノード割当のTerraformリソースを定義する
   - `terraform/netdata.tf` に `netdata_room`/`netdata_node_room_member` リソースを定義する
   - Room名・対象ノード(prod-node-1)の割当を宣言的に記述する
   - `terraform plan` でリソース作成計画が表示されること

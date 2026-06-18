@@ -189,3 +189,9 @@ variable "netdata_api_token" {
   sensitive   = true
   default     = ""
 }
+
+variable "netdata_space_id" {
+  description = "Netdata Cloud Space ID (Netdata Cloud コンソールで作成済みの Space を指定)"
+  type        = string
+  default     = ""
+}
