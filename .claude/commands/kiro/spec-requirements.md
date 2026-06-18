@@ -82,15 +82,13 @@ Provide output in the language specified in spec.json with:
 
 ### Next Phase: Design Generation
 
-**If Requirements Approved**:
+**Review and proceed**:
 - Review generated requirements at `.kiro/specs/$1/requirements.md`
 - **Optional Gap Analysis** (for existing codebases):
   - Run `/kiro:validate-gap $1` to analyze implementation gap with current code
   - Identifies existing components, integration points, and implementation strategy
   - Recommended for brownfield projects; skip for greenfield
-- Then `/kiro:spec-design $1 -y` to proceed to design phase
+- Then `/kiro:spec-design $1` to proceed to design phase (running it is itself the approval signal for these requirements)
 
 **If Modifications Needed**:
 - Provide feedback and re-run `/kiro:spec-requirements $1`
-
-**Note**: Approval is mandatory before proceeding to design phase.

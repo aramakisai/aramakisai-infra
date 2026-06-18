@@ -1,7 +1,7 @@
 ---
 description: Generate implementation tasks for a specification
 allowed-tools: Read, Write, Edit, MultiEdit, Glob, Grep
-argument-hint: <feature-name> [-y] [--sequential]
+argument-hint: <feature-name> [--sequential]
 ---
 
 # Implementation Tasks Generator
@@ -28,9 +28,7 @@ Generate implementation tasks for feature **$1** based on approved requirements 
 - `.kiro/specs/$1/tasks.md` (if exists, for merge mode)
 - **Entire `.kiro/steering/` directory** for complete project memory
 
-**Validate approvals**:
-- If `-y` flag provided ($2 == "-y"): Auto-approve requirements and design in spec.json
-- Otherwise: Verify both approved (stop if not, see Safety & Fallback)
+**Requirements/design approval**: Invoking this command is itself the approval signal for both prior phases (real review/approval happens at PR merge time, not as an internal gate). Proceed directly; Step 3 metadata update will mark both as approved.
 - Determine sequential mode based on presence of `--sequential`
 
 ### Step 2: Generate Implementation Tasks
@@ -96,11 +94,6 @@ Provide brief summary in the language specified in spec.json:
 
 ### Error Scenarios
 
-**Requirements or Design Not Approved**:
-- **Stop Execution**: Cannot proceed without approved requirements and design
-- **User Message**: "Requirements and design must be approved before task generation"
-- **Suggested Action**: "Run `/kiro:spec-tasks $1 -y` to auto-approve both and proceed"
-
 **Missing Requirements or Design**:
 - **Stop Execution**: Both documents must exist
 - **User Message**: "Missing requirements.md or design.md at `.kiro/specs/$1/`"
@@ -124,7 +117,7 @@ Provide brief summary in the language specified in spec.json:
 - This applies when starting first task OR switching between tasks
 - Fresh context ensures clean state and proper task focus
 
-**If Tasks Approved**:
+**Review and proceed** (running `/kiro:spec-impl` is itself the approval signal for these tasks):
 - Execute specific task: `/kiro:spec-impl $1 1.1` (recommended: clear context between each task)
 - Execute multiple tasks: `/kiro:spec-impl $1 1.1,1.2` (use cautiously, clear context between tasks)
 - Without arguments: `/kiro:spec-impl $1` (executes all pending tasks - NOT recommended due to context bloat)

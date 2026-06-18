@@ -1,7 +1,7 @@
 ---
 description: Create comprehensive technical design for a specification
 allowed-tools: Bash, Glob, Grep, LS, Read, Write, Edit, MultiEdit, Update, WebSearch, WebFetch
-argument-hint: <feature-name> [-y]
+argument-hint: <feature-name>
 ---
 
 # Technical Design Generator
@@ -30,9 +30,7 @@ Generate technical design document for feature **$1** based on approved requirem
 - `.kiro/settings/rules/design-principles.md` for design principles
 - `.kiro/settings/templates/specs/research.md` for discovery log structure
 
-**Validate requirements approval**:
-- If `-y` flag provided ($2 == "-y"): Auto-approve requirements in spec.json
-- Otherwise: Verify approval status (stop if unapproved, see Safety & Fallback)
+**Requirements approval**: Invoking this command is itself the approval signal for the requirements phase (real review/approval happens at PR merge time, not as an internal gate). Proceed directly to discovery; Step 3 metadata update will mark requirements as approved.
 
 ### Step 2: Discovery & Analysis
 
@@ -127,7 +125,7 @@ Provide brief summary in the language specified in spec.json:
 1. **Status**: Confirm design document generated at `.kiro/specs/$1/design.md`
 2. **Discovery Type**: Which discovery process was executed (full/light/minimal)
 3. **Key Findings**: 2-3 critical insights from `research.md` that shaped the design
-4. **Next Action**: Approval workflow guidance (see Safety & Fallback)
+4. **Next Action**: Guidance on reviewing the design and proceeding to task generation
 5. **Research Log**: Confirm `research.md` updated with latest decisions
 
 **Format**: Concise Markdown (under 200 words) - this is the command output, NOT the design document itself
@@ -137,11 +135,6 @@ Provide brief summary in the language specified in spec.json:
 ## Safety & Fallback
 
 ### Error Scenarios
-
-**Requirements Not Approved**:
-- **Stop Execution**: Cannot proceed without approved requirements
-- **User Message**: "Requirements not yet approved. Approval required before design generation."
-- **Suggested Action**: "Run `/kiro:spec-design $1 -y` to auto-approve requirements and proceed"
 
 **Missing Requirements**:
 - **Stop Execution**: Requirements document must exist
@@ -165,13 +158,11 @@ Provide brief summary in the language specified in spec.json:
 
 ### Next Phase: Task Generation
 
-**If Design Approved**:
+**Review and proceed**:
 - Review generated design at `.kiro/specs/$1/design.md`
 - **Optional**: Run `/kiro:validate-design $1` for interactive quality review
-- Then `/kiro:spec-tasks $1 -y` to generate implementation tasks
+- Then `/kiro:spec-tasks $1` to generate implementation tasks (running it is itself the approval signal for this design)
 
 **If Modifications Needed**:
 - Provide feedback and re-run `/kiro:spec-design $1`
 - Existing design used as reference (merge mode)
-
-**Note**: Design approval is mandatory before proceeding to task generation.

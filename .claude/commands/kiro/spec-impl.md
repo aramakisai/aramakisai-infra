@@ -27,8 +27,7 @@ Execute implementation tasks for feature **$1** using Test-Driven Development.
 - `.kiro/specs/$1/spec.json`, `requirements.md`, `design.md`, `tasks.md`
 - **Entire `.kiro/steering/` directory** for complete project memory
 
-**Validate approvals**:
-- Verify tasks are approved in spec.json (stop if not, see Safety & Fallback)
+**Tasks approval**: Invoking this command is itself the approval signal for the tasks phase (real review/approval happens at PR merge time, not as an internal gate). If `approvals.tasks.approved` is not yet `true` in spec.json, set it to `true` and proceed.
 
 ### Step 2: Select Tasks
 
@@ -90,8 +89,8 @@ Provide brief summary in the language specified in spec.json:
 
 ### Error Scenarios
 
-**Tasks Not Approved or Missing Spec Files**:
-- **Stop Execution**: All spec files must exist and tasks must be approved
+**Missing Spec Files**:
+- **Stop Execution**: requirements.md, design.md, and tasks.md must all exist
 - **Suggested Action**: "Complete previous phases: `/kiro:spec-requirements`, `/kiro:spec-design`, `/kiro:spec-tasks`"
 
 **Test Failures**:
