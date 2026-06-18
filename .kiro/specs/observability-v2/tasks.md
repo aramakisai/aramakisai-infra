@@ -17,7 +17,7 @@
   - _Requirements: 9.4, 7.3_
   - _Boundary: SaaSTerraformResources_
 
-- [ ] 2. Netdataによる軽量メトリクス可視化を導入する
+- [x] 2. Netdataによる軽量メトリクス可視化を導入する
 - [x] 2.1 (P) Netdata Cloud Room/ノード割当のTerraformリソースを定義する
   - `terraform/netdata.tf` に `netdata_room`/`netdata_node_room_member` リソースを定義する
   - Room名・対象ノード(prod-node-1)の割当を宣言的に記述する
@@ -26,7 +26,7 @@
   - _Requirements: 9.3_
   - _Boundary: SaaSTerraformResources_
 
-- [ ] 2.2 (P) ML無効化・メモリ予算内のNetdata childエージェントをHelm Applicationでデプロイする
+- [x] 2.2 (P) ML無効化・メモリ予算内のNetdata childエージェントをHelm Applicationでデプロイする
   - `gitops/apps/prod/netdata.yaml` (sync-wave 0) で `netdata/helmchart` Helm Applicationを作成し、`child`のみ有効化、`parent`/`k8sState`を無効化する
   - `[ml] enabled = no` を明示し、`resources.requests.memory: 64Mi` / `limits.memory: 150Mi` を設定する
   - `gitops/manifests/shared/eso/netdata-external-secret.yaml` で `NETDATA_CLAIM_TOKEN`/`NETDATA_CLAIM_ROOMS` をInfisicalから取得し、`child.envFrom` で注入する (valuesへの平文記載なし)
