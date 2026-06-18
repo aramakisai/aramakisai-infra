@@ -1,0 +1,22 @@
+{
+  "feature_name": "observability-v2",
+  "created_at": "2026-06-17T13:22:35Z",
+  "updated_at": "2026-06-18T09:00:00Z",
+  "language": "ja",
+  "phase": "ready-for-implementation",
+  "approvals": {
+    "requirements": {
+      "generated": true,
+      "approved": true
+    },
+    "design": {
+      "generated": true,
+      "approved": true
+    },
+    "tasks": {
+      "generated": true,
+      "approved": true
+    }
+  },
+  "ready_for_implementation": true
+}
