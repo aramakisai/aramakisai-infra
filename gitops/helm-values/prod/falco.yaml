@@ -1,0 +1,72 @@
+# Falco Helm values — prod
+# Chart: https://falcosecurity.github.io/charts (falco, falcosidekick subchart同梱)
+
+driver:
+  kind: modern_ebpf
+
+# chart既定 (requests 512Mi/limits 1024Mi) は単一ノードのRAM予算に対して過大なため削減する。
+# OOMKill時はPod再起動で復帰する検知用途のため、削減自体のリスクは許容する。
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 300Mi
+
+customRules:
+  rules-custom.yaml: |-
+    # mailserver (docker-mailserver) は起動時に Postfix/Dovecot の設定を /etc 配下に再生成し、
+    # cert-manager はベースイメージの update-ca-certificates で /etc/ssl/certs を更新する。
+    # いずれも正常な定期処理のため namespace/image/proc.name 単位で除外する。
+    - macro: known_etc_writer
+      condition: >
+        ((k8s.ns.name=prod and container.image.repository=mailserver/docker-mailserver
+          and proc.name in (postfix-script, postconf, dovecot, doveconf, update-ca-certificates))
+         or (k8s.ns.name=cert-manager and proc.name in (update-ca-certificates)))
+
+    # falco-rules:5 (デフォルトで投入される OCI artifact) には "Write below etc" 系のルールが
+    # 含まれていない (falcosecurity/rules の falco-sandbox_rules.yaml にのみ存在し、デフォルトでは pull されない)。
+    # append ではなく新規ルールとして定義し、除外条件をあらかじめ組み込む。
+    - macro: write_etc_common
+      condition: >
+        (open_write and etc_dir and proc_name_exists
+         and not proc.name in (passwd_binaries, shadowutils_binaries, package_mgmt_binaries))
+
+    - rule: Write below etc
+      desc: /etc 配下への書き込みを監査する。known_etc_writer (mailserver/cert-manager の正常な定期処理) は除外する
+      condition: write_etc_common and not known_etc_writer
+      output: File below /etc opened for writing (file=%fd.name command=%proc.cmdline pod=%k8s.pod.name namespace=%k8s.ns.name image=%container.image.repository)
+      priority: ERROR
+      tags: [filesystem]
+
+    # CNPGのWAL archiveはupstreamのpostgres_running_cnpgで既に除外済み。
+    # ここではbarman-cloudによるフルバックアップ (instance manager経由のシェル実行) を追加で除外する。
+    - macro: postgres_running_cnpg_backup
+      condition: (proc.pname=postgres and proc.cmdline startswith "sh -c /controller/manager backup")
+
+    - rule: Run shell untrusted
+      condition: >
+        and not (postgres_running_cnpg_backup
+                 or (k8s.ns.name=prod and container.image.repository=mailserver/docker-mailserver
+                     and proc.pname in (postfix-script, postconf, dovecot, doveconf, update-ca-certificates)))
+      override:
+        condition: append
+
+# Falcosidekick: Falcoアラートを Discord Webhook へ転送する。
+# single nodeのためreplicaCount既定値(2)を1へ削減し、軽量プロキシとしてリソースを絞る。
+# discord.webhookurlは平文記載せず、config.existingSecret (envFrom) で注入する。
+falcosidekick:
+  enabled: true
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 64Mi
+  config:
+    existingSecret: falcosidekick-secrets
+    discord:
+      minimumpriority: notice

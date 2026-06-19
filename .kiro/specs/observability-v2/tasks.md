@@ -108,8 +108,8 @@
   - _Requirements: 1.10_
   - _Boundary: DrTriggerWorkflow_
 
-- [ ] 6. Falcoによるランタイム侵入検知を導入する
-- [ ] 6.1 modern_eBPFドライバとメモリ予算override済みのFalco Helm Applicationをデプロイする
+- [x] 6. Falcoによるランタイム侵入検知を導入する
+- [x] 6.1 modern_eBPFドライバとメモリ予算override済みのFalco Helm Applicationをデプロイする
   - `gitops/apps/prod/falco.yaml` (sync-wave 0) で `falcosecurity/falco` Helm Applicationを作成する
   - `gitops/helm-values/prod/falco.yaml` で `driver.kind: modern_ebpf` を明示し、`resources.requests: 128Mi/50m`、`limits: 300Mi/500m` にoverrideする
   - 投入前に`make kubectl ARGS="top node"`で200-300Mi以上の空きメモリがあることを確認する
@@ -118,14 +118,14 @@
   - _Requirements: 3.1, 3.2, 3.3, 3.6, 3.7, 8.1_
   - _Boundary: FalcoAgent_
 
-- [ ] 6.2 メールサーバー/CNPG/cert-managerの正常処理を除外するカスタムルールを追加する
+- [x] 6.2 メールサーバー/CNPG/cert-managerの正常処理を除外するカスタムルールを追加する
   - `gitops/helm-values/prod/falco.yaml`の`customRules`値に、`Write below etc`系・`Run shell untrusted`系ルールをnamespace/image/`proc.pname`単位で除外する定義を追加する
   - Terminal shell in container/Privilege Escalation/センシティブファイル書き込みの高確度ルールは除外対象に含めない
   - 投入後1-2日分のアラートで、バックアップ・証明書更新等の正常処理が誤検知されていないことを確認する
   - _Requirements: 3.5_
   - _Boundary: FalcoCustomRules_
 
-- [ ] 6.3 FalcosidekickによるDiscordへのアラート転送を設定する
+- [x] 6.3 FalcosidekickによるDiscordへのアラート転送を設定する
   - `gitops/helm-values/prod/falco.yaml`で`falcosidekick.enabled: true`にし、`discord.webhookurl`をSecret参照で注入する
   - `gitops/manifests/shared/eso/falcosidekick-external-secret.yaml`で`DISCORD_OPS_WEBHOOK_URL`をInfisicalから取得する(Discord Webhook自体は手動作成、Requirement 9.6の例外)
   - `minimumpriority`をnotice以上に設定しノイズを抑制する

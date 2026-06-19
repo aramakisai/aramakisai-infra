@@ -1,0 +1,36 @@
+---
+# Falco — eBPFランタイム侵入検知 + Falcosidekick (Discord転送)
+# wave: 0
+#
+# multi-source: Helm chart + このリポジトリの helm-values (driver/resources/customRules override) を合成
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: falco
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  sources:
+    - repoURL: https://falcosecurity.github.io/charts
+      chart: falco
+      targetRevision: "9.*"
+      helm:
+        valueFiles:
+          - $values/gitops/helm-values/prod/falco.yaml
+    - repoURL: git@github.com:aramakisai/aramakisai-infra.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
