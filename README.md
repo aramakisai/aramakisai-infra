@@ -12,10 +12,9 @@ Terraform でクラウドリソースを定義し、Ansible で K3s クラスタ
 ┌─────────────────────────────────────────────────────┐
 │  Hetzner Cloud (fsn1)                               │
 │                                                     │
-│  cp-node (cx23)      prod-node-1 (cx23)             │
-│  prod-node-2 (cx23)                                 │
+│  prod-node-1 (cx33)                                 │
 │                                                     │
-│  ├── K3s (etcd HA クラスター, 3ノード全てワークロード有) │
+│  ├── K3s (シングルノード、コントロールプレーン＋ワークロード)  │
 │  ├── Cilium (CNI)                                   │
 │  └── cloudflared → Cloudflare Tunnel               │
 └──────────────────┬──────────────────────────────────┘
@@ -41,7 +40,7 @@ Terraform でクラウドリソースを定義し、Ansible で K3s クラスタ
 ├── ansible/            K3s クラスター初期化
 │   ├── inventory/      Tailscale MagicDNS ベースのホスト定義
 │   ├── playbooks/      k3s-bootstrap.yml (ブートストラップ手順)
-│   └── roles/          k3s-server / k3s-agent
+│   └── roles/          k3s-server / swap (ホスト側の OOM 安全弁)
 └── gitops/             ArgoCD が管理するすべてのマニフェスト
     ├── root.yaml        App of Apps エントリーポイント
     ├── apps/            ArgoCD Application 定義
@@ -62,7 +61,7 @@ Terraform でクラウドリソースを定義し、Ansible で K3s クラスタ
 |---------|-----------|------|
 | [Authentik](https://goauthentik.io) | `prod` | Identity Provider (SSO) |
 | [Directus](https://directus.io) | `prod` / `staging` | Headless CMS |
-| [Stalwart](https://stalw.art) | `prod` | メールサーバー |
+| [Docker Mailserver (DMS)](https://docker-mailserver.github.io/docker-mailserver/) | `prod` | メールサーバー |
 | cloudflared | `cloudflared` | Cloudflare Tunnel クライアント |
 | [ESO](https://external-secrets.io) | `external-secrets` | Kubernetes ↔ Infisical シークレット同期 |
 | [CloudNativePG](https://cloudnative-pg.io) | `cnpg-system` | PostgreSQL Operator |
@@ -138,11 +137,12 @@ infisical run --env=prod -- terraform apply
 `terraform apply` は以下を自動で実行する:
 
 ```
-1. Hetzner ノード × 3 作成 (cloud-init で Tailscale 自動インストール)
+1. Hetzner シングルノード (prod-node-1) 作成 (cloud-init で Tailscale 自動インストール)
 2. ノードが tailnet に登録されるまで待機 (Tailscale API ポーリング)
-3. Ansible で K3s をインストール
-4. Ansible で cloudflared を起動 (ArgoCD への外部アクセス経路を確保)
-5. Ansible で ArgoCD をインストール・App of Apps (gitops/root.yaml) を適用
+3. Ansible で swap ファイル（4GB）を作成
+4. Ansible で K3s をインストール
+5. Ansible で cloudflared を起動 (ArgoCD への外部アクセス経路を確保)
+6. Ansible で ArgoCD をインストール・App of Apps (gitops/root.yaml) を適用
    └── ESO (wave: -1) → 全アプリ (wave: 0) の順で自律 sync
 ```
 
@@ -164,10 +164,10 @@ tailscale status
 ### K3s バージョンアップ
 
 ```bash
-ansible-playbook -i ansible/inventory/tailscale.yml \
+infisical run --env=prod -- ansible-playbook -i ansible/inventory/tailscale.yml \
   ansible/playbooks/k3s-bootstrap.yml \
-  -e "k3s_version=v1.33.0+k3s1"
-# cp-node → prod-node-1 → prod-node-2 の順でローリング更新
+  -e "k3s_version=v1.32.3+k3s1"
+# prod-node-1 の K3s を更新
 ```
 
 ### 新しいサービスを追加
@@ -180,12 +180,11 @@ ansible-playbook -i ansible/inventory/tailscale.yml \
 ### ノードの強制再プロビジョニング
 
 ```bash
-ansible -i ansible/inventory/tailscale.yml prod-node-2 \
+infisical run --env=prod -- ansible -i ansible/inventory/tailscale.yml prod-node-1 \
   -m shell -a "/usr/local/bin/k3s-uninstall.sh"
 
-ansible-playbook -i ansible/inventory/tailscale.yml \
-  ansible/playbooks/k3s-bootstrap.yml \
-  --limit prod-node-2
+infisical run --env=prod -- ansible-playbook -i ansible/inventory/tailscale.yml \
+  ansible/playbooks/k3s-bootstrap.yml
 ```
 
 ---
@@ -204,8 +203,8 @@ ansible-playbook -i ansible/inventory/tailscale.yml \
 Authentik が落ちていて argocd.aramakisai.com にアクセスできない場合:
 
 ```bash
-ssh root@cp-node.tail<hash>.ts.net  # confidential:allow
-kubectl port-forward svc/argocd-server -n argocd 8080:443
+ssh root@prod-node-1.tail<hash>.ts.net  # confidential:allow
+make kubectl ARGS="port-forward svc/argocd-server -n argocd 8080:443"
 # → http://localhost:8080 でアクセス (Cloudflare Access を通らない)
 ```
 
