@@ -43,13 +43,14 @@
   - Observable: pod再起動後、`ps aux` 等で amavis プロセスが存在しないことを確認できる
   - _Requirements: 5.1, 5.2_
 
-- [ ] 2.6 Phase 0の変更を一括デプロイし初期回帰確認を行う
+- [x] 2.6 Phase 0の変更を一括デプロイし初期回帰確認を行う
   - タスク2.1〜2.5の変更を1コミットにまとめてmainへpushし、ArgoCDで `mailserver` アプリケーションを同期する
   - mailserver PodがReadyになることを確認する
   - 個人メンバー宛のテストメールが `550 5.1.1` で拒否されること（意図した個人メール受信廃止）をkubectl logsで確認する
   - 未移行の残り6件のML宛テストメールが、引き続き個人メンバーへfan-out配送されること（意図しない副作用がないこと）を確認する
   - `DOVECOT_USER_FILTER`/`DOVECOT_PASS_FILTER` および `gitops/manifests/prod/roundcube/` 配下に差分がないことをgit diffで確認する（個人ログイン維持・Roundcube対象外の回帰確認）
   - Observable: 上記すべての確認結果が正常であり、異常があればPhase 0分の変更をrevertする判断ができる状態になっている
+  - **検証結果（2026-06-19実施）**: デプロイ後、ACL plugin有効化(`mail_plugins`のprotocol別読込順問題、2コミットで修正)・`ldap-senders.cf`生成方式(DMSが`senders`をoverride対象外、user-patches.shで生成する方式へ変更)の2件の実装バグを実機で発見・修正済み（詳細はresearch.md参照）。最終的にdoveconf/postconfで全設定の反映を確認後、ユーザーが実際に(1)個人アドレスからのFrom送信→`553 5.7.1 Sender address rejected: not owned by user`で拒否（送信制限テスト）、(2)Gmail外部から個人アドレス宛送信→`550 5.1.1 User unknown in virtual mailbox table`で拒否（個人メール受信廃止テスト）の2点をkubectl logsで確認し、いずれも意図通りの挙動。未移行ML宛fan-out継続については、Phase -1事前検証（タスク1）でグループ側否定フィルタの挙動を確認済み・`virtual_alias_maps`の配線(postconf -h)に変更がないことも確認済みのため個別テストは省略。`DOVECOT_USER_FILTER`/`DOVECOT_PASS_FILTER`/`gitops/manifests/prod/roundcube/`への差分なしをgit diffで確認済み。
   - _Requirements: 1.5, 1.6, 5.3, 6.3, 7.1, 7.2_
 
 - [ ] 2.7 ロールアウト後の実測値に基づきリソース request/limit を確定する

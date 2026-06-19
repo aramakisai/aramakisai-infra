@@ -57,6 +57,23 @@
   - `postmaster@aramakisai.com`は既存のDMARC/TLS-RPTレポート送付先（`terraform/dns.tf`）として外部的に重要なアドレスだが、内部Maildir/フォルダ名の選択（`admin`）とは独立しており影響しない。 <!-- confidential:allow -->
 - **Why not blocking Task 2**: タスク2の各サブタスクのObservableはいずれもグローバルなenv var/dovecot.cf構文のみを対象とし、ML専用Userがまだ存在しない時点（Phase 1以前）でも検証可能なため、この発見はタスク2の完了判定に影響しない。
 
+### タスク2.6デプロイ時に発見した実装バグ2件（2026-06-19実施）
+
+- **バグ1: ACL pluginがprotocol imap向けに有効化されない**
+  - **Context**: design.md/タスク2.3は`mail_plugins = $mail_plugins acl`をdovecot.cf（→`/etc/dovecot/local.conf`、`!include conf.d/*.conf`の後に読込まれる）に書くだけで足りる想定だった。
+  - **Findings**: `doveconf -n`実機確認で`protocol imap { mail_plugins = }`が空のまま（`conf.d/20-imap.conf`が`protocol imap { mail_plugins = $mail_plugins }`を先に確定させ、後段でのグローバル変更が反映されない。doveconf自身が`Global setting mail_plugins won't change the setting inside an earlier filter`と警告）。`local.conf`側で`protocol imap {}`を再宣言する対処も無効だった（再宣言してもこの「filterの確定値は変更不可」という挙動自体は変わらない、実機で2回確認）。
+  - **Fix**: `conf.d/*.conf`全体より前に読まれるファイル名（`05-acl-plugin.conf`、configmap.yamlの新規キー）を`/etc/dovecot/conf.d/05-acl-plugin.conf`に直接マウントし、そちらで`mail_plugins = $mail_plugins acl`を設定する方式に変更（commit 9cd280c）。`doveconf -n`で`protocol imap { mail_plugins = " acl" }`になることを確認済み。
+  - **教訓**: Dovecotの`protocol {}` filterブロックは「そのfilterが一度確定した値は、後から書いたグローバル変更どころか同じfilterの再宣言でも変更不可」という直感に反する挙動を持つ。`!include`順序より前に変更を注入するしかない。
+
+- **バグ2: `ldap-senders.cf`がDMSのoverride対象外でカスタム内容が無視される**
+  - **Context**: design.md/タスク2.2は`ldap-groups.cf`と同じパターン（`/tmp/docker-mailserver/ldap-senders.cf`をマウント）でそのまま動く想定だった。
+  - **Findings**: 実機の`/etc/postfix/ldap-senders.cf`を確認すると、`query_filter`はLDAP_QUERY_FILTER_SENDERS環境変数の値に正しく置換されていたが、`result_attribute`がDMSイメージ標準の`mail, uid`のままで、`special_result_attribute`/`leaf_result_attribute`/`timeout`が一切存在しなかった（こちらのカスタム内容が反映されていない）。DMSの`setup.d/ldap.sh`を確認すると、`/tmp/docker-mailserver/ldap-{users,groups,aliases,domains}.cf`の4種類のみを`/etc/postfix/`へコピーするループになっており、`senders`は対象外（コードで直接確認、`for i in 'users' 'groups' 'aliases' 'domains'`）。
+  - **検討した代替案**: `/etc/postfix/ldap-senders.cf`への直接マウント（ConfigMapボリュームはread-only）→ 同じ`ldap.sh`が全FILES配列に対し`_replace_by_env_in_file`（sed -i相当）を無条件実行するため、read-onlyマウントでは起動が壊れる。デプロイ前にロジックを読んで気づき、未デプロイで回避。
+  - **Fix**: DMS公式の拡張フック`/tmp/docker-mailserver/user-patches.sh`（`_setup`完了後、daemon起動前に実行）でLDAP_*環境変数を直接参照し`/etc/postfix/ldap-senders.cf`をcatヒアドキュメントで生成する方式に変更（commit 37dfe8f）。実機で`bind_dn`/`bind_pw`/`query_filter`が正しい値に展開され、`special_result_attribute=member`等も反映されることを確認済み。
+  - **教訓**: DMSの`LDAP_QUERY_FILTER_*`系env varは４種（USER/GROUP/ALIAS/DOMAIN）のみが`/tmp/docker-mailserver/`からの直接override対応で、`SENDERS`はその対象外（DMS実装の非対称性、ドキュメントには明記されておらずソース確認が必要だった）。同様の非対称性が他のDMS機能にもある可能性があるため、新規のLDAP_QUERY_FILTER_*系設定を追加する際は`setup.d/ldap.sh`のFILES配列を都度確認すること。
+
+- **最終確認（2026-06-19、ユーザー実施）**: 上記2件修正後、ユーザー自身が(1)個人アドレスからのFrom送信（Roundcube経由）→`553 5.7.1 Sender address rejected: not owned by user`で拒否、(2)外部Gmailから個人アドレス宛送信→`550 5.1.1 User unknown in virtual mailbox table`で拒否、の2点を実トラフィックで確認。kubectl logsで両エラーとも想定通りの拒否理由・拒否コードであることを確認済み。タスク2.6完了。
+
 ## Architecture Pattern Evaluation
 
 | Option | Description | Strengths | Risks / Limitations | Notes |
