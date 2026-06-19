@@ -1,0 +1,49 @@
+---
+# ホスト OS の swap ファイル作成
+# 目的: containerd / k3s 本体などシステムプロセスのメモリ不足時の安全弁。
+# Pod は対象外 (NoSwap): kubelet-arg fail-swap-on=false のみ設定し
+# memorySwap.swapBehavior (LimitedSwap) は設定しない。これにより
+# Pod cgroup には swap が割り当てられず、Kubernetes の資源モデル
+# (requests/limits) は予測可能なまま保たれる。
+
+- name: swap ファイルを作成 ({{ swap_size_gb }}GB)
+  ansible.builtin.command: fallocate -l {{ swap_size_gb }}G {{ swap_file_path }}
+  args:
+    creates: "{{ swap_file_path }}"
+  register: swap_file_created
+
+- name: swap ファイルの権限を制限
+  ansible.builtin.file:
+    path: "{{ swap_file_path }}"
+    mode: '0600'
+    owner: root
+    group: root
+
+- name: swap 領域をフォーマット
+  ansible.builtin.command: mkswap {{ swap_file_path }}
+  when: swap_file_created is changed
+
+- name: /etc/fstab に swap エントリを追加
+  ansible.posix.mount:
+    path: none
+    src: "{{ swap_file_path }}"
+    fstype: swap
+    opts: sw
+    state: present
+
+- name: swap を有効化
+  ansible.builtin.command: swapon {{ swap_file_path }}
+  when: ansible_facts['swaptotal_mb'] == 0
+
+- name: vm.swappiness を設定 (緊急時バッファとしてのみ使用し、積極的なキャッシュアウトは避ける)
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/99-swappiness.conf
+    content: "vm.swappiness = {{ swap_vm_swappiness }}\n"
+    owner: root
+    group: root
+    mode: '0644'
+  register: swappiness_conf
+
+- name: vm.swappiness を即時反映
+  ansible.builtin.command: sysctl -p /etc/sysctl.d/99-swappiness.conf
+  when: swappiness_conf is changed

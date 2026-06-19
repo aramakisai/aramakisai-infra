@@ -1,0 +1,4 @@
+---
+swap_size_gb: 4
+swap_file_path: /swapfile
+swap_vm_swappiness: 10

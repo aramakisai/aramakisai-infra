@@ -18,10 +18,14 @@ embedded-registry: true
 
 # kubelet メモリ予約: OS・K3sシステムコンポーネント分を確保し OOM を防ぐ
 # eviction-hard: 空きメモリが 200Mi を下回ると優先度の低い Pod を退避させる
+# fail-swap-on=false: swap ファイル (roles/swap) 導入により kubelet がデフォルトで
+# 起動を拒否するため必須。memorySwap.swapBehavior は未設定 (NoSwap) のままなので
+# Pod cgroup は swap 不可。containerd/k3s 本体などホスト側プロセスのみが対象
 kubelet-arg:
   - "system-reserved=cpu=100m,memory=300Mi"
   - "kube-reserved=cpu=100m,memory=300Mi"
   - "eviction-hard=memory.available<200Mi"
+  - "fail-swap-on=false"
 
 # ノード間通信を Hetzner private network (10.0.1.0/24) に固定する
 # kubelet の登録 IP・etcd ピアリング・Pod ネットワークのルーティングが

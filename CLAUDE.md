@@ -41,11 +41,14 @@ infra/
         │   └── templates/
         │       ├── k3s-server.service.j2
         │       └── config.yaml.j2
-        └── k3s-agent/
+        ├── k3s-agent/
+        │   ├── tasks/main.yml
+        │   ├── handlers/main.yml
+        │   └── templates/
+        │       └── k3s-agent.service.j2
+        └── swap/                 全ノード共通 swap ファイル作成 (OOM 安全弁)
             ├── tasks/main.yml
-            ├── handlers/main.yml
-            └── templates/
-                └── k3s-agent.service.j2
+            └── defaults/main.yml
 ```
 
 ## 使用プロバイダー
@@ -376,6 +379,9 @@ Authentik 側では `idp.aramakisai.com/application/o/cloudflare/` に OAuth2/OI
 * **Hetzner FW でポート 443 を開放** (メールサーバー直接アクセス用)
   - `mail.aramakisai.com` は proxied=false (直接 AAAA) のため Cloudflare 保護なし / cert-manager TLS で保護
   - Webmail は Cloudflare Tunnel (webmail.aramakisai.com) 経由でアクセス
+* **全ノードに 4GB swap ファイル** (`roles/swap`、`/swapfile`) を作成済み。containerd/k3s 本体など**ホスト側プロセスのみ**の OOM 安全弁であり、Pod は対象外 (NoSwap)
+  - kubelet-arg `fail-swap-on=false` (`config.yaml.j2`) と対で機能する。swap を無効化する場合はこのフラグも外すこと (外さないと kubelet は単に swap なしで起動するだけで害はないが、フラグだけ残して swap ファイルを消すと kubelet が swap 前提のまま起動し続け整合性が崩れる)
+  - Pod に swap を許可する設計 (LimitedSwap) には変更していない。NodeSwap feature gate 有効化が別途必要なため
 
 
 ---

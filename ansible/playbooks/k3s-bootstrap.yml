@@ -1,12 +1,26 @@
 ---
 # K3s クラスタ全体の初期ブートストラップ Playbook
 # 実行順序:
+#   0. 全ノードに swap ファイルを作成 (ホスト側プロセスの OOM 安全弁)
 #   1. cp-node に K3s を --cluster-init でインストール (etcd 初期化)
 #   2. prod-node-1/2 に K3s をローリングでインストール (etcd 参加 + ワークロード)
 #   3. Cilium をインストール (flannel-backend: none のため CNI が必須 / ノードを Ready にする)
 #   4. cloudflared を事前インストール (ArgoCD への外部アクセス経路を確保)
 #   5. kubeconfig を手元に取得
 #   6. ArgoCD をインストール・App of Apps を適用
+
+
+# ============================================================
+# Play 0: swap ファイル作成 (全ノード共通)
+# K3s インストール前に行う: kubelet-arg fail-swap-on=false を config.yaml に
+# 設定済みでも、swap が無効な状態で K3s が先に起動していると反映には再起動が要る。
+# 先に swap を有効化しておけば K3s は最初から swap 前提で起動する。
+# ============================================================
+- name: ホストの swap ファイル作成
+  hosts: all
+  become: true
+  roles:
+    - role: swap
 
 
 # ============================================================
