@@ -48,6 +48,8 @@ spec:
       memory: "256Mi"
       cpu: "250m"
     limits:
-      # 実使用量は約60Mi。512Miは過大なためノードのオーバーコミット解消の一環で削減。
-      memory: "256Mi"
+      # idle時実使用量は約60Miだが、barman-cloud-backup/wal-archiveの
+      # バックアップ処理時にメモリスパイクするため256Miでは不足しOOM crash loopした
+      # (2026-06-19)。512Miに戻す。
+      memory: "512Mi"
       cpu: "500m"
