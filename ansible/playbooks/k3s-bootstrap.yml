@@ -224,9 +224,12 @@
       # --server-side: ArgoCD の CRD が大きく last-applied-configuration アノテーションが
       # 262144 バイト制限を超えるため、Server-Side Apply を使用する
       # --force-conflicts: 初回 client-side apply との field ownership 競合を解消する
+      # バージョンは明示固定 (stable は移動タグのため再実行ごとに無意識アップグレードされる。
+      # 2026-06-19: stable 経由で v3.4.4 に上がり configmap informer のラベル要件変更で
+      # argocd-cm/argocd-rbac-cm が見えなくなり全コンポーネントが crash した実績あり)
       ansible.builtin.command: >
         kubectl apply -n argocd --server-side --force-conflicts
-        -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+        -f https://raw.githubusercontent.com/argoproj/argo-cd/v3.4.4/manifests/install.yaml
 
     - name: ArgoCD が Ready になるまで待機
       ansible.builtin.command: >
