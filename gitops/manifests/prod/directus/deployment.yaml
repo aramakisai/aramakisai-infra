@@ -58,8 +58,9 @@ spec:
               memory: "256Mi"
               cpu: "250m"
             limits:
-              # 実使用量は約160Mi。512Miは過大なためノードのオーバーコミット解消の一環で削減。
-              memory: "384Mi"
+              # sharp画像変換・CSV import/export等でスパイクするため512Miを維持
+              # (384Miへ削減検討したが、これらの操作はCloudflareキャッシュ対象外でcgroup単位OOMリスクがあるため見送り)
+              memory: "512Mi"
               cpu: "500m"
           readinessProbe:
             httpGet:
