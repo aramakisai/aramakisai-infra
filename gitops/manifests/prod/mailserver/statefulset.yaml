@@ -147,6 +147,10 @@ spec:
               subPath: auth-ldap.conf.ext
               readOnly: true
             - name: dms-config
+              mountPath: /etc/dovecot/conf.d/05-acl-plugin.conf
+              subPath: 05-acl-plugin.conf
+              readOnly: true
+            - name: dms-config
               mountPath: /tmp/docker-mailserver/ldap-groups.cf
               subPath: ldap-groups.cf
               readOnly: true
@@ -188,6 +192,8 @@ spec:
                 path: dovecot.cf
               - key: auth-ldap.conf.ext
                 path: auth-ldap.conf.ext
+              - key: 05-acl-plugin.conf
+                path: 05-acl-plugin.conf
               - key: ldap-groups.cf
                 path: ldap-groups.cf
               - key: ldap-senders.cf

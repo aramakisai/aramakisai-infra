@@ -27,6 +27,16 @@ data:
       driver = ldap
       args = /etc/dovecot/dovecot-ldap.conf.ext
     }
+  # Dovecot ACL plugin の有効化 (mail_plugins への acl 追加):
+  # DMS の dovecot.cf 相当 (下の dovecot.cf キー) は /etc/dovecot/local.conf として
+  # !include conf.d/*.conf の後に読み込まれる。一方 conf.d/15-lda.conf や
+  # conf.d/20-imap.conf は protocol lda/imap { mail_plugins = $mail_plugins } を
+  # 既に明示宣言しており、Dovecotはその時点の(acl追加前の)グローバル値で確定させてしまうため、
+  # local.conf側でグローバルmail_pluginsを変更してもIMAP/LDA向けには反映されない
+  # (doveconf -nで実機確認済み、protocol imap側が空のまま)。
+  # そのため、acl追加分のみ conf.d/*.conf より前に読まれるファイル名 (05-) で別途注入する。
+  05-acl-plugin.conf: |
+    mail_plugins = $mail_plugins acl
   # Dovecot 認証設定オーバーライド
   dovecot.cf: |
     auth_mechanisms = plain login oauthbearer xoauth2
@@ -40,17 +50,6 @@ data:
 
     # ユーザー名のみでのIMAP/SMTP AUTHログインを許可 (フルアドレス入力にも後方互換)
     auth_username_format = %n@aramakisai.com  # confidential:allow
-
-    # ML共有メールボックスへのアクセス制御 (LDAP memberOf → acl_groups → ACLファイル)
-    mail_plugins = $mail_plugins acl
-
-    # conf.d/20-imap.conf が local.conf (本ファイル) より先に読み込まれ、
-    # protocol imap 用の mail_plugins をその時点の値 (acl追加前) で確定させてしまうため、
-    # 上記のグローバル変更だけではIMAP接続にaclプラグインが反映されない。
-    # protocol ブロックを本ファイル側でも明示的に再宣言し、最新の $mail_plugins を反映させる。
-    protocol imap {
-      mail_plugins = $mail_plugins
-    }
 
     plugin {
       acl = vfile
