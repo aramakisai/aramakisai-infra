@@ -61,25 +61,35 @@ spec:
                 secretKeyRef:
                   name: mailserver-secrets
                   key: LDAP_BIND_PASSWORD
+            # mailListAddress=true: ML専用Userのみを配送先候補にする (個人メール受信廃止)
             - name: LDAP_QUERY_FILTER_USER
-              value: "(&(objectClass=inetOrgPerson)(mail=%s)(ak-active=true))"
+              value: "(&(objectClass=inetOrgPerson)(mail=%s)(ak-active=true)(mailListAddress=true))"
             - name: LDAP_QUERY_FILTER_ALIAS
               value: "(&(objectClass=inetOrgPerson)(mailAlias=%s)(ak-active=true))"
             # ak-active はグループエントリには存在しないため、グループでは
             # mail 属性のみでフィルタする (ユーザーと違いグループに有効/無効の概念はない)
+            # mailListMigrated=true が設定されたグループ (新方式へ移行済み) は
+            # fan-out 展開の対象から除外する
             - name: LDAP_QUERY_FILTER_GROUP
-              value: "(&(objectClass=group)(mail=%s))"
+              value: "(&(objectClass=group)(mail=%s)(!(mailListMigrated=true)))"
             - name: DOVECOT_USER_FILTER
               value: "(&(objectClass=inetOrgPerson)(mail=%u)(ak-active=true))"
             - name: DOVECOT_PASS_FILTER
               value: "(&(objectClass=inetOrgPerson)(mail=%u)(ak-active=true))"
+            # 送信者なりすまし防止: MLアドレスをFromに使える送信者をグループメンバーに限定する
+            - name: LDAP_QUERY_FILTER_SENDERS
+              value: "(&(objectClass=group)(mail=%s))"
+            - name: SPOOF_PROTECTION
+              value: "1"
             # auth_bind=yes: Dovecot が LDAP に直接バインドしてユーザー認証 (PLAIN auth)
             - name: DOVECOT_AUTH_BIND
               value: "yes"
             # Authentik LDAP は mailUidNumber/mailGidNumber/mailHomeDirectory を持たないため
             # UID/GID に docker(5000) を使い、メールパスを静的に指定する
+            # memberOf=acl_groups: LDAPのmemberOf(所属グループDN一覧)をDovecot ACL pluginが
+            # 参照するacl_groups extra fieldへ直接マッピングする (中間マッピング不要)
             - name: DOVECOT_USER_ATTRS
-              value: "=uid=5000,=gid=5000,=home=/var/mail/%d/%n,=mail=maildir:/var/mail/%d/%n"
+              value: "=uid=5000,=gid=5000,=home=/var/mail/%d/%n,=mail=maildir:/var/mail/%d/%n,memberOf=acl_groups"
             # Roundcube OAuth2 クライアントシークレット (OAUTHBEARER introspection 用)
             - name: MAIL_OAUTH2_CLIENT_SECRET
               valueFrom:
@@ -103,6 +113,9 @@ spec:
             - name: ENABLE_RSPAMD
               value: "1"
             - name: ENABLE_CLAMAV
+              value: "0"
+            # Rspamd有効時の公式推奨構成: Amavisと機能が重複するため無効化しメモリを削減する
+            - name: ENABLE_AMAVIS
               value: "0"
             # TLS 設定 (cert-manager 証明書マウント位置の指定)
             - name: SSL_TYPE
@@ -136,6 +149,10 @@ spec:
             - name: dms-config
               mountPath: /tmp/docker-mailserver/ldap-groups.cf
               subPath: ldap-groups.cf
+              readOnly: true
+            - name: dms-config
+              mountPath: /tmp/docker-mailserver/ldap-senders.cf
+              subPath: ldap-senders.cf
               readOnly: true
             - name: dovecot-oauth2
               mountPath: /etc/dovecot/dovecot-oauth2.conf.ext
@@ -173,6 +190,8 @@ spec:
                 path: auth-ldap.conf.ext
               - key: ldap-groups.cf
                 path: ldap-groups.cf
+              - key: ldap-senders.cf
+                path: ldap-senders.cf
         - name: dovecot-oauth2
           secret:
             secretName: dovecot-oauth2-config

@@ -37,6 +37,67 @@ data:
       mechanisms = oauthbearer xoauth2
       args = /etc/dovecot/dovecot-oauth2.conf.ext
     }
+
+    # ユーザー名のみでのIMAP/SMTP AUTHログインを許可 (フルアドレス入力にも後方互換)
+    auth_username_format = %n@aramakisai.com  # confidential:allow
+
+    # ML共有メールボックスへのアクセス制御 (LDAP memberOf → acl_groups → ACLファイル)
+    mail_plugins = $mail_plugins acl
+
+    plugin {
+      acl = vfile
+    }
+
+    # ML 7件分の共有メールボックスを静的に定義する (acl_shared_dict は不使用、件数固定のため)
+    namespace {
+      type = shared
+      separator = /
+      prefix = Shared/planning/
+      location = maildir:/var/mail/aramakisai.com/planning:INDEX=/var/indexes/aramakisai.com/planning
+      subscriptions = no
+    }
+    namespace {
+      type = shared
+      separator = /
+      prefix = Shared/accounting/
+      location = maildir:/var/mail/aramakisai.com/accounting:INDEX=/var/indexes/aramakisai.com/accounting
+      subscriptions = no
+    }
+    namespace {
+      type = shared
+      separator = /
+      prefix = Shared/booth/
+      location = maildir:/var/mail/aramakisai.com/booth:INDEX=/var/indexes/aramakisai.com/booth
+      subscriptions = no
+    }
+    namespace {
+      type = shared
+      separator = /
+      prefix = Shared/stage/
+      location = maildir:/var/mail/aramakisai.com/stage:INDEX=/var/indexes/aramakisai.com/stage
+      subscriptions = no
+    }
+    namespace {
+      type = shared
+      separator = /
+      prefix = Shared/pr/
+      location = maildir:/var/mail/aramakisai.com/pr:INDEX=/var/indexes/aramakisai.com/pr
+      subscriptions = no
+    }
+    namespace {
+      type = shared
+      separator = /
+      prefix = Shared/admin/
+      location = maildir:/var/mail/aramakisai.com/admin:INDEX=/var/indexes/aramakisai.com/admin
+      subscriptions = no
+    }
+    namespace {
+      type = shared
+      separator = /
+      prefix = Shared/general-affairs/
+      location = maildir:/var/mail/aramakisai.com/general-affairs:INDEX=/var/indexes/aramakisai.com/general-affairs
+      subscriptions = no
+    }
   # Postfix LDAP グループマップ オーバーライド (メーリングリスト用):
   # DMS が自動生成する ldap-groups.cf は result_attribute=mail のみのため、
   # マッチしたグループ自身の mail (= 検索キーと同じ) が返るだけでメンバーに展開されない。
@@ -50,6 +111,24 @@ data:
   # bind/bind_dn/bind_pw/query_filter/search_base/server_host/start_tls/version は
   # LDAP_* 環境変数から _replace_by_env_in_file により自動置換される (DMS ldap.sh)。
   ldap-groups.cf: |
+    bind = yes
+    bind_dn =
+    bind_pw =
+    query_filter =
+    result_attribute =
+    leaf_result_attribute = mail
+    search_base =
+    server_host =
+    special_result_attribute = member
+    start_tls = no
+    timeout = 30
+    version = 3
+  # 送信者なりすまし防止 (LDAP_QUERY_FILTER_SENDERS / SPOOF_PROTECTION 用):
+  # ldap-groups.cf と同じ member 展開パターンを流用し、smtpd_sender_login_maps の
+  # 照合先 (Fromアドレス→許可された個人アドレス一覧) を返す。
+  # mailListMigrated の値は一切参照しないため、fan-out の移行状態に関係なく
+  # 全MLで送信制限が機能する。
+  ldap-senders.cf: |
     bind = yes
     bind_dn =
     bind_pw =
