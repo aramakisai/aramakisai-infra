@@ -58,7 +58,8 @@ spec:
               memory: "256Mi"
               cpu: "250m"
             limits:
-              memory: "512Mi"
+              # 実使用量は約160Mi。512Miは過大なためノードのオーバーコミット解消の一環で削減。
+              memory: "384Mi"
               cpu: "500m"
           readinessProbe:
             httpGet:

@@ -31,6 +31,14 @@ spec:
         migrate:
           image:
             repository: ghcr.io/aramakisai/room-presence-tracker-migrate
+        # chart既定512Miは実使用量(約63Mi)に対し過大。ノードのオーバーコミット解消のため削減。
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "256Mi"
+          limits:
+            cpu: "500m"
+            memory: "256Mi"
         app:
           config:
             AUTHENTIK_ISSUER: "https://idp.aramakisai.com/application/o/room-presence/"

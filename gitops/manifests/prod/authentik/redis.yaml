@@ -33,7 +33,8 @@ spec:
               memory: "128Mi"
               cpu: "100m"
             limits:
-              memory: "256Mi"
+              # 実使用量は約6Mi (キャッシュ用途のみ)。256Miは過大なため削減。
+              memory: "128Mi"
               cpu: "200m"
           readinessProbe:
             exec:

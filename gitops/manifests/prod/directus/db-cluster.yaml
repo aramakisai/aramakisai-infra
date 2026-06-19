@@ -48,5 +48,6 @@ spec:
       memory: "256Mi"
       cpu: "250m"
     limits:
-      memory: "512Mi"
+      # 実使用量は約60Mi。512Miは過大なためノードのオーバーコミット解消の一環で削減。
+      memory: "256Mi"
       cpu: "500m"
