@@ -99,23 +99,22 @@ spec:
 
 ## ArgoCD Sync Wave パターン
 
-- `sync-wave: "-1"` → ESO・ClusterSecretStore・CloudNativePG Operator・cert-manager・nginx-ingress (他 App の前提)
-- `sync-wave: "0"` (デフォルト) → Authentik・Directus・mailserver・Roundcube・cloudflared など
+- `sync-wave: "-1"` → ESO・ClusterSecretStore・CloudNativePG Operator・cert-manager・nginx-ingress (前提基盤)
+- `sync-wave: "0"` (デフォルト) → 各種アプリ (Authentik, Directus, mailserver, Roundcube, cloudflared等)
 
-**CloudNativePG はマニフェストなし**: CNPG Operator は Helm chart (`cloudnativepg.yaml`) のみで管理。各サービスの DB Cluster は `manifests/prod/<service>/db-cluster.yaml` に置く。
+**DBリソースについて**: CloudNativePG Operator 自体は Helm (`cloudnativepg.yaml`) で管理。DB Cluster 定義は各アプリの `manifests/prod/<service>/db-cluster.yaml` に配置。
 
-## 実際の apps/prod/ 一覧
+## プロジェクトメモリ同期プロセス
 
-```
-wave: -1  eso.yaml, cluster-secret-store.yaml, cloudnativepg.yaml,
-          cert-manager.yaml, kube-state-metrics.yaml, namespace-config.yaml,
-          snapshot-controller.yaml, volsync.yaml
-wave: 1   nginx-ingress.yaml
-wave: 0   authentik.yaml, directus.yaml, mailserver.yaml,
-          roundcube.yaml, cloudflared.yaml, reloader.yaml,
-          argocd-config.yaml, autoconfig.yaml, monitoring.yaml,
-          cert-manager-config.yaml
-```
+仕様完了（`phase: completed`）または変更時、インフラの変更情報を主要ドキュメント（`CLAUDE.md`, `steering/` 内ドキュメント）に確実に反映・同期します。
+
+### 1. 同期・転記基準
+- **新規公開サービス・サブドメイン**: `CLAUDE.md` および `steering/structure.md` (apps/prod/一覧等) に追加。
+- **新規環境変数・シークレット**: `CLAUDE.md` および `steering/tech.md` (シークレット一覧) にキーを追加（値は含めない）。
+- **手順・コマンドの変更**: 運用コマンドやブートストラップ手順に変更があれば `CLAUDE.md` を更新。
+
+### 2. [RULE] ドキュメントの自律的同期
+コード（Terraform、Ansible、GitOpsマニフェスト）に変更を加えた場合、AIエージェントは自律的に関連するドキュメント（`CLAUDE.md`、`steering/` 内ドキュメント）をスキャンし、最新の状態に同期しなければならない。コードの変更のみでタスクを完了してはならない。
 
 ---
 _Document patterns, not file trees. New files following patterns shouldn't require updates_

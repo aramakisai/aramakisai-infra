@@ -50,97 +50,56 @@ infisical run -- ansible-playbook k3s-bootstrap.yml
 5. ESO が `sync-wave: "-1"` で先行 sync → 他アプリは `wave: 0`
 
 ### K3s クラスター設計
-- シングルノード (prod-node-1) が etcd + ワークロードを担う。障害時は Raspberry Pi + Grafana Cloud Alerting による半自動コールドスタンバイ復旧
-- サーバータイプ: CX33 (2vCPU/8GB/80GB NVMe)
-- `--disable traefik,servicelb`: どちらも GitOps または Cloudflare Tunnel で代替
-- `--embedded-registry`: Spegel によるノード間イメージキャッシュ
+- シングルノード (prod-node-1) が etcd + ワークロードを担う。CX33 (2vCPU/8GB/80GB NVMe) 使用。
+- **主要フラグ**: `--flannel-backend none` (Cilium用), `--disable-network-policy` (Ciliumが担当), `--disable traefik,servicelb` (GitOps/Tunnel代替), `--embedded-registry` (Spegel)
+- **Swap設定**: 全ノードに4GB swap作成。kubelet `fail-swap-on=false` と対で機能 (PodはNoSwap)。
+- **障害復旧**: 障害時は Raspberry Pi + Grafana Cloud による半自動コールドスタンバイ復旧。
 
 ### Ansible 実行タイミング
-- `null_resource` + `local-exec` は HCP Terraform のリモート実行環境で動作しないため `main.tf` でコメントアウト済み
-- **Terraform 完了後に常に手動で Ansible を実行する**
-- 設定変更のみの場合も Ansible を直接実行する
+- `null_resource` + `local-exec` は HCP Terraform リモート実行非対応のため `main.tf` でコメントアウト済み。
+- **Terraform 完了後、常に手動で Ansible を実行する**（設定変更のみの場合も同様）。
 
 ## 監視スタック
 
 | コンポーネント | 役割 | 状態 |
 |--------------|------|------|
-| Grafana Alloy (DaemonSet) | Pod ログ + ノードメトリクス収集 | マニフェストあり・**未デプロイ** |
-| Grafana Cloud Loki | ログ保存・検索 | 外部サービス (要アカウント) |
-| Grafana Cloud Prometheus | メトリクス保存・アラート | 外部サービス (要アカウント) |
+| Grafana Alloy (DaemonSet) | Pod ログ + ノードメトリクス収集 | `shared/monitoring/alloy.yaml` (未デプロイ) |
+| Grafana Cloud Loki / Prometheus | ログ/メトリクス保存・アラート (外部) | 接続用シークレット登録後に有効化 |
 
-Alloy が収集したログ/メトリクスを Grafana Cloud に remote_write / Loki push する構成。
-クラスター内に Prometheus サーバーは不要。
-
-**未完了**: ArgoCD Application・ExternalSecret (`alloy-secrets`)・Infisical への6キー登録がない。
+Alloy が収集したログ/メトリクスを Grafana Cloud にリモート送信する構成。クラスター内に Prometheus サーバーは不要。
 
 ## Development Environment
 
-### Required Tools
-```
-terraform >= 1.9
-ansible >= 2.14
-kubectl
-tailscale (管理用SSH接続)
-infisical (シークレット注入)
-jq, curl
-```
-
-### シークレット管理ルール
-
-**Infisical がすべてのシークレットの Single Source of Truth。**
-
-- `.env`, `.env.app-secrets`, `secrets.tfvars`, `kubeconfig` は使用しない（無効化済み）。ローカルにシークレットを置かない
-- コマンド実行時は `infisical run --` プレフィックスで環境変数を注入する
-- `infisical login` で事前にログイン済みであること
+### Required Tools & Rules
+- `terraform >= 1.9`, `ansible >= 2.14`, `kubectl`, `tailscale` (SSH接続用), `infisical` (シークレット注入), `uv`
+- **Infisical が Single Source of Truth**。`.env` などのローカルファイルは無効化されており、`infisical run --` 経由で環境変数を注入する。
 
 ### Common Commands
 ```bash
-# IaC 差分確認
+# IaC 差分確認 / 適用
 infisical run -- terraform -chdir=terraform plan
-
-# IaC 適用
 infisical run -- terraform -chdir=terraform apply
 
-# Ansible 単体再実行
+# Ansible 単体実行 / K3s アップデート
 infisical run -- ansible-playbook -i ansible/inventory/tailscale.yml ansible/playbooks/k3s-bootstrap.yml
-
-# K3s ローリングアップデート
-infisical run -- ansible-playbook -i ansible/inventory/tailscale.yml ansible/playbooks/k3s-bootstrap.yml \
-  -e "k3s_version=v1.33.0+k3s1"
+infisical run -- ansible-playbook -i ansible/inventory/tailscale.yml ansible/playbooks/k3s-bootstrap.yml -e "k3s_version=v1.33.0+k3s1"
 ```
 
 ### Infisical で管理するシークレット一覧
-```
-# Terraform プロバイダー認証
-HCLOUD_TOKEN
-CLOUDFLARE_API_TOKEN
-TAILSCALE_OAUTH_CLIENT_ID / TAILSCALE_OAUTH_CLIENT_SECRET
-
-# Terraform 変数 (TF_VAR_ prefix)
-TF_VAR_k3s_token / TF_VAR_tailscale_api_key
-TF_VAR_authentik_cf_client_id / TF_VAR_authentik_cf_client_secret
-
-# Ansible ブートストラップ
-K3S_TOKEN
-CLOUDFLARE_TUNNEL_TOKEN / CLOUDFLARE_TUNNEL_ID
-INFISICAL_CLIENT_ID / INFISICAL_CLIENT_SECRET
-ARGOCD_GITHUB_DEPLOY_KEY
-
-# Raspberry Pi 復旧スクリプト
-TFC_API_TOKEN / TFC_WORKSPACE_ID
-TAILSCALE_API_KEY / TAILSCALE_TAILNET
-```
+- **IaC & 認証**: `HCLOUD_TOKEN`, `CLOUDFLARE_API_TOKEN`, `TAILSCALE_OAUTH_CLIENT_ID`, `TAILSCALE_OAUTH_CLIENT_SECRET`, `TF_VAR_k3s_token`, `TF_VAR_tailscale_api_key`, `TF_VAR_authentik_cf_client_id`, `TF_VAR_authentik_cf_client_secret`
+- **Ansible & 復旧**: `K3S_TOKEN`, `CLOUDFLARE_TUNNEL_TOKEN`, `CLOUDFLARE_TUNNEL_ID`, `INFISICAL_CLIENT_ID`, `INFISICAL_CLIENT_SECRET`, `ARGOCD_GITHUB_DEPLOY_KEY`, `TFC_API_TOKEN`, `TFC_WORKSPACE_ID`, `TAILSCALE_API_KEY`, `TAILSCALE_TAILNET`
+- **アプリ用シークレット**:
+  - **DMS**: `MAILSERVER_LDAP_BIND_PASSWORD`, `MAILSERVER_DKIM_KEY`, `MAILSERVER_RESTIC_PASSWORD`, `B2_APPLICATION_KEY_ID`, `B2_APPLICATION_KEY`
+  - **Alloy**: `LOKI_URL`, `LOKI_USERNAME`, `LOKI_PASSWORD`, `PROMETHEUS_REMOTE_WRITE_URL`, `PROMETHEUS_USERNAME`, `PROMETHEUS_PASSWORD`
+  - **Roundcube**: `MAIL_OAUTH2_CLIENT_SECRET`, `ROUNDCUBE_DES_KEY`
+  - **Presence Tracker**: `TF_VAR_authentik_room_presence_client_secret` (TF/ESO共用), `PRESENCE_AUTH_SECRET`, `PRESENCE_AUTHENTIK_API_TOKEN`, `PRESENCE_RESET_SECRET`, `PRESENCE_DISCORD_BOT_TOKEN`
 
 ### Commit Protection & Coding Standards
-- **機密情報のコミット防止**:
-  - `pre-commit` フックとして `scripts/check-confidential-info.py` が動作しており、開発者のローカル絶対パス（ユーザー名を含むパス等）や、非許可のメールアドレスのコミットを自動でブロックします。
-- **サンプル用メールアドレスの命名規則**:
-  - ドキュメントやコード内にダミー/サンプルのメールアドレスを記述する際は、以下を徹底してください。
-    - **内向き（プロジェクト関連）のサンプル**: `<username>@aramakisai.invalid`
-    - **外向き（一般外部ドメイン）のサンプル**: `<username>@example.invalid`
-  - これにより、実在ドメイン宛てへの誤送信を防ぎ、安全性を担保します。
-- **例外（バイパス）の管理**:
-  - 本番設定用（Let's Encrypt 用の `admin@` や DNS TXT レコード用の `postmaster@` 等）で、どうしてもインフラ設定として実アドレスをコードやマニフェストに記載する必要がある場合は、行末に `# confidential:allow` (Markdownの場合は `<!-- confidential:allow -->`) を付与し、明示的かつ承認された例外としてコード上に記録してください。
+- **パス漏洩防止**: pre-commit フック `scripts/check-confidential-info.py` がローカル絶対パスや非許可メールのコミットをブロック。
+- **メールアドレス命名規則**:
+  - プロジェクト関連のサンプル: `<username>@aramakisai.invalid`
+  - 一般外部ドメインのサンプル: `<username>@example.invalid`
+  - 実設定で必要な実アドレスは、行末に `# confidential:allow` (MDは `<!-- confidential:allow -->`) を付与。
 
 ---
 _Document standards and patterns, not every dependency_
