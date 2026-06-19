@@ -61,8 +61,8 @@
   - _Requirements: 4.1, 4.2, 4.3, 4.4, 9.1, 9.4_
   - _Boundary: UptimeRobotMonitors_
 
-- [ ] 5. DR自動復旧トリガーをクラスター外部のGitHub Actionsワークフローへ引き継ぐ
-- [ ] 5.1 (P) 5分毎スケジュール実行のワークフローを用意し、Tailscale認証情報をGitHub Actions Secretsへミラーする
+- [x] 5. DR自動復旧トリガーをクラスター外部のGitHub Actionsワークフローへ引き継ぐ
+- [x] 5.1 (P) 5分毎スケジュール実行のワークフローを用意し、Tailscale認証情報をGitHub Actions Secretsへミラーする
   - `.github/workflows/dr-trigger.yml` を作成し、`schedule: cron: */5 * * * *` と手動テスト用 `workflow_dispatch` を設定する
   - `permissions: { actions: write, issues: write }` に限定する (不要な権限を付与しない)
   - 既存Infisicalキー `TAILSCALE_API_KEY`/`TAILSCALE_TAILNET` をGitHub Actions Secretsにもミラー登録する
@@ -70,7 +70,7 @@
   - _Requirements: 1.8, 1.9, 1.11_
   - _Boundary: DrTriggerWorkflow_
 
-- [ ] 5.2 Tailscaleデバイス状態と複数サービスエンドポイントの複合検出ロジックを実装する
+- [x] 5.2 Tailscaleデバイス状態と複数サービスエンドポイントの複合検出ロジックを実装する
   - `.github/scripts/dr-trigger.sh` にTailscale Devices API (`connectedToControl`)でのprod-node-1オフライン判定を実装する
   - idp/argocd/webmailへのHTTPS到達性確認(タイムアウト+リトライ込み)を実装する
   - (a) Tailscaleオフライン、または(b) 2つ以上のエンドポイントが同時に応答なし、のいずれかでノード障害判定とする複合ロジックを実装する
@@ -79,14 +79,14 @@
   - _Requirements: 1.1, 1.2, 1.3_
   - _Boundary: DrTriggerWorkflow_
 
-- [ ] 5.3 単体障害時とノード障害疑い時のDiscord通知を実装する
+- [x] 5.3 単体障害時とノード障害疑い時のDiscord通知を実装する
   - `SingleEndpointDown`判定時は`repository_dispatch`へ進まずDiscord通知のみ送信する処理を実装する
   - `NodeFailureSuspected`判定時は即座にDiscordへ障害検知通知を送信する処理を実装する
   - 両ケースでDiscord Webhookへの送信が成功することを確認する
   - _Requirements: 1.3, 1.4_
   - _Boundary: DrTriggerWorkflow_
 
-- [ ] 5.4 GitHub Issueによる猶予期間の状態管理(単一インシデント保証・自動発火)を実装する
+- [x] 5.4 GitHub Issueによる猶予期間の状態管理(単一インシデント保証・自動発火)を実装する
   - ラベル`dr-incident`のGitHub Issueを使い、既にopenなインシデントが存在する場合は新規作成せず既存Issueの経過時間を評価する処理を実装する
   - 猶予期間(既定10分)内は`repository_dispatch`の発火を保留する処理を実装する
   - 猶予期間経過かつ中止コメントがない場合に自動で`repository_dispatch`(event_type: `dr-recovery`)を発火し、Issueをクローズする処理を実装する
@@ -94,14 +94,14 @@
   - _Requirements: 1.5, 1.7, 1.8_
   - _Boundary: DrTriggerWorkflow_
 
-- [ ] 5.5 author_associationに基づく運用者の中止操作を実装する
+- [x] 5.5 author_associationに基づく運用者の中止操作を実装する
   - Issueへの中止コメントまたはクローズ操作について、`author_association`が`OWNER`/`MEMBER`/`COLLABORATOR`の場合のみ有効とする処理を実装する
   - 中止操作が有効な場合は`repository_dispatch`を発火させずIssueを中止コメント付きでクローズする処理を実装する
   - `author_association`が`NONE`のコメントでは中止操作が無効であることを確認する
   - _Requirements: 1.6_
   - _Boundary: DrTriggerWorkflow_
 
-- [ ] 5.6 dr-runbook.mdとsteering/dr.mdを新しいトリガー方式に合わせて更新する
+- [x] 5.6 dr-runbook.mdとsteering/dr.mdを新しいトリガー方式に合わせて更新する
   - `docs/dr-runbook.md`の「自動復旧フロー」節をGrafana Cloud起点から`dr-trigger.yml`起点の複合検出・猶予期間方式に書き換える
   - `.kiro/steering/dr.md`の「DRの基本方針」内のGrafana Cloud依存記述を新構成に合わせて更新する
   - 更新後の文書にGrafana Cloud Synthetic Monitoringへの依存記述が残っていないこと

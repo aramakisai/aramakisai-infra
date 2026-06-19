@@ -2,10 +2,11 @@
 
 ## 概要
 
-prod-node-1 (CX33) が障害になった場合、Grafana Cloud Alerting + GitHub Actions の  
-自動復旧ワークフローが **人手なしで 30 分以内に復旧を完了する**。
+prod-node-1 (CX33) が障害になった場合、クラスター外部で完結する複合検出ワークフロー
+(`dr-trigger.yml`) + GitHub Actions の自動復旧ワークフローが
+**人手なしで 30 分以内に復旧を完了する**。
 
-人が行うのは **復旧後の確認のみ**。  
+人が行うのは **復旧後の確認、または猶予期間中の誤検知時の中止操作のみ**。  
 自動復旧が失敗した場合のみ、「手動フォールバック」セクションを参照する。
 
 **目標復旧時間 (RTO)**: 30 分  
@@ -15,13 +16,32 @@ prod-node-1 (CX33) が障害になった場合、Grafana Cloud Alerting + GitHub
 
 ## 自動復旧フロー
 
-```
-Grafana Cloud Synthetic Monitoring
-  → idp.aramakisai.com が 3 分間応答なし
-  → Contact Point (Webhook) → POST https://api.github.com/repos/aramakisai/aramakisai-infra/dispatches
-                               {"event_type": "dr-recovery"}
+旧構成は Grafana Cloud Synthetic Monitoring (idp 単体の応答なしのみを判定条件) を起点としていたが、
+Grafana Cloud 解約に伴い `dr-trigger.yml` (クラスター外部・GitHub Actions 完結) に引き継いだ。
+**idp 単体障害ではノード再作成を起こさない複合検出ロジック**と、
+**誤検知時に運用者が止められる「通知 + 猶予期間オプトアウト」方式**を採用している。
 
-GitHub Actions (.github/workflows/dr-recovery.yml)
+```
+.github/workflows/dr-trigger.yml (5分毎 cron + workflow_dispatch)
+  → .github/scripts/dr-trigger.sh が複合検出を実施
+       (a) Tailscale Devices API で prod-node-1 の connectedToControl を確認
+       (b) idp / argocd / webmail への HTTPS 到達性を確認 (タイムアウト+リトライ込み)
+
+  判定:
+    - (a) がオフライン、または (b) で2つ以上が同時に応答なし
+        → ノード障害 (NodeFailureSuspected)
+    - (b) で1つのみ応答なし、(a) はオンライン
+        → 単体サービス障害 (SingleEndpointDown) — Discord 通知のみ、ノード再作成はしない
+
+  ノード障害と判定した場合:
+    1. Discord へ即座に障害検知通知を送信
+    2. ラベル `dr-incident` の GitHub Issue を作成 (= 猶予期間の開始、既定10分)
+    3. 猶予期間中に OWNER/MEMBER/COLLABORATOR 権限を持つ運用者が
+       Issue へ `abort`/`中止` を含むコメントを付ける、または Issue をクローズすると中止
+    4. 猶予期間が経過しても中止操作がない場合、無人でも自動で
+       repository_dispatch (event_type: dr-recovery) を発火し Issue をクローズ
+
+GitHub Actions (.github/workflows/dr-recovery.yml) ← repository_dispatch (dr-recovery) で起動
   1. Tailscale から prod-node-1 デバイスを削除
   2. Terraform Cloud API で CX33 prod-node-1 を再作成 (≈5分)
   3. Tailscale への prod-node-1 登録をポーリング (最大10分)
@@ -32,6 +52,9 @@ GitHub Actions (.github/workflows/dr-recovery.yml)
        → CNPG が B2 から WAL リストア (Authentik, Directus)
   6. Stalwart を停止 → VolSync で B2 から stalwart-data をリストア → 再起動
 ```
+
+5分毎の cron tick で再評価するため、検知から dispatch 発火までの実時間は最大 15 分程度になる
+(猶予期間 10 分 + cron 間隔 5 分)。`dr-recovery.yml` 自体の入力契約・内部ロジックは変更していない。
 
 ---
 
@@ -166,41 +189,57 @@ make kubectl ARGS="delete -f gitops/manifests/prod/stalwart/replication-destinat
 ## GitHub Actions 復旧ワークフローの管理
 
 ```
+検出ログ: https://github.com/aramakisai/aramakisai-infra/actions/workflows/dr-trigger.yml
 復旧ログ: https://github.com/aramakisai/aramakisai-infra/actions/workflows/dr-recovery.yml
 
-# 手動トリガー (テスト・強制実行)
-curl -X POST \
-  -H "Authorization: Bearer <GITHUB_PAT>" \
-  -H "Accept: application/vnd.github+json" \
-  -H "X-GitHub-Api-Version: 2022-11-28" \
-  https://api.github.com/repos/aramakisai/aramakisai-infra/dispatches \
-  -d '{"event_type":"dr-recovery"}'
+# dr-trigger.yml の手動トリガー (テスト・強制実行)
+gh workflow run dr-trigger.yml --repo aramakisai/aramakisai-infra
 
-# 同時実行制御: concurrency グループ "dr-recovery" で保護済み
-# 前回のジョブが実行中の場合、新規トリガーはキューに入る (cancel-in-progress: false)
+# dr-recovery.yml への直接 dispatch (dr-trigger.yml をバイパスして強制実行する場合のみ)
+gh api repos/aramakisai/aramakisai-infra/dispatches -f event_type=dr-recovery
+
+# 同時実行制御: dr-trigger は concurrency グループ "dr-trigger"、
+# dr-recovery は "dr-recovery" で保護済み (cancel-in-progress: false)
 ```
 
-### Grafana Cloud Contact Point 設定
+### dr-trigger.yml の運用
 
-| 項目 | 値 |
-|------|-----|
-| URL | `https://api.github.com/repos/aramakisai/aramakisai-infra/dispatches` |
-| HTTP Method | POST |
-| Header: Authorization | `Bearer <GITHUB_PAT>` |
-| Header: Accept | `application/vnd.github+json` |
-| Header: X-GitHub-Api-Version | `2022-11-28` |
-| Body | `{"event_type":"dr-recovery"}` |
+```
+ノード障害疑いの猶予期間中: https://github.com/aramakisai/aramakisai-infra/issues?q=label:dr-incident
+  → 誤検知の場合は OWNER/MEMBER/COLLABORATOR 権限を持つアカウントで
+    `abort` または `中止` を含むコメントを付ける (Issue を直接クローズしても中止扱いになる)
+  → 権限を持たないアカウント (author_association が NONE 等) のコメントは無視される
 
-**GITHUB_PAT**: Fine-Grained PAT (Actions: write 権限のみ) を Grafana Cloud の Contact Point に設定する。
+猶予期間 (既定10分) の変更:
+  .github/scripts/dr-trigger.sh の DR_TRIGGER_GRACE_MINUTES (デフォルト値) を変更してコミットする
+  (workflow_dispatch 実行時のみ環境変数で一時的に上書きすることも可能)
+
+監視対象エンドポイントの変更:
+  .github/scripts/dr-trigger.sh の ENDPOINTS 配列を編集する
+```
 
 ### GitHub Actions Secrets (要設定)
 
-| Secret 名 | 内容 |
-|-----------|------|
-| `INFISICAL_CLIENT_ID` | Infisical Machine Identity Client ID |
-| `INFISICAL_CLIENT_SECRET` | Infisical Machine Identity Client Secret |
-| `INFISICAL_PROJECT_ID` | Infisical プロジェクト ID |
-| `TS_OAUTH_CLIENT_ID` | Tailscale OAuth Client ID (tag:ci 用) |
-| `TS_OAUTH_SECRET` | Tailscale OAuth Client Secret (tag:ci 用) |
+| Secret 名 | 内容 | 使用ワークフロー |
+|-----------|------|------------------|
+| `TAILSCALE_API_KEY` | Tailscale API キー (Infisical の既存キーをミラー) | dr-trigger.yml |
+| `TAILSCALE_TAILNET` | Tailscale tailnet 名 (Infisical の既存キーをミラー) | dr-trigger.yml |
+| `DISCORD_OPS_WEBHOOK_URL` | 運用通知用 Discord Webhook (Infisical の既存キーをミラー) | dr-trigger.yml |
+| `INFISICAL_CLIENT_ID` | Infisical Machine Identity Client ID | dr-recovery.yml |
+| `INFISICAL_CLIENT_SECRET` | Infisical Machine Identity Client Secret | dr-recovery.yml |
+| `INFISICAL_PROJECT_ID` | Infisical プロジェクト ID | dr-recovery.yml |
+| `TS_OAUTH_CLIENT_ID` | Tailscale OAuth Client ID (tag:ci 用) | dr-recovery.yml |
+| `TS_OAUTH_SECRET` | Tailscale OAuth Client Secret (tag:ci 用) | dr-recovery.yml |
 
-**Tailscale 前提**: Tailscale ACL に `tag:ci` タグを定義し、上記 OAuth Client がそのタグでデバイスを登録できること。
+**dr-trigger.yml の `GITHUB_TOKEN`**: 新規 PAT は不要。`repository_dispatch` 発火には
+`contents: write`、Issue 操作には `issues: write` をワークフロー内の `permissions` で明示している
+(`GITHUB_TOKEN` は同一リポジトリへの `repository_dispatch`/`workflow_dispatch` に関して
+再帰防止ルールの例外として使用できる)。
+
+**Tailscale 前提 (dr-recovery.yml)**: Tailscale ACL に `tag:ci` タグを定義し、
+上記 OAuth Client がそのタグでデバイスを登録できること。
+
+**60日非活動による無効化に関する注意**: GitHub Actions の scheduled workflow は
+リポジトリに60日間コミット等の活動がないと自動的に無効化される。本リポジトリは継続的に
+開発中のため現状リスクは低いが、定期的に Actions タブで `dr-trigger.yml` が有効なままか
+目視確認することを推奨する (自動化対象外)。

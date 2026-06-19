@@ -1,0 +1,35 @@
+name: DR Trigger
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+# 同時実行を防ぐ (Issue の状態判定が前回実行の結果に依存するため)
+concurrency:
+  group: dr-trigger
+  cancel-in-progress: false
+
+# repository_dispatch (POST /repos/{owner}/{repo}/dispatches) には
+# Contents: write が必要 (GitHub公式ドキュメント: Fine-grained token permission set)。
+# Issue 作成・コメント・クローズには Issues: write が必要。
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run DR trigger detection
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          TAILSCALE_API_KEY: ${{ secrets.TAILSCALE_API_KEY }}
+          TAILSCALE_TAILNET: ${{ secrets.TAILSCALE_TAILNET }}
+          DISCORD_OPS_WEBHOOK_URL: ${{ secrets.DISCORD_OPS_WEBHOOK_URL }}
+        run: bash .github/scripts/dr-trigger.sh

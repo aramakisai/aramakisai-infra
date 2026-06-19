@@ -7,10 +7,21 @@
 
 ## DR の基本方針
 
-- **自動復旧が前提**: Grafana Cloud → GitHub Actions (`.github/workflows/dr-recovery.yml`) が無人で復旧する
-- **人手は復旧後確認のみ**: `docs/dr-runbook.md` の「復旧後の確認」セクションを参照
+- **自動復旧が前提**: `dr-trigger.yml` (クラスター外部完結・5分毎cron) が複合検出
+  (Tailscaleオフライン、または idp/argocd/webmail のうち2つ以上が同時応答なし) でノード障害と
+  判定し、Discord通知 + 猶予期間 (既定10分) オプトアウトを経て `repository_dispatch` →
+  `.github/workflows/dr-recovery.yml` が無人で復旧する。Grafana Cloud解約に伴いこの起点を
+  GitHub Actions完結型へ引き継いだ (`.kiro/specs/observability-v2` 参照)
+- **idp単体障害ではノード再作成しない**: 1エンドポイントのみ応答なしでTailscaleオンラインの場合は
+  単体サービス障害 (SingleEndpointDown) と判定しDiscord通知のみ行う (誤ったノード再作成を防ぐ)
+- **誤検知時は人手で中止できる**: 猶予期間中にOWNER/MEMBER/COLLABORATOR権限を持つアカウントが
+  `dr-incident`ラベルのIssueへ`abort`/`中止`を含むコメントを付ける、またはIssueをクローズすると
+  `repository_dispatch`は発火しない (権限のないコメントは無視される)
+- **人手は復旧後確認、または猶予期間中の中止操作のみ**: `docs/dr-runbook.md` の「復旧後の確認」
+  「dr-trigger.yml の運用」セクションを参照
 - **手動手順は例外**: ワークフローが失敗した場合のフォールバックとして `docs/dr-runbook.md` の「手動フォールバック」を使う
-- **復旧スクリプト**: `.github/scripts/recovery.sh` (旧 `raspberry-pi/recovery/recovery.sh` から移動)
+- **検出スクリプト**: `.github/scripts/dr-trigger.sh` (複合検出・通知・猶予期間・dispatch、ユニットテスト: `scripts/test-dr-trigger-logic.sh`)
+- **復旧スクリプト**: `.github/scripts/recovery.sh` (旧 `raspberry-pi/recovery/recovery.sh` から移動、内部ロジックは変更なし)
 
 ---
 
@@ -117,6 +128,8 @@ ID=$(curl -sf -H "Authorization: Bearer $TAILSCALE_API_KEY" \
 ## 参照先
 
 - DR 手順全文: `docs/dr-runbook.md`
+- 検出ワークフロー: `.github/workflows/dr-trigger.yml` / `.github/scripts/dr-trigger.sh`
 - 自動復旧スクリプト: `.github/scripts/recovery.sh`
 - 復旧ワークフロー: `.github/workflows/dr-recovery.yml`
 - CNPG 移行時の詳細知見: `.kiro/specs/single-node-migration/design.md` の「実装時の知見」セクション
+- DR起動トリガー引き継ぎの設計判断: `.kiro/specs/observability-v2/design.md` の「DR Trigger」セクション
