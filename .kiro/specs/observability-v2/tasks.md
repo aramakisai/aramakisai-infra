@@ -133,7 +133,7 @@
   - _Requirements: 3.4, 7.1, 7.2, 9.6_
   - _Boundary: FalcosidekickForwarder_
 
-- [ ] 7. Healthchecks.io ping URLとNetdata Room IDのTerraform outputを追加する
+- [x] 7. Healthchecks.io ping URLとNetdata Room IDのTerraform outputを追加する
   - `terraform/outputs.tf`にHealthchecks.io checkのping URL、Netdata CloudのRoom IDのoutputを追加する
   - `terraform output -raw <name>`で各値が取得できることを確認する
   - 取得した値を`scripts/push-secrets-to-infisical.sh`経由で`HEALTHCHECKS_MAILSERVER_BACKUP_PING_URL`/`NETDATA_CLAIM_ROOMS`としてInfisicalへ反映する運用手順を確認する

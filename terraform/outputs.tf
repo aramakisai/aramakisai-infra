@@ -20,6 +20,17 @@ output "tunnel_token" {
   sensitive   = true
 }
 
+output "healthchecksio_mailserver_backup_ping_url" {
+  description = "Healthchecks.io mailserver-backup check の ping URL (Infisical の HEALTHCHECKS_MAILSERVER_BACKUP_PING_URL へ反映 / 機密情報)"
+  value       = healthchecksio_check.mailserver_backup.ping_url
+  sensitive   = true
+}
+
+output "netdata_room_id" {
+  description = "Netdata Cloud aramakisai-prod Room ID (Infisical の NETDATA_CLAIM_ROOMS へ反映)"
+  value       = netdata_room.prod.id
+}
+
 # Hetzner Object Storage は hcloud provider 非対応のため手動管理
 # バケット名: aramakisai-backups
 # output "object_storage_bucket" {
