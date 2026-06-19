@@ -30,7 +30,8 @@ spec:
               memory: 64Mi
             limits:
               cpu: 200m
-              memory: 150Mi
+              # 150Miはlimit付近に張り付いて慢性的にOOM Killされていた (76回/22h)。256Miへ拡張。
+              memory: 256Mi
           configs:
             netdata:
               enabled: true

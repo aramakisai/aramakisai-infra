@@ -48,5 +48,7 @@ spec:
       memory: "64Mi"
       cpu: "50m"
     limits:
-      memory: "128Mi"
+      # postgres + barman-cloud (backup) は同一cgroupでOOM Killされるため、
+      # バックアップ実行時の合算ピークに対して128Miは不足していた (2026-06-19 OOM発生)。
+      memory: "256Mi"
       cpu: "100m"
