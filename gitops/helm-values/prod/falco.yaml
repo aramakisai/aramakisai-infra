@@ -53,6 +53,15 @@ customRules:
       override:
         condition: append
 
+    # ArgoCD/Authentik/CNPG operator/Netdataはコントロールプレーン連携のためk8s APIへの定常アクセスが正常動作。
+    # upstreamが用意するuser_known_contact_k8s_api_server_activities (既定never_true) を上書きして除外する。
+    - macro: user_known_contact_k8s_api_server_activities
+      condition: >
+        (k8s.ns.name=argocd and container.image.repository=quay.io/argoproj/argocd)
+        or (k8s.ns.name=prod and container.image.repository=ghcr.io/goauthentik/server)
+        or (k8s.ns.name=cnpg-system and container.image.repository=ghcr.io/cloudnative-pg/cloudnative-pg)
+        or (k8s.ns.name=monitoring and container.image.repository=docker.io/netdata/netdata)
+
 # Falcosidekick: Falcoアラートを Discord Webhook へ転送する。
 # single nodeのためreplicaCount既定値(2)を1へ削減し、軽量プロキシとしてリソースを絞る。
 # discord.webhookurlは平文記載せず、config.existingSecret (envFrom) で注入する。
