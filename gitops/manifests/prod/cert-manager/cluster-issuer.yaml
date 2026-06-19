@@ -14,7 +14,7 @@ metadata:
 spec:
   acme:
     server: https://acme-v02.api.letsencrypt.org/directory
-    email: admin@aramakisai.com
+    email: admin@aramakisai.com # confidential:allow
     privateKeySecretRef:
       name: letsencrypt-prod-account-key
     solvers:

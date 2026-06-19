@@ -51,6 +51,13 @@ repos:
         files: ^gitops/manifests/.*\.yaml$
         types: [yaml]
 
+      - id: check-confidential-info
+        name: Check Confidential Info
+        entry: uv run python scripts/check-confidential-info.py
+        language: system
+        files: \.(py|sh|yaml|yml|json|md|txt|tf|tfvars|cfg)$
+        pass_filenames: true
+
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.23.0
     hooks:

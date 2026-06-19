@@ -131,5 +131,16 @@ TFC_API_TOKEN / TFC_WORKSPACE_ID
 TAILSCALE_API_KEY / TAILSCALE_TAILNET
 ```
 
+### Commit Protection & Coding Standards
+- **機密情報のコミット防止**:
+  - `pre-commit` フックとして `scripts/check-confidential-info.py` が動作しており、開発者のローカル絶対パス（ユーザー名を含むパス等）や、非許可のメールアドレスのコミットを自動でブロックします。
+- **サンプル用メールアドレスの命名規則**:
+  - ドキュメントやコード内にダミー/サンプルのメールアドレスを記述する際は、以下を徹底してください。
+    - **内向き（プロジェクト関連）のサンプル**: `<username>@aramakisai.invalid`
+    - **外向き（一般外部ドメイン）のサンプル**: `<username>@example.invalid`
+  - これにより、実在ドメイン宛てへの誤送信を防ぎ、安全性を担保します。
+- **例外（バイパス）の管理**:
+  - 本番設定用（Let's Encrypt 用の `admin@` や DNS TXT レコード用の `postmaster@` 等）で、どうしてもインフラ設定として実アドレスをコードやマニフェストに記載する必要がある場合は、行末に `# confidential:allow` (Markdownの場合は `<!-- confidential:allow -->`) を付与し、明示的かつ承認された例外としてコード上に記録してください。
+
 ---
 _Document standards and patterns, not every dependency_

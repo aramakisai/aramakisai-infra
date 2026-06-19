@@ -204,7 +204,7 @@ ansible-playbook -i ansible/inventory/tailscale.yml \
 Authentik が落ちていて argocd.aramakisai.com にアクセスできない場合:
 
 ```bash
-ssh root@cp-node.tail<hash>.ts.net
+ssh root@cp-node.tail<hash>.ts.net  # confidential:allow
 kubectl port-forward svc/argocd-server -n argocd 8080:443
 # → http://localhost:8080 でアクセス (Cloudflare Access を通らない)
 ```

@@ -143,7 +143,7 @@ resource "cloudflare_record" "spf_mail" {
 resource "cloudflare_record" "dmarc" {
   zone_id = var.cloudflare_zone_id
   name    = "_dmarc"
-  value   = "v=DMARC1; p=reject; rua=mailto:postmaster@aramakisai.com; ruf=mailto:postmaster@aramakisai.com"
+  value   = "v=DMARC1; p=reject; rua=mailto:postmaster@aramakisai.com; ruf=mailto:postmaster@aramakisai.com" # confidential:allow
   type    = "TXT"
   proxied = false
   comment = "DMARC record"
@@ -196,7 +196,7 @@ resource "cloudflare_record" "send_spf" {
 resource "cloudflare_record" "smtp_tls" {
   zone_id = var.cloudflare_zone_id
   name    = "_smtp._tls"
-  value   = "v=TLSRPTv1; rua=mailto:postmaster@aramakisai.com"
+  value   = "v=TLSRPTv1; rua=mailto:postmaster@aramakisai.com" # confidential:allow
   type    = "TXT"
   proxied = false
   comment = "SMTP TLS reporting (RFC 8460)"
