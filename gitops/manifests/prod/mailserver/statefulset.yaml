@@ -154,9 +154,11 @@ spec:
               mountPath: /tmp/docker-mailserver/ldap-groups.cf
               subPath: ldap-groups.cf
               readOnly: true
+            # ldap-senders.cf は DMS が標準サポートしない override 対象のため、
+            # user-patches.sh (DMS公式拡張フック) 内で直接生成する (configmap.yaml参照)
             - name: dms-config
-              mountPath: /tmp/docker-mailserver/ldap-senders.cf
-              subPath: ldap-senders.cf
+              mountPath: /tmp/docker-mailserver/user-patches.sh
+              subPath: user-patches.sh
               readOnly: true
             - name: dovecot-oauth2
               mountPath: /etc/dovecot/dovecot-oauth2.conf.ext
@@ -196,8 +198,8 @@ spec:
                 path: 05-acl-plugin.conf
               - key: ldap-groups.cf
                 path: ldap-groups.cf
-              - key: ldap-senders.cf
-                path: ldap-senders.cf
+              - key: user-patches.sh
+                path: user-patches.sh
         - name: dovecot-oauth2
           secret:
             secretName: dovecot-oauth2-config

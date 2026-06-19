@@ -130,21 +130,30 @@ data:
     start_tls = no
     timeout = 30
     version = 3
-  # 送信者なりすまし防止 (LDAP_QUERY_FILTER_SENDERS / SPOOF_PROTECTION 用):
-  # ldap-groups.cf と同じ member 展開パターンを流用し、smtpd_sender_login_maps の
-  # 照合先 (Fromアドレス→許可された個人アドレス一覧) を返す。
-  # mailListMigrated の値は一切参照しないため、fan-out の移行状態に関係なく
-  # 全MLで送信制限が機能する。
-  ldap-senders.cf: |
+  # 送信者なりすまし防止 (LDAP_QUERY_FILTER_SENDERS / SPOOF_PROTECTION 用) の最終ファイルを
+  # DMS公式の拡張フック (user-patches.sh、_setup完了後に実行) で生成する。
+  # DMSのldap.shは/tmp/docker-mailserver/ldap-{users,groups,aliases,domains}.cfのみを
+  # /etc/postfix/へコピーする実装でsendersは対象外、かつ/etc/postfix/ldap-senders.cfへの
+  # 直接マウントもConfigMapボリュームがread-onlyのため後続のldap.shによる
+  # _replace_by_env_in_file (sed -i) が失敗する (いずれも実機確認済み、
+  # research.md「Phase 0実装時の発見」参照)。そのため _setup 完了後に呼ばれる
+  # user-patches.sh で、ldap-groups.cf と同じ member 展開パターン
+  # (special_result_attribute=member / leaf_result_attribute=mail / timeout=30) を持つ
+  # ldap-senders.cf を直接生成する。mailListMigrated の値は一切参照しないため、
+  # fan-out の移行状態に関係なく全MLで送信制限が機能する。
+  user-patches.sh: |
+    #!/bin/bash
+    cat > /etc/postfix/ldap-senders.cf <<INNEREOF
     bind = yes
-    bind_dn =
-    bind_pw =
-    query_filter =
+    bind_dn = ${LDAP_BIND_DN}
+    bind_pw = ${LDAP_BIND_PW}
+    query_filter = ${LDAP_QUERY_FILTER_SENDERS}
     result_attribute =
     leaf_result_attribute = mail
-    search_base =
-    server_host =
+    search_base = ${LDAP_SEARCH_BASE}
+    server_host = ${LDAP_SERVER_HOST}
     special_result_attribute = member
     start_tls = no
     timeout = 30
     version = 3
+    INNEREOF
