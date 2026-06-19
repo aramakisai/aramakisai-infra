@@ -44,6 +44,14 @@ data:
     # ML共有メールボックスへのアクセス制御 (LDAP memberOf → acl_groups → ACLファイル)
     mail_plugins = $mail_plugins acl
 
+    # conf.d/20-imap.conf が local.conf (本ファイル) より先に読み込まれ、
+    # protocol imap 用の mail_plugins をその時点の値 (acl追加前) で確定させてしまうため、
+    # 上記のグローバル変更だけではIMAP接続にaclプラグインが反映されない。
+    # protocol ブロックを本ファイル側でも明示的に再宣言し、最新の $mail_plugins を反映させる。
+    protocol imap {
+      mail_plugins = $mail_plugins
+    }
+
     plugin {
       acl = vfile
     }
