@@ -53,6 +53,10 @@ RUN uv tool install pre-commit \
     && uv tool install ansible-lint \
     && uv pip install --system ansible
 
+# ansible-lint は uv tool の隔離 venv で動くため、ansible.posix (mount モジュール等)
+# を ~/.ansible/collections (デフォルトの収集パス) に明示インストールしておく必要がある
+RUN ansible-galaxy collection install ansible.posix
+
 # 6. Install Antigravity CLI (agy)
 RUN curl -fsSL https://antigravity.google/cli/install.sh | bash \
     && if [ -f /root/.local/bin/agy ]; then mv /root/.local/bin/agy /usr/local/bin/agy; fi
