@@ -53,10 +53,11 @@
   - **検証結果（2026-06-19実施）**: デプロイ後、ACL plugin有効化(`mail_plugins`のprotocol別読込順問題、2コミットで修正)・`ldap-senders.cf`生成方式(DMSが`senders`をoverride対象外、user-patches.shで生成する方式へ変更)の2件の実装バグを実機で発見・修正済み（詳細はresearch.md参照）。最終的にdoveconf/postconfで全設定の反映を確認後、ユーザーが実際に(1)個人アドレスからのFrom送信→`553 5.7.1 Sender address rejected: not owned by user`で拒否（送信制限テスト）、(2)Gmail外部から個人アドレス宛送信→`550 5.1.1 User unknown in virtual mailbox table`で拒否（個人メール受信廃止テスト）の2点をkubectl logsで確認し、いずれも意図通りの挙動。未移行ML宛fan-out継続については、Phase -1事前検証（タスク1）でグループ側否定フィルタの挙動を確認済み・`virtual_alias_maps`の配線(postconf -h)に変更がないことも確認済みのため個別テストは省略。`DOVECOT_USER_FILTER`/`DOVECOT_PASS_FILTER`/`gitops/manifests/prod/roundcube/`への差分なしをgit diffで確認済み。
   - _Requirements: 1.5, 1.6, 5.3, 6.3, 7.1, 7.2_
 
-- [ ] 2.7 ロールアウト後の実測値に基づきリソース request/limit を確定する
+- [x] 2.7 ロールアウト後の実測値に基づきリソース request/limit を確定する
   - ロールアウト後、十分な期間を置いて `kubectl top` でmailserver podの実メモリ使用量を計測する
   - 計測値に基づき `statefulset.yaml` の `resources.requests`/`resources.limits` を見直す（目安: request 384Mi/limit 640Mi、実測確定）
   - Observable: 別コミットでresources値が更新され、ロールアウト前後のメモリ使用量比較結果が記録される
+  - **検証結果（2026-06-20実施）**: ロールアウト後26時間、`kubectl top`で複数回安定して424Miを計測（ps auxでamavisプロセス不在も確認済み）。事前目安(384Mi/640Mi)より実測がやや高かったため、request 512Mi→448Mi、limit 1Gi→768Miに調整（commit 2f223a3）。別コミットでデプロイ・ロールアウト後もPod Ready、resources値が反映されていることを確認済み。
   - _Requirements: 5.3, 5.4_
   - _Depends: 2.6_
 
