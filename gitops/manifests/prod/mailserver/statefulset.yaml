@@ -125,12 +125,15 @@ spec:
             - name: SSL_KEY_PATH
               value: "/etc/dms/tls-secret/tls.key"
           resources:
+            # ENABLE_AMAVIS=0 ロールアウト後、26時間の実トラフィックで安定して
+            # 424Mi (kubectl top) を実測。requestは実測値に小さめのマージンを乗せ、
+            # limitはrspamd等のスパイクに備え約1.8倍の余裕を持たせる。
             requests:
               cpu: "200m"
-              memory: "512Mi"
+              memory: "448Mi"
             limits:
               cpu: "1000m"
-              memory: "1Gi"
+              memory: "768Mi"
           volumeMounts:
             - name: data
               mountPath: /var/mail
