@@ -8,6 +8,12 @@ resource "authentik_provider_ldap" "dms" {
   base_dn     = "dc=ldap,dc=goauthentik,dc=io"
   bind_flow   = data.authentik_flow.default_authentication.id
   unbind_flow = data.authentik_flow.default_authentication.id
+  # bind_flow (default-authentication-flow) には Authenticator Validation
+  # ステージが含まれる。LDAP outpostのdirect binderはこのステージを
+  # 正しく通過できず Invalid credentials (49) を返す既知の不具合がある
+  # (goauthentik/authentik#4729, #10571)。MFA自体はLDAP bind経由では
+  # 元々サポート対象外の運用のため、provider側で明示的に無効化する。
+  mfa_support = false
 }
 
 # DMS用のLDAPアプリケーション
