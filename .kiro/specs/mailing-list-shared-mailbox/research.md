@@ -134,6 +134,17 @@
 - **dovecot-acl確認**: `/var/mail/aramakisai.com/pr/dovecot-acl` = `group=pr lrwstipekxa`（タスク3.2設置分）。member acl_groups=`pr`と一致。
 - **残（人手ゲート、実認証セッション必須）**: タスク4.1の最終スモーク（実member/実non-memberの**実IMAPクライアントでのLIST・読み書き**）、タスク4.2（実SMTP AUTHでのFrom:pr@送信成功/非member拒否）、タスク4.3（個人ログインのusername-only/フルアドレス両UX・Roundcube疎通）はいずれもメンバーのパスワードを要するためユーザー実施。doveadmで検証可能な配送マップ・ACLエンジン・senderマップは下記4.4含め全て確認済。
 
+### タスク4.1/4.3: 共有メールボックスがクライアントに自動表示されない → subscriptions=yes化（2026-06-21）
+- **症状（ユーザー軽テスト報告）**: INDEXバグ修正デプロイ後、メンバーが実IMAPクライアントでログインできるが Shared/* フォルダが自動表示されず「とても不便」。
+- **ログ確認**: mailserver-0ログで実クライアント(PLAIN, rip=124.155.16.5)・Roundcube(OAUTHBEARER, 10.42.0.1)双方がログイン成功、`LIST finished`記録あり。送受信も成立（`orig_to=<pr@>`→`to=<member1@>` INBOX stored、mailListMigrated未設定でfan-out継続中＝想定通り）。
+- **根本原因**: 全7 shared namespaceが`subscriptions = no`。大半のIMAPクライアントは購読フォルダのみ表示（LSUB / LIST-SUBSCRIBED）するため、購読されていないShared/*は出ない。`doveadm mailbox list -s -u member1`の購読リストに個人フォルダ(Drafts/Sent/Junk/Trash/Mailspring)のみでShared/*無しを確認。doveadm無印LISTには出る（ACLゲートも正常）が、クライアントは購読分しか出さない。design.mdの「subscribe不要で自動表示」前提が実クライアントで崩れていた。
+- **購読保存先の実機確認**: `subscriptions = no`下で`doveadm mailbox subscribe -u member1 Shared/pr`すると、購読は**member1個人の**`/var/mail/aramakisai.com/member1/subscriptions`に保存される（private namespaceへfallback、per-user）。全員自動表示にはこれでは不足。
+- **採用方式（ユーザー選択肢1: 自動購読+ACL filter、commit `857617d`）**: 7 shared namespaceを`subscriptions = yes`化。`type=shared`かつ`location`が固定パス(`/var/mail/aramakisai.com/<ml>`)のため、購読状態は**共有メールボックスルートの単一`subscriptions`ファイル**に保存され全アクセスユーザーで共有される（DMS単一uid 5000）。
+  - **実証**: デプロイ後`doveadm mailbox subscribe -u member1 Shared/pr`を1回実行 → 共有ルート`/var/mail/aramakisai.com/pr/subscriptions`に保存され、**別ユーザー`test`の`doveadm mailbox list -s`にもShared/prが購読表示**された（=1回subscribeで全メンバーに購読伝播）。member1の旧個人購読エントリ`Shared/pr/`はdoveadmが自動クリーン。
+  - **ACLゲート維持**: `acl rights` member1=フル / test=空（変化なし）。`protocol imap { mail_plugins = " acl" }`でcore acl pluginがIMAPロード済。LIST/LIST-SUBSCRIBEDの可視性フィルタはcore aclが担うため、実IMAPでは非メンバー(lookup権限無)からShared/prは除外される見込み（fail-closed, Req 2.2）。
+- **運用手順への含意**: ML追加（タスク6）では各MLメールボックス作成後に`doveadm mailbox subscribe -u <任意user> Shared/<slug>`を1回実行すれば全メンバーに購読が反映される（dovecot-acl設置とセットの一回限り操作）。
+- **残（人手ゲート、実認証必須・Req 2.2の肝）**: (1)実メンバーがクライアント再同期でShared/prが自動表示されること、(2)**実非メンバーがログインしてもShared/prが表示されない**こと、の2点は実IMAPセッションでのみ検証可能（doveadmはACLバイパスのため不可）。特に(2)はグローバル購読下でのACL除外＝option1の安全性の核心。**注意**: 旧来のraw LSUBのみ対応する古いクライアントはACL非適用で名前(空箱)が漏れる可能性あり（開くと拒否）。モダンクライアント(LIST-SUBSCRIBED)では除外される。
+
 ### タスク4.4検証: cutover準備の両立確認（2026-06-21、autonomous完了）
 - `postmap -q pr@aramakisai.com ldap:/etc/postfix/ldap-users.cf` → `pr@aramakisai.com`（`mailListAddress=true`一致でML専用Userが直接配送先として解決。cutover後の直接配送の前提成立）。 <!-- confidential:allow -->
 - `postmap -q pr@aramakisai.com ldap:/etc/postfix/ldap-groups.cf` → `member1@aramakisai.com`（`mailListMigrated`未設定のためfan-out継続、メンバー個人アドレスを返す。意図通り）。 <!-- confidential:allow -->
