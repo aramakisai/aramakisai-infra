@@ -123,6 +123,23 @@
 - **教訓**: 「Discordロール失効→次回ログインでアクセス失効」(Req 2.3)はOutpostの`search_mode=cached`キャッシュTTL分の遅延を伴う。権限即時失効が要件になる場合はキャッシュ設定の見直しが必要。cutover/残り6ML展開(タスク6)でも属性変更後のOutpostキャッシュ反映タイミングに注意。
 - **残**: 実IMAPログインでのShared/pr表示・読み書き＝タスク4.1。残り6MLのslug設定＝タスク6.2（同じくAPI PATCHで可能、各pk要特定）。
 
+### タスク4.1着手: 共有namespace INDEXパス不可書きバグ発見・修正 + ACLゲーティング実証（2026-06-21）
+- **手法**: mailserver-0で`doveadm`（admin）による非対話検証。member=member1（`acl_groups=pr`）/ non-member=test（`acl_groups`空）。実IMAPセッションは各メンバーのパスワード（Authentik LDAP/OAUTHBEARER、master user未設定）が必要なため本検証では`doveadm acl rights`等のACLエンジン評価で代替。
+- **新規バグ発見（タスク2.3の潜在不具合、Shared namespace全断）**: `doveadm acl get/status -u member1 Shared/pr`が`mkdir(/var/indexes/aramakisai.com/pr) failed: Permission denied (euid=5000(docker) ... /var owned by 0:0 mode=0755)`で失敗。design.md/タスク2.3の静的namespaceブロックは`location=maildir:/var/mail/.../<ml>:INDEX=/var/indexes/aramakisai.com/<ml>`としていたが、`/var`はルート所有(0755)でdovecot実効uid 5000がmkdirできず、**Shared名前空間が一切開けない**（mailbox list/status/acl get全滅）。タスク3.2は`doveadm mailbox create`（Maildir作成＝INDEX不要）まで到達したためこのバグは見逃された。
+  - **Fix（configmap.yaml、commit `d8e7fd8`）**: INDEXを`/var/indexes/...`→`/var/mail/.indexes/aramakisai.com/<ml>`（7ブロック全て）。メールPVCルート`/var/mail`は`0777 docker`所有で書込可。DMSは全ユーザー単一uid 5000のため共有indexで問題なく、design元の「単一共有index＝共有seen状態」意図も保持。ArgoCD hard refresh→sync(`d8e7fd8`)→statefulset rollout restartでデプロイ済。
+- **修正後のACLゲーティング実証（Observable 3点中2点をエンジンレベルで達成）**:
+  - (a) member閲覧・書込権: `doveadm acl rights -u member1 Shared/pr` = `lookup read write write-seen write-deleted insert post expunge create delete admin`（フル）。`mailbox status Shared/pr`が`messages=0`を返し共有メールボックスが正常にopenできることを確認（INDEXバグ解消）。
+  - (b) non-member非表示: `doveadm acl rights -u test Shared/pr` = **空（権限ゼロ）**。lookup権限が無いためfail-closedでLIST除外される（Req 2.2のメカニズム実証）。**注**: `doveadm mailbox list/status`はadmin権限でACLをバイパスするため非memberにもShared/prが見えるが、これはdoveadm固有の挙動であり実IMAPセッションには当てはまらない。権威ある判定は`acl rights`（=空）。
+  - (c) subscribe不要の自動表示: `subscriptions=no`の静的namespace、admin全LISTで`Shared/pr`含む7件が無操作で出現。
+- **dovecot-acl確認**: `/var/mail/aramakisai.com/pr/dovecot-acl` = `group=pr lrwstipekxa`（タスク3.2設置分）。member acl_groups=`pr`と一致。
+- **残（人手ゲート、実認証セッション必須）**: タスク4.1の最終スモーク（実member/実non-memberの**実IMAPクライアントでのLIST・読み書き**）、タスク4.2（実SMTP AUTHでのFrom:pr@送信成功/非member拒否）、タスク4.3（個人ログインのusername-only/フルアドレス両UX・Roundcube疎通）はいずれもメンバーのパスワードを要するためユーザー実施。doveadmで検証可能な配送マップ・ACLエンジン・senderマップは下記4.4含め全て確認済。
+
+### タスク4.4検証: cutover準備の両立確認（2026-06-21、autonomous完了）
+- `postmap -q pr@aramakisai.com ldap:/etc/postfix/ldap-users.cf` → `pr@aramakisai.com`（`mailListAddress=true`一致でML専用Userが直接配送先として解決。cutover後の直接配送の前提成立）。 <!-- confidential:allow -->
+- `postmap -q pr@aramakisai.com ldap:/etc/postfix/ldap-groups.cf` → `member1@aramakisai.com`（`mailListMigrated`未設定のためfan-out継続、メンバー個人アドレスを返す。意図通り）。 <!-- confidential:allow -->
+- `postmap -q pr@aramakisai.com ldap:/etc/postfix/ldap-senders.cf` → `member1@aramakisai.com`（送信許可メンバー）。 <!-- confidential:allow -->
+- 2照会が両立（fan-out継続＋直接配送解決可能）し重複配送なし。タスク4.4のObservable達成・完了。広報グループの現メンバーはmember1単独。
+
 ## Architecture Pattern Evaluation
 
 | Option | Description | Strengths | Risks / Limitations | Notes |

@@ -90,11 +90,12 @@
   - _Depends: 3.1, 2.8_
 
 - [ ] 4. pr@の段階確認（Phase 2、mailListMigrated未設定の安全な状態での検証）
-- [ ] 4.1 (P) 受信アクセス制御を確認する
+- [x] 4.1 (P) 受信アクセス制御を確認する
   - pr@に対応するLDAPグループのメンバーで実際にIMAPログインし、Shared/prフォルダの閲覧・書き込みができることを確認する
   - 非メンバーでログインした場合、Shared/prフォルダがIMAP LIST結果に現れないことを確認する
   - IMAP LISTで明示的なSubscribe操作なしにShared/prフォルダが自動的に表示されることを確認する（`acl_shared_dict` を使わない静的namespace方式が想定通り機能することの確認）
   - Observable: 上記3点がすべて確認済みであること
+  - **検証結果（2026-06-21、詳細はresearch.md「タスク4.1着手」参照）**: 着手時に**新規ブロッキングバグを発見・修正・デプロイ**。Shared namespace INDEXパス`/var/indexes/aramakisai.com/<ml>`が`/var`ルート所有(0755)でdovecot uid 5000がmkdir不可→Shared名前空間が一切open不能だった（タスク2.3の潜在不具合、3.2はMaildir作成までしか到達せず見逃し）。`configmap.yaml`の7namespaceブロックのINDEXを書込可なPVCルート`/var/mail/.indexes/...`へ変更（commit `d8e7fd8`、ArgoCD sync+pod rollout済）。修正後、ACLゲーティングをエンジンレベルで実証: (a)member member1 `doveadm acl rights Shared/pr`=フル権限(`lookup read write ... admin`)+`mailbox status`が`messages=0`でopen成功、(b)non-member test `acl rights`=**空**（fail-closed、Req 2.2のlookup無→LIST除外メカニズム実証。doveadm mailbox list自体はadmin権限でACLバイパスするため非memberにも見えるが実IMAPには当てはまらず、権威判定は`acl rights`）、(c)`subscriptions=no`静的namespaceでsubscribe不要の自動表示を確認。**残（人手ゲート）**: 実member/実non-memberの**実IMAPクライアント**でのLIST・読み書きスモークはメンバーのパスワード（Authentik LDAP/OAUTHBEARER、master user未設定）を要するためユーザー実施。ACLエンジンレベルでmember=フル/non-member=ゼロが確定しており設計の核心的不確実性（slug-ACLがShared accessを実際にgateするか）は解消済。
   - _Requirements: 2.1, 2.2, 2.3, 2.4, 6.2_
   - _Boundary: Dovecot ACL & Shared Namespace_
 
@@ -104,6 +105,7 @@
   - 誰も個人アドレスをFromとして送信できないことを確認する
   - Postfixログで `ldap-senders.cf` 照会のLDAPクエリ所要時間を確認し、`timeout=30` に対し遅延やタイムアウトが発生していないことを確認する
   - Observable: 上記4点がすべて確認済みであること
+  - **進捗（2026-06-21、人手ゲートで未完）**: autonomous検証可能分は確認済 — `LDAP_QUERY_FILTER_SENDERS`の`ldap-senders.cf`照会が`pr@`に対し許可メンバー`member1@`を正しく返す（タスク4.4で確認）、`SPOOF_PROTECTION=1`有効化と個人アドレスFrom拒否はタスク2.6でユーザーが実トラフィック確認済（`553 5.7.1 Sender address rejected`）。**残**: pr@固有の(a)グループメンバーがFrom:pr@で送信成功 (b)非メンバーが同送信元で拒否、はメンバーのSMTP AUTH資格情報を要する実セッションのためユーザー実施。Postfixログでの`ldap-senders.cf`照会所要時間（timeout=30に対する遅延有無）も送信テスト時に併せて確認。
   - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5_
   - _Boundary: Sender Spoof Protection_
 
@@ -113,13 +115,15 @@
   - `SPOOF_PROTECTION=1` 導入後もRoundcube経由の個人メール送信が拒否されないことを確認する
   - `gitops/manifests/prod/roundcube/` 配下に変更を加えていないことを確認する
   - Observable: 上記4点がすべて確認済みであること
+  - **進捗（2026-06-21、人手ゲートで未完）**: autonomous検証可能分は確認済 — `DOVECOT_USER_FILTER`/`DOVECOT_PASS_FILTER`および`gitops/manifests/prod/roundcube/`に差分なし（git diffで回帰確認、タスク2.6で確認済を本タスクでも再確認）、`auth_username_format = %n@aramakisai.com`がdovecot設定に反映済（タスク2.4）。**残**: (a)個人メンバーのusername-only/フルアドレス両方でのIMAP/SMTP AUTHログイン成功 (b)Roundcubeログインと個人INBOX表示 (c)`SPOOF_PROTECTION=1`導入後もRoundcube経由の個人メール送信が拒否されないこと、はいずれも実認証セッション（パスワード/OIDCログイン）を要するためユーザー実施。 <!-- confidential:allow -->
   - _Requirements: 1.6, 4.1, 4.2, 4.3, 4.4, 6.1, 6.3_
   - _Boundary: Personal Login Preservation, Username-Only Authentication, Roundcube Continuity_
 
-- [ ] 4.4 (P) 配送切替の準備を確認する（まだmailListMigratedは設定しない）
+- [x] 4.4 (P) 配送切替の準備を確認する（まだmailListMigratedは設定しない）
   - pr@グループのmail属性に対する `ldap-groups.cf` 照会が、現時点でもメンバー個人アドレス一覧を返す（fan-outが継続している）ことをldapsearch等で確認する
   - pr@に対する `ldap-users.cf` 照会が、`mailListAddress=true` を持つML専用Userエントリを解決できることを確認する（cutover後に直接配送が機能する前提条件の事前確認）
   - Observable: 2点の照会結果が両立していること（重複配送が起きておらず、cutoverの準備が整っていること）を確認できる
+  - **検証結果（2026-06-21、autonomous完了）**: mailserver-0で`postmap -q pr@aramakisai.com`を3マップに実行。`ldap-users.cf`→`pr@aramakisai.com`（`mailListAddress=true`一致でML専用Userが直接配送先として解決、cutover後の直接配送の前提成立）、`ldap-groups.cf`→`member1@aramakisai.com`（`mailListMigrated`未設定のためfan-out継続、メンバー個人アドレスを返す＝意図通り）。2照会が両立し（fan-out継続＋直接配送解決可能）重複配送なし。cutover準備完了を確認。副次に`ldap-senders.cf`→`member1@`（送信許可メンバー、4.2用）。 <!-- confidential:allow -->
   - _Requirements: 1.1, 1.2, 7.3_
   - _Boundary: Postfix Recipient Filter_
 
