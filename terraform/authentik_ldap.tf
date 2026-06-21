@@ -56,6 +56,25 @@ resource "authentik_flow_stage_binding" "ldap_bind_password_bind" {
   order  = 20
 }
 
+# User Login stage — bind フローの session 確立に必須。
+# 2026-06-21 hotfix: identification+password のみの構成では password 検証は
+# 通る ("User has access") が session が作られず、Outpost が後続で叩く
+# /api/v3/core/users/me/ が 403 "Authentication credentials were not provided"
+# を返し、LDAP bind が Operations error (1) になっていた。bind_mode=cached の
+# 回避策は「直近の web ログインで作られた session が残っている間だけ動く」状態で、
+# Outpost 再起動で session が消えると full bind が必ず 403 になり再現していた。
+# default-authentication-flow と同様に user_login stage を末尾に置き、bind 成功時に
+# session を確立させることで users/me を成功させる。
+resource "authentik_stage_user_login" "ldap_bind_login" {
+  name = "ldap-bind-login-stage"
+}
+
+resource "authentik_flow_stage_binding" "ldap_bind_login_bind" {
+  target = authentik_flow.ldap_bind.uuid
+  stage  = authentik_stage_user_login.ldap_bind_login.id
+  order  = 30
+}
+
 # DMS用のLDAPプロバイダー
 resource "authentik_provider_ldap" "dms" {
   name        = "DMS LDAP"
