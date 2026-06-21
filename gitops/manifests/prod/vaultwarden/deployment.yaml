@@ -36,10 +36,27 @@ spec:
           ports:
             - name: http
               containerPort: 80
-          envFrom:
-            - secretRef:
-                name: vaultwarden-secrets
           env:
+            - name: ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: vaultwarden-secrets
+                  key: ADMIN_TOKEN
+            - name: ORG_CREATION_USERS
+              valueFrom:
+                secretKeyRef:
+                  name: vaultwarden-secrets
+                  key: ORG_CREATION_USERS
+            - name: SSO_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: vaultwarden-secrets
+                  key: SSO_CLIENT_ID
+            - name: SSO_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: vaultwarden-secrets
+                  key: SSO_CLIENT_SECRET
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
