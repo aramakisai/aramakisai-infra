@@ -146,6 +146,13 @@ variable "authentik_room_presence_client_secret" {
   default     = ""
 }
 
+variable "vaultwarden_oidc_client_secret" {
+  description = "Vaultwarden OIDC Client Secret (vaultwarden)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 variable "cloudflare_access_redirect_uris" {
   description = "Cloudflare Access OIDC Redirect URIs"
   type        = list(string)

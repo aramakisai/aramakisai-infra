@@ -1,0 +1,15 @@
+---
+# Vaultwarden DB 日次フルバックアップ (毎日 02:00 UTC)
+# WAL archiving は継続的に行われるため、フルバックアップ間の変更も
+# WAL再生によりPITR可能 (retentionPolicy: 14d で2世代分のフルバックアップを保持)
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: vaultwarden-db-daily
+  namespace: prod
+spec:
+  schedule: "0 2 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: vaultwarden-db
+  target: prefer-standby

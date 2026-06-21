@@ -55,6 +55,16 @@ resource "cloudflare_record" "presence" {
   comment = "Room Presence Tracker (Cloudflare Tunnel)"
 }
 
+# Vaultwarden (Password Manager)
+resource "cloudflare_record" "vault" {
+  zone_id = var.cloudflare_zone_id
+  name    = "vault"
+  value   = local.tunnel_cname
+  type    = "CNAME"
+  proxied = true
+  comment = "Vaultwarden (Cloudflare Tunnel)"
+}
+
 # Production API (Directus)
 resource "cloudflare_record" "api" {
   zone_id = var.cloudflare_zone_id

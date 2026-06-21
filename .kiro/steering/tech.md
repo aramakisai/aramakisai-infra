@@ -108,6 +108,7 @@ infisical run -- ansible-playbook -i ansible/inventory/tailscale.yml ansible/pla
   - **Alloy**: `LOKI_URL`, `LOKI_USERNAME`, `LOKI_PASSWORD`, `PROMETHEUS_REMOTE_WRITE_URL`, `PROMETHEUS_USERNAME`, `PROMETHEUS_PASSWORD`
   - **Roundcube**: `MAIL_OAUTH2_CLIENT_SECRET`, `ROUNDCUBE_DES_KEY`
   - **Presence Tracker**: `TF_VAR_authentik_room_presence_client_secret` (TF/ESO共用), `PRESENCE_AUTH_SECRET`, `PRESENCE_AUTHENTIK_API_TOKEN`, `PRESENCE_RESET_SECRET`, `PRESENCE_DISCORD_BOT_TOKEN`
+  - **Vaultwarden**: `VAULTWARDEN_ADMIN_TOKEN`, `VAULTWARDEN_DB_PASSWORD`, `VAULTWARDEN_SMTP_PASSWORD`, `VAULTWARDEN_ORG_CREATION_USERS`, `VAULTWARDEN_OIDC_CLIENT_ID`, `VAULTWARDEN_OIDC_CLIENT_SECRET`, `VAULTWARDEN_RESTIC_REPOSITORY`, `VAULTWARDEN_RESTIC_PASSWORD`
 
 ### Commit Protection & Coding Standards
 - **パス漏洩防止**: pre-commit フック `scripts/check-confidential-info.py` がローカル絶対パスや非許可メールのコミットをブロック。

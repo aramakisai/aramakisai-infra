@@ -111,7 +111,41 @@ resource "authentik_application" "cloudflare" {
 }
 
 # ────────────────────────────────────────────────────────────
-# 4. Room Presence Tracker - 新規作成
+# 4. Vaultwarden - 新規作成
+# ────────────────────────────────────────────────────────────
+resource "authentik_provider_oauth2" "vaultwarden" {
+  name          = "Vaultwarden"
+  client_id     = "vaultwarden"
+  client_secret = var.vaultwarden_oidc_client_secret
+  signing_key   = data.authentik_certificate_key_pair.default.id
+
+  authorization_flow = data.authentik_flow.default_authorization.id
+  invalidation_flow  = data.authentik_flow.default_invalidation.id
+
+  allowed_redirect_uris = [
+    {
+      matching_mode = "strict"
+      url           = "https://vault.aramakisai.com/identity/connect/oidc-signin"
+    }
+  ]
+
+  property_mappings = [
+    data.authentik_property_mapping_provider_scope.oauth_scope_openid.id,
+    data.authentik_property_mapping_provider_scope.oauth_scope_email.id,
+    data.authentik_property_mapping_provider_scope.oauth_scope_profile.id,
+    authentik_property_mapping_provider_scope.oauth_scope_groups.id
+  ]
+}
+
+resource "authentik_application" "vaultwarden" {
+  name              = "Vaultwarden"
+  slug              = "vaultwarden"
+  protocol_provider = authentik_provider_oauth2.vaultwarden.id
+  open_in_new_tab   = true
+}
+
+# ────────────────────────────────────────────────────────────
+# 5. Room Presence Tracker - 新規作成
 # 実行委員室の入退室管理アプリ用 OIDC Provider
 # student_id / discord_id はカスタム Property Mapping で id_token に含める
 # ────────────────────────────────────────────────────────────

@@ -1,0 +1,21 @@
+---
+apiVersion: volsync.backube/v1alpha1
+kind: ReplicationSource
+metadata:
+  name: vaultwarden-backup
+  namespace: prod
+spec:
+  sourcePVC: vaultwarden-data
+  trigger:
+    schedule: "0 */6 * * *"
+  restic:
+    pruneIntervalDays: 7
+    repository: vaultwarden-restic-secret
+    retain:
+      hourly: 12
+      daily: 7
+    copyMethod: Direct
+    moverSecurityContext:
+      runAsUser: 0
+      runAsGroup: 0
+      fsGroup: 0

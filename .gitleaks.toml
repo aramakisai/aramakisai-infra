@@ -9,5 +9,6 @@ paths = [
     '''\.env\.app-secrets\.example$''',
     '''kubeconfig$''',
     '''terraform/secrets\.tfvars$''',
-    '''secrets\.tfvars\.example$'''
+    '''secrets\.tfvars\.example$''',
+    '''external-secret\.yaml$'''
 ]

@@ -56,6 +56,12 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "main" {
       service  = "http://room-presence.prod.svc.cluster.local:3000"
     }
 
+    # Vaultwarden (Password Manager)
+    ingress_rule {
+      hostname = "vault.aramakisai.com"
+      service  = "http://vaultwarden.prod.svc.cluster.local:80"
+    }
+
     # フォールバック (いずれのホスト名にもマッチしない場合)
     ingress_rule {
       service = "http_status:404"

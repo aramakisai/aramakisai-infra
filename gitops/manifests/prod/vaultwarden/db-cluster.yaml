@@ -1,0 +1,56 @@
+---
+# Vaultwarden 用 PostgreSQL クラスター (CloudNativePG)
+# CNPG operator (wave: -1) が先にインストールされている前提
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: vaultwarden-db
+  namespace: prod
+  annotations:
+    cnpg.io/skipEmptyWalArchiveCheck: enabled
+spec:
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:16.8
+
+  postgresql:
+    parameters:
+      max_connections: "100"
+      shared_buffers: "64MB"
+      effective_cache_size: "128MB"
+      work_mem: "4MB"
+      wal_compression: "on"
+
+  bootstrap:
+    initdb:
+      owner: vaultwarden
+      secret:
+        name: vaultwarden-db-credentials
+
+  backup:
+    barmanObjectStore:
+      destinationPath: "s3://aramakisai-backups/cnpg/vaultwarden-db"
+      endpointURL: "https://fsn1.your-objectstorage.com"
+      serverName: vaultwarden-db
+      s3Credentials:
+        accessKeyId:
+          name: hetzner-os-credentials
+          key: ACCESS_KEY_ID
+        secretAccessKey:
+          name: hetzner-os-credentials
+          key: SECRET_ACCESS_KEY
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+    retentionPolicy: "14d"
+
+  storage:
+    size: 5Gi
+
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "250m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"

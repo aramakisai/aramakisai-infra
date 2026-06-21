@@ -65,7 +65,7 @@ Terraform でクラウドリソースを定義し、Ansible で K3s クラスタ
 | cloudflared | `cloudflared` | Cloudflare Tunnel クライアント |
 | [ESO](https://external-secrets.io) | `external-secrets` | Kubernetes ↔ Infisical シークレット同期 |
 | [CloudNativePG](https://cloudnative-pg.io) | `cnpg-system` | PostgreSQL Operator |
-| [Grafana Alloy](https://grafana.com/oss/alloy/) | `monitoring` | メトリクス・ログ収集 |
+| [Vaultwarden](https://github.com/dani-garcia/vaultwarden) | `prod` | パスワードマネージャー (SSO対応) |
 
 ---
 

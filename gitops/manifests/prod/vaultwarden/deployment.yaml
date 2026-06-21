@@ -1,0 +1,93 @@
+---
+# Vaultwarden Password Manager
+#
+# image バージョンは https://hub.docker.com/r/vaultwarden/server/tags で確認して固定すること
+# 更新手順: image タグを変更 → GitOps PR → ArgoCD が自動 sync
+#
+# 認証方式: Authentik OIDC SSO (SSO_ONLY=true でパスワードログイン無効化)
+#   - SSO_ENABLED=true, SSO_ONLY=true
+#   - 新規登録は SIGNUPS_ALLOWED=false で無効化 (管理者招待制)
+#   - 管理者ポータルは ADMIN_TOKEN で保護
+#
+# DB: PostgreSQL (CloudNativePG Cluster: vaultwarden-db)
+# Storage: PVC (vaultwarden-data) for attachments / sends / icon_cache
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vaultwarden
+  namespace: prod
+  labels:
+    app: vaultwarden
+  annotations:
+    secret.reloader.stakater.com/reload: "vaultwarden-secrets"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vaultwarden
+  template:
+    metadata:
+      labels:
+        app: vaultwarden
+    spec:
+      containers:
+        - name: vaultwarden
+          image: vaultwarden/server:1.33.2
+          ports:
+            - name: http
+              containerPort: 80
+          envFrom:
+            - secretRef:
+                name: vaultwarden-secrets
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: vaultwarden-db-credentials
+                  key: password
+            - name: DATA_FOLDER
+              value: "/data"
+            - name: WEBSOCKET_ENABLED
+              value: "true"
+            - name: DOMAIN
+              value: "https://vault.aramakisai.com"
+            - name: SIGNUPS_ALLOWED
+              value: "false"
+            - name: SIGNUPS_DOMAINS_WHITELIST
+              value: ""
+            - name: SSO_ENABLED
+              value: "true"
+            - name: SSO_AUTHORITY
+              value: "https://idp.aramakisai.com/application/o/vaultwarden/"
+            - name: SSO_ONLY
+              value: "true"
+            - name: SSO_SIGNUPS_MATCH_EMAIL
+              value: "true"
+            - name: SSO_PKCE
+              value: "true"
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /alive
+              port: 80
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /alive
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: vaultwarden-data
