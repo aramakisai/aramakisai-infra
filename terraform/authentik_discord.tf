@@ -120,6 +120,13 @@ def _save_attrs():
     attrs["discord_roles"] = _discord_roles
     if _avatar:
         attrs["avatar"] = _avatar
+    # 所属MLグループの mailAclSlug をASCIIカンマ区切り単一値にまとめ Dovecot acl_groups の源とする
+    # (memberOf 直接マッピングは多値潰れ + DNカンマ衝突で無効、research.md参照)
+    attrs["mailAclGroups"] = ",".join(sorted({
+        g.attributes.get("mailAclSlug")
+        for g in u.ak_groups.all()
+        if g.attributes.get("mailAclSlug")
+    }))
     AkUser.objects.filter(pk=user_pk).update(attributes=attrs)
 
 transaction.on_commit(_save_attrs)

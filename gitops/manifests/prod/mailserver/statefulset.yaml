@@ -86,10 +86,12 @@ spec:
               value: "yes"
             # Authentik LDAP は mailUidNumber/mailGidNumber/mailHomeDirectory を持たないため
             # UID/GID に docker(5000) を使い、メールパスを静的に指定する
-            # memberOf=acl_groups: LDAPのmemberOf(所属グループDN一覧)をDovecot ACL pluginが
-            # 参照するacl_groups extra fieldへ直接マッピングする (中間マッピング不要)
+            # mailAclGroups=acl_groups: discord-group-sync-policy が永続化する
+            # mailAclGroups (所属MLグループの mailAclSlug をASCIIカンマ区切りにした単一値) を
+            # Dovecot ACL plugin が参照する acl_groups extra field へマッピングする。
+            # 旧 memberOf=acl_groups は多値潰れ + DNカンマ衝突で無効だったため是正 (research.md参照)
             - name: DOVECOT_USER_ATTRS
-              value: "=uid=5000,=gid=5000,=home=/var/mail/%d/%n,=mail=maildir:/var/mail/%d/%n,memberOf=acl_groups"
+              value: "=uid=5000,=gid=5000,=home=/var/mail/%d/%n,=mail=maildir:/var/mail/%d/%n,mailAclGroups=acl_groups"
             # Roundcube OAuth2 クライアントシークレット (OAUTHBEARER introspection 用)
             - name: MAIL_OAUTH2_CLIENT_SECRET
               valueFrom:
