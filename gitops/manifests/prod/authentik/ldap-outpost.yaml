@@ -42,7 +42,7 @@ spec:
         - name: ldap
           # ⚠️  Authentik サーバーと同じバージョンに合わせること
           # 最新リリース: https://github.com/goauthentik/authentik/releases
-          image: ghcr.io/goauthentik/ldap:2026.5.2
+          image: ghcr.io/goauthentik/ldap:2026.5.3
           ports:
             - name: ldap
               containerPort: 3389
