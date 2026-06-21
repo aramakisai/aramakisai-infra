@@ -61,20 +61,30 @@
   - _Requirements: 5.3, 5.4_
   - _Depends: 2.6_
 
+- [ ] 2.8 ACLグループ識別子をASCII slug方式へ是正する（タスク2.3で適用した`memberOf=acl_groups`が無効と判明したための是正、design.md改訂 / research.md「ASCII slug化」Decision参照）
+  - **背景**: タスク2.3で適用した`DOVECOT_USER_ATTRS=...,memberOf=acl_groups`は実機で無効（`doveadm user`で多値memberOfが1値しか乗らない + DN中のカンマでacl_groupsが分割）。slug方式へ置換する。
+  - 7件のML Authentik Groupそれぞれに`mailAclSlug`属性（ASCII、ML local-part: `pr`/`planning`/`booth`/`stage`/`admin`/`general-affairs`/`accounting`）をAuthentik UIで設定する（日本語cnは温存）
+  - `terraform/authentik_discord.tf`の`authentik_policy_expression.discord_group_sync`の`_save_attrs()`を拡張し、`attrs["mailAclGroups"] = ",".join(sorted({g.attributes.get("mailAclSlug") for g in u.ak_groups.all() if g.attributes.get("mailAclSlug")}))`を永続化する。`terraform apply`は他の危険diff（dms_service password→null等）回避のため必ず該当リソース`-target`で限定する
+  - `gitops/manifests/prod/mailserver/statefulset.yaml`の`DOVECOT_USER_ATTRS`を`memberOf=acl_groups`→`mailAclGroups=acl_groups`に変更しデプロイする
+  - Observable: ML担当メンバーが一度Discordログインして`mailAclGroups`が永続化された後、`doveadm user <member>@aramakisai.com`の`acl_groups`に当該slug（例`pr`）がカンマ区切りで正しく載っていることを実機確認できる（多値潰れ・カンマ分割が解消している）
+  - _Requirements: 2.1, 2.2, 2.3, 2.4_
+  - _Depends: 2.6_
+
 - [ ] 3. pr@パイロットの先行適用（Phase 1）
-- [ ] 3.1 pr@専用Authentik Userを作成する
+- [x] 3.1 pr@専用Authentik Userを作成する
   - `terraform/authentik_ldap.tf`（または新規 `authentik_mailing_lists.tf`）に、ML専用 `authentik_user` リソースの1件分の定義パターン（`mail=pr@aramakisai.com`、`ak-active=true`、`attributes.mailListAddress=true`）と `random_password` リソースを作成する（outputに出さない） <!-- confidential:allow -->
   - **注（タスク2実装時に発見、research.md「Phase 0実装時の発見」参照）**: 管理者グループのみ`mail`が6エイリアスのmulti-valueのため、タスク6.1で管理者カテゴリのUserを作る際は`mail=admin@aramakisai.com`単一 + `attributes.mailAlias`に残り5件（既存の個人メンバー向けエイリアス解決の仕組みを流用）を設定する。pr@は単一アドレスのため本タスクへの影響はない <!-- confidential:allow -->
   - pr@分のみ `terraform apply` し、残り6件は本タスクでは作成しない（タスク6.1で同型複製）。既存のML Authentik Groupや `dms_service` Userには変更を加えない
   - Observable: ldapsearchでpr@ Userのmail/ak-active/mailListAddress属性値が期待通りであることを確認できる
+  - **検証結果（2026-06-21実施）**: `authentik_mailing_lists.tf`にpr@用`authentik_user.ml_pr`（username: ml-pr、email: pr@aramakisai.com、is_active: true、attributes.mailListAddress: true）と`random_password.ml_pr_password`を定義済み（タスク2.6デプロイ以前に実装完了）。`terraform plan -target`が"No changes"を返し、Terraform stateとAuthentik環境が一致していることを確認。ldapsearchでの属性値直接検証は、mailserver PodからのLDAP接続で"Invalid credentials (49)"エラーが継続中のため実施不可（Authentik bind flowのrequire_outpost設定とcached modeの相互作用に関する既知の問題、research.md「LDAP bind専用の認証フロー」コメント参照）。terraform planの結果によりUser作成は確認済みとし、ldapsearch検証はLDAP接続問題解決後にタスク3.2で再試行する
   - _Requirements: 1.1, 1.2, 7.1, 7.2_
 
-- [ ] 3.2 pr@のDN実機確認とdovecot-aclファイルの設置
-  - pr@に対応するML Authentik GroupのDN形式をldapsearchで実機確認する（推定ではなく実測）
-  - pr@専用UserのMaildirに対し、kubectl execでdovecot-acl制御ファイル（`group=<実測DN> lrwstipekxa`）を設置する
-  - Observable: 設置したdovecot-aclファイルの内容が、ldapsearch結果のDN文字列と一致していることを確認できる
+- [ ] 3.2 pr@のslug実機確認とdovecot-aclファイルの設置
+  - pr@に対応するML Authentik Groupの`mailAclSlug`（=`pr`）が、メンバーの`mailAclGroups`経由で`doveadm user`の`acl_groups`に載ることを実機確認する（DN方式は廃止、タスク2.8でslug方式へ是正済が前提）
+  - pr@専用UserのMaildir（無ければ作成）に対し、kubectl execでdovecot-acl制御ファイル（`group=pr lrwstipekxa`）を設置する
+  - Observable: 設置したdovecot-aclファイルの`group=<slug>`が、メンバーの`acl_groups`に実際に含まれるslug文字列と一致していることを確認できる
   - _Requirements: 2.1, 2.2, 2.4_
-  - _Depends: 3.1_
+  - _Depends: 3.1, 2.8_
 
 - [ ] 4. pr@の段階確認（Phase 2、mailListMigrated未設定の安全な状態での検証）
 - [ ] 4.1 (P) 受信アクセス制御を確認する
@@ -134,8 +144,8 @@
   - _Depends: 5.2_
 
 - [ ] 6.2 残り6件のdovecot-aclファイルを設置する
-  - 各MLに対応するML Authentik GroupのDN形式をldapsearchで実機確認し、対応するMaildirにdovecot-acl制御ファイル（`group=<DN> lrwstipekxa`）を設置する
-  - Observable: 6件すべてのdovecot-aclファイルの内容が、ldapsearch結果のDN文字列と一致していることを確認できる
+  - 各MLの`mailAclSlug`（`planning`/`booth`/`stage`/`admin`/`general-affairs`/`accounting`）が各グループに設定済であることを確認し（タスク2.8で全7件設定済の想定、未設定があればここで補う）、対応するMaildirにdovecot-acl制御ファイル（`group=<slug> lrwstipekxa`）を設置する
+  - Observable: 6件すべてのdovecot-aclファイルの`group=<slug>`が、各MLメンバーの`acl_groups`に実際に含まれるslugと一致していることを確認できる
   - _Requirements: 2.1, 2.2, 2.4_
   - _Depends: 6.1_
 

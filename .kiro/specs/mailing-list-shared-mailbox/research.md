@@ -74,6 +74,39 @@
 
 - **最終確認（2026-06-19、ユーザー実施）**: 上記2件修正後、ユーザー自身が(1)個人アドレスからのFrom送信（Roundcube経由）→`553 5.7.1 Sender address rejected: not owned by user`で拒否、(2)外部Gmailから個人アドレス宛送信→`550 5.1.1 User unknown in virtual mailbox table`で拒否、の2点を実トラフィックで確認。kubectl logsで両エラーとも想定通りの拒否理由・拒否コードであることを確認済み。タスク2.6完了。
 
+### タスク3.1検証時のLDAP接続エラー（2026-06-21実施）
+- **Context**: タスク3.1（pr@専用User作成）のObservable検証として、mailserver Pod内からldapsearchで属性値（mail/ak-active/mailListAddress）を確認しようとした。
+- **Method**: mailserver-0 Pod内で`ldapsearch -H ldap://authentik-ldap-outpost.prod.svc.cluster.local -D "$LDAP_BIND_DN" -w "$LDAP_BIND_PW" -b "dc=ldap,dc=goauthentik,dc=io" "(&(objectClass=person)(mail=pr@aramakisai.com))"`を実行。
+- **Findings**: `ldap_sasl_interactive_bind: Can't contact LDAP server (-1)`で接続失敗。`kubectl logs mailserver-0`を確認したところ、`warning: dict_ldap_connect: Unable to bind to server ldap://authentik-ldap-outpost.prod.svc.cluster.local with dn cn=mailserver-service,ou=users,dc=ldap,dc=goauthentik,dc=io: 49 (Invalid credentials)`が継続的に記録されていた（2026-06-20T16:03:12〜）。DNS解決は正常（10.43.107.224）でLDAP Service自体は稼働中。
+- **Root cause hypothesis**: authentik_ldap.tfの`authentik_flow.ldap_bind`コメントにある通り、LDAP Outpostのbind flow設定（`authentication = "none"`）と`bind_mode = "cached"`/`search_mode = "cached"`の相互作用により、cached bindが失敗している可能性。ただしPhase -1事前検証（2026-06-19）では一時Podから正常にldapsearchが実行できたとの記録があり、mailserver Pod固有の問題（環境変数の不一致、LDAP接続の初期化タイミング等）の可能性もある。
+- **Implications**: タスク3.1のldapsearch検証は現在実施不可。ただし`terraform plan -target`が"No changes"を返しており、Terraform stateとAuthentik環境が一致していることは確認済み。タスク3.1は実装完了としてマークし、ldapsearchでの属性値直接検証はLDAP接続問題解決後にタスク3.2（pr@のDN実機確認）で再試行する。タスク4.xの4点確認（IMAPログイン・送信テスト）もLDAP接続が前提のため、本問題の解決がPhase 2以降のブロック要因となる。
+- **Next action**: LDAP接続エラーの原因調査（Authentik bind flow設定、mailserver PodのLDAP_BIND_PW環境変数の整合性確認、ESO/infisical-auth経由のシークレット同期状態の確認）を優先実施。memoryの[[project_eso_infisical_auth]]（infisical-auth secretが空になりESO全体停止）との関連も確認する。
+
+### タスク3.2着手時のLDAP Outpost全断（2026-06-21、Phase 1ブロック）
+- **Context**: タスク3.2（pr@のDN実機確認 + dovecot-acl設置）に着手。ldapsearchによるDN実機確認・dovecot-aclのgroup=<DN>記述ともにLDAP bind成功が前提。
+- **Findings**: mailserver-0ログで`dict_ldap_connect: Unable to bind ... cn=mailserver-service,...: 1 (Operations error)`が継続。fresh pod（ldap-verify）から正パスワードでbindしても同じ`Operations error (1)`、誤パスワードでは`Invalid credentials (49)`。→ mailserver固有でなくOutpost側の全断。3.1記録時の`Invalid credentials (49)`から悪化（49=認証段階まで到達, 1=Outpost内部エラーで認証以前に失敗）。
+- **Root cause**: Outpost/Server `2026.5.3`がOperations-errorのbind不具合を持つ（[[project_ldap_outpost_auth_failure]]、X-authentik-outpost-token vs Authorization Bearer不一致）。commit `362c625`(18:00)で`2026.5.2`にピン留めしbind復旧したが、15分後の`96f327c`(18:15)でピンを外し`2026.*`auto-upgradeに戻したため`2026.5.3`へ浮動し再発。[[project_argocd_stable_tag_version_drift_incident]]と同型のunpin→driftパターン。
+- **副次影響(live prod incident)**: bind全断によりPostfix `ldap-aliases.cf`等の照会が`lookup error`→ML/個人宛の受信解決とDovecotログインが現在機能不全（tempfail/defer）。タスク3.2のみならず本番メール配送・ログインが停止中。
+- **Implications**: タスク3.2はLDAP bind復旧までhard-block。3.1で先送りしたldapsearch検証も同様。
+- **再ピン検証結果（2026-06-21、`2026.5.2`は無効と確定）**: `2026.5.2`へ再ピン（commit `ebca13b`）しOutpost podを`2026.5.2`にロールしたが、fresh podからの実bindは依然`Operations error (1)`。version変更は無効と確定し`ebca13b`をrevert（`b5fa915`、`96f327c`のauto-upgrade状態へ復帰）。
+- **真因確定（Outpostログ証跡）**: Outpostログに以下のシーケンス。
+  - `"Successfully connected websocket"` — Outpost↔Server websocketは確立（`AUTHENTIK_TOKEN`自体は有効）
+  - `"event":"User has access"` — LDAP bindのpolicy判定はPASS
+  - `"error":"403 Forbidden  (Authentication credentials were not provided.)","event":"failed to get user info"` — Outpostが**user info取得のためServer APIへHTTP呼び出しする際、認証ヘッダが付かず403**
+  - → bindは`Operations error (1)`でクライアントへ返る。`took-ms:5487`の初回フル bind失敗後、`authenticated from session`(took-ms:0)のcached bindのみ通る（user info欠落）。
+  - 結論: version/token設定の問題でなく、2026.x系Outpost flow executorのAPI呼び出しヘッダ不整合（[[project_ldap_outpost_auth_failure]] と一致）。version pin（2026.5.2/5.3いずれも）では解消しない上流コードバグ。
+- **Next action**: タスク3.2/4.x はLDAP bind復旧までhard-block継続。恒久対応は別spec `authentik-ldap-bind-failure`（design-generated, 未実装）で扱う。version pinは打ち切り。
+
+### タスク3.2着手: LDAP bind復旧後に判明した `memberOf=acl_groups` 直接マッピングの設計欠陥（2026-06-21）
+- **前提**: LDAP bind障害は別途解消（custom bind flowに`user_login` stage欠落が真因、commit `1ced512`で修正。[[project_ldap_outpost_auth_failure]]）。bind復旧後にタスク3.2のDN実機確認を実施。
+- **DN確認結果**: pr@対応のML GroupのDNは `cn=広報,ou=groups,dc=ldap,dc=goauthentik,dc=io`（cnが日本語「広報」、ldapsearchはbase64返却）。他MLも同様にcnが日本語名の見込み。
+- **設計欠陥（2点、いずれもdesign.md「`DOVECOT_USER_ATTRS`への`memberOf=acl_groups`直接マッピング」Decisionを無効化）**:
+  1. **多値memberOfが単一値に潰れる**: member1 は memberOf 3件（`discord-linked-users`/`広報`/`管理者`）を持つが、`doveadm user member1@aramakisai.com` の `acl_groups` は `cn=discord-linked-users,ou=groups,...` の**1件のみ**。Dovecot LDAP userdb は多値属性を単一フィールドへマップする際1値しか保持しない（`user_attrs = ...,memberOf=acl_groups` を実機確認）。→ `広報` がacl_groupsに乗らず、pr@のACLは原理的にmatchしない。
+  2. **DN中のカンマでacl_groupsが分割される**: acl pluginは`acl_groups`をカンマ区切りでtoken化する。DN `cn=広報,ou=groups,dc=ldap,...` はカンマを含むため `cn=広報`/`ou=groups`/`dc=ldap`/... に砕けて `group=<DN>` と一致しない。仮に多値問題を解決しても、DNをそのままgroup名にする方式は成立しない。
+- **影響**: タスク3.2（dovecot-acl設置）は現設計のままでは機能するACLを作れない。**design.md の改訂が必要**（Revalidation Trigger「Authentik LDAP Outpost のスキーマ/`memberOf`挙動」に該当）。タスク3.2は未完了のままブロック。
+- **修正方向（design改訂で要決定、未実装）**: Authentik側でユーザーの所属グループを「カンマを含まない識別子のカンマ区切り単一文字列」として公開するproperty mappingを新設し（例: group cn または専用slugを `,` 連結した1属性 `mailAclGroups`）、`DOVECOT_USER_ATTRS` で `mailAclGroups=acl_groups` にマップする。dovecot-aclは `group=広報`（または slug）で記述する。これにより (1)多値→単一カンマ区切り文字列化 (2)カンマ衝突回避（cnにカンマ無し）の両方を解消する。group cnが日本語のままで良いか（ASCII slug化すべきか）も併せて決める。
+- **Next action**: mailing-list-shared-mailbox の design.md / tasks.md をこの制約に合わせて改訂してから 3.2 を再設計・再実行する。
+
 ## Architecture Pattern Evaluation
 
 | Option | Description | Strengths | Risks / Limitations | Notes |
@@ -98,15 +131,26 @@
 - **Trade-offs**: フラグが2種類に増える分、Authentik 側の運用ドキュメント（どの属性をどのオブジェクトに付けるか）の管理コストはわずかに増える。ただし既存の `discord_role_id` / `discord_role_ids` のように複数の真偽値・属性をオブジェクトごとに使い分ける運用は既存パターンに合致しており、許容範囲。
 - **Follow-up**: pr@ パイロット適用後、`mailListMigrated=true` 設定前後で `LDAP_QUERY_FILTER_GROUP` の挙動（fan-out 停止）と `LDAP_QUERY_FILTER_SENDERS` の挙動（送信許可）の両方を実トラフィックで確認する。
 
-### Decision: `DOVECOT_USER_ATTRS` への `memberOf=acl_groups` 直接マッピング
-- **Context**: requirements.md は `memberOf=groups` という中間属性名を経由する想定だったが、Dovecot の `acl_groups` plugin setting は userdb extra field から直接設定できることが判明した。
+### Decision: `DOVECOT_USER_ATTRS` への `memberOf=acl_groups` 直接マッピング 【SUPERSEDED 2026-06-21】
+- **⚠️ この Decision は実機検証で無効と判明し、下の「ACL グループ識別子を ASCII slug 化する」Decision で置換された。** 残置は経緯記録のため。
+- **Context（当時）**: requirements.md は `memberOf=groups` 中間属性名経由の想定だったが、Dovecot `acl_groups` は userdb extra field から直接設定できると判断した。
+- **Selected Approach（当時）**: `DOVECOT_USER_ATTRS` に `,memberOf=acl_groups` を追記。
+- **なぜ無効だったか（2026-06-21 実機検証）**: (1) Dovecot LDAP userdb は多値属性を単一フィールドへマップする際1値しか保持せず、3グループ所属でも `acl_groups` に memberOf が1件しか乗らない（`doveadm user` 実測）。(2) memberOf の値は DN（`cn=広報,ou=groups,...`）でカンマを含むため、acl plugin のカンマ区切り token 化で DN が砕けて `group=<DN>` と一致しない。詳細は上の Research Log「`memberOf=acl_groups` 直接マッピングの設計欠陥」参照。
+
+### Decision: ACL グループ識別子を ASCII slug 化し、Authentik 側で単一カンマ区切り属性として公開する
+- **Context**: 上記 SUPERSEDED Decision の2欠陥（多値潰れ・DNカンマ衝突）を両方解消する必要がある。`acl_groups` は「カンマを含まない識別子の、カンマ区切り単一文字列」でなければ機能しない。
 - **Alternatives Considered**:
-  1. `memberOf=groups` でユーザーDB拡張フィールドに取り込み、`dovecot.cf` の `plugin{}` ブロックで `acl_groups = %{userdb:groups}` のように再マッピングする
-  2. （採用）`memberOf=acl_groups` で直接マッピングする
-- **Selected Approach**: `DOVECOT_USER_ATTRS` の既存値に `,memberOf=acl_groups` を追記する。
-- **Rationale**: Design Synthesis の Simplification レンズに従い、不要な中間層を1つ削減する。`plugin{}` 側の追加設定が不要になり、設定ファイルの行数・可動部分が減る。
-- **Trade-offs**: なし（機能的に完全に等価で、設定がシンプルになるのみ）。
-- **Follow-up**: なし。
+  1. LDAP Provider の expression property mapping で bind 時に動的計算 — authentik LDAP Provider の expression mapping 対応が不確実、かつ bind 毎評価でレイテンシ増（既に full bind ~10s の問題あり、[[project_ldap_outpost_auth_failure]]）。不採用。
+  2. group cn（日本語「広報」等）をそのまま slug に使う — cn にカンマは無いため技術的には可だが、設定ファイル・kubectl exec・doveconf 等で UTF-8 を持ち回る運用脆弱性がある。業務 UI 表示用に日本語 cn は残しつつ、機械照合は ASCII にしたい（ユーザー要望 2026-06-21）。不採用（cn は人間用に温存）。
+  3. （採用）ML Group に ASCII の `mailAclSlug` 属性を持たせ、ユーザーの所属 ML グループの slug を**カンマ区切り単一文字列**にまとめた User 属性 `mailAclGroups` を Discord 同期時に計算・永続化する。
+- **Selected Approach**:
+  - ML Authentik Group に属性 `mailAclSlug`（ASCII、ML アドレスの local-part と一致: `pr`/`planning`/`booth`/`stage`/`admin`/`general-affairs`/`accounting`）を付与（Authentik UI 手動、`mailListMigrated` と同じ運用）。日本語 cn（広報 等）は業務表示用にそのまま残す。
+  - 既存の `discord-group-sync-policy`（`authentik_policy_expression.discord_group_sync`、authentik_discord.tf）の `_save_attrs()` を拡張し、グループ membership 再計算後に `attrs["mailAclGroups"] = ",".join(sorted({g.attributes.get("mailAclSlug") for g in u.ak_groups.all() if g.attributes.get("mailAclSlug")}))` を永続化する。membership 変更点と同一トランザクションで更新されるため acl_groups と実所属が常に一致する。
+  - `DOVECOT_USER_ATTRS` を `memberOf=acl_groups` → `mailAclGroups=acl_groups` に変更（statefulset.yaml）。User.attributes は authentik LDAP outpost が LDAP 属性として自動公開する（既存の `mailListAddress` と同経路）。
+  - `dovecot-acl` ファイルは `group=<slug> lrwstipekxa`（例 `group=pr lrwstipekxa`）で記述。slug は Shared namespace の folder 名（`Shared/pr/` 等、タスク2.3で採用済）と一致し命名が揃う。
+- **Rationale**: (1) 単一カンマ区切り文字列なので Dovecot の多値潰れを回避。(2) slug は ASCII でカンマ無しのため acl plugin の token 化で壊れない。(3) 更新を Discord 同期（membership の唯一の変更点）に同居させるので「Discord ロール失効→次回ログインで失効」の動的モデル（Requirement 2.4）を維持しつつ acl_groups と membership の不整合が起きない。(4) slug=local-part=folder名で命名が一貫。
+- **Trade-offs**: User 属性 `mailAclGroups` は Discord 同期時にのみ更新されるため、既存ユーザーへの初期反映は各自の次回 Discord ログインを要する（動的モデルと整合、許容）。ML Group ごとに `mailAclSlug` を手動設定する運用が1項目増える（`mailListMigrated` と同種、許容）。
+- **Follow-up**: タスク2.3 は `memberOf=acl_groups` で既にデプロイ済のため是正タスクが必要（タスク2.8 新設）。タスク3.2/6.2 の dovecot-acl 記述を DN から slug に変更。`mailAclGroups` が LDAP 属性として公開されることを ldapsearch / `doveadm user` で実機確認する。
 
 ## Risks & Mitigations
 - **`LDAP_QUERY_FILTER_USER`/`LDAP_QUERY_FILTER_GROUP` の変更は ML 単位の段階トグルが存在しない** — `mailListAddress`/`mailListMigrated` フラグはいずれも参照される側の値であり、フィルタ式自体（`statefulset.yaml`）は単一の env var として全7ML・全メンバーに同時適用される。デプロイした瞬間に個人メール受信が全員分停止し、全7MLのグループ展開フィルタが切り替わるため、Phase -1（`ldapsearch`による否定フィルタの事前実機確認、本番非破壊）を Phase 0 デプロイ前に必須とする（design.md Migration Strategy 参照）。
