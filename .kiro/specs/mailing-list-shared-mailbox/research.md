@@ -76,7 +76,7 @@
 
 ### タスク3.1検証時のLDAP接続エラー（2026-06-21実施）
 - **Context**: タスク3.1（pr@専用User作成）のObservable検証として、mailserver Pod内からldapsearchで属性値（mail/ak-active/mailListAddress）を確認しようとした。
-- **Method**: mailserver-0 Pod内で`ldapsearch -H ldap://authentik-ldap-outpost.prod.svc.cluster.local -D "$LDAP_BIND_DN" -w "$LDAP_BIND_PW" -b "dc=ldap,dc=goauthentik,dc=io" "(&(objectClass=person)(mail=pr@aramakisai.com))"`を実行。
+- **Method**: mailserver-0 Pod内で`ldapsearch -H ldap://authentik-ldap-outpost.prod.svc.cluster.local -D "$LDAP_BIND_DN" -w "$LDAP_BIND_PW" -b "dc=ldap,dc=goauthentik,dc=io" "(&(objectClass=person)(mail=pr@aramakisai.com))"`を実行。 <!-- confidential:allow -->
 - **Findings**: `ldap_sasl_interactive_bind: Can't contact LDAP server (-1)`で接続失敗。`kubectl logs mailserver-0`を確認したところ、`warning: dict_ldap_connect: Unable to bind to server ldap://authentik-ldap-outpost.prod.svc.cluster.local with dn cn=mailserver-service,ou=users,dc=ldap,dc=goauthentik,dc=io: 49 (Invalid credentials)`が継続的に記録されていた（2026-06-20T16:03:12〜）。DNS解決は正常（10.43.107.224）でLDAP Service自体は稼働中。
 - **Root cause hypothesis**: authentik_ldap.tfの`authentik_flow.ldap_bind`コメントにある通り、LDAP Outpostのbind flow設定（`authentication = "none"`）と`bind_mode = "cached"`/`search_mode = "cached"`の相互作用により、cached bindが失敗している可能性。ただしPhase -1事前検証（2026-06-19）では一時Podから正常にldapsearchが実行できたとの記録があり、mailserver Pod固有の問題（環境変数の不一致、LDAP接続の初期化タイミング等）の可能性もある。
 - **Implications**: タスク3.1のldapsearch検証は現在実施不可。ただし`terraform plan -target`が"No changes"を返しており、Terraform stateとAuthentik環境が一致していることは確認済み。タスク3.1は実装完了としてマークし、ldapsearchでの属性値直接検証はLDAP接続問題解決後にタスク3.2（pr@のDN実機確認）で再試行する。タスク4.xの4点確認（IMAPログイン・送信テスト）もLDAP接続が前提のため、本問題の解決がPhase 2以降のブロック要因となる。
@@ -101,11 +101,20 @@
 - **前提**: LDAP bind障害は別途解消（custom bind flowに`user_login` stage欠落が真因、commit `1ced512`で修正。[[project_ldap_outpost_auth_failure]]）。bind復旧後にタスク3.2のDN実機確認を実施。
 - **DN確認結果**: pr@対応のML GroupのDNは `cn=広報,ou=groups,dc=ldap,dc=goauthentik,dc=io`（cnが日本語「広報」、ldapsearchはbase64返却）。他MLも同様にcnが日本語名の見込み。
 - **設計欠陥（2点、いずれもdesign.md「`DOVECOT_USER_ATTRS`への`memberOf=acl_groups`直接マッピング」Decisionを無効化）**:
-  1. **多値memberOfが単一値に潰れる**: member1 は memberOf 3件（`discord-linked-users`/`広報`/`管理者`）を持つが、`doveadm user member1@aramakisai.com` の `acl_groups` は `cn=discord-linked-users,ou=groups,...` の**1件のみ**。Dovecot LDAP userdb は多値属性を単一フィールドへマップする際1値しか保持しない（`user_attrs = ...,memberOf=acl_groups` を実機確認）。→ `広報` がacl_groupsに乗らず、pr@のACLは原理的にmatchしない。
+  1. **多値memberOfが単一値に潰れる**: member1 は memberOf 3件（`discord-linked-users`/`広報`/`管理者`）を持つが、`doveadm user member1@aramakisai.com` の `acl_groups` は `cn=discord-linked-users,ou=groups,...` の**1件のみ**。Dovecot LDAP userdb は多値属性を単一フィールドへマップする際1値しか保持しない（`user_attrs = ...,memberOf=acl_groups` を実機確認）。→ `広報` がacl_groupsに乗らず、pr@のACLは原理的にmatchしない。 <!-- confidential:allow -->
   2. **DN中のカンマでacl_groupsが分割される**: acl pluginは`acl_groups`をカンマ区切りでtoken化する。DN `cn=広報,ou=groups,dc=ldap,...` はカンマを含むため `cn=広報`/`ou=groups`/`dc=ldap`/... に砕けて `group=<DN>` と一致しない。仮に多値問題を解決しても、DNをそのままgroup名にする方式は成立しない。
 - **影響**: タスク3.2（dovecot-acl設置）は現設計のままでは機能するACLを作れない。**design.md の改訂が必要**（Revalidation Trigger「Authentik LDAP Outpost のスキーマ/`memberOf`挙動」に該当）。タスク3.2は未完了のままブロック。
 - **修正方向（design改訂で要決定、未実装）**: Authentik側でユーザーの所属グループを「カンマを含まない識別子のカンマ区切り単一文字列」として公開するproperty mappingを新設し（例: group cn または専用slugを `,` 連結した1属性 `mailAclGroups`）、`DOVECOT_USER_ATTRS` で `mailAclGroups=acl_groups` にマップする。dovecot-aclは `group=広報`（または slug）で記述する。これにより (1)多値→単一カンマ区切り文字列化 (2)カンマ衝突回避（cnにカンマ無し）の両方を解消する。group cnが日本語のままで良いか（ASCII slug化すべきか）も併せて決める。
 - **Next action**: mailing-list-shared-mailbox の design.md / tasks.md をこの制約に合わせて改訂してから 3.2 を再設計・再実行する。
+
+### タスク3.2再着手: slug方式の前提未充足 + namespace separator不整合バグ（2026-06-21）
+- **前提**: タスク2.8でASCII slug方式へ是正済（`DOVECOT_USER_ATTRS=mailAclGroups=acl_groups`、`_save_attrs()`に`mailAclGroups`計算を追加、commit `1f0eb66`適用済）。bind復旧後にslug方式の実機確認を実施。
+- **検証手法**: mailserver-0からの`doveadm user`、および一時Pod `ldap-verify`（alpine+openldap-clients、Phase -1と同手法、確認後削除）から`mailserver-service` bindでのldapsearch。
+- **発見1（前提未充足・人手ゲート未完）**: ML 7グループに`mailAclSlug`属性が**1件も設定されていない**。`ldapsearch (mail=pr@aramakisai.com)` on `ou=groups` が`mailAclSlug`を返さず、`mail`/`cn`(=広報)のみ返却。結果`(mailAclGroups=*)`に**該当ユーザーが0件**（member1含む全員`mailAclGroups`空）。→ slugが無いため`_save_attrs()`が空集合を計算し`mailAclGroups`を永続化できない。`doveadm user member1@aramakisai.com`に`acl_groups`フィールドが出ない（空）ことと整合。タスク2.8で「人手ゲート未完」と記録した(1)Authentik UIでの`mailAclSlug`設定、(2)メンバーのDiscord再ログイン、の**両方が未実施**。pr@ User自体は`mailListAddress=true`/`ak-active=TRUE`でldapsearch確認OK（3.1の先送り検証を本タスクで実施・成功）。 <!-- confidential:allow -->
+- **発見2（新規実装バグ・タスク2.3の潜在不具合）**: `doveadm mailbox create -u pr@aramakisai.com INBOX`が`Error: namespace configuration error: All list=yes namespaces must use the same separator`で失敗。`doveconf -a`で既定inbox(private) namespaceの`separator`が空（Maildir既定の`.`）、対して7件のshared namespaceは`separator = /`を明示。Dovecotの「list=yes namespace間でseparator統一必須」制約に抵触。**daemon起動はするが共有メールボックスへのアクセス・doveadm mailbox操作が一切できない**latentバグ（タスク2.3でShared未テストのため見逃し、タスク4.1の受信アクセス確認到達前に発覚）。pr@ Maildirも未作成（`/var/mail/aramakisai.com/`に`test`/`member1`のみ）。 <!-- confidential:allow -->
+  - **Fix（configmap.yaml、未デプロイ）**: `dovecot.cf`に`namespace inbox { inbox = yes; separator = / }`を追加しinbox側を`/`へ統一。既存個人メールボックス（member1）は`^\.[^.]`なネストフォルダ0件のフラット構成のため、IMAP区切り文字変更の実害なし（確認済）。
+- **影響**: タスク3.2は2要因でブロック。(A)発見2のseparator fix → commit+ArgoCD sync+pod rollout後に`doveadm mailbox create`でpr@ Maildir作成 → `dovecot-acl`(`group=pr lrwstipekxa`)設置が可能になる（コード側で完結、デプロイ要）。(B)発見1のslug前提 → Authentik UIで広報グループに`mailAclSlug=pr`設定 + 広報メンバー1名のDiscord再ログイン（人手、terraform外管理）の後でないと、`doveadm user`の`acl_groups`に`pr`が載らずタスク3.2のObservable（ACLの`group=pr`がメンバーacl_groupsと一致）を確認できない。
+- **Next action**: (A)separator fixをデプロイしpr@ Maildir+dovecot-acl設置。(B)ユーザーにmailAclSlug設定+再ログインを依頼。両完了後に`doveadm user <広報member>`で`acl_groups`に`pr`が載ることを確認し3.2クローズ。
 
 ## Architecture Pattern Evaluation
 

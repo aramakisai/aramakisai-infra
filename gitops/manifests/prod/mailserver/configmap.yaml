@@ -55,6 +55,17 @@ data:
       acl = vfile
     }
 
+    # 既定の inbox (private) namespace は separator 未指定で Maildir 既定の '.' を使う。
+    # 一方で下の shared namespace 群は separator = '/' を指定しているため、
+    # Dovecot の "All list=yes namespaces must use the same separator" 制約に抵触し、
+    # 共有メールボックスへのアクセス・doveadm mailbox 操作が一切できない (タスク3.2で発覚)。
+    # inbox namespace の separator も '/' に揃えて解消する (既存個人メールボックスはネスト
+    # フォルダを持たないフラット構成のため、IMAP 区切り文字変更の影響は無い)。
+    namespace inbox {
+      inbox = yes
+      separator = /
+    }
+
     # ML 7件分の共有メールボックスを静的に定義する (acl_shared_dict は不使用、件数固定のため)
     namespace {
       type = shared
