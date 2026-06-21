@@ -116,6 +116,13 @@
 - **影響**: タスク3.2は2要因でブロック。(A)発見2のseparator fix → commit+ArgoCD sync+pod rollout後に`doveadm mailbox create`でpr@ Maildir作成 → `dovecot-acl`(`group=pr lrwstipekxa`)設置が可能になる（コード側で完結、デプロイ要）。(B)発見1のslug前提 → Authentik UIで広報グループに`mailAclSlug=pr`設定 + 広報メンバー1名のDiscord再ログイン（人手、terraform外管理）の後でないと、`doveadm user`の`acl_groups`に`pr`が載らずタスク3.2のObservable（ACLの`group=pr`がメンバーacl_groupsと一致）を確認できない。
 - **Next action**: (A)separator fixをデプロイしpr@ Maildir+dovecot-acl設置。(B)ユーザーにmailAclSlug設定+再ログインを依頼。両完了後に`doveadm user <広報member>`で`acl_groups`に`pr`が載ることを確認し3.2クローズ。
 
+### タスク3.2クローズ: slugパイプライン end-to-end成立 + Outpostキャッシュ知見（2026-06-21）
+- **mailAclSlug設定はAPIで実施（UI不要と判明）**: ML GroupはTerraform外管理だが、Authentik Core API `PATCH /api/v3/core/groups/{pk}/` で属性設定可能。広報の実ML Group pkは `d2382993-61c7-47d2-ac1d-55864c757e46`（同名の空属性グループ `a005ec59...` が別に存在、誤爆注意）。**attributesはPATCHで丸ごと置換**されるため既存`mail`/`discord_role_ids`を含めた全体を送る必要あり。`{"attributes":{"mail":["pr@..."],"discord_role_ids":["..."],"mailAclSlug":"pr"}}`をPATCHしHTTP200。 <!-- confidential:allow -->
+- **検証用にmember1 `mailAclGroups=pr` をAPI一時セット**（Discord再ログインを待たずに即検証するため）: `_save_attrs()`は過去ログイン時に空文字`mailAclGroups=""`を既にセット済（=ldapsearchで未公開＝空のため出てこなかった真因）。group側にslug設定済なので、次回再ログインの再計算でも`pr`になり一時値と一致＝永続的に整合。**curlハマり**: userのattributesに巨大なavatar(base64 ~150KB)が含まれ、`-d "$BODY"`のargv渡しが`Argument list too long`で失敗→`--data @file`方式に変更で解決。
+- **Outpostキャッシュが即時反映しない（重要・Req 2.3に影響）**: API PATCH後もLDAP Outpost(`search_mode=cached`)は`mailAclGroups`を空のまま返し、`doveadm user`の`acl_groups`も空。**Outpost pod再起動で強制リフレッシュ**したところ、Outpost直ldapsearchが`mailAclGroups: pr`を公開、`doveadm auth cache flush`後の`doveadm user member1@...`が`acl_groups	pr`を返した。 <!-- confidential:allow --> → dovecot-aclの`group=pr`と一致しタスク3.2のObservable達成。
+- **教訓**: 「Discordロール失効→次回ログインでアクセス失効」(Req 2.3)はOutpostの`search_mode=cached`キャッシュTTL分の遅延を伴う。権限即時失効が要件になる場合はキャッシュ設定の見直しが必要。cutover/残り6ML展開(タスク6)でも属性変更後のOutpostキャッシュ反映タイミングに注意。
+- **残**: 実IMAPログインでのShared/pr表示・読み書き＝タスク4.1。残り6MLのslug設定＝タスク6.2（同じくAPI PATCHで可能、各pk要特定）。
+
 ## Architecture Pattern Evaluation
 
 | Option | Description | Strengths | Risks / Limitations | Notes |
