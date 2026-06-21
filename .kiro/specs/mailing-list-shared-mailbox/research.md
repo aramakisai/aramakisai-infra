@@ -143,7 +143,8 @@
   - **実証**: デプロイ後`doveadm mailbox subscribe -u member1 Shared/pr`を1回実行 → 共有ルート`/var/mail/aramakisai.com/pr/subscriptions`に保存され、**別ユーザー`test`の`doveadm mailbox list -s`にもShared/prが購読表示**された（=1回subscribeで全メンバーに購読伝播）。member1の旧個人購読エントリ`Shared/pr/`はdoveadmが自動クリーン。
   - **ACLゲート維持**: `acl rights` member1=フル / test=空（変化なし）。`protocol imap { mail_plugins = " acl" }`でcore acl pluginがIMAPロード済。LIST/LIST-SUBSCRIBEDの可視性フィルタはcore aclが担うため、実IMAPでは非メンバー(lookup権限無)からShared/prは除外される見込み（fail-closed, Req 2.2）。
 - **運用手順への含意**: ML追加（タスク6）では各MLメールボックス作成後に`doveadm mailbox subscribe -u <任意user> Shared/<slug>`を1回実行すれば全メンバーに購読が反映される（dovecot-acl設置とセットの一回限り操作）。
-- **残（人手ゲート、実認証必須・Req 2.2の肝）**: (1)実メンバーがクライアント再同期でShared/prが自動表示されること、(2)**実非メンバーがログインしてもShared/prが表示されない**こと、の2点は実IMAPセッションでのみ検証可能（doveadmはACLバイパスのため不可）。特に(2)はグローバル購読下でのACL除外＝option1の安全性の核心。**注意**: 旧来のraw LSUBのみ対応する古いクライアントはACL非適用で名前(空箱)が漏れる可能性あり（開くと拒否）。モダンクライアント(LIST-SUBSCRIBED)では除外される。
+- **実機確認結果（2026-06-21、ユーザー実クライアント）**: (1)メンバー = Shared/pr が自動表示され開ける ✅。(2)非メンバー = **Shared/pr の存在(名前)は見えるが閲覧トグルがグレーアウトで開けない**（ACLが読取拒否、Req 2.2のアクセス制御は成立）。事前警告通りグローバル購読由来でフォルダ名のみ非メンバーに露出する（中身は守られる）。
+- **設計判断（ユーザー決定 2026-06-21）**: 非メンバーへの名前露出は**許容**（現状維持、subscriptions=yes継続）。理由: アクセス制御(開けない)は満たされ中身機密は守られる、メンバー/新規メンバー(Discordロール付与)の自動表示が動的アクセスモデル(Req 2.4)と整合、ML名は委員会内で周知の情報。名前も隠す代替（per-member個別購読）は新規メンバーの手動subscribeが必要で動的モデルから後退するため不採用。→ タスク4.1クローズ。
 
 ### タスク4.4検証: cutover準備の両立確認（2026-06-21、autonomous完了）
 - `postmap -q pr@aramakisai.com ldap:/etc/postfix/ldap-users.cf` → `pr@aramakisai.com`（`mailListAddress=true`一致でML専用Userが直接配送先として解決。cutover後の直接配送の前提成立）。 <!-- confidential:allow -->
