@@ -18,6 +18,10 @@ terraform {
       source  = "hashicorp/null"
       version = "~> 3.0"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
+    }
     authentik = {
       source  = "goauthentik/authentik"
       version = ">= 2024.12.0"
@@ -61,6 +65,8 @@ provider "tailscale" {
 provider "cloudflare" {}
 
 provider "null" {}
+
+provider "random" {}
 
 provider "authentik" {
   url = var.authentik_url

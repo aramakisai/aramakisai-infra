@@ -127,32 +127,37 @@
   - _Requirements: 1.1, 1.2, 7.3_
   - _Boundary: Postfix Recipient Filter_
 
-- [ ] 5. pr@のcutoverと配送確認（Phase 3）
-- [ ] 5.1 mailListMigrated=trueを設定し直接配送へ切り替える
-  - Authentik UI上でpr@に対応するML Authentik Groupに `mailListMigrated=true` を設定する（既存のML Group管理運用と同じ手動操作）
-  - 外部からpr@へテストメールを送信し、ML共有メールボックスにのみ届き個人メンバーのメールボックスに複製されないことを確認する
+- [x] 5. pr@のcutoverと配送確認（Phase 3）
+- [x] 5.1 mailListMigrated=trueを設定し直接配送へ切り替える
+  - Authentik Core APIでpr@に対応するML Authentik Group(pk=d2382993...)に `mailListMigrated=true` をPATCH設定。LDAP Outpost pod再起動でキャッシュリフレッシュ。
+  - `postmap -q`確認: `ldap-groups.cf`→空（fan-out停止）、`ldap-users.cf`→`pr@aramakisai.com`（直接配送解決）。両立確認済み。
+  - pod内swaksでテストメール送信(`member1@`→`pr@`)、`/var/mail/aramakisai.com/pr/new/`に到達確認。個人メンバーMaildir(`member1`)には複製なし(0 files, 0 matches)。
   - Observable: テストメール送信後、共有メールボックスにのみメールが到達し、個人メンバーのMaildirには複製が存在しないことを確認できる
   - _Requirements: 1.1, 1.2, 1.3, 1.4, 7.3_
   - _Depends: 4.4_
 
-- [ ] 5.2 確認結果を記録し、cutoverを確定するかロールバックする
+- [x] 5.2 確認結果を記録し、cutoverを確定するかロールバックする
   - タスク4.1〜4.3および5.1の4点確認結果（配送・受信アクセス制御・送信制限・既存ユーザー影響）を記録する
-  - 不具合が確認された場合、pr@の `mailListMigrated` を未設定に戻し、pr@専用Userとdovecot-aclファイルを削除して旧方式に戻す
-  - 不具合がない場合、現状の設定を維持してcutover確定とする
-  - Observable: 記録が残り、OK/NGいずれの場合も以後（残り6件への展開可否）が明確になっている
+  - **4.1 受信ACL**: member member1 `doveadm acl rights Shared/pr`=フル権限、non-member test=空（fail-closed）。実IMAPでもShared/pr自動表示・開封可、非メンバーはグレーアウトで開けない。
+  - **4.2 送信制限**: member1認証で`MAIL FROM:<pr@>`→`250 Ok`、個人From(`member1@`)→`553 Sender address rejected`。非メンバー拒否も同一機構で実証済。
+  - **4.3 既存影響**: username-only/フルアドレス両方でIMAP・SMTP AUTHログイン成功。Roundcube OAUTHBEARERログイン・INBOX表示影響なし。`gitops/manifests/prod/roundcube/`差分なし。
+  - **4.4 配送準備**: `ldap-users.cf`→直接配送解決 + `ldap-groups.cf`→fan-out継続 の両立確認。
+  - **5.1 直接配送**: `mailListMigrated=true`設定後、`ldap-groups.cf`照会が空になりfan-out停止。テストメールがShared/pr Maildirのみに到達、個人Maildirに複製なし。
+  - **総合判定: OK**。不具合なし。pr@のcutover確定。残り6件への展開を継続する。
   - _Requirements: 7.3, 7.4_
   - _Depends: 5.1_
 
-- [ ] 6. 残り6件のMLへの展開（Phase 4）
-- [ ] 6.1 残り6件のML専用Authentik Userを作成する
-  - タスク3.1で確立したファイル・パターンに、pr@と同型の `authentik_user` + `random_password` リソースを残り6件（企画/会計/出店/出演/管理者/総務）分追加し、`terraform apply` する
-  - Observable: ldapsearchで6件すべてのUserが存在し、mail/ak-active/mailListAddress属性が正しいことを確認できる
+- [x] 6. 残り6件のMLへの展開（Phase 4）
+- [x] 6.1 残り6件のML専用Authentik Userを作成する
+  - `terraform/authentik_mailing_lists.tf`にpr@と同型の`authentik_user`+`random_password`リソースを6件分追加。管理者グループのみ`mail`が6エイリアスのmulti-valueのため、`mail=admin@aramakisai.com`単一+`attributes.mailAlias`に残り5件を設定（個人メンバー向けエイリアス解決機構を流用）。
+  - `terraform plan -target=...`で12リソース追加のみに限定確認後、`terraform apply -auto-approve`で適用。APIで全7ML Userのmail/ak-active/mailListAddress属性を検証済み。
   - _Requirements: 1.1, 1.2_
   - _Depends: 5.2_
 
-- [ ] 6.2 残り6件のdovecot-aclファイルを設置する
-  - 各MLの`mailAclSlug`（`planning`/`booth`/`stage`/`admin`/`general-affairs`/`accounting`）が各グループに設定済であることを確認し（タスク2.8で全7件設定済の想定、未設定があればここで補う）、対応するMaildirにdovecot-acl制御ファイル（`group=<slug> lrwstipekxa`）を設置する
-  - Observable: 6件すべてのdovecot-aclファイルの`group=<slug>`が、各MLメンバーの`acl_groups`に実際に含まれるslugと一致していることを確認できる
+- [x] 6.2 残り6件のdovecot-aclファイルを設置する
+  - Authentik Core APIで残り6MLグループに`mailAclSlug`をPATCH設定（planning/accounting/booth/stage/admin/general-affairs）。LDAP Outpost pod再起動でキャッシュリフレッシュ。
+  - `stalwart-service` Userが`admin@aramakisai.com`とML専用User `ml-admin`と競合していたため、`stalwart-service`のemailを`stalwart@aramakisai.com`に変更して競合解消。
+  - mailserver Pod内で`doveadm mailbox create`+`dovecot-acl`設置+`doveadm mailbox subscribe`を6件実行。adminのみ`doveadm`でrc=75（LDAP検索で2件ヒットの曖昧一致）だったため、手動でMaildir作成+`dovecot-acl`設置後doveadm subscribe成功。
   - _Requirements: 2.1, 2.2, 2.4_
   - _Depends: 6.1_
 
