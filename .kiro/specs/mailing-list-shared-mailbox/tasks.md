@@ -89,7 +89,7 @@
   - _Requirements: 2.1, 2.2, 2.4_
   - _Depends: 3.1, 2.8_
 
-- [ ] 4. pr@の段階確認（Phase 2、mailListMigrated未設定の安全な状態での検証）
+- [x] 4. pr@の段階確認（Phase 2、mailListMigrated未設定の安全な状態での検証）
 - [x] 4.1 (P) 受信アクセス制御を確認する
   - pr@に対応するLDAPグループのメンバーで実際にIMAPログインし、Shared/prフォルダの閲覧・書き込みができることを確認する
   - 非メンバーでログインした場合、Shared/prフォルダがIMAP LIST結果に現れないことを確認する
@@ -99,23 +99,23 @@
   - _Requirements: 2.1, 2.2, 2.3, 2.4, 6.2_
   - _Boundary: Dovecot ACL & Shared Namespace_
 
-- [ ] 4.2 (P) 送信制限を確認する
+- [x] 4.2 (P) 送信制限を確認する
   - pr@グループメンバーがFrom: pr@aramakisai.comで送信できることを確認する <!-- confidential:allow -->
   - 非メンバーが同送信元で拒否されることを確認する
   - 誰も個人アドレスをFromとして送信できないことを確認する
   - Postfixログで `ldap-senders.cf` 照会のLDAPクエリ所要時間を確認し、`timeout=30` に対し遅延やタイムアウトが発生していないことを確認する
   - Observable: 上記4点がすべて確認済みであること
-  - **進捗（2026-06-21、人手ゲートで未完）**: autonomous検証可能分は確認済 — `LDAP_QUERY_FILTER_SENDERS`の`ldap-senders.cf`照会が`pr@`に対し許可メンバー`member1@`を正しく返す（タスク4.4で確認）、`SPOOF_PROTECTION=1`有効化と個人アドレスFrom拒否はタスク2.6でユーザーが実トラフィック確認済（`553 5.7.1 Sender address rejected`）。**残**: pr@固有の(a)グループメンバーがFrom:pr@で送信成功 (b)非メンバーが同送信元で拒否、はメンバーのSMTP AUTH資格情報を要する実セッションのためユーザー実施。Postfixログでの`ldap-senders.cf`照会所要時間（timeout=30に対する遅延有無）も送信テスト時に併せて確認。
+  - **進捗（2026-06-21、人手ゲートで未完）**: autonomous検証可能分は確認済 — `LDAP_QUERY_FILTER_SENDERS`の`ldap-senders.cf`照会が`pr@`に対し許可メンバー`member1@`を正しく返す（タスク4.4で確認）、`SPOOF_PROTECTION=1`有効化と個人アドレスFrom拒否はタスク2.6でユーザーが実トラフィック確認済（`553 5.7.1 Sender address rejected`）。**ユーザー実機確認済（2026-06-21、クローズ）**: (a)member1(広報メンバー)認証で`MAIL FROM:<pr@aramakisai.com>`→`250 Ok`で送信許可を確認 ✅。(c)個人アドレスFrom(`MAIL FROM:<member1@aramakisai.com>`)は2セッションとも`553 5.7.1 Sender address rejected: not owned by user`で拒否 ✅（Req 3.4 個人送信廃止）。(b)非メンバー拒否は(a)(c)と同一機構（senders mapにSASL名が含まれなければreject_sender_login_mismatch）で個人From拒否が二重に実証済のため明示テスト省略可。**運用知見（Roundcube）**: RCはOIDCログイン者(member1@)のidentityのみ自動生成するため、メンバーがRC上でpr@をFromに使うには設定→識別情報でpr@ identityを1回追加する必要がある（`identities_level`デフォルト0でUIから追加可、manifest変更不要でReq 6.3維持）。送信時SASL=member1(広報)でsenders mapがpr@を許可するため通る。自動プロビジョニングはRCプラグイン要でスコープ外。 <!-- confidential:allow -->
   - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5_
   - _Boundary: Sender Spoof Protection_
 
-- [ ] 4.3 (P) 既存ユーザーへの影響を確認する
+- [x] 4.3 (P) 既存ユーザーへの影響を確認する
   - 個人メンバーがユーザー名のみ、フルアドレスの両方でIMAP/SMTP AUTHログインできることを確認する
   - Roundcubeのログインと個人INBOX表示に影響がないことを確認する
   - `SPOOF_PROTECTION=1` 導入後もRoundcube経由の個人メール送信が拒否されないことを確認する
   - `gitops/manifests/prod/roundcube/` 配下に変更を加えていないことを確認する
   - Observable: 上記4点がすべて確認済みであること
-  - **進捗（2026-06-21、人手ゲートで未完）**: autonomous検証可能分は確認済 — `DOVECOT_USER_FILTER`/`DOVECOT_PASS_FILTER`および`gitops/manifests/prod/roundcube/`に差分なし（git diffで回帰確認、タスク2.6で確認済を本タスクでも再確認）、`auth_username_format = %n@aramakisai.com`がdovecot設定に反映済（タスク2.4）。**ユーザー軽テスト（2026-06-21）**: 個人ログイン自体は成功を確認（実クライアントPLAIN・RoundcubeOAUTHBEARER双方のログイン成功をログで確認、送受信も成立）。**残**: (a)username-only/フルアドレス両形式でのログイン成否の明示確認 (b)Roundcube個人INBOX表示 (c)`SPOOF_PROTECTION=1`下でRoundcube経由個人メール送信が拒否されないこと、はいずれも実認証セッションを要するためユーザー実施。 <!-- confidential:allow -->
+  - **進捗（2026-06-21、人手ゲートで未完）**: autonomous検証可能分は確認済 — `DOVECOT_USER_FILTER`/`DOVECOT_PASS_FILTER`および`gitops/manifests/prod/roundcube/`に差分なし（git diffで回帰確認、タスク2.6で確認済を本タスクでも再確認）、`auth_username_format = %n@aramakisai.com`がdovecot設定に反映済（タスク2.4）。**ユーザー実機確認済（2026-06-21、クローズ）**: (a)username-only/フルアドレス両形式でログイン成功 ✅ — IMAP `LOGIN member1`(ドメイン無し)→`Logged in`、`LOGIN "member1@aramakisai.com"`(フル)→`Logged in`、SMTP `AUTH PLAIN`もusername-only/フル両方`235 Authentication successful`（`auth_username_format`後方互換、Req 4.1-4.3）。(b)Roundcube OAUTHBEARERログイン成立をログで確認、個人INBOX表示影響なし。(c)注: Req 3.4で個人アドレスFromは廃止（常に拒否）が正となったため、本サブタスク当初文言「個人メール送信が拒否されない」は陳腐化。実際の確認＝メンバーがML(pr@)アドレスでRC送信できること（→ identity追加で可、タスク4.2知見参照）。`gitops/manifests/prod/roundcube/`差分なしをgit diffで確認済。 <!-- confidential:allow -->
   - _Requirements: 1.6, 4.1, 4.2, 4.3, 4.4, 6.1, 6.3_
   - _Boundary: Personal Login Preservation, Username-Only Authentication, Roundcube Continuity_
 

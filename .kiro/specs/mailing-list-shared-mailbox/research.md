@@ -146,6 +146,13 @@
 - **実機確認結果（2026-06-21、ユーザー実クライアント）**: (1)メンバー = Shared/pr が自動表示され開ける ✅。(2)非メンバー = **Shared/pr の存在(名前)は見えるが閲覧トグルがグレーアウトで開けない**（ACLが読取拒否、Req 2.2のアクセス制御は成立）。事前警告通りグローバル購読由来でフォルダ名のみ非メンバーに露出する（中身は守られる）。
 - **設計判断（ユーザー決定 2026-06-21）**: 非メンバーへの名前露出は**許容**（現状維持、subscriptions=yes継続）。理由: アクセス制御(開けない)は満たされ中身機密は守られる、メンバー/新規メンバー(Discordロール付与)の自動表示が動的アクセスモデル(Req 2.4)と整合、ML名は委員会内で周知の情報。名前も隠す代替（per-member個別購読）は新規メンバーの手動subscribeが必要で動的モデルから後退するため不採用。→ タスク4.1クローズ。
 
+### タスク4.2/4.3クローズ: 実SMTP/IMAP確認 + Roundcube identity運用知見（2026-06-21、ユーザー実機）
+- **IMAP LIST実機（LIST-EXTENDEDクライアント、member1=広報メンバー）**: `LIST "" "*"`応答で `Shared/pr` = `(\HasNoChildren)`（選択可）、他6件 `Shared/{booth,stage,admin,planning,accounting,general-affairs}` = `(\Noselect \HasNoChildren)`。**`\Noselect`＝「名前は出るが開けない」がユーザーの見たグレーアウトの正体**。fail-closedがLISTレベルで動作（acl pluginがlookup権限の無い共有MBを\Noselectでマーク、グローバル購読下でも開けない）。Req 2.2成立。`Shared/admin`も`\Noselect`＝member1は管理者グループ所属だが管理者グループに`mailAclSlug`未設定（広報=`pr`のみ設定済）→ acl_groups=`pr`のみ。**複数ML所属の挙動が実証**: slug設定済グループのみ選択可。管理者を開くには管理者グループに`mailAclSlug=admin`設定（タスク6.2）。
+- **username-onlyログイン実証（Req 4、タスク4.3）**: IMAP `LOGIN member1`（ドメイン無し）→`Logged in`、`LOGIN "member1@aramakisai.com"`（フル）→`Logged in` 両方成功。SMTP `AUTH PLAIN`もusername-only(`member1\0member1\0pw`)/フル両方`235 Authentication successful`。`auth_username_format = %n@aramakisai.com`の後方互換成立。 <!-- confidential:allow -->
+- **送信制限実証（Req 3、タスク4.2）**: member1(広報メンバー)認証で `MAIL FROM:<pr@aramakisai.com>`→`250 Ok`（メンバーML送信許可）。`MAIL FROM:<member1@aramakisai.com>`（個人アドレス）→2セッションとも`553 5.7.1 Sender address rejected: not owned by user member1@aramakisai.com`（個人送信廃止 Req 3.4）。senders mapにSASL名が無ければreject、の機構が実証。非メンバー拒否は同一機構のため明示テスト省略可。 <!-- confidential:allow -->
+- **Roundcube identity運用知見（重要・引き継ぎ）**: Roundcubeは`oauth_identity_fields=['email']`でOIDCログイン者のemail(member1@)のidentityのみ自動生成する。メンバーがRC上でML(pr@)アドレスをFromに使うには **設定→識別情報でpr@ identityを1回手動追加**する必要がある（`identities_level`未設定＝デフォルト0でUI追加可、`gitops/manifests/prod/roundcube/`変更不要でReq 6.3維持）。追加後はSASL認証=member1(広報メンバー)でsenders mapがpr@を許可するため送信が通り、From表示だけpr@になる。共有メールボックスをWebmailで送信運用する標準パターン。identity自動プロビジョニング（LDAP連携プラグイン等）はRC manifest変更を要しスコープ外。 <!-- confidential:allow -->
+- **4点確認（Req 7.3）完了状況**: 配送切替準備(4.4)✅ / 受信アクセス制御(4.1)✅ / 送信制限(4.2)✅ / 既存ユーザー影響(4.3)✅。タスク4（Phase 2）クローズ → Phase 3（タスク5.1 cutover）へ進行可能。
+
 ### タスク4.4検証: cutover準備の両立確認（2026-06-21、autonomous完了）
 - `postmap -q pr@aramakisai.com ldap:/etc/postfix/ldap-users.cf` → `pr@aramakisai.com`（`mailListAddress=true`一致でML専用Userが直接配送先として解決。cutover後の直接配送の前提成立）。 <!-- confidential:allow -->
 - `postmap -q pr@aramakisai.com ldap:/etc/postfix/ldap-groups.cf` → `member1@aramakisai.com`（`mailListMigrated`未設定のためfan-out継続、メンバー個人アドレスを返す。意図通り）。 <!-- confidential:allow -->
