@@ -13,7 +13,7 @@ for arg in "$@"; do
 done
 
 echo "=== 1. Terraform Apply ==="
-(cd terraform && infisical run -- bash -c "export TF_VAR_authentik_token=\$AUTHENTIK_TOKEN && terraform apply ${AUTO_APPROVE}")
+(cd terraform && infisical run -- bash -c "export TF_VAR_authentik_token=\$AUTHENTIK_TOKEN && export TF_VAR_mailserver_ldap_bind_password=\$MAILSERVER_LDAP_BIND_PASSWORD && terraform apply ${AUTO_APPROVE}")
 
 echo "=== 2. Waiting for Tailscale SSH Connection ==="
 echo "Polling ansible ping to verify SSH reachability..."
