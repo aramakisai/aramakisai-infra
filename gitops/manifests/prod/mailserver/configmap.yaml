@@ -71,54 +71,61 @@ data:
     # dovecot 実効 uid 5000 が mkdir できず "Permission denied" で Shared 名前空間が一切開けない
     # (タスク4.1で発覚)。メール PVC のルート /var/mail は 0777 docker 所有で書込可能なため、
     # ここに共有 index を置く。DMS は全ユーザー単一 uid 5000 のため共有 index で問題ない。
+    #
+    # subscriptions = yes: 大半の IMAP クライアントは購読フォルダのみ表示 (LSUB/LIST-SUBSCRIBED)
+    # するため、subscriptions = no では Shared/* が自動表示されない (タスク4.3で発覚)。
+    # type=shared かつ location が固定パス (/var/mail/.../<ml>) のため、購読状態は共有メールボックス
+    # ルートの単一 subscriptions ファイルに保存され全アクセスユーザーで共有される。よって運用上
+    # 1回 subscribe するだけで全メンバーに購読が反映され自動表示される。非メンバーには
+    # LIST-SUBSCRIBED 応答時に acl plugin の lookup 権限欠如で除外される (fail-closed, Req 2.2)。
     namespace {
       type = shared
       separator = /
       prefix = Shared/planning/
       location = maildir:/var/mail/aramakisai.com/planning:INDEX=/var/mail/.indexes/aramakisai.com/planning
-      subscriptions = no
+      subscriptions = yes
     }
     namespace {
       type = shared
       separator = /
       prefix = Shared/accounting/
       location = maildir:/var/mail/aramakisai.com/accounting:INDEX=/var/mail/.indexes/aramakisai.com/accounting
-      subscriptions = no
+      subscriptions = yes
     }
     namespace {
       type = shared
       separator = /
       prefix = Shared/booth/
       location = maildir:/var/mail/aramakisai.com/booth:INDEX=/var/mail/.indexes/aramakisai.com/booth
-      subscriptions = no
+      subscriptions = yes
     }
     namespace {
       type = shared
       separator = /
       prefix = Shared/stage/
       location = maildir:/var/mail/aramakisai.com/stage:INDEX=/var/mail/.indexes/aramakisai.com/stage
-      subscriptions = no
+      subscriptions = yes
     }
     namespace {
       type = shared
       separator = /
       prefix = Shared/pr/
       location = maildir:/var/mail/aramakisai.com/pr:INDEX=/var/mail/.indexes/aramakisai.com/pr
-      subscriptions = no
+      subscriptions = yes
     }
     namespace {
       type = shared
       separator = /
       prefix = Shared/admin/
       location = maildir:/var/mail/aramakisai.com/admin:INDEX=/var/mail/.indexes/aramakisai.com/admin
-      subscriptions = no
+      subscriptions = yes
     }
     namespace {
       type = shared
       separator = /
       prefix = Shared/general-affairs/
       location = maildir:/var/mail/aramakisai.com/general-affairs:INDEX=/var/mail/.indexes/aramakisai.com/general-affairs
-      subscriptions = no
+      subscriptions = yes
     }
   # Postfix LDAP グループマップ オーバーライド (メーリングリスト用):
   # DMS が自動生成する ldap-groups.cf は result_attribute=mail のみのため、
