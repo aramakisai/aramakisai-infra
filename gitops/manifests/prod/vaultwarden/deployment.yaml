@@ -82,6 +82,8 @@ spec:
               value: "true"
             - name: SSO_PKCE
               value: "true"
+            - name: SSO_ALLOW_UNKNOWN_EMAIL_VERIFICATION
+              value: "true"
           volumeMounts:
             - name: data
               mountPath: /data
