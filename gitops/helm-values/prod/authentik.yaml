@@ -58,6 +58,19 @@ server:
           key: AUTHENTIK_SECRET_KEY
     - name: AUTHENTIK_WEB__WORKERS
       value: "1"
+    - name: AUTHENTIK_EMAIL__HOST
+      value: "mailserver.prod.svc.cluster.local"
+    - name: AUTHENTIK_EMAIL__PORT
+      value: "587"
+    - name: AUTHENTIK_EMAIL__USERNAME
+      value: "noreply"
+    - name: AUTHENTIK_EMAIL__PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: authentik-secrets
+          key: NOREPLY_SMTP_PASSWORD
+    - name: AUTHENTIK_EMAIL__FROM
+      value: "noreply@aramakisai.com"
   envFrom:
     - secretRef:
         name: authentik-secrets   # ESO が生成: AUTHENTIK_SECRET_KEY, DB_PASSWORD
@@ -94,6 +107,19 @@ worker:
         secretKeyRef:
           name: authentik-secrets
           key: AUTHENTIK_SECRET_KEY
+    - name: AUTHENTIK_EMAIL__HOST
+      value: "mailserver.prod.svc.cluster.local"
+    - name: AUTHENTIK_EMAIL__PORT
+      value: "587"
+    - name: AUTHENTIK_EMAIL__USERNAME
+      value: "noreply"
+    - name: AUTHENTIK_EMAIL__PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: authentik-secrets
+          key: NOREPLY_SMTP_PASSWORD
+    - name: AUTHENTIK_EMAIL__FROM
+      value: "noreply@aramakisai.com"
   envFrom:
     - secretRef:
         name: authentik-secrets
