@@ -58,6 +58,15 @@ resource "authentik_stage_prompt_field" "enrollment_student_id" {
   required  = true
 }
 
+resource "authentik_stage_prompt_field" "enrollment_email" {
+  name        = "enrollment-email-prompt"
+  field_key   = "email"
+  label       = "メールアドレス"
+  type        = "email"
+  required    = true
+  placeholder = "your@email.example"
+}
+
 # Stage 2 (order=20): プロフィール入力 (Prompt Stage)
 resource "authentik_stage_prompt" "enrollment_user_profile" {
   name = "user-profile-prompt-stage"
@@ -67,6 +76,7 @@ resource "authentik_stage_prompt" "enrollment_user_profile" {
     authentik_stage_prompt_field.enrollment_username.id,
     authentik_stage_prompt_field.enrollment_displayname.id,
     authentik_stage_prompt_field.enrollment_student_id.id,
+    authentik_stage_prompt_field.enrollment_email.id,
   ]
 
   validation_policies = []
@@ -90,7 +100,7 @@ resource "authentik_stage_prompt" "enrollment_user_password" {
 resource "authentik_stage_user_write" "enrollment_user_write" {
   name                     = "user-write-stage"
   user_creation_mode       = "create_when_required"
-  create_users_as_inactive = false
+  create_users_as_inactive = true
   user_type                = "internal"
 }
 
@@ -116,6 +126,19 @@ resource "authentik_stage_redirect" "enrollment_discord_redirect" {
   name          = "discord-link-redirect-stage"
   mode          = "static"
   target_static = "/source/oauth/login/discord/"
+}
+
+# Stage 4.5 (order=45): メールアドレス検証 (Email Verification Stage)
+# ユーザーの個人メールに確認コードを送信し、リンククリックでユーザーを有効化する。
+# User Write Stage が create_users_as_inactive=true でユーザーを作成し、
+# このステージの activate_user_on_success=true で有効化される。
+resource "authentik_stage_email" "enrollment_email_verification" {
+  name                     = "enrollment-email-verification-stage"
+  use_global_settings      = true
+  subject                  = "荒牧祭実行委員会SSO メールアドレス確認"
+  template                 = "email/password_reset.html"
+  token_expiry             = null
+  activate_user_on_success = true
 }
 
 # フローとステージのバインディング
@@ -147,6 +170,14 @@ resource "authentik_flow_stage_binding" "enrollment_user_write_bind" {
   target               = authentik_flow.invitation_enrollment.uuid
   stage                = authentik_stage_user_write.enrollment_user_write.id
   order                = 40
+  evaluate_on_plan     = false
+  re_evaluate_policies = true
+}
+
+resource "authentik_flow_stage_binding" "enrollment_email_verification_bind" {
+  target               = authentik_flow.invitation_enrollment.uuid
+  stage                = authentik_stage_email.enrollment_email_verification.id
+  order                = 45
   evaluate_on_plan     = false
   re_evaluate_policies = true
 }
