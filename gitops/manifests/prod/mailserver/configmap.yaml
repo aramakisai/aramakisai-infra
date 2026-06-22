@@ -127,6 +127,13 @@ data:
       location = maildir:/var/mail/aramakisai.com/general-affairs:INDEX=/var/mail/.indexes/aramakisai.com/general-affairs
       subscriptions = yes
     }
+    namespace {
+      type = shared
+      separator = /
+      prefix = Shared/noreply/
+      location = maildir:/var/mail/aramakisai.com/noreply:INDEX=/var/mail/.indexes/aramakisai.com/noreply
+      subscriptions = yes
+    }
   # Postfix LDAP グループマップ オーバーライド (メーリングリスト用):
   # DMS が自動生成する ldap-groups.cf は result_attribute=mail のみのため、
   # マッチしたグループ自身の mail (= 検索キーと同じ) が返るだけでメンバーに展開されない。
