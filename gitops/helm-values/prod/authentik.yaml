@@ -70,7 +70,11 @@ server:
           name: authentik-secrets
           key: NOREPLY_SMTP_PASSWORD
     - name: AUTHENTIK_EMAIL__FROM
-      value: "noreply@aramakisai.com"
+      value: "noreply@aramakisai.com" # confidential:allow
+    # submission(587)はSTARTTLS前提でAUTHを広告しないため必須。
+    # 未設定だとSMTPNotSupportedError: SMTP AUTH extension not supported by server.
+    - name: AUTHENTIK_EMAIL__USE_TLS
+      value: "true"
   envFrom:
     - secretRef:
         name: authentik-secrets   # ESO が生成: AUTHENTIK_SECRET_KEY, DB_PASSWORD
@@ -119,7 +123,9 @@ worker:
           name: authentik-secrets
           key: NOREPLY_SMTP_PASSWORD
     - name: AUTHENTIK_EMAIL__FROM
-      value: "noreply@aramakisai.com"
+      value: "noreply@aramakisai.com" # confidential:allow
+    - name: AUTHENTIK_EMAIL__USE_TLS
+      value: "true"
   envFrom:
     - secretRef:
         name: authentik-secrets
