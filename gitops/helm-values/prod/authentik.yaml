@@ -58,8 +58,11 @@ server:
           key: AUTHENTIK_SECRET_KEY
     - name: AUTHENTIK_WEB__WORKERS
       value: "1"
+    # mail-tls証明書はmail.aramakisai.com宛のLet's Encrypt証明書のため
+    # (内部Service DNS名はACME検証不可)、内部ServiceDNSではなく公開ホスト名で
+    # 接続する。シングルノード構成のためhairpin NAT経由で自ノードに戻る。
     - name: AUTHENTIK_EMAIL__HOST
-      value: "mailserver.prod.svc.cluster.local"
+      value: "mail.aramakisai.com"
     - name: AUTHENTIK_EMAIL__PORT
       value: "587"
     - name: AUTHENTIK_EMAIL__USERNAME
@@ -112,7 +115,7 @@ worker:
           name: authentik-secrets
           key: AUTHENTIK_SECRET_KEY
     - name: AUTHENTIK_EMAIL__HOST
-      value: "mailserver.prod.svc.cluster.local"
+      value: "mail.aramakisai.com"
     - name: AUTHENTIK_EMAIL__PORT
       value: "587"
     - name: AUTHENTIK_EMAIL__USERNAME
