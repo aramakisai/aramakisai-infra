@@ -76,6 +76,8 @@ spec:
               value: "true"
             - name: SSO_AUTHORITY
               value: "https://idp.aramakisai.com/application/o/vaultwarden/"
+            - name: SSO_SCOPES
+              value: "openid email profile groups"
             - name: SSO_ONLY
               value: "true"
             - name: SSO_SIGNUPS_MATCH_EMAIL
