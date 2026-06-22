@@ -160,3 +160,27 @@ resource "authentik_user" "ml_general_affairs" {
     mailListAddress = true
   })
 }
+
+# -----------------------------------------------------------
+# noreply@aramakisai.com (システム送信用)
+# -----------------------------------------------------------
+# Authentik が DMS SMTP 経由で送信する際の From アドレス。
+# DMS 共有メールボックスとして LDAP プロビジョニングされる。
+# Authentik は submission ポート(587)で DMS に接続し、
+# DMS が Resend 経由で外部配送する。
+
+resource "random_password" "noreply_password" {
+  length  = 32
+  special = true
+}
+
+resource "authentik_user" "noreply" {
+  username  = "noreply"
+  name      = "noreply (system sender)"
+  email     = "noreply@aramakisai.com"
+  password  = random_password.noreply_password.result
+  is_active = true
+  attributes = jsonencode({
+    mailListAddress = true
+  })
+}
