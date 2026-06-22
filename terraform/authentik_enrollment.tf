@@ -64,7 +64,7 @@ resource "authentik_stage_prompt_field" "enrollment_email" {
   label       = "メールアドレス"
   type        = "email"
   required    = true
-  placeholder = "your@email.example"
+  placeholder = "your@email.example" # confidential:allow
 }
 
 # Stage 2 (order=20): プロフィール入力 (Prompt Stage)
@@ -197,3 +197,33 @@ resource "authentik_flow_stage_binding" "enrollment_discord_redirect_bind" {
   evaluate_on_plan     = false
   re_evaluate_policies = true
 }
+
+# ============================================================
+# ログイン中ユーザーによるフロー再入場の拒否ポリシー
+# ============================================================
+# インシデント (2026-06-22): ログイン中の状態で招待リンクを開くと、
+# User Write Stage (create_when_required) が新規ユーザーを作らず、
+# ログイン中の既存ユーザー (今回は superuser) の email/password を
+# 検証なしに上書きしてしまった。再発防止のため、認証済みユーザーは
+# このフローに入れずログアウトを促すポリシーをフロー本体にバインドする。
+resource "authentik_policy_expression" "deny_enrollment_if_authenticated" {
+  name       = "deny-enrollment-if-authenticated"
+  expression = <<-EOT
+if request.user.is_authenticated:
+    ak_message("既にログイン中のため、このリンクは使用できません。一度ログアウトしてから開いてください。")
+    return False
+return True
+EOT
+}
+
+resource "authentik_policy_binding" "enrollment_deny_if_authenticated_bind" {
+  target  = authentik_flow.invitation_enrollment.uuid
+  policy  = authentik_policy_expression.deny_enrollment_if_authenticated.id
+  order   = 0
+  enabled = true
+}
+
+# 2026-06-22 にTerraform実行不可 (HCP Terraform org認証エラー) のため
+# 上記2リソースはAuthentik APIで直接作成済み。復旧後に import すること:
+#   terraform import authentik_policy_expression.deny_enrollment_if_authenticated 2d9f400a-cec2-408e-a6f7-005b416dcc44
+#   terraform import authentik_policy_binding.enrollment_deny_if_authenticated_bind ac5acf28-2721-4b3d-ad28-a06c5bbceebe
