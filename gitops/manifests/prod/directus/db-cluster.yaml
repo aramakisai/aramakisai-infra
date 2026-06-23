@@ -34,6 +34,9 @@ spec:
         secretAccessKey:
           name: hetzner-os-credentials
           key: SECRET_ACCESS_KEY
+        region:
+          name: hetzner-os-credentials
+          key: REGION
       wal:
         compression: gzip
       data:
