@@ -104,6 +104,30 @@ DR 時は `recovery.sh` が自動で VolSync リストアを行う。
 - TLS は cert-manager (`mail-tls` Certificate) で管理。DR 後は ArgoCD sync で自動適用される
   - `mail-tls` が未作成の場合は `gitops/manifests/prod/cert-manager/` を先に手動 apply する
 
+### Authentik LDAP 連携でのメール認証・送信トラブル (2026-06-23 解決)
+
+個人ユーザーのメール送受信は方針上禁止（ML専用、`mailListAddress=true` のみ受信可）。
+例外は `noreply`（システム通知送信元）のみ。この前提を崩さずに2つの不具合を修正した。
+
+1. **SMTP認証が全ユーザーで `535 Authentication failed`（パスワードは常に正しい）**
+   - 原因: Authentik 2024.8+ で LDAP 全件検索には RBAC 権限 `search_full_directory`
+     （旧 `search_group` 設定の後継）が必要になった。`mailserver-service` に未割当だと
+     bind したユーザー自身のエントリしか検索できず、dovecot の DN ルックアップが失敗する。
+   - 修正: `terraform/authentik_ldap.tf` の `authentik_rbac_role`/`authentik_rbac_permission_role`
+     を `mailserver_ldap_search` として付与（LDAP Outpost再起動で `search_mode=cached` のキャッシュをflush）。
+
+2. **SMTP認証成功後に `553 Sender address rejected: not owned by user`**
+   - 原因: docker-mailserver は `LDAP_QUERY_FILTER_SENDERS` を設定すると USER/ALIAS/GROUP
+     フィルタの自動OR結合を無効化し、SENDERSフィルタのみが送信者認可チェックになる仕様。
+     既存値 `(&(objectClass=group)(mail=%s))` は ML(group)宛のなりすまし防止用で、
+     個人ユーザー（`noreply`含む）は構造的に一切マッチしなかった。
+   - 修正: `gitops/manifests/prod/mailserver/statefulset.yaml` の `LDAP_QUERY_FILTER_SENDERS` を
+     `(|(&(objectClass=group)(mail=%s))(&(objectClass=inetOrgPerson)(mail=%s)(cn=noreply)))` に変更。
+     `cn=noreply` で個人ユーザー全体ではなく `noreply` のみに例外を限定（方針を維持）。
+   - **再発時の確認手順**: `authentik-worker` ログで `SMTPRecipientsRefused`/`exc_type` を grep。
+     SMTP認証(`235`)は通るが送信が失敗する場合は、認証問題ではなく Postfix の
+     `reject_authenticated_sender_login_mismatch`（`SPOOF_PROTECTION=1` 由来）を疑う。
+
 ---
 
 ## Tailscale デバイス削除の必要性
