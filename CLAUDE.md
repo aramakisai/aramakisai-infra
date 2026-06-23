@@ -46,6 +46,7 @@ ssh root@prod-node-1
 make kubectl ARGS="get nodes -o wide"
 make kubectl ARGS="get pods -A"
 ```
+決して `kubectl` を直接ローカルで実行しないこと。必ず `make kubectl` 経由で kubeconfig を注入して実行すること。
 
 ## ブートストラップフロー
 
