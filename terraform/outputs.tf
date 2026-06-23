@@ -31,6 +31,12 @@ output "netdata_room_id" {
   value       = netdata_room.prod.id
 }
 
+output "vaultwarden_rbac_sync_authentik_token" {
+  description = "vaultwarden-rbac-sync用Authentik APIトークン (apply後にInfisicalのVAULTWARDEN_RBAC_SYNC_AUTHENTIK_API_TOKENへ手動反映 / 機密情報)"
+  value       = authentik_token.vaultwarden_rbac_sync.key
+  sensitive   = true
+}
+
 # Hetzner Object Storage は hcloud provider 非対応のため手動管理
 # バケット名: aramakisai-backups
 # output "object_storage_bucket" {

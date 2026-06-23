@@ -109,6 +109,7 @@ infisical run -- ansible-playbook -i ansible/inventory/tailscale.yml ansible/pla
   - **Roundcube**: `MAIL_OAUTH2_CLIENT_SECRET`, `ROUNDCUBE_DES_KEY`
   - **Presence Tracker**: `TF_VAR_authentik_room_presence_client_secret` (TF/ESO共用), `PRESENCE_AUTH_SECRET`, `PRESENCE_AUTHENTIK_API_TOKEN`, `PRESENCE_RESET_SECRET`, `PRESENCE_DISCORD_BOT_TOKEN`
   - **Vaultwarden**: `VAULTWARDEN_ADMIN_TOKEN`, `VAULTWARDEN_DB_PASSWORD`, `VAULTWARDEN_SMTP_PASSWORD`, `VAULTWARDEN_ORG_CREATION_USERS`, `VAULTWARDEN_OIDC_CLIENT_ID`, `VAULTWARDEN_OIDC_CLIENT_SECRET`, `VAULTWARDEN_RESTIC_REPOSITORY`, `VAULTWARDEN_RESTIC_PASSWORD`
+  - **Vaultwarden RBAC Sync**: `VAULTWARDEN_RBAC_SYNC_AUTHENTIK_API_TOKEN`（`PRESENCE_AUTHENTIK_API_TOKEN`と同パターン、`terraform/authentik_vaultwarden_rbac_sync.tf`で発行）, `VAULTWARDEN_RBAC_SYNC_SERVICE_ACCOUNT_CLIENT_ID`, `VAULTWARDEN_RBAC_SYNC_SERVICE_ACCOUNT_CLIENT_SECRET`（Vaultwarden専用サービスアカウントのPersonal API Key、手動ブートストラップ必須）, `TF_VAR_vaultwarden_rbac_sync_trigger_token`（Trigger Receiver共有ベアラートークン）, `DISCORD_OPS_WEBHOOK_URL`（既存キーを再利用、新規作成なし）
 
 ### Commit Protection & Coding Standards
 - **パス漏洩防止**: pre-commit フック `scripts/check-confidential-info.py` がローカル絶対パスや非許可メールのコミットをブロック。
