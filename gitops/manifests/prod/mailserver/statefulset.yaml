@@ -77,8 +77,17 @@ spec:
             - name: DOVECOT_PASS_FILTER
               value: "(&(objectClass=inetOrgPerson)(mail=%u)(ak-active=true))"
             # 送信者なりすまし防止: MLアドレスをFromに使える送信者をグループメンバーに限定する
+            # 2026-06-23 hotfix: SENDERSフィルタを設定すると docker-mailserver の
+            # 仕様上 USER/ALIAS/GROUP フィルタの自動OR結合が無効化される
+            # (SENDERSフィルタが唯一の送信者認可チェックになる)。元の値は
+            # objectClass=group限定だったため、システム通知用の noreply も含め
+            # 個人ユーザーからの送信が一切できず、SMTP認証成功後に Postfix が
+            # 553 5.7.1 Sender address rejected: not owned by user で全件拒否
+            # していた。個人ユーザーのメール送受信は方針として禁止のため、
+            # 例外は noreply (cn=noreply) のみに限定して許可する
+            # (他の個人ユーザーには広げない)。
             - name: LDAP_QUERY_FILTER_SENDERS
-              value: "(&(objectClass=group)(mail=%s))"
+              value: "(|(&(objectClass=group)(mail=%s))(&(objectClass=inetOrgPerson)(mail=%s)(cn=noreply)))"
             - name: SPOOF_PROTECTION
               value: "1"
             # auth_bind=yes: Dovecot が LDAP に直接バインドしてユーザー認証 (PLAIN auth)

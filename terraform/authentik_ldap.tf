@@ -159,4 +159,30 @@ resource "authentik_user" "dms_service" {
   attributes = jsonencode({
     mailAlias = []
   })
+  roles = [authentik_rbac_role.mailserver_ldap_search.id]
 }
+
+# 2026-06-23 hotfix: Authentik 2024.8 以降、LDAP Outpost経由の全件検索には
+# search_full_directory 権限 (旧 search_group 設定の後継、RBAC化された) が
+# 必要になった。mailserver-service に未割当だったため、検索結果が常に
+# 「bindしたユーザー自身のエントリのみ」に制限され、dovecotのSASL認証
+# (DOVECOT_USER_FILTER/DOVECOT_PASS_FILTER によるDN検索) が noreply を含む
+# 他ユーザーのDNを一切発見できず、全ユーザーのSMTP認証が
+# 535 5.7.8 Authentication failed になっていた (パスワードは常に正しかった)。
+resource "authentik_rbac_role" "mailserver_ldap_search" {
+  name = "mailserver-ldap-search"
+}
+
+resource "authentik_rbac_permission_role" "mailserver_ldap_search_perm" {
+  role       = authentik_rbac_role.mailserver_ldap_search.id
+  permission = "authentik_providers_ldap.search_full_directory"
+  model      = "authentik_providers_ldap.ldapprovider"
+  object_id  = authentik_provider_ldap.dms.id
+}
+
+# 2026-06-23 にTerraform実行不可 (HCP Terraform org認証エラー) のため
+# 上記2リソースとdms_service.rolesの変更はAuthentik APIで直接作成済み。
+# 復旧後に import すること:
+#   terraform import authentik_rbac_role.mailserver_ldap_search 1fdb122d-9ea9-46c7-9bcb-63b35c891031
+#   terraform import authentik_rbac_permission_role.mailserver_ldap_search_perm <要確認: permission assignment id>
+# import後はterraform planで差分が出ないことを確認すること。
