@@ -6,6 +6,8 @@ metadata:
   namespace: prod
   labels:
     app: directus
+  annotations:
+    secret.reloader.stakater.com/reload: "directus-secrets"
 spec:
   replicas: 1
   selector:
@@ -53,6 +55,21 @@ spec:
               value: fsn1
             - name: STORAGE_S3_FORCE_PATH_STYLE
               value: "false"
+            - name: EMAIL_TRANSPORT
+              value: smtp
+            - name: EMAIL_FROM
+              value: noreply@aramakisai.com # confidential:allow
+            - name: EMAIL_SMTP_HOST
+              value: mail.aramakisai.com
+            - name: EMAIL_SMTP_PORT
+              value: "587"
+            - name: EMAIL_SMTP_USER
+              value: noreply
+            - name: EMAIL_SMTP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: directus-secrets
+                  key: EMAIL_SMTP_PASSWORD
           resources:
             requests:
               memory: "256Mi"
