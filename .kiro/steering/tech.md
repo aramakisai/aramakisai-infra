@@ -45,7 +45,7 @@ infisical run -- ansible-playbook k3s-bootstrap.yml
 - **ルール**: マニフェストに平文シークレットを書かない
 - **方法**: `ExternalSecret` リソースで Infisical から取得
 - **唯一の例外**: `infisical-auth` Secret のみ Ansible が直接 `kubectl apply` (ESO 自体の起動に必要なため)
-- **既知問題への対処**: ArgoCD が「sync成功」と報告しても `ExternalSecret` の `spec.data` 配列が実際にはクラスター側で更新されない場合がある（directus/vaultwarden で再発）。原因は未解明だが、全 `ExternalSecret` リソースに `metadata.annotations: {argocd.argoproj.io/sync-options: Replace=true}` を付与し `kubectl apply`/patch ではなく `kubectl replace` でsyncさせることで再現しなくなった。新規 `ExternalSecret` 追加時もこのアノテーションを必ず付与する。
+- **既知問題への対処**: ArgoCD が「sync成功」と報告しても `ExternalSecret` の `spec.data` 配列に新規追加した要素が実際にはクラスター側で反映されない場合がある（directus/vaultwarden で複数回再発、原因未解明）。全 `ExternalSecret` に `metadata.annotations: {argocd.argoproj.io/sync-options: Replace=true}` を付与済みだが、**これ単体では直らない**（ArgoCDの差分検出自体が新規配列要素を見逃し、selfHealが同期処理を一切起動しないケースがあるため）。`spec.data` を追加・変更した場合は必ず push 後に `kubectl get externalsecret <name> -n <ns> -o jsonpath='{.metadata.generation}'` 等で実反映を確認し、未反映なら Application オブジェクトへ直接 operation patch で強制sync（[[project_argocd_stale_apply_externalsecret]] 参照）。
 
 ### ブートストラップ順序
 1. K3s インストール (prod-node-1: `--cluster-init`、シングルノード)
