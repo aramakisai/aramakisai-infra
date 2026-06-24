@@ -180,10 +180,3 @@ resource "authentik_rbac_permission_role" "mailserver_ldap_search_perm" {
   model      = "authentik_providers_ldap.ldapprovider"
   object_id  = authentik_provider_ldap.dms.id
 }
-
-# 2026-06-23 にTerraform実行不可 (HCP Terraform org認証エラー) のため
-# 上記2リソースとdms_service.rolesの変更はAuthentik APIで直接作成済み。
-# 復旧後に import すること:
-#   terraform import authentik_rbac_role.mailserver_ldap_search 1fdb122d-9ea9-46c7-9bcb-63b35c891031
-#   terraform import authentik_rbac_permission_role.mailserver_ldap_search_perm <要確認: permission assignment id>
-# import後はterraform planで差分が出ないことを確認すること。
