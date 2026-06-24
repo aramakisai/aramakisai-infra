@@ -61,7 +61,7 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: vaultwarden-db-credentials
-                  key: password
+                  key: url
             - name: DATA_FOLDER
               value: "/data"
             - name: WEBSOCKET_ENABLED
