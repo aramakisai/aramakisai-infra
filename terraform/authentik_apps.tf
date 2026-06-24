@@ -42,6 +42,7 @@ resource "authentik_application" "roundcube" {
   slug              = "roundcube"
   protocol_provider = authentik_provider_oauth2.roundcube.id
   open_in_new_tab   = true
+  meta_icon         = "fa://fa-solid fa-envelope"
 }
 
 # ────────────────────────────────────────────────────────────
@@ -76,6 +77,7 @@ resource "authentik_application" "argocd" {
   slug              = "argocd"
   protocol_provider = authentik_provider_oauth2.argocd.id
   open_in_new_tab   = true
+  meta_icon         = "fa://fa-solid fa-dharmachakra"
 }
 
 # ────────────────────────────────────────────────────────────
@@ -108,6 +110,7 @@ resource "authentik_application" "cloudflare" {
   name              = "Cloudflare Access"
   slug              = "cloudflare"
   protocol_provider = authentik_provider_oauth2.cloudflare.id
+  meta_icon         = "fa://fa-solid fa-cloud"
 }
 
 # ────────────────────────────────────────────────────────────
@@ -142,6 +145,7 @@ resource "authentik_application" "vaultwarden" {
   slug              = "vaultwarden"
   protocol_provider = authentik_provider_oauth2.vaultwarden.id
   open_in_new_tab   = true
+  meta_icon         = "fa://fa-solid fa-key"
 }
 
 # ────────────────────────────────────────────────────────────
@@ -211,4 +215,5 @@ resource "authentik_application" "room_presence" {
   slug              = "room-presence"
   protocol_provider = authentik_provider_oauth2.room_presence.id
   open_in_new_tab   = true
+  meta_icon         = "fa://fa-solid fa-door-open"
 }

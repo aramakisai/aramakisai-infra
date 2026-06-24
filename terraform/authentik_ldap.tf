@@ -102,6 +102,7 @@ resource "authentik_application" "dms_ldap" {
   name              = "DMS LDAP"
   slug              = "dms-ldap"
   protocol_provider = authentik_provider_ldap.dms.id
+  meta_icon         = "fa://fa-solid fa-address-book"
 }
 
 # クラスター内で稼働する LDAP Outpost の登録
