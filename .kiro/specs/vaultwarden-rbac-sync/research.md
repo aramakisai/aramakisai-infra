@@ -78,6 +78,14 @@
   - Vaultwarden OSSは`organizations`テーブル作成時のレスポンスで`"useGroups":false`を明示しており、Enterprise Groups機能が無効であることを実機でも再確認した。
 - **Implications**: 同期ロジックは未ConfirmメンバーへのPUT送信をスキップする必要は無い（スキップすると後でConfirmされた際に反映が1サイクル遅れるだけで実害は無いが、スキップしない方がシンプル）。PUTはフルリプレースで冪等なため、Confirm待ちの間も毎回マッピング通りに送信して問題ない。Confirm待ち検出はDiscord通知の判定にのみ使う（`get_member_status`、design.md参照）。
 
+### Bitwarden公式Directory Connector（bwdc）併用案の検討と不採用
+- **Context**: 自前でinvite/PUTを実装する代わりに、Bitwarden公式のDirectory Connector（`JonTheNiceGuy/vaultwarden-sync`がVaultwarden向けにパッケージ化）をLDAP(Authentik LDAP Outpost)と組み合わせて使えば、ユーザー/グループ同期の再実装を避けられないか検討した。
+- **Sources Consulted**: vaultwardenソース`src/api/core/public.rs`の`ldap_import`ハンドラ（`/public/organization/import`）全文。Organization API Key発行エンドポイント`src/api/core/organizations.rs`の`api_key`関数（`PasswordOrOtpData::validate`）。
+- **Findings**:
+  - `ldap_import`がメンバーに設定する`MembershipStatus`は`Invited`または（`mail_enabled()`が false かつ既存ユーザーの場合のみ）`Accepted`が最大値。`Confirmed`に進める分岐はコード全体（249行）に一切存在しない。つまり**bwdc経由のimportでもConfirm問題は回避できない**。importは「招待を出す」フェーズの代替に過ぎず、Collection権限割り当てロジックも持たない（既存研究で確認済み）。
+  - Organization API Key（`client_id=organization.<uuid>`）の発行自体は、Confirmとは異なる検証で完結する。`api_key`エンドポイントは`AdminHeaders`ガード＋`PasswordOrOtpData::validate`で、これは`user.check_valid_password(pw_hash)`という**サーバー側の文字列比較のみ**（クライアント側の鍵復号は不要）。よってサービスアカウント自身のマスターパスワードハッシュをInfisicalに保管しておけば、Organization API Key自体の取得は完全自動化できる（Confirmのような暗号的制約はここには無い）。
+- **Implications**: 「Organization API Key + import」へ切り替えても、(a) Confirm問題は解決しない、(b) Collection権限はimportでは扱えないため別途PUTの実装が必須、(c) 認証経路がUser Personal API Key（招待・PUT用）とOrganization API Key（import用）の2種類に増え複雑性が上がる。再実装の回避という利点に対しメリットが小さいため**不採用**。現行設計（User Personal API Keyでinvite + PUTを直接呼ぶ）を継続する。
+
 ## Architecture Pattern Evaluation
 
 | Option | Description | Strengths | Risks / Limitations | Notes |
