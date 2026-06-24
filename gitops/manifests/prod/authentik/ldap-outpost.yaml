@@ -120,6 +120,8 @@ kind: ExternalSecret
 metadata:
   name: authentik-ldap-outpost-token
   namespace: prod
+  annotations:
+    argocd.argoproj.io/sync-options: Replace=true
 spec:
   refreshInterval: 1h
   secretStoreRef:

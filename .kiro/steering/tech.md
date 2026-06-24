@@ -45,6 +45,7 @@ infisical run -- ansible-playbook k3s-bootstrap.yml
 - **ルール**: マニフェストに平文シークレットを書かない
 - **方法**: `ExternalSecret` リソースで Infisical から取得
 - **唯一の例外**: `infisical-auth` Secret のみ Ansible が直接 `kubectl apply` (ESO 自体の起動に必要なため)
+- **既知問題への対処**: ArgoCD が「sync成功」と報告しても `ExternalSecret` の `spec.data` 配列が実際にはクラスター側で更新されない場合がある（directus/vaultwarden で再発）。原因は未解明だが、全 `ExternalSecret` リソースに `metadata.annotations: {argocd.argoproj.io/sync-options: Replace=true}` を付与し `kubectl apply`/patch ではなく `kubectl replace` でsyncさせることで再現しなくなった。新規 `ExternalSecret` 追加時もこのアノテーションを必ず付与する。
 
 ### ブートストラップ順序
 1. K3s インストール (prod-node-1: `--cluster-init`、シングルノード)
