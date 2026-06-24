@@ -57,9 +57,10 @@
   - `POST /api/organizations/{orgId}/users/invite`による招待処理を実装
   - メンバー一覧取得時に`status`フィールドを確認し、`invited`（未Confirm）メンバーを`confirm_pending`リストへ追加する処理を実装（**検証済み**: `PUT`は`status`に関わらず常に成功しDBへ保存されるが、Vaultwarden側で`status=Confirmed`になるまでCollection権限は有効化されない。そのためPUT自体はスキップせず、Confirm待ち検出はDiscord通知判定のみに用いる）
   - `PUT /api/organizations/{orgId}/users/{memberId}`によるCollection権限更新処理を実装し、フルリプレースAPIであることを踏まえマッピング対象外のCollection権限は現状値を保持してマージする（未Confirmメンバーにも送信してよい。Confirm後に自動有効化される）
+  - PUTリクエストの`type`フィールドには対象メンバーの**現在のtypeをそのまま再送**する処理を実装（`edit_member`の権限昇格ガードにより、サービスアカウントAdminがtype変更を伴うPUTを送ると403になるため。Collection権限のみを変更し、type自体は変更しない）
   - 同一ユーザーへの複数Collection権限変更を1回のPUTリクエストに集約する処理を実装
   - マージ処理の前後でマッピング対象外のCollection権限が変化しないことを確認できる（ユニットテスト）
-  - _Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 7.1, 7.2, 8.1, 8.3_
+  - _Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 7.1, 7.2, 7.3, 8.1, 8.3_
   - _Boundary: VaultwardenOrgClient, PermissionDiffEngine_
 
 - [ ] 4. (P) PermissionDiffEngine実装による権限差分計算
@@ -71,7 +72,7 @@
   - _Boundary: PermissionDiffEngine_
 
 - [ ] 5. SyncOrchestrator実装による実行順序制御とdry-run分岐
-  - マッピング読込→Authentikグループメンバー取得→Vaultwarden現状取得→差分計算→（dry-runでなければ）適用（Confirm済みメンバーのみCollection権限更新を実行）→ Confirm待ちメンバー検出とDiscord通知キュー追加→ログ出力→Discord通知、の順序を制御する処理を実装
+  - マッピング読込→Authentikグループメンバー取得→Vaultwarden現状取得→差分計算→（dry-runでなければ）適用（Confirm済み・未Confirm双方のメンバーへCollection権限PUTを送信する。未Confirm分はConfirm完了まで無効化されたまま保持され、Confirm検知後の再送処理は不要）→ Confirm待ちメンバー検出とDiscord通知キュー追加→ログ出力→Discord通知、の順序を制御する処理を実装
   - dry-runモード有効時はVaultwardenへの変更系API呼び出しを行わず、適用予定の変更内容（Confirm待ち含む）のみをログ出力する分岐を実装
   - 個別エラー（グループ不在・Collection不在・招待失敗）を記録し、他の正常な対象の処理を継続させる
   - dry-runモード有効時にVaultwarden側へ実際の変更が発生しないことを確認できる（統合テスト）

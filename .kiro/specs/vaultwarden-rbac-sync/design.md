@@ -314,8 +314,9 @@ def remove_member_collection(org_id: str, member_id: str, collection_id: str) ->
 
 **Implementation Notes**
 - Integration: Organization API Key（client_credentials, `organization.<uuid>`）は使用しない。ユーザーコンテキストを持たず、招待・権限変更エンドポイント（`AdminHeaders`ガード）を満たせないため（research.md参照）
-- Validation: サービスアカウントは対象Organization全てでAdmin以上のロールを持つことが前提（事前の手動セットアップ）
+- Validation: サービスアカウントは対象Organization全てで**Admin**ロールを持つことが前提（事前の手動セットアップ、`vaultwarden-rbac.md`参照。Owner登録は行わない）
 - Risks: PUT がフルリプレースAPIであるため、マージ漏れは意図しない権限剥奪に直結する。実装時に必ず「現状Collection権限取得 → マッピング対象分のみ差し替え → 残りは保持」のマージロジックをユニットテストで保証する
+- **Constraint**: `edit_member`には権限昇格ガードがあり、`new_type != member_to_edit.atype && (member_to_edit.atype >= Admin || new_type >= Admin) && headers.membership_type != Owner` の場合は403になる（Admin/Owner権限の付与・剥奪はOwnerのみ可能。ソース確認済み）。本機能はCollection権限のみを扱うため、`PUT`の`EditUserData.type`には対象メンバーの**現在の`type`を変更せずそのまま再送**し、membership種別（User/Manager/Admin/Owner）自体は変更しないこと。サービスアカウントがAdmin止まりである以上、type変更を伴うPUTは403になるため、実装時にこの制約を確実に守る
 
 #### MappingConfigLoader
 
@@ -378,7 +379,7 @@ def compute_diff(mappings: list[MappingEntry], group_members: dict, org_states: 
 | Requirements | 5.3, 6.1, 6.2, 6.3, 7.1, 8.1, 9.1, 9.2, 11.1 |
 
 **Responsibilities & Constraints**
-- 実行順序: マッピング読込 → Authentikグループメンバー取得 → Vaultwarden現状取得 → 差分計算 → （dry-runでなければ）適用（Confirm済みメンバーのみCollection権限更新を実行）→ Confirm待ちメンバーの検出とDiscord通知キュー追加 → ログ出力 → Discord通知（招待・権限更新・削除・Confirm待ちの全サマリーを含む）
+- 実行順序: マッピング読込 → Authentikグループメンバー取得 → Vaultwarden現状取得 → 差分計算 → （dry-runでなければ）適用（**Confirm済み・未Confirm双方のメンバーへCollection権限PUTを送信する。未Confirm分はConfirm完了まで無効化されたまま保持され、Confirm検知後に再送する追加処理は不要**）→ Confirm待ちメンバーの検出とDiscord通知キュー追加 → ログ出力 → Discord通知（招待・権限更新・削除・Confirm待ちの全サマリーを含む）
 - dry-run有効時はVaultwardenへの変更系API（招待・PUT・削除）を一切呼び出さず、`SyncPlan`の内容のみをログ出力する（9.1）。データ取得・差分計算は通常モードと同様に実行する（9.2）
 - 個別グループ・個別マッピングのエラー（1.4, 3.3, 6.3）は記録した上で他の正常な対象の処理を継続する
 
@@ -628,7 +629,7 @@ def compute_diff(mappings: list[MappingEntry], group_members: dict, org_states: 
 
 ## Security Considerations
 
-- 専用Vaultwardenサービスアカウントは対象Organization全てでAdmin/Owner権限を持つため、漏洩時の影響範囲が大きい。ExternalSecret経由でのみ配布し、ログへの平文出力を禁止する（12.2）。ローテーション手順を運用ドキュメントに残す
+- 専用Vaultwardenサービスアカウントは対象Organization全てでAdmin権限を持つため、漏洩時の影響範囲が大きい（Collection権限の閲覧・変更・他メンバーの招待が可能。Owner権限は付与しないため、Admin/Ownerの昇格・剥奪はできない）。ExternalSecret経由でのみ配布し、ログへの平文出力を禁止する（12.2）。ローテーション手順を運用ドキュメントに残す
 - `TriggerReceiver`は共有Bearerトークンでのみ呼び出し元を認証する。`prod` namespace内に現状NetworkPolicy/CiliumNetworkPolicyが存在しないため、理論上は同namespace内の他Podからも到達可能（既存の全サービス共通の現状であり、本機能のみを特別扱いしない）。将来的なハードニング候補としてCiliumNetworkPolicyでのAuthentik Pod限定を記録する
 - Authentik側のExpression Policy（LoginSyncTriggerPolicy）に埋め込む共有トークンはTerraform変数経由（`TF_VAR_vaultwarden_rbac_sync_trigger_token`）とし、HCLソースに平文を書かない（既存`discord_guild_id`と同様の扱い）
 - サービスアカウントの初回ブートストラップ（マスターパスワード設定・Personal API Key発行）はSSO_ONLYの一時解除を伴う。作業中は当該アカウントのみがパスワードログイン可能な状態になるため、作業時間を最小化し、完了後は速やかにSSO_ONLYを復元する
