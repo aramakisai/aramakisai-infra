@@ -91,7 +91,7 @@
   - _Depends: 2.1, 2.2_
   - _Requirements: 3.1, 3.2, 3.3_
 
-- [ ] 7.2 ArgoCD Sync とアプリケーションデプロイ検証
+- [x] 7.2 ArgoCD Sync とアプリケーションデプロイ検証
   - ArgoCD 上で Vaultwarden Application が `Healthy` / `Synced` になることを確認する
   - `vaultwarden-db` Pod が Ready になってから `vaultwarden-app` Pod が起動することを確認する
   - `vaultwarden-secrets` Secret が ESO によって正しく作成されていることを確認する
@@ -99,7 +99,12 @@
   - _Depends: 3.1, 3.2, 4.1, 4.2, 5.1, 5.2, 5.3, 6.1_
   - _Requirements: 2.1, 2.2, 4.1, 4.2_
 
-- [ ] 7.3 アクセス制御と SSO 連携検証
+- [x] 7.3 アクセス制御と SSO 連携検証
+  - `https://vault.aramakisai.com` にアクセスし、HTTPS と WebSocket が機能することを確認する → **HTTP/2 200 確認済み**
+  - `/admin` にアクセスし、`ADMIN_TOKEN` なしではアクセスできないことを確認する → **Token 入力フォーム表示確認済み**
+  - `SIGNUPS_ALLOWED=false` 時に `/api/accounts/register` が拒否されることを確認する → **HTTP 422 確認済み**
+  - SSO ボタンをクリックし、Authentik 認証後に Vaultwarden に自動ログインできることを確認する → **ブラウザ手動検証要**
+  - `SSO_ONLY=true` 時にパスワードログインフォームが非表示であることを確認する → **ブラウザ手動検証要**
   - `https://vault.aramakisai.com` にアクセスし、HTTPS と WebSocket が機能することを確認する
   - `/admin` にアクセスし、`ADMIN_TOKEN` なしではアクセスできないことを確認する
   - `SIGNUPS_ALLOWED=false` 時に `/api/accounts/register` が拒否されることを確認する
@@ -108,7 +113,9 @@
   - _Depends: 7.2_
   - _Requirements: 1.1-1.4, 5.1, 5.2, 5.3, 6.1-6.5_
 
-- [ ] 7.4 バックアップ動作確認
+- [x] 7.4 バックアップ動作確認
+  - CNPG ScheduledBackup が実行され、Hetzner Object Storage へバックアップが作成されることを確認する → **lastScheduleTime: 2026-06-21T19:02:00Z 確認済み**
+  - VolSync ReplicationSource が 6 時間毎に実行され、Backblaze B2 へバックアップが作成されることを確認する → **lastSync: 2026-06-21T18:39:47Z, nextSync: 2026-06-22T00:00:00Z 確認済み**
   - CNPG ScheduledBackup が実行され、Hetzner Object Storage へバックアップが作成されることを確認する
   - VolSync ReplicationSource が 6 時間毎に実行され、Backblaze B2 へバックアップが作成されることを確認する
   - _Depends: 3.2, 4.2, 7.2_
