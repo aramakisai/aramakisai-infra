@@ -53,13 +53,14 @@
   - _Requirements: 3.1, 3.2, 3.3_
   - _Boundary: VaultwardenOrgClient_
 
-- [ ] 3.3 招待・Collection権限更新・削除の適用実装
+- [ ] 3.3 招待・Collection権限更新・削除の適用実装（Confirm待ち検出含む）
   - `POST /api/organizations/{orgId}/users/invite`による招待処理を実装
-  - `PUT /api/organizations/{orgId}/users/{memberId}`によるCollection権限更新処理を実装し、フルリプレースAPIであることを踏まえマッピング対象外のCollection権限は現状値を保持してマージする
+  - メンバー一覧取得時に`status`フィールドを確認し、`invited`（未Confirm）メンバーを`confirm_pending`リストへ追加する処理を実装（**検証済み**: `PUT`は`status`に関わらず常に成功しDBへ保存されるが、Vaultwarden側で`status=Confirmed`になるまでCollection権限は有効化されない。そのためPUT自体はスキップせず、Confirm待ち検出はDiscord通知判定のみに用いる）
+  - `PUT /api/organizations/{orgId}/users/{memberId}`によるCollection権限更新処理を実装し、フルリプレースAPIであることを踏まえマッピング対象外のCollection権限は現状値を保持してマージする（未Confirmメンバーにも送信してよい。Confirm後に自動有効化される）
   - 同一ユーザーへの複数Collection権限変更を1回のPUTリクエストに集約する処理を実装
   - マージ処理の前後でマッピング対象外のCollection権限が変化しないことを確認できる（ユニットテスト）
-  - _Requirements: 6.1, 6.2, 6.3, 7.1, 7.2, 8.1, 8.3_
-  - _Boundary: VaultwardenOrgClient_
+  - _Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 7.1, 7.2, 8.1, 8.3_
+  - _Boundary: VaultwardenOrgClient, PermissionDiffEngine_
 
 - [ ] 4. (P) PermissionDiffEngine実装による権限差分計算
   - マッピングエントリ単位でAuthentikグループメンバーとVaultwarden現状（メンバー・Collection権限）を比較し、招待対象・更新対象・削除対象を算出する処理を実装
@@ -70,19 +71,20 @@
   - _Boundary: PermissionDiffEngine_
 
 - [ ] 5. SyncOrchestrator実装による実行順序制御とdry-run分岐
-  - マッピング読込→Authentikグループメンバー取得→Vaultwarden現状取得→差分計算→（dry-runでなければ）適用、の順序を制御する処理を実装
-  - dry-runモード有効時はVaultwardenへの変更系API呼び出しを行わず、適用予定の変更内容のみをログ出力する分岐を実装
+  - マッピング読込→Authentikグループメンバー取得→Vaultwarden現状取得→差分計算→（dry-runでなければ）適用（Confirm済みメンバーのみCollection権限更新を実行）→ Confirm待ちメンバー検出とDiscord通知キュー追加→ログ出力→Discord通知、の順序を制御する処理を実装
+  - dry-runモード有効時はVaultwardenへの変更系API呼び出しを行わず、適用予定の変更内容（Confirm待ち含む）のみをログ出力する分岐を実装
   - 個別エラー（グループ不在・Collection不在・招待失敗）を記録し、他の正常な対象の処理を継続させる
   - dry-runモード有効時にVaultwarden側へ実際の変更が発生しないことを確認できる（統合テスト）
-  - _Requirements: 5.3, 6.1, 6.3, 7.1, 8.1, 9.1, 9.2_
+  - _Requirements: 5.3, 6.1, 6.3, 6.4, 6.5, 7.1, 8.1, 9.1, 9.2_
   - _Boundary: SyncOrchestrator_
 
 - [ ] 6. (P) DiscordNotifier実装による実行結果通知
   - 同期完了時に招待・更新・削除件数のサマリーを既存`DISCORD_OPS_WEBHOOK_URL`へ通知する処理を実装
+  - Confirm待ちユーザーが1件以上存在する場合、サマリーにConfirm待ちユーザー数と対象メールアドレス一覧を含め、管理者がVaultwarden Web UIでConfirm操作を行うことを促すメッセージを追加する処理を実装
   - エラー発生時にエラー内容を通知する処理を実装
   - 通知送信の失敗が同期処理自体の成否に影響しないようにする
   - 同期処理完了後にDiscordへサマリーメッセージが送信されることを確認できる（Webhookモックを用いた統合テスト）
-  - _Requirements: 11.1, 11.2, 11.3_
+  - _Requirements: 11.1, 11.2, 11.3, 11.4_
   - _Boundary: DiscordNotifier_
 
 - [ ] 7. (P) SyncLockManager実装によるLease排他制御
@@ -132,9 +134,10 @@
 
 - [ ] 10. E2E検証とドリフト修復確認
 
-- [ ] 10.1 オンボーディングE2Eテスト
-  - テスト用Authentikグループへの新規メンバー追加→トリガー（ログインまたはWebhook）→Vaultwarden招待・Collection権限付与までの一連の反映を確認できる
-  - _Requirements: 1.1, 6.1, 6.2, 7.1
+- [ ] 10.1 オンボーディングE2Eテスト（2段階フロー）
+  - 一段階目: テスト用Authentikグループへの新規メンバー追加→トリガー（ログインまたはWebhook）→Vaultwarden招待送信→Discord「Confirm待ちN件」通知確認を一連で確認できる
+  - 二段階目: 上記の後、管理者がWeb UIでConfirm→次回CronJob実行時にCollection権限が自動適用されることを確認できる
+  - _Requirements: 1.1, 6.1, 6.2, 6.4, 6.5, 7.1, 11.4_
   - _Depends: 9.1, 9.2
 
 - [ ] 10.2 オフボーディングE2Eテスト

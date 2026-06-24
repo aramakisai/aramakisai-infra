@@ -18,6 +18,7 @@
 - Authentikグループ自体の作成・編集（既存の手動運用または別仕様の対象）
 - Vaultwarden Organization・Collection自体の新規作成（既存リソースを対象とする）
 - Vaultwarden招待を受けたユーザーがOrganizationを受諾する操作の自動化
+- **管理者によるConfirm操作の自動化**（Organization鍵の再暗号化にマスターパスワードが必要。Bitwarden公式Directory Connectorも自動化していない）。未ConfirmユーザーはDiscord通知で管理者に促す設計
 - グループに紐付かない理由でのOrganizationからの完全除名（Collection権限の剥奪のみを扱う）
 - Vaultwarden OSSへのEnterprise Groups機能の代替実装（個々のユーザー単位のCollection権限操作に留める）
 
@@ -27,7 +28,7 @@
 - Authentikグループメンバーシップ取得ロジックと、Vaultwarden Organization/Collectionとのマッピング解釈
 - マッピング設定（GitOps ConfigMap）のスキーマ定義
 - Vaultwarden Organization APIへの認証情報（専用サービスアカウントのPersonal API Key）の利用方法
-- 差分計算・適用ロジック（招待・Collection権限更新・権限剥奪）
+- 差分計算・適用ロジック（招待・Collection権限更新・権限剥奪・Confirm待通知）
 - 定期実行（CronJob）とイベント駆動トリガー（Trigger Receiver）の実行制御・排他制御
 - 実行結果のログ出力とDiscord通知
 
@@ -165,6 +166,7 @@ sequenceDiagram
             Sync->>Sync: 適用予定の変更をログ出力のみ (Req 9)
         else 通常実行
             Sync->>VW: 招待 / Collection権限更新 / 権限削除を適用 (Req 6,7,8)
+            Sync->>Sync: Confirm待ちメンバーを検出しDiscord通知キューに追加 (Req 6.5, 11.4)
         end
         Sync->>Discord: 実行結果サマリー通知 (Req 11)
         Trigger->>Lease: release
@@ -276,6 +278,7 @@ def get_group_members(group_name: str) -> GroupMembersResult:
 - `client_id=user.<service_account_uuid>` のUser Personal API Key（client_credentials grant, scope=api）で `/identity/connect/token` を呼び出し、access_tokenを取得する（research.md「Vaultwarden認証方式」決定を参照）
 - 取得したaccess_tokenで `GET /api/organizations`、`GET /api/organizations/{orgId}/users`、`GET /api/organizations/{orgId}/collections` を呼び出し現状を取得する
 - `POST /api/organizations/{orgId}/users/invite` で招待（Collection権限を同時指定）、`PUT /api/organizations/{orgId}/users/{memberId}` でCollection権限を更新する（**フルリプレースAPI**のため、マッピング対象外のCollection権限は現状値を保持してマージする責務を持つ）
+- **検証済み事実**（ローカルDocker検証、2026-06-24）: `PUT`は対象メンバーのstatusに関わらず常に成功し、`users_collections`テーブルへの保存も行われる（`AdminHeaders`ガードのみでstatusチェックは無い）。しかし、Vaultwardenソース`Collection::find_by_user_uuid`（`src/db/models/collection.rs`）が`.filter(users_organizations::status.eq(MembershipStatus::Confirmed as i32))`でフィルタしているため、**未Confirmの間はCollection権限が一切有効化されない**（GETレスポンスの`collections`配列も常に空、クライアント側でもアクセス不可）。Confirm完了の瞬間に、事前にPUTした権限が自動的に有効化される。`PUT`はフルリプレースで冪等なため、未Confirm中も毎回マッピング通りに送信して問題ない（GETが常に空を返すため差分計算上は「常に不一致」と判定され続けるが、再送に害はない）。同期ロジックは未ConfirmメンバーへのPUTをスキップする必要は無く、単にConfirm待ち検出とDiscord通知を並行して行う
 - 認証失敗時は例外を投げ、同期処理全体を中断させる（2.3）
 - マッピング設定が参照するCollectionがOrganization内に存在しない場合は、そのマッピングのみをエラーとして返す（3.3）
 
@@ -290,7 +293,10 @@ def authenticate() -> AccessToken: ...
 def list_organizations() -> list[Organization]: ...
 def get_org_state(org_id: str) -> OrgState:
     """OrgState(members: list[Member], collections: list[Collection])"""
-def invite_member(org_id: str, email: str, collections: list[CollectionGrant]) -> InviteResult: ...
+def invite_member(org_id: str, email: str, collections: list[CollectionGrant]) -> InviteResult:
+    """InviteResult(member_id, status='invited')"""
+def get_member_status(org_id: str, member_id: str) -> str:
+    """Returns 'invited' or 'confirmed'. status='invited'のメンバーはConfirm待ちDiscord通知の対象として検出するために使用（PUT自体は両方のstatusで成功するため分岐不要）"""
 def put_member_collections(org_id: str, member_id: str, collections: list[CollectionGrant]) -> UpdateResult: ...
 def remove_member_collection(org_id: str, member_id: str, collection_id: str) -> UpdateResult: ...
 ```
@@ -333,7 +339,7 @@ def remove_member_collection(org_id: str, member_id: str, collection_id: str) ->
 | Requirements | 5.1, 5.2, 5.3, 8.1, 8.2, 8.3 |
 
 **Responsibilities & Constraints**
-- マッピングエントリ単位で「Authentikグループメンバーに含まれるがOrganization未参加」（招待対象）、「Organizationメンバーだが現在のCollection権限がマッピングと不一致」（更新対象）、「Organizationメンバーだがマッピング対象グループから脱退済み」（削除対象）を算出する
+- マッピングエントリ単位で「Authentikグループメンバーに含まれるがOrganization未参加」（招待対象）、「招待済みだが未Confirm（管理者通知対象）」、「Confirm済みOrganizationメンバーだが現在のCollection権限がマッピングと不一致」（更新対象）、「Organizationメンバーだがマッピング対象グループから脱退済み」（削除対象）を算出する
 - 同一ユーザーが複数グループ/マッピングに属する場合、ユーザー×Organization単位で全Collection変更を集約してから`VaultwardenOrgClient`へ渡す（7.2と連携）
 - 一部グループのみ脱退した場合、脱退したグループに対応するCollection権限のみを削除対象とし、継続所属グループに対応する権限は変更対象から除外する（8.2）
 - Organizationからの除名は行わず、Collection権限の削除のみを算出する（8.3）
@@ -350,6 +356,7 @@ def compute_diff(mappings: list[MappingEntry], group_members: dict, org_states: 
     """
     SyncPlan(
       invites: list[InvitePlan],          # 招待対象 (5.1, 6)
+      confirm_pending: list[ConfirmPendingPlan], # 招待済み未Confirm (Discord通知対象)
       collection_updates: list[UpdatePlan], # 権限更新/付与対象 (5.1, 7)
       collection_removals: list[RemovalPlan], # 権限剥奪対象 (5.1, 8)
       unchanged_count: int,                 # 5.2
@@ -371,7 +378,7 @@ def compute_diff(mappings: list[MappingEntry], group_members: dict, org_states: 
 | Requirements | 5.3, 6.1, 6.2, 6.3, 7.1, 8.1, 9.1, 9.2, 11.1 |
 
 **Responsibilities & Constraints**
-- 実行順序: マッピング読込 → Authentikグループメンバー取得 → Vaultwarden現状取得 → 差分計算 → （dry-runでなければ）適用 → ログ出力 → Discord通知
+- 実行順序: マッピング読込 → Authentikグループメンバー取得 → Vaultwarden現状取得 → 差分計算 → （dry-runでなければ）適用（Confirm済みメンバーのみCollection権限更新を実行）→ Confirm待ちメンバーの検出とDiscord通知キュー追加 → ログ出力 → Discord通知（招待・権限更新・削除・Confirm待ちの全サマリーを含む）
 - dry-run有効時はVaultwardenへの変更系API（招待・PUT・削除）を一切呼び出さず、`SyncPlan`の内容のみをログ出力する（9.1）。データ取得・差分計算は通常モードと同様に実行する（9.2）
 - 個別グループ・個別マッピングのエラー（1.4, 3.3, 6.3）は記録した上で他の正常な対象の処理を継続する
 
@@ -555,7 +562,8 @@ def compute_diff(mappings: list[MappingEntry], group_members: dict, org_states: 
 
 ### Domain Model
 - **MappingEntry**: `authentik_group`（グループ名）, `organization`（Organization名）, `collection`（Collection名）, `permission`（4種別enum）
-- **SyncPlan**: `invites`, `collection_updates`, `collection_removals`, `unchanged_count` の集計結果（PermissionDiffEngineの出力、Vaultwarden側の永続化前の一時データ）
+- **SyncPlan**: `invites`, `confirm_pending`, `collection_updates`, `collection_removals`, `unchanged_count` の集計結果（PermissionDiffEngineの出力、Vaultwarden側の永続化前の一時データ）
+- **ConfirmPendingPlan**: `email`, `org_name`, `invited_at`（招待日時）。Vaultwarden APIのメンバー`status=invited`から検出。Discord通知の対象
 - 本機能はVaultwarden/Authentik側のデータを所有しない。マッピング設定（ConfigMap）のみが本機能が所有する永続データである
 
 ### Logical Data Model
@@ -614,7 +622,8 @@ def compute_diff(mappings: list[MappingEntry], group_members: dict, org_states: 
   - dry-runモード時にVaultwarden側へ実際の変更APIが一切呼ばれないことの確認（9.1）
   - `SyncLockManager`: 同時に2プロセスがLease取得を試みた際、片方のみ成功することの確認（10.2, 13.3）
 - **E2E Tests**:
-  - テスト用Authentikグループへのメンバー追加 → ログインまたはイベントトリガー → Vaultwarden Collection権限反映までの一連の確認
+  - テスト用Authentikグループへのメンバー追加 → ログインまたはイベントトリガー → Vaultwarden招待送信 → Discord「Confirm待ち」通知確認、の一段階目
+  - 上記の後、管理者がWeb UIでConfirm → 次回CronJob実行時にCollection権限が自動反映されることの確認（二段階フロー）
   - グループ脱退 → 次回CronJobまたはイベントトリガーでのCollection権限剥奪確認（Organizationからの除名が発生しないことも確認、8.3）
 
 ## Security Considerations

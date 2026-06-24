@@ -68,6 +68,16 @@
 - **Findings**: AuthentikもVaultwardenも同一 `prod` namespace 上で稼働しており、`prod` 内でNetworkPolicy/CiliumNetworkPolicyによる制限は現状適用されていない。Authentik workerポッドから他Podの ClusterIP Service への直接到達は既存の外部HTTP呼び出し実績（Discord API）と同様に問題なく成立する。
 - **Implications**: トリガー受信エンドポイントは**ClusterIP Serviceのみで公開し、Cloudflare Tunnel等の外部公開は不要**。共有Bearerトークン（新規Infisicalシークレット）による認証をアプリケーションレベルで実施する（Requirement 13.2）。将来的にCiliumNetworkPolicyでingressを `authentik` Podのラベルに限定する追加の防御も可能（本設計ではOpen Questionとして記録）。
 
+### Confirm前のPUT（Collection権限更新）の実際の挙動（ローカルDocker検証）
+- **Context**: 当初「未ConfirmメンバーへのPUTはAdminHeadersガードのみで成功するはず」という想定（research.md冒頭の`organizations.rs`ソース調査）から、設計時に誤って「未ConfirmへのPUTは失敗する」という逆の前提を一度設計に書いてしまった。実機検証で実際の挙動を確定させる必要があった。
+- **Sources Consulted**: ローカルDocker環境（`vaultwarden/server:latest` 2026.5.0 + Postgres 16、`/tmp/vw-test/docker-compose.yml`）でOrganization作成→メンバー招待→未ConfirmメンバーへのPUTを実行し、PostgreSQLへ直接`SELECT`して実データを確認。Vaultwardenソース`src/db/models/collection.rs`の`Collection::find_by_user_uuid`を直接読解。
+- **Findings**:
+  - `PUT /organizations/{orgId}/users/{memberId}` はstatus（Invited/Confirmed）に関わらず常に200で成功し、`users_collections`テーブルへの保存も実際に行われる（DBで確認済み）。`edit_member`実装（`src/api/core/organizations.rs`）にstatusチェックは存在しない。
+  - しかし`Collection::find_by_user_uuid`が`.filter(users_organizations::status.eq(MembershipStatus::Confirmed as i32))`という条件を持つため、**未Confirmの間はそのメンバーのCollection権限が一切「存在しない」ものとして扱われる**。`GET /organizations/{orgId}/users`の`collections`配列も常に空。クライアント側でもアクセス不可。
+  - Confirm完了の瞬間に、事前にPUT済みの権限が自動的に有効化される（再度PUTし直す必要はない）。
+  - Vaultwarden OSSは`organizations`テーブル作成時のレスポンスで`"useGroups":false`を明示しており、Enterprise Groups機能が無効であることを実機でも再確認した。
+- **Implications**: 同期ロジックは未ConfirmメンバーへのPUT送信をスキップする必要は無い（スキップすると後でConfirmされた際に反映が1サイクル遅れるだけで実害は無いが、スキップしない方がシンプル）。PUTはフルリプレースで冪等なため、Confirm待ちの間も毎回マッピング通りに送信して問題ない。Confirm待ち検出はDiscord通知の判定にのみ使う（`get_member_status`、design.md参照）。
+
 ## Architecture Pattern Evaluation
 
 | Option | Description | Strengths | Risks / Limitations | Notes |
