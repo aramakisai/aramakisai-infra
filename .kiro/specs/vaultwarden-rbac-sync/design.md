@@ -280,7 +280,7 @@ def get_group_members(group_name: str) -> GroupMembersResult:
 - `POST /api/organizations/{orgId}/users/invite` で招待（Collection権限を同時指定）、`PUT /api/organizations/{orgId}/users/{memberId}` でCollection権限を更新する（**フルリプレースAPI**のため、マッピング対象外のCollection権限は現状値を保持してマージする責務を持つ）
 - **検証済み事実**（ローカルDocker検証、2026-06-24）: `PUT`は対象メンバーのstatusに関わらず常に成功し、`users_collections`テーブルへの保存も行われる（`AdminHeaders`ガードのみでstatusチェックは無い）。しかし、Vaultwardenソース`Collection::find_by_user_uuid`（`src/db/models/collection.rs`）が`.filter(users_organizations::status.eq(MembershipStatus::Confirmed as i32))`でフィルタしているため、**未Confirmの間はCollection権限が一切有効化されない**（GETレスポンスの`collections`配列も常に空、クライアント側でもアクセス不可）。Confirm完了の瞬間に、事前にPUTした権限が自動的に有効化される。`PUT`はフルリプレースで冪等なため、未Confirm中も毎回マッピング通りに送信して問題ない（GETが常に空を返すため差分計算上は「常に不一致」と判定され続けるが、再送に害はない）。同期ロジックは未ConfirmメンバーへのPUTをスキップする必要は無く、単にConfirm待ち検出とDiscord通知を並行して行う
 - 認証失敗時は例外を投げ、同期処理全体を中断させる（2.3）
-- マッピング設定が参照するCollectionがOrganization内に存在しない場合は、そのマッピングのみをエラーとして返す（3.3）
+- マッピング設定が参照する`collection_id`がOrganization内の実際のCollection ID一覧に存在しない場合は、そのマッピングのみをエラーとして返す（3.3）。**Collection名による照合は行わない**（`collections.name`はOrganization鍵でクライアント暗号化されたCipherStringとしてのみ取得できるため、`mapping.json`の`collection_label`と文字列一致することはない。research.md「Vaultwarden Collection名はOrg鍵でクライアント暗号化される」参照）
 
 **Dependencies**
 - External: Vaultwarden Organization API（`/identity/connect/token`, `/api/organizations/**`） — P0
@@ -328,7 +328,7 @@ def remove_member_collection(org_id: str, member_id: str, collection_id: str) ->
 **Contracts**: Service [x] / State [x]
 
 **Implementation Notes**
-- Integration: ConfigMapは `mapping.json` キーに `{"mappings": [{"authentik_group", "organization", "collection", "permission"}, ...]}` 形式で格納（research.md「サービスアカウント」決定と合わせ、YAML依存を避けるためJSON採用）
+- Integration: ConfigMapは `mapping.json` キーに `{"mappings": [{"authentik_group", "organization", "collection_id", "permission", "collection_label"?}, ...]}` 形式で格納（research.md「サービスアカウント」決定と合わせ、YAML依存を避けるためJSON採用）。`collection_id`はVaultwarden Collection名が暗号化CipherStringのためname解決不可と判明（research.md「Vaultwarden Collection名はOrg鍵でクライアント暗号化される」）したことによりUUID直接指定とした。`collection_label`は任意の人間向けコメントで検証・照合の対象外
 - Validation: `permission` は4種別（`can_view`/`can_view_except_passwords`/`can_edit`/`can_manage`）以外を拒否し、構文・必須フィールド不正時は同期処理全体を中断する（4.3）
 - Risks: 同一グループが複数エントリに現れるケース（4.4）を正しく全件処理できるよう、グループ名をキーにしたグルーピングではなく「エントリのリストをそのまま全件処理する」設計とする
 
@@ -543,8 +543,8 @@ def compute_diff(mappings: list[MappingEntry], group_members: dict, org_states: 
 **Contracts**: State [x]
 
 **Implementation Notes**
-- Integration: `mapping.json`キーにマッピングエントリのリストを格納。Organization/Collectionは人間が読めるnameで記述し、IDは同期エンジンが実行時にVaultwarden APIから解決する（UUIDをGitに直接書かない）
-- Validation: ConfigMap更新のみでマッピング変更が反映される（CronJob/Deploymentの再デプロイ不要）
+- Integration: `mapping.json`キーにマッピングエントリのリストを格納。Organizationは人間が読めるnameで記述し、IDは同期エンジンが実行時にVaultwarden APIから解決する（`organizations.name`は平文保存、実機検証済み: research.md「Vaultwarden Collection名はOrg鍵でクライアント暗号化される」参照）。**Collectionはname解決不可のため`collection_id`（UUID）を直接記述する**（`collections.name`はOrganization鍵でクライアント側暗号化されたCipherStringとしてのみ保存され、サーバー/APIクライアントは復号できないため文字列照合が原理的に成立しない）。レビュー性を保つため`collection_label`（任意、人間向けコメント、照合には使わない）を併記する
+- Validation: ConfigMap更新のみでマッピング変更が反映される（CronJob/Deploymentの再デプロイ不要）。`collection_id`の特定はOrganization Owner/Adminが実ブラウザでWeb Vaultにログインし対象Collectionを開いてUUIDを確認する一回限りの人手作業が必要
 
 #### RbacSyncSecrets
 
@@ -562,7 +562,7 @@ def compute_diff(mappings: list[MappingEntry], group_members: dict, org_states: 
 ## Data Models
 
 ### Domain Model
-- **MappingEntry**: `authentik_group`（グループ名）, `organization`（Organization名）, `collection`（Collection名）, `permission`（4種別enum）
+- **MappingEntry**: `authentik_group`（グループ名）, `organization`（Organization名、API実行時にIDへ解決）, `collection_id`（Vaultwarden Collection UUID、直接記述。Collection名は暗号化CipherStringのためname解決不可、research.md参照）, `collection_label`（任意、レビュー用人間可読ラベル、照合には使わない）, `permission`（4種別enum）
 - **SyncPlan**: `invites`, `confirm_pending`, `collection_updates`, `collection_removals`, `unchanged_count` の集計結果（PermissionDiffEngineの出力、Vaultwarden側の永続化前の一時データ）
 - **ConfirmPendingPlan**: `email`, `org_name`, `invited_at`（招待日時）。Vaultwarden APIのメンバー`status=invited`から検出。Discord通知の対象
 - 本機能はVaultwarden/Authentik側のデータを所有しない。マッピング設定（ConfigMap）のみが本機能が所有する永続データである
@@ -576,14 +576,15 @@ def compute_diff(mappings: list[MappingEntry], group_members: dict, org_states: 
     {
       "authentik_group": "広報",
       "organization": "SNSアカウント",
-      "collection": "広報",
+      "collection_id": "3d64cf3a-fc4c-4004-a9c7-9967c008ac38",
+      "collection_label": "広報",
       "permission": "can_view"
     }
   ]
 }
 ```
-- 自然キー: `(authentik_group, organization, collection)` の組（4.4で1グループが複数マッピングを持てるため、グループ名単体はキーにならない）
-- 整合性: Organization/Collection名はVaultwarden側の実名と一致している必要がある（不一致時は3.3でエラー記録）
+- 自然キー: `(authentik_group, organization, collection_id)` の組（4.4で1グループが複数マッピングを持てるため、グループ名単体はキーにならない）
+- 整合性: Organization名はVaultwarden側の実名と一致している必要がある（不一致時は3.3でエラー記録）。`collection_id`は対象Organizationの実際のCollection UUIDと一致している必要がある（不一致時も同様に3.3でエラー記録、名前ではなくID一致で判定する。理由はresearch.md「Vaultwarden Collection名はOrg鍵でクライアント暗号化される」参照）。`collection_label`は照合に使わない人間向けコメント
 
 ### Data Contracts & Integration
 

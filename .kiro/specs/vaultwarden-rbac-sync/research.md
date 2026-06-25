@@ -78,6 +78,15 @@
   - Vaultwarden OSSは`organizations`テーブル作成時のレスポンスで`"useGroups":false`を明示しており、Enterprise Groups機能が無効であることを実機でも再確認した。
 - **Implications**: 同期ロジックは未ConfirmメンバーへのPUT送信をスキップする必要は無い（スキップすると後でConfirmされた際に反映が1サイクル遅れるだけで実害は無いが、スキップしない方がシンプル）。PUTはフルリプレースで冪等なため、Confirm待ちの間も毎回マッピング通りに送信して問題ない。Confirm待ち検出はDiscord通知の判定にのみ使う（`get_member_status`、design.md参照）。
 
+### Vaultwarden Collection名はOrg鍵でクライアント暗号化される（ローカルDocker検証、2026-06-25）
+- **Context**: design.mdの`RbacMappingConfigMap`は「Organization/Collectionは人間が読めるnameで記述し、IDは同期エンジンが実行時にVaultwarden APIから解決する」という前提で設計されていた。task 3（VaultwardenOrgClient）の実装着手前に、この前提が実際のVaultwardenデータモデルと整合するか検証する必要があった。
+- **Sources Consulted**: ローカルDocker環境（`vaultwarden/server:latest` + Postgres 16、使い捨て環境）に対し、Playwright + 実際の公式Web Vaultクライアント（`vaultwarden-web-vault`、暗号化ロジックを含む本物のクライアント）で実際にユーザー登録・ログイン・Organization作成・Collection確認を行い、その結果をPostgreSQLへ直接`SELECT`して実データを確認した。
+- **Findings**:
+  - `organizations.name`は平文で保存される（例: `VERIFY_ORG_PLAINTEXT_TEST`のまま）。Organization名はバルト解錠（マスターパスワード入力）前にアカウント切替UIへ表示する必要があるため、サーバー側で平文保持される。
+  - `collections.name`はOrganization作成時にクライアントが自動生成する「Default collection」であっても、本物のBitwarden CipherString形式（`2.<iv_base64>|<ciphertext_base64>|<mac_base64>`、AES-256-CBC + HMAC-SHA256）で保存される。これはOrganization鍵（Org Owner/Adminの復号済み鍵でのみ復号可能）でクライアント側暗号化されたものであり、**サーバー（および本機能のような非ブラウザAPIクライアント）には復号する手段が無い**。
+  - したがって、`GET /api/organizations/{orgId}/collections`のレスポンスの`name`フィールドは常にこの暗号化文字列であり、`mapping.json`の人間可読なCollection名（例: `"広報"`）と文字列一致することは**原理的にあり得ない**。
+- **Implications**: design.mdが前提としていた「Collection名でAPI照合してIDを解決する」方式は実装不可能。Organization名（平文）でのマッチングは引き続き有効。Collectionは**`collection_id`（UUID）をmapping.jsonに直接記述する方式**に変更する。人間可読性を失わないよう、レビュー専用の`collection_label`（コメント相当、照合には使わない）を任意フィールドとして残す。`collection_id`の実際の値は、Organization Owner/Adminが実ブラウザでWeb Vaultにログインし、対象Collectionを開いて表示されるIDをコピーする一回限りの人手作業が必要（既存の「サービスアカウント初回ブートストラップ」と同種の運用作業）。
+
 ### Bitwarden公式Directory Connector（bwdc）併用案の検討と不採用
 - **Context**: 自前でinvite/PUTを実装する代わりに、Bitwarden公式のDirectory Connector（`JonTheNiceGuy/vaultwarden-sync`がVaultwarden向けにパッケージ化）をLDAP(Authentik LDAP Outpost)と組み合わせて使えば、ユーザー/グループ同期の再実装を避けられないか検討した。
 - **Sources Consulted**: vaultwardenソース`src/api/core/public.rs`の`ldap_import`ハンドラ（`/public/organization/import`）全文。Organization API Key発行エンドポイント`src/api/core/organizations.rs`の`api_key`関数（`PasswordOrOtpData::validate`）。
@@ -128,11 +137,23 @@
 - **Trade-offs**: 常駐Pod1つ分のリソースを消費する（CPU/メモリは軽量見込み）。
 - **Follow-up**: Lease の `leaseDurationSeconds` と同期処理の最大実行時間の関係を実装時に調整する。
 
+### Decision: mapping.jsonのCollection指定はID直接記述方式に変更（name解決方式から変更）
+- **Context**: 当初設計（design.md初版）は「Organization/Collectionは人間が読めるnameで記述し、IDは同期エンジンが実行時にVaultwarden APIから解決する」前提だった。上記「Vaultwarden Collection名はOrg鍵でクライアント暗号化される」の検証により、この前提はCollectionに関して成立しないことが判明した。
+- **Alternatives Considered**:
+  1. **name解決方式（旧設計、不採用）**: `GET /organizations/{orgId}/collections`の`name`と`mapping.json`の`collection`を文字列一致 → Collection名は常に暗号化CipherStringのため原理的に一致しない
+  2. 同期エンジン自身がCollectionを直接作成し平文nameで管理する → design.mdのNon-Goal（Vaultwarden Organization・Collection自体の新規作成は対象外）に抵触し、かつ人間が実Web Vault UIでそのCollectionを開いた際にクライアントが復号に失敗し表示が壊れる実害がある
+  3. **`collection_id`（UUID）を`mapping.json`に直接記述（採用）**: Organization名（平文確認済み）は引き続きnameで解決し、Collectionのみ事前に人間が実ブラウザで確認したUUIDを使う。レビュー用に`collection_label`（任意、照合には使わない）を残す
+- **Selected Approach**: `MappingEntry`を`(authentik_group, organization, collection_id, permission)`必須・`collection_label`任意に変更。`VaultwardenOrgClient`はCollection IDが対象Organizationの`GET .../collections`が返すID一覧に存在するかのみを検証し（名前比較はしない）、存在しない場合は当該マッピングのみエラー記録して継続する（Requirement 3.3は維持）。
+- **Rationale**: Organization名は実機検証で平文確認済みのため変更不要。Collectionだけ実害のある箇所を最小限修正する。
+- **Trade-offs**: `collection_id`の特定には人間が実ブラウザでログインしCollectionを開いてUUIDをコピーする一回限りの作業が必要（Organization Owner/Adminのブラウザ操作、既存の[[project_vaultwarden_rbac_sync_bootstrap_blockers]]と同種の制約）。`mapping.json`のGit diffはUUIDの羅列になり`collection_label`を読む必要があるが、`collection_label`を併記すれば実質的なレビュー性は保たれる。
+- **Follow-up**: `.kiro/steering/vaultwarden-rbac.md`のオンボーディング手順に「Collection IDの確認方法（Web Vault → 対象Collection → URL or 詳細表示でUUIDを確認）」を追記する。
+
 ## Risks & Mitigations
 - **サービスアカウントの資格情報漏洩** — Admin/Owner権限を持つ強い資格情報のため、ExternalSecret経由のみで配布し、ログに平文出力しない（Requirement 12）。定期的なローテーションを運用手順に含める。
 - **Authentikの `app`/`model` フィルタ文字列がバージョン依存で不正確だと、グループ変更Webhookが発火しない** — 実装時に実環境で動作確認（テストグループでの追加削除→Webhook発火確認）を行う。
 - **ログインバインドのHTTP呼び出しがログインフローをブロック/遅延させる** — `discord_group_sync` 同様、例外処理で同期処理自体の失敗がログインを阻害しないようにし、タイムアウトを短く設定する。
 - **PUT /organizations/.../users/{id} がフルリプレースAPIのため、意図しない権限欠落を起こしうる** — 差分計算時に対象ユーザーの全Collection権限（マッピング対象外のCollectionも含む）を取得し、リクエスト構築前に現状とマージするロジックを実装で保証する。
+- **`mapping.json`の`collection_id`が指す先のCollectionが削除・別名変更された場合、Gitの差分だけでは検知できない** — `collection_label`を併記し、定期的にOrganization内のCollection一覧と`collection_label`の対応を目視確認する運用を推奨する（自動検証は本機能のスコープ外）。
 
 ## References
 - [Organisation API for n8n #2317](https://github.com/dani-garcia/vaultwarden/discussions/2317) — Organization API Keyの実装範囲についての保守者コメント
