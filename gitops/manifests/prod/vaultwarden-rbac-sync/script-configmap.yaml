@@ -1,0 +1,193 @@
+---
+# Vaultwarden RBAC Sync エンジン本体 (sync.py)。
+# CronJob (cronjob.yaml, --mode=cron) と Trigger Receiver Deployment (deployment.yaml, --mode=serve) の
+# 両方が同一の ConfigMap をマウントし、command の --mode 引数のみを切り替える (ロジック重複を避けるため)。
+# Python 3 標準ライブラリのみで実装する (alpine/k8s:1.32.13 イメージ内に追加pip依存の保証がないため)。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vaultwarden-rbac-sync-script
+  namespace: prod
+data:
+  sync.py: |
+    #!/usr/bin/env python3
+    """Vaultwarden RBAC Sync エンジン。
+
+    Authentikグループメンバーシップを正本として、Vaultwarden Organization/Collectionの
+    ユーザー単位権限を自動同期する。実行モードは --mode=cron (定期実行) / --mode=serve
+    (Trigger Receiver常駐) の2種類。
+    """
+    import argparse
+    import json
+    import logging
+    import sys
+    from dataclasses import dataclass
+    from urllib.error import HTTPError, URLError
+    from urllib.parse import quote as url_quote
+    from urllib.request import Request, urlopen
+
+    LOGGER_NAME = "vaultwarden-rbac-sync"
+
+    VALID_PERMISSIONS = ("can_view", "can_view_except_passwords", "can_edit", "can_manage")
+
+    REQUIRED_MAPPING_FIELDS = ("authentik_group", "organization", "collection", "permission")
+
+
+    class MappingConfigError(Exception):
+        """mapping.json の構文・スキーマが不正な場合に発生する (Requirement 4.3)。"""
+
+
+    @dataclass(frozen=True)
+    class MappingEntry:
+        authentik_group: str
+        organization: str
+        collection: str
+        permission: str
+
+
+    def load_mapping(raw_json: str) -> list[MappingEntry]:
+        """mapping.json の内容を検証しつつ読み込む (Requirement 4.1, 4.2, 4.3, 4.4)。
+
+        1つの authentik_group が複数エントリに現れるケース (4.4) を正しく扱うため、
+        グループ名でのグルーピングはせず、エントリのリストをそのまま全件返す。
+        """
+        try:
+            data = json.loads(raw_json)
+        except json.JSONDecodeError as exc:
+            raise MappingConfigError(f"mapping.json の構文が不正です: {exc}") from exc
+
+        if not isinstance(data, dict) or not isinstance(data.get("mappings"), list):
+            raise MappingConfigError("mapping.json は {'mappings': [...]} 形式である必要があります")
+
+        entries = []
+        for index, raw_entry in enumerate(data["mappings"]):
+            if not isinstance(raw_entry, dict):
+                raise MappingConfigError(f"mappings[{index}] はオブジェクトである必要があります")
+
+            missing = [field for field in REQUIRED_MAPPING_FIELDS if field not in raw_entry]
+            if missing:
+                raise MappingConfigError(f"mappings[{index}] に必須フィールドがありません: {missing}")
+
+            permission = raw_entry["permission"]
+            if permission not in VALID_PERMISSIONS:
+                raise MappingConfigError(
+                    f"mappings[{index}] の permission が不正です: {permission!r} "
+                    f"(許可値: {VALID_PERMISSIONS})"
+                )
+
+            entries.append(
+                MappingEntry(
+                    authentik_group=raw_entry["authentik_group"],
+                    organization=raw_entry["organization"],
+                    collection=raw_entry["collection"],
+                    permission=permission,
+                )
+            )
+        return entries
+
+
+    class AuthentikApiError(Exception):
+        """Authentik API呼び出しが認証エラー・タイムアウトで失敗した場合に発生する (Requirement 1.3)。
+
+        呼び出し元 (SyncOrchestrator) に伝播し、同期処理全体を中断させる。
+        """
+
+
+    @dataclass(frozen=True)
+    class GroupMembersResult:
+        group_name: str
+        member_emails: list[str]
+        error: str | None
+
+
+    class AuthentikGroupClient:
+        """Authentikグループメンバーシップ取得クライアント (Requirement 1.1-1.4)。
+
+        専用APIトークン (PRESENCE_AUTHENTIK_API_TOKEN パターン踏襲) でBearer認証する。
+        """
+
+        def __init__(self, base_url: str, api_token: str, timeout: float = 10.0):
+            self._base_url = base_url.rstrip("/")
+            self._api_token = api_token
+            self._timeout = timeout
+
+        def get_group_members(self, group_name: str) -> GroupMembersResult:
+            """グループ名からメンバーのメールアドレス一覧を取得する (Requirement 1.1)。
+
+            グループが存在しない場合は例外を投げず GroupMembersResult.error に記録する (1.4)。
+            認証エラー・タイムアウトは AuthentikApiError として呼び出し元に伝播させる (1.3)。
+            """
+            url = (
+                f"{self._base_url}/api/v3/core/groups/"
+                f"?name={url_quote(group_name, safe='')}&include_users=true"
+            )
+            request = Request(url, headers={"Authorization": f"Bearer {self._api_token}"})
+            try:
+                with urlopen(request, timeout=self._timeout) as response:
+                    payload = json.loads(response.read())
+            except HTTPError as exc:
+                raise AuthentikApiError(
+                    f"Authentik APIエラー (group={group_name}): HTTP {exc.code}"
+                ) from exc
+            except (URLError, TimeoutError) as exc:
+                raise AuthentikApiError(
+                    f"Authentik API呼び出しに失敗しました (group={group_name}): {exc}"
+                ) from exc
+
+            results = payload.get("results", [])
+            if not results:
+                log_event("authentik_group_not_found", group=group_name)
+                return GroupMembersResult(
+                    group_name, [], f"グループ '{group_name}' がAuthentik上に存在しません"
+                )
+
+            member_emails = [
+                user["email"]
+                for user in (results[0].get("users_obj") or [])
+                if user.get("email")
+            ]
+            return GroupMembersResult(group_name, member_emails, None)
+
+
+    def configure_logging() -> None:
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s %(levelname)s %(message)s",
+            stream=sys.stdout,
+        )
+
+
+    def log_event(event: str, **fields) -> None:
+        """招待/更新/削除件数等を後続タスクで埋め込める構造化ログ出力 (Requirement 11.1)。"""
+        logging.getLogger(LOGGER_NAME).info(json.dumps({"event": event, **fields}, ensure_ascii=False))
+
+
+    def build_arg_parser() -> argparse.ArgumentParser:
+        parser = argparse.ArgumentParser(description="Vaultwarden RBAC Sync エンジン")
+        parser.add_argument(
+            "--mode",
+            choices=("cron", "serve"),
+            required=True,
+            help="cron: CronJobからの定期実行 / serve: Trigger Receiverとして常駐",
+        )
+        return parser
+
+
+    def main(argv: list[str] | None = None) -> int:
+        configure_logging()
+        args = build_arg_parser().parse_args(argv)
+
+        log_event("startup", mode=args.mode)
+
+        if args.mode == "cron":
+            # マッピング読込・差分計算・適用 (SyncOrchestrator) は後続タスクで実装する。
+            log_event("run_complete", mode=args.mode)
+        else:
+            # Trigger Receiver の HTTP サーバー起動は task 8.2 で実装する。
+            log_event("serve_skeleton_not_implemented", mode=args.mode)
+
+        return 0
+
+
+    if __name__ == "__main__":
+        sys.exit(main())

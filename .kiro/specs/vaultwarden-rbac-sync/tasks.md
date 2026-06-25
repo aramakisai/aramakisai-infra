@@ -1,15 +1,15 @@
 # Implementation Plan
 
-- [ ] 1. 基盤: シークレット・マッピング設定・実行基盤のセットアップ
+- [x] 1. 基盤: シークレット・マッピング設定・実行基盤のセットアップ
 
-- [ ] 1.1 (P) ExternalSecret定義とInfisicalキー登録によるシークレット注入基盤構築
+- [x] 1.1 (P) ExternalSecret定義とInfisicalキー登録によるシークレット注入基盤構築
   - Authentik APIトークン、Vaultwardenサービスアカウントclient_id/client_secret、Trigger共有ベアラートークンを新規Infisicalキーとして登録しExternalSecretに定義
   - 既存`DISCORD_OPS_WEBHOOK_URL`を新規Webhook作成せず再利用する設定にする
   - `kubectl get secret`で全キーが正しく復号・Secretとして存在することを確認できる
   - _Requirements: 12.1, 12.2_
   - _Boundary: RbacSyncSecrets_
 
-- [ ] 1.2 (P) マッピング設定ConfigMapのスキーマ実装と検証ロジック構築
+- [x] 1.2 (P) マッピング設定ConfigMapのスキーマ実装と検証ロジック構築
   - `mapping.json`構造（`authentik_group`/`organization`/`collection`/`permission`の配列、1グループが複数エントリを持てる）を定義
   - 構文不正・必須フィールド欠落・未知の`permission`値を検出するロード時検証ロジックを実装
   - サンプルマッピング（広報→SNSアカウント→広報→`can_view`等、`vaultwarden-rbac.md`の実例に基づく）をGitOps ConfigMapとして投入
@@ -17,19 +17,19 @@
   - _Requirements: 4.1, 4.2, 4.3, 4.4_
   - _Boundary: MappingConfigLoader, RbacMappingConfigMap_
 
-- [ ] 1.3 (P) Lease操作用ServiceAccount/RBAC定義
+- [x] 1.3 (P) Lease操作用ServiceAccount/RBAC定義
   - `vaultwarden-rbac-sync`専用ServiceAccountと、`leases.coordination.k8s.io`に対するget/create/update権限のみを持つRole/RoleBindingを`prod` namespaceに定義
   - 当該ServiceAccountがLease以外のリソースを操作できない（最小権限）ことを確認できる
   - _Requirements: 10.2, 13.3_
   - _Boundary: SyncLockManager RBAC_
 
-- [ ] 1.4 (P) 実行エントリポイント骨格（モード分岐・構造化ログ基盤）実装
+- [x] 1.4 (P) 実行エントリポイント骨格（モード分岐・構造化ログ基盤）実装
   - `--mode=cron` / `--mode=serve` の起動引数分岐を実装
   - 招待/更新/削除件数を後続タスクで埋め込める構造化ログ出力フォーマットを定義
   - `--mode=cron`で起動すると指定したモード名がログに記録され正常終了することを確認できる
   - _Requirements: 10.1_
 
-- [ ] 2. (P) AuthentikGroupClient実装によるグループメンバーシップ取得
+- [x] 2. (P) AuthentikGroupClient実装によるグループメンバーシップ取得
   - 専用Authentik APIトークン（`PRESENCE_AUTHENTIK_API_TOKEN`パターン踏襲）での認証処理を実装
   - グループ名からメンバーのメールアドレス一覧を取得する処理を実装
   - 認証エラー・タイムアウト発生時は例外を上位に伝播させ、グループ不在時はそのグループのみエラー記録して処理を継続する分岐を実装

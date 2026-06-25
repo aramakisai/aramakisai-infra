@@ -1,0 +1,23 @@
+---
+# Authentikグループ -> Vaultwarden Organization/Collection/権限レベルのマッピング設定。
+# 自然キー: (authentik_group, organization, collection)。1グループが複数エントリを持てる (Requirement 4.4)。
+# permission は can_view / can_view_except_passwords / can_edit / can_manage の4種別のみ (Requirement 4.2)。
+# ConfigMap更新のみで反映される (CronJob/Deployment再デプロイ不要)。
+# サンプルは .kiro/steering/vaultwarden-rbac.md の実例 (広報班の Twitter アカウント) に基づく。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vaultwarden-rbac-sync-mapping
+  namespace: prod
+data:
+  mapping.json: |
+    {
+      "mappings": [
+        {
+          "authentik_group": "広報",
+          "organization": "SNSアカウント",
+          "collection": "広報",
+          "permission": "can_view"
+        }
+      ]
+    }
