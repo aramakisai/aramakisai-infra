@@ -86,8 +86,12 @@ spec:
             # していた。個人ユーザーのメール送受信は方針として禁止のため、
             # 例外は noreply (cn=noreply) のみに限定して許可する
             # (他の個人ユーザーには広げない)。
+            # 2026-06-26: Roundcube OAuth2 で email claim を ML グループの mail 属性に
+            # 変更したため、SASL ユーザー名が ML 専用 User のメールアドレスになる。
+            # このため ML 専用 User (mailListAddress=true) 自身も送信者として許可する
+            # (groups の member 展開結果に ML 専用 User は含まれないため)。
             - name: LDAP_QUERY_FILTER_SENDERS
-              value: "(|(&(objectClass=group)(mail=%s))(&(objectClass=inetOrgPerson)(mail=%s)(cn=noreply)))"
+              value: "(|(&(objectClass=group)(mail=%s))(&(objectClass=inetOrgPerson)(mail=%s)(mailListAddress=true))(&(objectClass=inetOrgPerson)(mail=%s)(cn=noreply)))"
             - name: SPOOF_PROTECTION
               value: "1"
             # auth_bind=yes: Dovecot が LDAP に直接バインドしてユーザー認証 (PLAIN auth)
