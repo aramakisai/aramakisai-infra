@@ -74,19 +74,23 @@ data:
     # (タスク4.1で発覚)。メール PVC のルート /var/mail は 0777 docker 所有で書込可能なため、
     # ここに共有 index を置く。DMS は全ユーザー単一 uid 5000 のため共有 index で問題ない。
     #
-    # subscriptions = yes: 大半の IMAP クライアントは購読フォルダのみ表示 (LSUB/LIST-SUBSCRIBED)
-    # するため、subscriptions = no では Shared/* が自動表示されない (タスク4.3で発覚)。
-    # type=shared かつ location が固定パス (/var/mail/.../<ml>) のため、購読状態は共有メールボックス
-    # ルートの単一 subscriptions ファイルに保存され全アクセスユーザーで共有される。よって運用上
-    # 1回 subscribe するだけで全メンバーに購読が反映され自動表示される。非メンバーには
-    # LIST-SUBSCRIBED 応答時に acl plugin の lookup 権限欠如で除外される (fail-closed, Req 2.2)。
+    # subscriptions = no + list = yes: 共有メールボックスは購読状態に依存せず常に LIST に出す。
+    # list = children だと「子メールボックスを持つ namespace のみ表示」となり、まだ Drafts/Sent 等の
+    # サブフォルダが自動生成されていない部署 (受信のみで一度もクライアント接続していない maildir) が
+    # LIST から消える (実機確認: pr だけ子フォルダがあり表示され、他部署は SELECT 可能なのに
+    # LIST に出なかった)。list = yes なら子の有無に関わらず Shared/<dept> が出る。
+    # アクセス制御は acl plugin が担保する: LIST 応答は lookup 権限 (l) を持つ (= group= が
+    # acl_groups にマッチする) ユーザーにのみ各 namespace を返し、非メンバーは fail-closed で除外
+    # される (Req 2.2)。acl_groups は oauth2 introspection の userdb_acl_groups 経由で注入される
+    # (dovecot-oauth2-external-secret.yaml の pass_attrs 参照)。
+    # subscriptions = no は Roundcube 側 imap_force_list=true で補い、購読不要で表示させる。
     namespace {
       type = shared
       separator = /
       prefix = Shared/planning/
       location = maildir:/var/mail/aramakisai.com/planning:INDEX=/var/mail/.indexes/aramakisai.com/planning
       subscriptions = no
-      list = children
+      list = yes
     }
     namespace {
       type = shared
@@ -94,7 +98,7 @@ data:
       prefix = Shared/accounting/
       location = maildir:/var/mail/aramakisai.com/accounting:INDEX=/var/mail/.indexes/aramakisai.com/accounting
       subscriptions = no
-      list = children
+      list = yes
     }
     namespace {
       type = shared
@@ -102,7 +106,7 @@ data:
       prefix = Shared/booth/
       location = maildir:/var/mail/aramakisai.com/booth:INDEX=/var/mail/.indexes/aramakisai.com/booth
       subscriptions = no
-      list = children
+      list = yes
     }
     namespace {
       type = shared
@@ -110,7 +114,7 @@ data:
       prefix = Shared/stage/
       location = maildir:/var/mail/aramakisai.com/stage:INDEX=/var/mail/.indexes/aramakisai.com/stage
       subscriptions = no
-      list = children
+      list = yes
     }
     namespace {
       type = shared
@@ -118,7 +122,7 @@ data:
       prefix = Shared/pr/
       location = maildir:/var/mail/aramakisai.com/pr:INDEX=/var/mail/.indexes/aramakisai.com/pr
       subscriptions = no
-      list = children
+      list = yes
     }
     namespace {
       type = shared
@@ -126,7 +130,7 @@ data:
       prefix = Shared/admin/
       location = maildir:/var/mail/aramakisai.com/admin:INDEX=/var/mail/.indexes/aramakisai.com/admin
       subscriptions = no
-      list = children
+      list = yes
     }
     namespace {
       type = shared
@@ -134,7 +138,7 @@ data:
       prefix = Shared/general-affairs/
       location = maildir:/var/mail/aramakisai.com/general-affairs:INDEX=/var/mail/.indexes/aramakisai.com/general-affairs
       subscriptions = no
-      list = children
+      list = yes
     }
     namespace {
       type = shared
@@ -142,7 +146,7 @@ data:
       prefix = Shared/noreply/
       location = maildir:/var/mail/aramakisai.com/noreply:INDEX=/var/mail/.indexes/aramakisai.com/noreply
       subscriptions = no
-      list = children
+      list = yes
     }
   # Postfix LDAP グループマップ オーバーライド (メーリングリスト用):
   # DMS が自動生成する ldap-groups.cf は result_attribute=mail のみのため、
