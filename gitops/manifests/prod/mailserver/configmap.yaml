@@ -50,6 +50,11 @@ data:
 
     plugin {
       acl = vfile
+      # acl_shared_dict: Dovecot が共有メールボックスの ACL 情報をキャッシュするための辞書。
+      # 設定しないと "Mailbox not found from dovecot-acl-list" エラーが発生し、
+      # 共有メールボックスが LIST に表示されない (acl_lookup_dict not enabled)。
+      # /var/mail/aramakisai.com/ は docker:docker (0777) 所有で書込可能。
+      acl_shared_dict = file:/var/mail/aramakisai.com/.acl_shared_dict
     }
 
     # 既定の inbox (private) namespace は separator 未指定で Maildir 既定の '.' を使う。
@@ -80,56 +85,64 @@ data:
       separator = /
       prefix = Shared/planning/
       location = maildir:/var/mail/aramakisai.com/planning:INDEX=/var/mail/.indexes/aramakisai.com/planning
-      subscriptions = yes
+      subscriptions = no
+      list = children
     }
     namespace {
       type = shared
       separator = /
       prefix = Shared/accounting/
       location = maildir:/var/mail/aramakisai.com/accounting:INDEX=/var/mail/.indexes/aramakisai.com/accounting
-      subscriptions = yes
+      subscriptions = no
+      list = children
     }
     namespace {
       type = shared
       separator = /
       prefix = Shared/booth/
       location = maildir:/var/mail/aramakisai.com/booth:INDEX=/var/mail/.indexes/aramakisai.com/booth
-      subscriptions = yes
+      subscriptions = no
+      list = children
     }
     namespace {
       type = shared
       separator = /
       prefix = Shared/stage/
       location = maildir:/var/mail/aramakisai.com/stage:INDEX=/var/mail/.indexes/aramakisai.com/stage
-      subscriptions = yes
+      subscriptions = no
+      list = children
     }
     namespace {
       type = shared
       separator = /
       prefix = Shared/pr/
       location = maildir:/var/mail/aramakisai.com/pr:INDEX=/var/mail/.indexes/aramakisai.com/pr
-      subscriptions = yes
+      subscriptions = no
+      list = children
     }
     namespace {
       type = shared
       separator = /
       prefix = Shared/admin/
       location = maildir:/var/mail/aramakisai.com/admin:INDEX=/var/mail/.indexes/aramakisai.com/admin
-      subscriptions = yes
+      subscriptions = no
+      list = children
     }
     namespace {
       type = shared
       separator = /
       prefix = Shared/general-affairs/
       location = maildir:/var/mail/aramakisai.com/general-affairs:INDEX=/var/mail/.indexes/aramakisai.com/general-affairs
-      subscriptions = yes
+      subscriptions = no
+      list = children
     }
     namespace {
       type = shared
       separator = /
       prefix = Shared/noreply/
       location = maildir:/var/mail/aramakisai.com/noreply:INDEX=/var/mail/.indexes/aramakisai.com/noreply
-      subscriptions = yes
+      subscriptions = no
+      list = children
     }
   # Postfix LDAP グループマップ オーバーライド (メーリングリスト用):
   # DMS が自動生成する ldap-groups.cf は result_attribute=mail のみのため、
