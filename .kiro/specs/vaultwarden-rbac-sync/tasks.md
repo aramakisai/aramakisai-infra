@@ -22,6 +22,7 @@
   - 当該ServiceAccountがLease以外のリソースを操作できない（最小権限）ことを確認できる
   - _Requirements: 10.2, 13.3_
   - _Boundary: SyncLockManager RBAC_
+  - **修正済み（2026-06-25、task 8実装時に発覚）**: `release()`が`kubectl delete lease`を呼ぶにもかかわらず`delete`権限が付与されておらず本番で403になる欠落があったため、`verbs`に`delete`を追加
 
 - [x] 1.4 (P) 実行エントリポイント骨格（モード分岐・構造化ログ基盤）実装
   - `--mode=cron` / `--mode=serve` の起動引数分岐を実装
@@ -29,13 +30,25 @@
   - `--mode=cron`で起動すると指定したモード名がログに記録され正常終了することを確認できる
   - _Requirements: 10.1_
 
-- [ ] 1.5 (人手・Claude実行不可) 実Collection IDの確認とmapping.json反映
-  - Organization Owner/Adminが実ブラウザでWeb Vaultにログインし、対象Organization内の対象Collectionを開いてCollection ID (UUID) を確認する（Collection名はOrg鍵でクライアント暗号化されたCipherStringのため、API/CLI/Claudeでは解決不可能。research.md「Vaultwarden Collection名はOrg鍵でクライアント暗号化される」参照）
-  - 確認したUUIDを`mapping-configmap.yaml`の該当エントリの`collection_id`へ反映する（現状はプレースホルダー値`00000000-0000-0000-0000-000000000000`）
-  - `mapping.json`の全エントリの`collection_id`が対象Organizationに実在するCollectionを指していることを確認できる
-  - _Requirements: 4.1, 4.4_
+- [ ] 1.5 (人手・Claude実行不可) Authentik/Vaultwarden側の実環境セットアップとmapping.json反映
+  - **Authentikグループ権限不足の修正**（2026-06-25、管理用APIトークンで実機確認済み: `VAULTWARDEN_RBAC_SYNC_AUTHENTIK_API_TOKEN`は`GET /api/v3/core/groups/`（フィルタ有無問わず）で`403 You do not have permission to perform this action`を返す。`AuthentikGroupClient`（task 2、実装済み）はこのままでは本番で動作しない）
+    - Authentik Admin UI → Directory → Roles で`authentik_core.view_group`権限を持つRoleを作成（未作成なら）
+    - 当該トークンに紐づくサービスアカウントユーザーへ上記Roleを割り当てる
+    - 割り当て後、同トークンで`GET /api/v3/core/groups/?name=広報&include_users=true`等が200を返すことを確認する
+  - **未作成のAuthentikグループの作成**（このSpecのスコープ外、既存の手動運用に従う。design.md Non-Goal参照）
+    - `リーダー`グループを新規作成（管理者と同様に全Collectionへcan_manageでアクセスする想定、mapping.json参照）
+    - `Googleアカウント`グループを新規作成（Googleアカウント認証情報専用、所属者はcan_view_except_passwordsでアクセスする想定）
+  - **Vaultwarden Organization/Collectionの作成**（このSpecのスコープ外、design.md Non-Goal「Organization・Collection自体の新規作成」参照。現状DBに既存Organization/Collectionは0件、2026-06-25実機確認済み）
+    - Organization「荒牧祭実行委員会」をWeb Vaultで作成
+    - 配下にCollectionを8件作成: `企画`/`会計`/`出店`/`出演`/`広報`/`総務`/`Googleアカウント`/`管理者`（Authentikグループ名と一致させる、`vaultwarden-rbac.md`命名規則参照。`管理者`Collectionは管理者・リーダー専用で部門グループはアクセス権を持たない）
+    - サービスアカウント（`vaultwarden-rbac-sync`専用、未ブートストラップなら`vaultwarden-rbac.md`の初回ブートストラップ手順を先に実施）を当該OrganizationのAdminとして参加・Confirmする
+  - **Collection IDの確認とmapping.json反映**
+    - Organization Owner/Adminが実ブラウザでWeb Vaultにログインし、各Collectionを開いてCollection ID (UUID) を確認する（Collection名はOrg鍵でクライアント暗号化されたCipherStringのため、API/CLI/Claudeでは解決不可能。research.md「Vaultwarden Collection名はOrg鍵でクライアント暗号化される」参照）
+    - 確認したUUIDを`mapping-configmap.yaml`の対応する23エントリ全件の`collection_id`へ反映する（現状は全件プレースホルダー値`00000000-0000-0000-0000-000000000000`、`collection_label`を目印に対応付ける）
+  - `mapping.json`の全エントリの`collection_id`が対象Organizationに実在するCollectionを指し、かつAuthentikグループ一覧取得が成功することを確認できる
+  - _Requirements: 1.1, 1.2, 4.1, 4.4_
   - _Boundary: RbacMappingConfigMap_
-  - _Note: 実ブラウザでのマスターパスワード復号操作が必須なため、Claudeはこのタスクを代行できない。サービスアカウント初回ブートストラップ（`.kiro/steering/vaultwarden-rbac.md`）と合わせて人手で実施する_
+  - _Note: 実ブラウザでのマスターパスワード復号操作・Authentik Admin UI操作が必須なため、Claudeはこのタスクを代行できない_
 
 - [x] 2. (P) AuthentikGroupClient実装によるグループメンバーシップ取得
   - 専用Authentik APIトークン（`PRESENCE_AUTHENTIK_API_TOKEN`パターン踏襲）での認証処理を実装
@@ -71,7 +84,7 @@
   - _Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 7.1, 7.2, 7.3, 8.1, 8.3_
   - _Boundary: VaultwardenOrgClient, PermissionDiffEngine_
 
-- [ ] 4. (P) PermissionDiffEngine実装による権限差分計算
+- [x] 4. (P) PermissionDiffEngine実装による権限差分計算
   - マッピングエントリ単位でAuthentikグループメンバーとVaultwarden現状（メンバー・Collection権限）を比較し、招待対象・更新対象・削除対象を算出する処理を実装
   - 同一ユーザー×Organization単位で複数Collectionへの変更を集約する処理を実装
   - 複数グループに所属するユーザーが一部グループのみ脱退した場合、脱退したグループに対応するCollection権限のみを削除対象とし、継続所属グループに対応する権限は変更対象から除外する判定を実装
@@ -79,7 +92,7 @@
   - _Requirements: 5.1, 5.2, 5.3, 8.2_
   - _Boundary: PermissionDiffEngine_
 
-- [ ] 5. SyncOrchestrator実装による実行順序制御とdry-run分岐
+- [x] 5. SyncOrchestrator実装による実行順序制御とdry-run分岐
   - マッピング読込→Authentikグループメンバー取得→Vaultwarden現状取得→差分計算→（dry-runでなければ）適用（Confirm済み・未Confirm双方のメンバーへCollection権限PUTを送信する。未Confirm分はConfirm完了まで無効化されたまま保持され、Confirm検知後の再送処理は不要）→ Confirm待ちメンバー検出とDiscord通知キュー追加→ログ出力→Discord通知、の順序を制御する処理を実装
   - dry-runモード有効時はVaultwardenへの変更系API呼び出しを行わず、適用予定の変更内容（Confirm待ち含む）のみをログ出力する分岐を実装
   - 個別エラー（グループ不在・Collection不在・招待失敗）を記録し、他の正常な対象の処理を継続させる
@@ -87,7 +100,7 @@
   - _Requirements: 5.3, 6.1, 6.3, 6.4, 6.5, 7.1, 8.1, 9.1, 9.2_
   - _Boundary: SyncOrchestrator_
 
-- [ ] 6. (P) DiscordNotifier実装による実行結果通知
+- [x] 6. (P) DiscordNotifier実装による実行結果通知
   - 同期完了時に招待・更新・削除件数のサマリーを既存`DISCORD_OPS_WEBHOOK_URL`へ通知する処理を実装
   - Confirm待ちユーザーが1件以上存在する場合、サマリーにConfirm待ちユーザー数と対象メールアドレス一覧を含め、管理者がVaultwarden Web UIでConfirm操作を行うことを促すメッセージを追加する処理を実装
   - エラー発生時にエラー内容を通知する処理を実装
@@ -96,23 +109,24 @@
   - _Requirements: 11.1, 11.2, 11.3, 11.4_
   - _Boundary: DiscordNotifier_
 
-- [ ] 7. (P) SyncLockManager実装によるLease排他制御
+- [x] 7. (P) SyncLockManager実装によるLease排他制御
   - `kubectl`経由で固定名Lease（`vaultwarden-rbac-sync-lock`, namespace `prod`）の取得・解放処理を実装
   - Lease取得に失敗した場合、呼び出し元に取得失敗を返し同期処理を実行させない分岐を実装
   - 2プロセスが同時にLease取得を試みた際、片方のみ取得に成功することを確認できる（統合テスト）
   - _Requirements: 10.2, 13.3, 13.4_
   - _Boundary: SyncLockManager_
+  - **修正済み（2026-06-25、task 8実装時に発覚）**: 当初実装は`kubectl create --dry-run=client -o yaml | kubectl apply`だったが、`kubectl apply`は既存Lease相手でもresourceVersion不問のupsertで常に成功するため排他制御として機能していなかった（旧ユニットテストはこの実挙動と異なる失敗パターンをモックしており検出できなかった）。実APIへの`kubectl create`（既存時はAlreadyExistsで失敗）+ stale判定（`leaseDurationSeconds`超過時のみ`resourceVersion`を伴う`kubectl replace`で奪取）に変更し、release()もholderIdentity不一致時は削除をスキップするよう修正。テストもkubectl create/get/replace/deleteの実APIサーバー意味論を模倣するFakeLeaseStoreに置き換えた
 
-- [ ] 8. 実行エントリポイントへの統合
+- [x] 8. 実行エントリポイントへの統合
 
-- [ ] 8.1 CronJobエントリポイント統合とマニフェスト定義
+- [x] 8.1 CronJobエントリポイント統合とマニフェスト定義
   - `--mode=cron`起動時にLease取得→SyncOrchestrator実行（dry_run=False）→Lease解放の一連の流れを接続する
   - `schedule: "0 * * * *"`、`concurrencyPolicy: Forbid`、実行履歴上限を設定したKubernetes CronJobマニフェストを定義
   - CronJobを手動トリガーで起動した際、Lease取得から解放までの一連のログが出力されることを確認できる
   - _Requirements: 10.1, 10.2, 10.3_
   - _Depends: 5, 7_
 
-- [ ] 8.2 Trigger Receiver実装とDeployment/Service統合
+- [x] 8.2 Trigger Receiver実装とDeployment/Service統合
   - `POST /trigger`エンドポイントと`Authorization: Bearer`検証処理を実装
   - 検証成功時はLease取得を試行し、成功時はバックグラウンドでSyncOrchestratorを起動して即座に202を返し、Lease取得失敗時もログ記録の上202を返す分岐を実装
   - 常駐DeploymentとClusterIP Serviceのマニフェストを定義
@@ -121,9 +135,9 @@
   - _Requirements: 13.1, 13.2, 13.3, 13.4_
   - _Depends: 5, 7_
 
-- [ ] 9. Authentikイベント駆動トリガーのIaC実装
+- [x] 9. Authentikイベント駆動トリガーのIaC実装
 
-- [ ] 9.1 (P) ログイン時即時トリガーのExpression Policy実装
+- [x] 9.1 (P) ログイン時即時トリガーのExpression Policy実装
   - 既存`discord_group_sync`パターンを参考に、ログイン成功時にTrigger Receiverへリクエストを送信する`authentik_policy_expression`を実装
   - 対象ログインフローのUserLoginStageへ`authentik_policy_binding`で紐付ける
   - 呼び出し失敗時に例外を握り潰しログイン処理自体を継続させる
@@ -131,8 +145,10 @@
   - _Requirements: 13.1_
   - _Depends: 8.2_
   - _Boundary: LoginSyncTriggerPolicy_
+  - **実装メモ（2026-06-25）**: `discord_group_sync`が使う`client.do_request()`はOAuth Source専用コンテキストのみに存在するため使えず、代わりに全Expression Policyで標準提供される`requests`グローバル（authentik `BaseEvaluator`の`get_http_session()`）を使用。実環境API (`/api/v3/flows/bindings/?target=<flow_pk>`) で確認した3つのUserLoginStage binding（`default-authentication-flow`直接ログイン: `12ed7fd6-...`、`default-source-authentication`: `550f392f-...`、`default-source-enrollment`: `2ab74f9c-...`、後二者は既存discord_group_syncと共用）全てにバインドし、ログイン経路を問わず即時トリガーされることを保証。`terraform apply`済み・本番反映済み・full plan diff 0件確認済み。
+  - **既知のギャップ**: バインド先のTrigger Receiver (`vaultwarden-rbac-sync.prod.svc.cluster.local`) は本コミット時点でtask 4-8のDeployment/Service/CronJobがgit未コミットのため未デプロイ。ログイン時のPOSTは現状失敗するが例外握り潰しのためログイン自体への影響はない（fail-open）。
 
-- [ ] 9.2 (P) 管理者操作イベントWebhookの実装
+- [x] 9.2 (P) 管理者操作イベントWebhookの実装
   - Bearerトークンをヘッダに付与する`authentik_event_transport`を定義
   - グループメンバーシップ変更イベントのみを対象とする`authentik_policy_event_matcher`を定義
   - `authentik_event_rule`と`authentik_policy_binding`でMatcherとTransportを紐付ける
@@ -140,6 +156,7 @@
   - _Requirements: 13.1_
   - _Depends: 8.2_
   - _Boundary: GroupChangeWebhookRule_
+  - **実装メモ（2026-06-25）**: `app`/`model`の正確な値は`terraform providers schema -json`のenum一覧と実Events API実例（2026-06-25時点 `app="authentik.core"`, `model="authentik_core.group"`、action="model_updated"）で確認済み。**providerバグ回避**: `destination_group`未設定(null)のままだとレスポンスの`destination_group_obj`がnullになり、terraform-provider-authentik 2026.2.0のGoクライアントがネストオブジェクトデコードに失敗し`HTTP Error 'no value given for required property pk'`でcreate/import双方が失敗する実機確認済み不具合。`destination_group`に既存`管理者`グループを指定することで回避（管理者への可視化という副次的利点もある）。`destination_event_user=true`も設定し、NotificationRule.destination_users()が空になりWebhookが発火しない事態を防止。`terraform apply`済み・本番反映済み・full plan diff 0件確認済み。
 
 - [ ] 10. E2E検証とドリフト修復確認
 

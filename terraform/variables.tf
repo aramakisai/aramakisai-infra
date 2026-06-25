@@ -172,6 +172,13 @@ variable "mailserver_ldap_bind_password" {
   default     = ""
 }
 
+variable "vaultwarden_rbac_sync_trigger_token" {
+  description = "vaultwarden-rbac-sync Trigger Receiver共有ベアラートークン (Authentik側のExpression Policy/Webhookに埋め込む)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 # ============================================================
 # Observability SaaS (UptimeRobot / Healthchecks.io / Netdata Cloud)
 # ============================================================
