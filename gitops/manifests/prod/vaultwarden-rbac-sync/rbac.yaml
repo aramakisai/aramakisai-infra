@@ -1,7 +1,8 @@
 ---
 # vaultwarden-rbac-sync 専用 ServiceAccount
 # CronJob (--mode=cron) と Trigger Receiver Deployment (--mode=serve) の両方から使う。
-# Lease (vaultwarden-rbac-sync-lock) の get/create/update のみを許可する最小権限。
+# Lease (vaultwarden-rbac-sync-lock) の get/create/update/delete のみを許可する最小権限。
+# delete は release() が解放時に呼ぶため必須 (task 8実装時に既存rbac.yamlの不足を発見・追記)。
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -17,7 +18,7 @@ rules:
   - apiGroups: ["coordination.k8s.io"]
     resources: ["leases"]
     resourceNames: ["vaultwarden-rbac-sync-lock"]
-    verbs: ["get", "update"]
+    verbs: ["get", "update", "delete"]
   - apiGroups: ["coordination.k8s.io"]
     resources: ["leases"]
     verbs: ["create"]

@@ -1,0 +1,19 @@
+---
+# Trigger Receiver用 ClusterIP Service (Requirement 13.1)。
+# prod namespace内のAuthentik (LoginSyncTriggerPolicy/GroupChangeWebhookRule) からのみ到達される。
+# 外部公開はしない (design.md TriggerReceiver Implementation Notes参照)。
+apiVersion: v1
+kind: Service
+metadata:
+  name: vaultwarden-rbac-sync
+  namespace: prod
+  labels:
+    app: vaultwarden-rbac-sync
+spec:
+  type: ClusterIP
+  selector:
+    app: vaultwarden-rbac-sync
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080

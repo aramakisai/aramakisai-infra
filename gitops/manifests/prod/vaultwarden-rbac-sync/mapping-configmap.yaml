@@ -10,8 +10,22 @@
 # 判明したため、人間可読名での照合はできない。collection_id は Organization Owner/Admin が実ブラウザで
 # Web Vaultにログインし対象Collectionを開いて確認する (.kiro/steering/vaultwarden-rbac.md 参照)。
 # collection_label はレビュー用の任意コメントで、照合には使わない。
-# サンプルは .kiro/steering/vaultwarden-rbac.md の実例 (広報班の Twitter アカウント) に基づく
-# (collection_id は実環境確認前のプレースホルダー)。
+#
+# 実Authentikグループ構成 (2026-06-25, 管理用APIトークンでのGroup一覧取得により確認済み。
+# "Group "接頭辞付きの同名グループはProperty Mappingによる誤生成のゴミのため対象外):
+#   部門: 企画 / 会計 / 出店 / 出演 / 広報 / 総務
+#   全権限: 管理者 (既存) / リーダー (未作成、Authentik側で作成要)
+#   資格情報専用グループ: Googleアカウント (未作成、Authentik側で作成要)
+# Organizationは "荒牧祭実行委員会" の単一構成。Collectionは8件:
+#   部門名と1:1の6件 (企画/会計/出店/出演/広報/総務) + Googleアカウント専用 + 管理者専用。
+# 一般部門メンバー・Googleアカウントグループの権限は「can_use」(=can_view_except_passwords。
+# Autofill等で利用できるがパスワード平文の閲覧・コピーはできない。can_viewは使用しない方針)。
+# 管理者・リーダーは全8Collection (管理者専用Collection含む) に対しcan_manage。
+# 部門グループは管理者専用Collectionへのアクセス権を持たない。
+#
+# collection_id は実UUID反映済み (2026-06-25、Organization「荒牧祭実行委員会」と8Collection作成完了、
+# task 1.5の一部完了)。Authentikグループ`リーダー`/`Googleアカウント`の新規作成、および
+# `VAULTWARDEN_RBAC_SYNC_AUTHENTIK_API_TOKEN`への`authentik_core.view_group`権限付与は別途必要。
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -22,11 +36,165 @@ data:
     {
       "mappings": [
         {
+          "authentik_group": "企画",
+          "organization": "荒牧祭実行委員会",
+          "collection_id": "d725b442-c4b9-4496-81c4-79c72559c29d",
+          "collection_label": "企画",
+          "permission": "can_view_except_passwords"
+        },
+        {
+          "authentik_group": "会計",
+          "organization": "荒牧祭実行委員会",
+          "collection_id": "b3f10677-c55d-4f8d-a100-b1b9639900b8",
+          "collection_label": "会計",
+          "permission": "can_view_except_passwords"
+        },
+        {
+          "authentik_group": "出店",
+          "organization": "荒牧祭実行委員会",
+          "collection_id": "f8007e39-eb90-471d-9a1a-972b9023f530",
+          "collection_label": "出店",
+          "permission": "can_view_except_passwords"
+        },
+        {
+          "authentik_group": "出演",
+          "organization": "荒牧祭実行委員会",
+          "collection_id": "739bc07a-3c94-45ff-88fb-5d698794fd30",
+          "collection_label": "出演",
+          "permission": "can_view_except_passwords"
+        },
+        {
           "authentik_group": "広報",
-          "organization": "SNSアカウント",
-          "collection_id": "00000000-0000-0000-0000-000000000000",
+          "organization": "荒牧祭実行委員会",
+          "collection_id": "5caf6a25-eadd-4bf7-856b-7c05bb53e9df",
           "collection_label": "広報",
-          "permission": "can_view"
+          "permission": "can_view_except_passwords"
+        },
+        {
+          "authentik_group": "総務",
+          "organization": "荒牧祭実行委員会",
+          "collection_id": "044ac654-3142-47b8-9021-a7f9998a31c7",
+          "collection_label": "総務",
+          "permission": "can_view_except_passwords"
+        },
+        {
+          "authentik_group": "Googleアカウント",
+          "organization": "荒牧祭実行委員会",
+          "collection_id": "99872f8c-bbd9-4ef4-aad0-93ac27e81793",
+          "collection_label": "Googleアカウント",
+          "permission": "can_view_except_passwords"
+        },
+        {
+          "authentik_group": "管理者",
+          "organization": "荒牧祭実行委員会",
+          "collection_id": "d725b442-c4b9-4496-81c4-79c72559c29d",
+          "collection_label": "企画",
+          "permission": "can_manage"
+        },
+        {
+          "authentik_group": "管理者",
+          "organization": "荒牧祭実行委員会",
+          "collection_id": "b3f10677-c55d-4f8d-a100-b1b9639900b8",
+          "collection_label": "会計",
+          "permission": "can_manage"
+        },
+        {
+          "authentik_group": "管理者",
+          "organization": "荒牧祭実行委員会",
+          "collection_id": "f8007e39-eb90-471d-9a1a-972b9023f530",
+          "collection_label": "出店",
+          "permission": "can_manage"
+        },
+        {
+          "authentik_group": "管理者",
+          "organization": "荒牧祭実行委員会",
+          "collection_id": "739bc07a-3c94-45ff-88fb-5d698794fd30",
+          "collection_label": "出演",
+          "permission": "can_manage"
+        },
+        {
+          "authentik_group": "管理者",
+          "organization": "荒牧祭実行委員会",
+          "collection_id": "5caf6a25-eadd-4bf7-856b-7c05bb53e9df",
+          "collection_label": "広報",
+          "permission": "can_manage"
+        },
+        {
+          "authentik_group": "管理者",
+          "organization": "荒牧祭実行委員会",
+          "collection_id": "044ac654-3142-47b8-9021-a7f9998a31c7",
+          "collection_label": "総務",
+          "permission": "can_manage"
+        },
+        {
+          "authentik_group": "管理者",
+          "organization": "荒牧祭実行委員会",
+          "collection_id": "99872f8c-bbd9-4ef4-aad0-93ac27e81793",
+          "collection_label": "Googleアカウント",
+          "permission": "can_manage"
+        },
+        {
+          "authentik_group": "リーダー",
+          "organization": "荒牧祭実行委員会",
+          "collection_id": "d725b442-c4b9-4496-81c4-79c72559c29d",
+          "collection_label": "企画",
+          "permission": "can_manage"
+        },
+        {
+          "authentik_group": "リーダー",
+          "organization": "荒牧祭実行委員会",
+          "collection_id": "b3f10677-c55d-4f8d-a100-b1b9639900b8",
+          "collection_label": "会計",
+          "permission": "can_manage"
+        },
+        {
+          "authentik_group": "リーダー",
+          "organization": "荒牧祭実行委員会",
+          "collection_id": "f8007e39-eb90-471d-9a1a-972b9023f530",
+          "collection_label": "出店",
+          "permission": "can_manage"
+        },
+        {
+          "authentik_group": "リーダー",
+          "organization": "荒牧祭実行委員会",
+          "collection_id": "739bc07a-3c94-45ff-88fb-5d698794fd30",
+          "collection_label": "出演",
+          "permission": "can_manage"
+        },
+        {
+          "authentik_group": "リーダー",
+          "organization": "荒牧祭実行委員会",
+          "collection_id": "5caf6a25-eadd-4bf7-856b-7c05bb53e9df",
+          "collection_label": "広報",
+          "permission": "can_manage"
+        },
+        {
+          "authentik_group": "リーダー",
+          "organization": "荒牧祭実行委員会",
+          "collection_id": "044ac654-3142-47b8-9021-a7f9998a31c7",
+          "collection_label": "総務",
+          "permission": "can_manage"
+        },
+        {
+          "authentik_group": "リーダー",
+          "organization": "荒牧祭実行委員会",
+          "collection_id": "99872f8c-bbd9-4ef4-aad0-93ac27e81793",
+          "collection_label": "Googleアカウント",
+          "permission": "can_manage"
+        },
+        {
+          "authentik_group": "管理者",
+          "organization": "荒牧祭実行委員会",
+          "collection_id": "7888899c-aa76-48e9-842f-a15899cfd2cd",
+          "collection_label": "管理者",
+          "permission": "can_manage"
+        },
+        {
+          "authentik_group": "リーダー",
+          "organization": "荒牧祭実行委員会",
+          "collection_id": "7888899c-aa76-48e9-842f-a15899cfd2cd",
+          "collection_label": "管理者",
+          "permission": "can_manage"
         }
       ]
     }
