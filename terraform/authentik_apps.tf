@@ -15,9 +15,12 @@ resource "authentik_property_mapping_provider_scope" "oauth_scope_groups" {
 # 1. Roundcube (Webmail) - 既存インポート
 # ────────────────────────────────────────────────────────────
 
-# Roundcube 専用 email mapping: ML グループの mail 属性を優先して返す。
-# 部署グループ (pr/planning/ accounting/booth/stage/general-affairs) > 管理者 (admin)。
-# 複数部署所属時は最初に見つかったものを採用（重複は運用でカバー）。
+# Roundcube 専用 email mapping: IMAP identity を ML 共有メールボックスにルーティングする。
+#
+# 優先度: 部署グループ > 管理者 (admin) > 個人メール
+#
+# leader グループは部署所属が前提のため IMAP identity は部署アドレスのまま。
+# 部署リーダーの全 Shared/* アクセスは acl_groups 経由（mail_acl_groups scope）で解決する。
 resource "authentik_property_mapping_provider_scope" "oauth_scope_email_roundcube" {
   name       = "Roundcube: OpenID 'email' with ML group priority"
   scope_name = "email"
@@ -49,6 +52,26 @@ resource "authentik_property_mapping_provider_scope" "oauth_scope_email_roundcub
   EOT
 }
 
+# Roundcube 専用 mail_acl_groups scope:
+# ログインユーザーの現在のグループ所属から mailAclSlug を動的に計算して返す。
+# discord-group-sync-policy のキャッシュ値に依存せず常に最新のグループ所属を反映する。
+# Dovecot oauth2 passdb が introspection レスポンスからこの値を取得し、
+# DOVECOT_USER_ATTRS の %{passdb:mailAclGroups} 経由で acl_groups に注入する。
+# これにより ml-* の共有 LDAP 属性ではなく per-user のグループ所属が ACL に反映される。
+resource "authentik_property_mapping_provider_scope" "oauth_scope_mail_acl_groups" {
+  name       = "Roundcube: mail_acl_groups for Dovecot ACL"
+  scope_name = "mail_acl_groups"
+  expression = <<-EOT
+    return {
+        "mailAclGroups": ",".join(sorted({
+            g.attributes.get("mailAclSlug")
+            for g in request.user.groups.all()
+            if g.attributes.get("mailAclSlug")
+        }))
+    }
+  EOT
+}
+
 resource "authentik_provider_oauth2" "roundcube" {
   name          = "Roundcube"
   client_id     = "aramakisai-mail"
@@ -68,7 +91,8 @@ resource "authentik_provider_oauth2" "roundcube" {
   property_mappings = [
     data.authentik_property_mapping_provider_scope.oauth_scope_openid.id,
     authentik_property_mapping_provider_scope.oauth_scope_email_roundcube.id,
-    data.authentik_property_mapping_provider_scope.oauth_scope_profile.id
+    data.authentik_property_mapping_provider_scope.oauth_scope_profile.id,
+    authentik_property_mapping_provider_scope.oauth_scope_mail_acl_groups.id,
   ]
 }
 

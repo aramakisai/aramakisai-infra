@@ -35,7 +35,7 @@ data:
     $config['oauth_auth_uri'] = 'https://idp.aramakisai.com/application/o/authorize/';
     $config['oauth_token_uri'] = 'https://idp.aramakisai.com/application/o/token/';
     $config['oauth_identity_uri'] = 'https://idp.aramakisai.com/application/o/userinfo/';
-    $config['oauth_scope'] = 'openid email profile offline_access';
+    $config['oauth_scope'] = 'openid email profile offline_access mail_acl_groups';
     $config['oauth_identity_fields'] = ['email'];
     $config['oauth_login_redirect'] = true;
     // Authentik は HTTP Basic Auth でクライアント認証する (client_secret_post は拒否される)
@@ -52,5 +52,9 @@ data:
     $config['smtp_conn_options'] = [
         'ssl' => ['verify_peer' => false, 'verify_peer_name' => false],
     ];
+
+    // Dovecot shared namespace は subscriptions=no のため LSUB が空になる。
+    // Roundcube を LIST 強制にしてフォルダを表示させる。
+    $config['imap_force_list'] = true;
 
     $config['product_name'] = '荒牧祭 Webmail';
