@@ -116,6 +116,20 @@ resource "authentik_application" "cloudflare" {
 # ────────────────────────────────────────────────────────────
 # 4. Vaultwarden - 新規作成
 # ────────────────────────────────────────────────────────────
+
+# Vaultwardenはemail_verified=trueを要求するが、Authentikデフォルトmappingが
+# falseを返すケースがあるため、強制的にTrueを返す専用mappingを使用。
+resource "authentik_property_mapping_provider_scope" "oauth_scope_email_vaultwarden" {
+  name       = "Vaultwarden: OpenID 'email' with verified"
+  scope_name = "email"
+  expression = <<-EOT
+    return {
+      "email": request.user.email,
+      "email_verified": True,
+    }
+  EOT
+}
+
 resource "authentik_provider_oauth2" "vaultwarden" {
   name          = "Vaultwarden"
   client_id     = "vaultwarden"
@@ -134,7 +148,7 @@ resource "authentik_provider_oauth2" "vaultwarden" {
 
   property_mappings = [
     data.authentik_property_mapping_provider_scope.oauth_scope_openid.id,
-    data.authentik_property_mapping_provider_scope.oauth_scope_email.id,
+    authentik_property_mapping_provider_scope.oauth_scope_email_vaultwarden.id,
     data.authentik_property_mapping_provider_scope.oauth_scope_profile.id,
     authentik_property_mapping_provider_scope.oauth_scope_groups.id
   ]
