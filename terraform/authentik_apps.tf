@@ -14,6 +14,41 @@ resource "authentik_property_mapping_provider_scope" "oauth_scope_groups" {
 # ────────────────────────────────────────────────────────────
 # 1. Roundcube (Webmail) - 既存インポート
 # ────────────────────────────────────────────────────────────
+
+# Roundcube 専用 email mapping: ML グループの mail 属性を優先して返す。
+# 部署グループ (pr/planning/ accounting/booth/stage/general-affairs) > 管理者 (admin)。
+# 複数部署所属時は最初に見つかったものを採用（重複は運用でカバー）。
+resource "authentik_property_mapping_provider_scope" "oauth_scope_email_roundcube" {
+  name       = "Roundcube: OpenID 'email' with ML group priority"
+  scope_name = "email"
+  expression = <<-EOT
+    groups = request.user.groups.all()
+    dept_mails = []
+    admin_mail = None
+
+    for g in groups:
+        mail_attr = g.attributes.get("mail", None)
+        if mail_attr:
+            # mail 属性は string または list の可能性がある
+            if isinstance(mail_attr, list):
+                mail = mail_attr[0]
+            else:
+                mail = mail_attr
+
+            # 管理者グループは優先度最低（部署グループが無い場合のみフォールバック）
+            if g.name == "admin" or (isinstance(mail, str) and mail.startswith("admin@")):
+                admin_mail = mail
+            else:
+                dept_mails.append(mail)
+
+    email = dept_mails[0] if dept_mails else (admin_mail if admin_mail else request.user.email)
+
+    return {
+        "email": email,
+    }
+  EOT
+}
+
 resource "authentik_provider_oauth2" "roundcube" {
   name          = "Roundcube"
   client_id     = "aramakisai-mail"
@@ -32,7 +67,7 @@ resource "authentik_provider_oauth2" "roundcube" {
 
   property_mappings = [
     data.authentik_property_mapping_provider_scope.oauth_scope_openid.id,
-    data.authentik_property_mapping_provider_scope.oauth_scope_email.id,
+    authentik_property_mapping_provider_scope.oauth_scope_email_roundcube.id,
     data.authentik_property_mapping_provider_scope.oauth_scope_profile.id
   ]
 }
