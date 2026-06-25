@@ -62,8 +62,12 @@ resource "authentik_property_mapping_provider_scope" "oauth_scope_mail_acl_group
   name       = "Roundcube: mail_acl_groups for Dovecot ACL"
   scope_name = "mail_acl_groups"
   expression = <<-EOT
+    # Dovecot: passdb extra field が "userdb_xxx" 名の場合、userdb フィールド "xxx" として
+    # 自動注入される。oauth2 passdb は introspection レスポンスの全フィールドを
+    # passdb extra として保持するため、"userdb_acl_groups" を返すだけで
+    # Dovecot の acl_groups に反映される。LDAP user_attrs への依存不要。
     return {
-        "mailAclGroups": ",".join(sorted({
+        "userdb_acl_groups": ",".join(sorted({
             g.attributes.get("mailAclSlug")
             for g in request.user.groups.all()
             if g.attributes.get("mailAclSlug")
