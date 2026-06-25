@@ -103,8 +103,11 @@ spec:
             # mailAclGroups (所属MLグループの mailAclSlug をASCIIカンマ区切りにした単一値) を
             # Dovecot ACL plugin が参照する acl_groups extra field へマッピングする。
             # 旧 memberOf=acl_groups は多値潰れ + DNカンマ衝突で無効だったため是正 (research.md参照)
+            # 2026-06-26: auth_username_format 削除により %d がユーザーの入力ドメイン (gmail.com 等)
+            # に展開されるようになった。メールボックスは aramakisai.com 配下に統一しているため
+            # %d の代わりに静的に aramakisai.com を指定する。
             - name: DOVECOT_USER_ATTRS
-              value: "=uid=5000,=gid=5000,=home=/var/mail/%d/%n,=mail=maildir:/var/mail/%d/%n,mailAclGroups=acl_groups"
+              value: "=uid=5000,=gid=5000,=home=/var/mail/aramakisai.com/%n,=mail=maildir:/var/mail/aramakisai.com/%n,mailAclGroups=acl_groups"
             # Roundcube OAuth2 クライアントシークレット (OAUTHBEARER introspection 用)
             - name: MAIL_OAUTH2_CLIENT_SECRET
               valueFrom:
