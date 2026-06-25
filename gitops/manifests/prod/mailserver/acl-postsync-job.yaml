@@ -1,0 +1,54 @@
+---
+# Dovecot ACL 更新 PostSync Job
+# 部門グループ・管理者・リーダーの共有メールボックスアクセス権を
+# メールボックス単位の dovecot-acl ファイルに冪等追加する。
+# ArgoCD PostSync フックとして実行される。
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: mailserver-acl-update
+  namespace: prod
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: HookSucceeded
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      nodeSelector:
+        kubernetes.io/hostname: prod-node-1
+      containers:
+        - name: acl-update
+          image: mailserver/docker-mailserver:14.0.0
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              BASE="/var/mail/aramakisai.com"
+              # 各共有メールボックスに leader と admin のアクセス権を追加
+              for box in planning accounting booth stage pr admin general-affairs; do
+                ACL_FILE="$BASE/$box/dovecot-acl"
+                if [ -f "$ACL_FILE" ]; then
+                  # leader が未設定なら追加
+                  if ! grep -q "^group=leader " "$ACL_FILE"; then
+                    echo "group=leader lrws" >> "$ACL_FILE"
+                    echo "[+] Added leader ACL to $box"
+                  fi
+                  # admin が未設定なら追加
+                  if ! grep -q "^group=admin " "$ACL_FILE"; then
+                    echo "group=admin lrws" >> "$ACL_FILE"
+                    echo "[+] Added admin ACL to $box"
+                  fi
+                else
+                  echo "[!] ACL file not found: $ACL_FILE"
+                  exit 1
+                fi
+              done
+              echo "[*] ACL update complete"
+          volumeMounts:
+            - name: data
+              mountPath: /var/mail
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: mailserver-data
