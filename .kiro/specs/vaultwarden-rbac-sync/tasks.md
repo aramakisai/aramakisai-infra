@@ -10,9 +10,9 @@
   - _Boundary: RbacSyncSecrets_
 
 - [x] 1.2 (P) マッピング設定ConfigMapのスキーマ実装と検証ロジック構築
-  - `mapping.json`構造（`authentik_group`/`organization`/`collection`/`permission`の配列、1グループが複数エントリを持てる）を定義
+  - `mapping.json`構造（`authentik_group`/`organization`/`collection_id`/`permission`必須＋`collection_label`任意の配列、1グループが複数エントリを持てる）を定義（**設計変更**: Collection名はOrg鍵でクライアント暗号化されたCipherStringのためAPI照合不可と実機検証で判明し、`collection`(名前)から`collection_id`(UUID直接指定)に変更。research.md「Vaultwarden Collection名はOrg鍵でクライアント暗号化される」参照）
   - 構文不正・必須フィールド欠落・未知の`permission`値を検出するロード時検証ロジックを実装
-  - サンプルマッピング（広報→SNSアカウント→広報→`can_view`等、`vaultwarden-rbac.md`の実例に基づく）をGitOps ConfigMapとして投入
+  - サンプルマッピング（広報→SNSアカウント→`collection_id`（プレースホルダー）→`can_view`等、`vaultwarden-rbac.md`の実例に基づく）をGitOps ConfigMapとして投入。実Collection IDの反映はtask 1.5（人手作業）
   - 不正なマッピングを与えた場合に検証エラーが返り、正常なマッピングは全件ロードされることを確認できる
   - _Requirements: 4.1, 4.2, 4.3, 4.4_
   - _Boundary: MappingConfigLoader, RbacMappingConfigMap_
@@ -29,6 +29,14 @@
   - `--mode=cron`で起動すると指定したモード名がログに記録され正常終了することを確認できる
   - _Requirements: 10.1_
 
+- [ ] 1.5 (人手・Claude実行不可) 実Collection IDの確認とmapping.json反映
+  - Organization Owner/Adminが実ブラウザでWeb Vaultにログインし、対象Organization内の対象Collectionを開いてCollection ID (UUID) を確認する（Collection名はOrg鍵でクライアント暗号化されたCipherStringのため、API/CLI/Claudeでは解決不可能。research.md「Vaultwarden Collection名はOrg鍵でクライアント暗号化される」参照）
+  - 確認したUUIDを`mapping-configmap.yaml`の該当エントリの`collection_id`へ反映する（現状はプレースホルダー値`00000000-0000-0000-0000-000000000000`）
+  - `mapping.json`の全エントリの`collection_id`が対象Organizationに実在するCollectionを指していることを確認できる
+  - _Requirements: 4.1, 4.4_
+  - _Boundary: RbacMappingConfigMap_
+  - _Note: 実ブラウザでのマスターパスワード復号操作が必須なため、Claudeはこのタスクを代行できない。サービスアカウント初回ブートストラップ（`.kiro/steering/vaultwarden-rbac.md`）と合わせて人手で実施する_
+
 - [x] 2. (P) AuthentikGroupClient実装によるグループメンバーシップ取得
   - 専用Authentik APIトークン（`PRESENCE_AUTHENTIK_API_TOKEN`パターン踏襲）での認証処理を実装
   - グループ名からメンバーのメールアドレス一覧を取得する処理を実装
@@ -37,23 +45,23 @@
   - _Requirements: 1.1, 1.2, 1.3, 1.4_
   - _Boundary: AuthentikGroupClient_
 
-- [ ] 3. VaultwardenOrgClient実装によるAPI連携
+- [x] 3. VaultwardenOrgClient実装によるAPI連携
 
-- [ ] 3.1 (P) サービスアカウント認証によるアクセストークン取得実装
+- [x] 3.1 (P) サービスアカウント認証によるアクセストークン取得実装
   - `client_id=user.<uuid>`のPersonal API Keyを用いたclient_credentials grantでの`/identity/connect/token`呼び出しを実装
   - 認証失敗時に例外を投げる分岐を実装
   - 有効なサービスアカウント認証情報でアクセストークンが取得できることを確認できる（検証環境での統合テスト）
   - _Requirements: 2.1, 2.2, 2.3, 2.4_
   - _Boundary: VaultwardenOrgClient_
 
-- [ ] 3.2 Organization/Collection/メンバー現状取得実装
+- [x] 3.2 Organization/Collection/メンバー現状取得実装
   - `GET /api/organizations`、`GET /api/organizations/{orgId}/users`、`GET /api/organizations/{orgId}/collections`を呼び出す処理を実装
   - マッピング設定が参照するCollectionが対象Organizationに存在しない場合、当該マッピングのみエラー記録して継続する分岐を実装
   - 対象Organizationの現メンバー一覧（メール・メンバーID・現在のCollection権限）とCollection一覧が取得できることを確認できる
   - _Requirements: 3.1, 3.2, 3.3_
   - _Boundary: VaultwardenOrgClient_
 
-- [ ] 3.3 招待・Collection権限更新・削除の適用実装（Confirm待ち検出含む）
+- [x] 3.3 招待・Collection権限更新・削除の適用実装（Confirm待ち検出含む）
   - `POST /api/organizations/{orgId}/users/invite`による招待処理を実装
   - メンバー一覧取得時に`status`フィールドを確認し、`invited`（未Confirm）メンバーを`confirm_pending`リストへ追加する処理を実装（**検証済み**: `PUT`は`status`に関わらず常に成功しDBへ保存されるが、Vaultwarden側で`status=Confirmed`になるまでCollection権限は有効化されない。そのためPUT自体はスキップせず、Confirm待ち検出はDiscord通知判定のみに用いる）
   - `PUT /api/organizations/{orgId}/users/{memberId}`によるCollection権限更新処理を実装し、フルリプレースAPIであることを踏まえマッピング対象外のCollection権限は現状値を保持してマージする（未Confirmメンバーにも送信してよい。Confirm後に自動有効化される）

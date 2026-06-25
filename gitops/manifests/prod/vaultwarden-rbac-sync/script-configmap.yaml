@@ -24,13 +24,14 @@ data:
     from dataclasses import dataclass
     from urllib.error import HTTPError, URLError
     from urllib.parse import quote as url_quote
+    from urllib.parse import urlencode
     from urllib.request import Request, urlopen
 
     LOGGER_NAME = "vaultwarden-rbac-sync"
 
     VALID_PERMISSIONS = ("can_view", "can_view_except_passwords", "can_edit", "can_manage")
 
-    REQUIRED_MAPPING_FIELDS = ("authentik_group", "organization", "collection", "permission")
+    REQUIRED_MAPPING_FIELDS = ("authentik_group", "organization", "collection_id", "permission")
 
 
     class MappingConfigError(Exception):
@@ -39,10 +40,19 @@ data:
 
     @dataclass(frozen=True)
     class MappingEntry:
+        """Vaultwarden Collection は collection_id (UUID) で直接指定する。
+
+        Collection名はOrganization鍵でクライアント側暗号化されたCipherStringとしてのみ
+        APIから取得できるため、人間可読名での照合は原理的に成立しない
+        (research.md「Vaultwarden Collection名はOrg鍵でクライアント暗号化される」、実機検証済み)。
+        collection_label はレビュー用の任意コメントであり、照合には使わない。
+        """
+
         authentik_group: str
         organization: str
-        collection: str
+        collection_id: str
         permission: str
+        collection_label: str | None = None
 
 
     def load_mapping(raw_json: str) -> list[MappingEntry]:
@@ -79,8 +89,9 @@ data:
                 MappingEntry(
                     authentik_group=raw_entry["authentik_group"],
                     organization=raw_entry["organization"],
-                    collection=raw_entry["collection"],
+                    collection_id=raw_entry["collection_id"],
                     permission=permission,
+                    collection_label=raw_entry.get("collection_label"),
                 )
             )
         return entries
@@ -147,6 +158,260 @@ data:
                 if user.get("email")
             ]
             return GroupMembersResult(group_name, member_emails, None)
+
+
+    class VaultwardenApiError(Exception):
+        """Vaultwarden API呼び出しが失敗した場合の基底例外。"""
+
+
+    class VaultwardenAuthError(VaultwardenApiError):
+        """アクセストークン取得に失敗した場合に発生する (Requirement 2.3)。
+
+        呼び出し元 (SyncOrchestrator) に伝播し、同期処理全体を中断させる。
+        """
+
+
+    class VaultwardenOrgClient:
+        """Vaultwardenサービスアカウント認証・Organization/Collection操作クライアント (Requirement 2, 3, 6, 7, 8)。
+
+        専用サービスアカウントのUser Personal API Key (client_id=user.<uuid>) で
+        client_credentials grantのアクセストークンを取得する。
+        """
+
+        def __init__(self, base_url: str, client_id: str, client_secret: str, timeout: float = 10.0):
+            self._base_url = base_url.rstrip("/")
+            self._client_id = client_id
+            self._client_secret = client_secret
+            self._timeout = timeout
+            self._access_token: str | None = None
+
+        def authenticate(self) -> str:
+            """Personal API Key (client_credentials grant, scope=api) でアクセストークンを取得する (2.1, 2.2)。
+
+            認証失敗時 (HTTPエラー・タイムアウト・access_token欠落) はVaultwardenAuthErrorを
+            投げ、同期処理全体を中断させる (2.3)。
+            """
+            body = urlencode(
+                {
+                    "grant_type": "client_credentials",
+                    "client_id": self._client_id,
+                    "client_secret": self._client_secret,
+                    "scope": "api",
+                }
+            ).encode("utf-8")
+            request = Request(
+                f"{self._base_url}/identity/connect/token",
+                data=body,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+            try:
+                with urlopen(request, timeout=self._timeout) as response:
+                    payload = json.loads(response.read())
+            except HTTPError as exc:
+                raise VaultwardenAuthError(f"Vaultwarden認証に失敗しました: HTTP {exc.code}") from exc
+            except (URLError, TimeoutError) as exc:
+                raise VaultwardenAuthError(f"Vaultwarden認証呼び出しに失敗しました: {exc}") from exc
+
+            access_token = payload.get("access_token")
+            if not access_token:
+                raise VaultwardenAuthError("Vaultwarden認証レスポンスにaccess_tokenが含まれていません")
+
+            self._access_token = access_token
+            return access_token
+
+        def _request_json(self, method: str, path: str, body: dict | None = None) -> dict:
+            data = json.dumps(body).encode("utf-8") if body is not None else None
+            headers = {"Authorization": f"Bearer {self._access_token}"}
+            if data is not None:
+                headers["Content-Type"] = "application/json"
+            request = Request(f"{self._base_url}{path}", data=data, headers=headers, method=method)
+            try:
+                with urlopen(request, timeout=self._timeout) as response:
+                    raw = response.read()
+            except HTTPError as exc:
+                raise VaultwardenApiError(
+                    f"Vaultwarden APIエラー ({method} {path}): HTTP {exc.code}"
+                ) from exc
+            except (URLError, TimeoutError) as exc:
+                raise VaultwardenApiError(
+                    f"Vaultwarden API呼び出しに失敗しました ({method} {path}): {exc}"
+                ) from exc
+            return json.loads(raw) if raw else {}
+
+        def list_organizations(self) -> list["Organization"]:
+            """Vaultwarden上の全Organization一覧を取得する (Requirement 3.1)。"""
+            payload = self._request_json("GET", "/api/organizations")
+            return [Organization(org["id"], org["name"]) for org in payload.get("data", [])]
+
+        def get_org_state(self, org_id: str) -> "OrgState":
+            """対象Organizationのメンバー一覧・Collection一覧を取得する (Requirement 3.1, 3.2)。"""
+            users_payload = self._request_json("GET", f"/api/organizations/{org_id}/users")
+            collections_payload = self._request_json("GET", f"/api/organizations/{org_id}/collections")
+
+            members = [
+                Member(
+                    member_id=user["id"],
+                    email=user["email"],
+                    member_type=user["type"],
+                    status=user["status"],
+                    collections=[
+                        CollectionGrant(c["id"], c["readOnly"], c["hidePasswords"], c["manage"])
+                        for c in (user.get("collections") or [])
+                    ],
+                )
+                for user in users_payload.get("data", [])
+            ]
+            collections = [
+                Collection(c["id"], c.get("name", "")) for c in collections_payload.get("data", [])
+            ]
+            return OrgState(members=members, collections=collections)
+
+        def resolve_mapping_collection(self, org_state: "OrgState", collection_id: str) -> str | None:
+            """mapping.jsonのcollection_idが対象Organizationに実在するか検証する (Requirement 3.3)。
+
+            Collection名は暗号化CipherStringのためname照合はできない (research.md参照)。
+            存在する場合はcollection_idをそのまま返し、存在しない場合はNoneを返す
+            (呼び出し元で当該マッピングのみエラー記録し処理を継続する)。
+            """
+            valid_ids = {c.collection_id for c in org_state.collections}
+            return collection_id if collection_id in valid_ids else None
+
+        def invite_member(
+            self, org_id: str, email: str, member_type: int, collections: list["CollectionGrant"]
+        ) -> None:
+            """ユーザーをOrganizationへ招待する (Requirement 6.1, 6.2)。
+
+            招待と同時にCollection権限を指定できる (Confirm完了まで有効化されない、design.md参照)。
+            招待失敗時はVaultwardenApiErrorを投げ、呼び出し元 (SyncOrchestrator) が当該ユーザーのみ
+            エラー記録し他のユーザーの処理を継続する (6.3)。
+            """
+            body = {
+                "emails": [email],
+                "type": member_type,
+                "collections": [_collection_grant_to_payload(c) for c in collections],
+                "groups": [],
+            }
+            self._request_json("POST", f"/api/organizations/{org_id}/users/invite", body=body)
+
+        def put_member_collections(
+            self, org_id: str, member_id: str, member_type: int, collections: list["CollectionGrant"]
+        ) -> None:
+            """対象メンバーのCollection権限配列をフルリプレースで更新する (Requirement 7.1, 7.2)。
+
+            未Confirmメンバーにも送信してよい (Confirm完了の瞬間に自動的に有効化される、design.md参照)。
+            typeには対象メンバーの現在のtypeをそのまま再送する (Requirement 7.3)。サービスアカウントは
+            Admin止まりのため、type変更を伴うPUTは権限昇格ガードにより403になる。
+            """
+            body = {
+                "type": member_type,
+                "collections": [_collection_grant_to_payload(c) for c in collections],
+                "groups": [],
+            }
+            self._request_json("PUT", f"/api/organizations/{org_id}/users/{member_id}", body=body)
+
+
+    @dataclass(frozen=True)
+    class Organization:
+        org_id: str
+        name: str
+
+
+    @dataclass(frozen=True)
+    class CollectionGrant:
+        collection_id: str
+        read_only: bool
+        hide_passwords: bool
+        manage: bool
+
+
+    @dataclass(frozen=True)
+    class Collection:
+        # name はOrganization鍵でクライアント暗号化されたCipherStringのまま保持する。照合・表示には使わない。
+        collection_id: str
+        name: str
+
+
+    @dataclass(frozen=True)
+    class Member:
+        member_id: str
+        email: str
+        member_type: int
+        status: int
+        collections: list[CollectionGrant]
+
+
+    @dataclass(frozen=True)
+    class OrgState:
+        members: list[Member]
+        collections: list[Collection]
+
+
+    # 実機検証済み (research.md「Confirm前のPUTの実際の挙動」、Bitwarden公開APIのMembershipStatus enumと一致):
+    # Invited=0, Accepted=1, Confirmed=2, Revoked=-1。Confirmed以外は全てConfirm待ち通知の対象とする (6.5)。
+    VAULTWARDEN_STATUS_CONFIRMED = 2
+
+    PERMISSION_TO_COLLECTION_FLAGS = {
+        "can_view": (True, False, False),
+        "can_view_except_passwords": (True, True, False),
+        "can_edit": (False, False, False),
+        "can_manage": (False, False, True),
+    }
+
+
+    def permission_to_collection_grant(collection_id: str, permission: str) -> CollectionGrant:
+        """mapping.jsonの権限レベル(4種別)をVaultwardenのCollectionData形式に変換する。
+
+        対応表 (research.md Data Contracts参照):
+        can_view -> readOnly/hidePasswords/manage = True/False/False
+        can_view_except_passwords -> True/True/False
+        can_edit -> False/False/False
+        can_manage -> False/False/True
+        """
+        read_only, hide_passwords, manage = PERMISSION_TO_COLLECTION_FLAGS[permission]
+        return CollectionGrant(collection_id, read_only, hide_passwords, manage)
+
+
+    def merge_collection_grants(
+        current_grants: list[CollectionGrant], desired_grants: list[CollectionGrant]
+    ) -> list[CollectionGrant]:
+        """現状のCollection権限とマッピングに基づく変更をマージする (Requirement 7.1, 7.2)。
+
+        PUTはフルリプレースAPIのため、マッピング対象外のCollection権限は現状値のまま保持し、
+        マッピング対象のCollectionのみ上書き・新規追加する (意図しない権限欠落を防ぐ、research.md参照)。
+        """
+        merged = {grant.collection_id: grant for grant in current_grants}
+        for grant in desired_grants:
+            merged[grant.collection_id] = grant
+        return list(merged.values())
+
+
+    def remove_collection_grants(
+        current_grants: list[CollectionGrant], collection_ids_to_remove: set[str]
+    ) -> list[CollectionGrant]:
+        """グループ脱退に対応するCollection権限のみを除去する (Requirement 8.1, 8.2, 8.3)。
+
+        指定外のCollection権限は変更しない。Organizationからの除名は行わない
+        (呼び出し元はput_member_collectionsで結果を送信するのみで、メンバー自体は削除しない)。
+        """
+        return [grant for grant in current_grants if grant.collection_id not in collection_ids_to_remove]
+
+
+    def filter_confirm_pending(members: list[Member]) -> list[Member]:
+        """招待済みだが未Confirmのメンバーを抽出する (Requirement 6.5)。
+
+        Discord通知 (Confirm待ち一覧) の判定にのみ使う。PUT送信のスキップ判定には使わない
+        (未ConfirmメンバーへのPUTはスキップ不要、design.md参照)。
+        """
+        return [member for member in members if member.status != VAULTWARDEN_STATUS_CONFIRMED]
+
+
+    def _collection_grant_to_payload(grant: CollectionGrant) -> dict:
+        return {
+            "id": grant.collection_id,
+            "readOnly": grant.read_only,
+            "hidePasswords": grant.hide_passwords,
+            "manage": grant.manage,
+        }
 
 
     def configure_logging() -> None:
