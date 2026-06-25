@@ -48,9 +48,6 @@ data:
       args = /etc/dovecot/dovecot-oauth2.conf.ext
     }
 
-    # ユーザー名のみでのIMAP/SMTP AUTHログインを許可 (フルアドレス入力にも後方互換)
-    auth_username_format = %n@aramakisai.com  # confidential:allow
-
     plugin {
       acl = vfile
     }
