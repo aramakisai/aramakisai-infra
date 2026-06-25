@@ -100,10 +100,11 @@ spec:
             # Authentik LDAP は mailUidNumber/mailGidNumber/mailHomeDirectory を持たないため
             # UID/GID に docker(5000) を使い、メールパスを静的に指定する
             # acl_groups は LDAP user_attrs に含めない。
-            # oauth2 passdb が introspection レスポンスの "userdb_acl_groups" フィールドを
-            # passdb extra として保持し、Dovecot が userdb フィールド acl_groups へ自動注入する
-            # (passdb extra の "userdb_xxx" → userdb フィールド "xxx" の Dovecot 規約)。
-            # %{passdb:xxx} は LDAP user_attrs では展開されないため LDAP 経由では不可。
+            # oauth2 passdb は introspection レスポンスのフィールドを自動転送しないため、
+            # dovecot-oauth2.conf.ext の pass_attrs で introspection の "userdb_acl_groups"
+            # クレームを passdb extra field にマップする (dovecot-oauth2-external-secret.yaml 参照)。
+            # passdb extra の "userdb_xxx" → userdb フィールド "xxx" の Dovecot 規約により
+            # acl_groups へ反映される。%{passdb:xxx} は LDAP user_attrs では展開されないため不可。
             # 2026-06-26: auth_username_format 削除により %d がユーザーの入力ドメイン (gmail.com 等)
             # に展開されるようになった。メールボックスは aramakisai.com 配下に統一しているため
             # %d の代わりに静的に aramakisai.com を指定する。

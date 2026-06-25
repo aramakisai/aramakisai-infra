@@ -63,9 +63,13 @@ resource "authentik_property_mapping_provider_scope" "oauth_scope_mail_acl_group
   scope_name = "mail_acl_groups"
   expression = <<-EOT
     # Dovecot: passdb extra field が "userdb_xxx" 名の場合、userdb フィールド "xxx" として
-    # 自動注入される。oauth2 passdb は introspection レスポンスの全フィールドを
-    # passdb extra として保持するため、"userdb_acl_groups" を返すだけで
-    # Dovecot の acl_groups に反映される。LDAP user_attrs への依存不要。
+    # 自動注入される。ただし oauth2 passdb は introspection レスポンスのフィールドを
+    # 自動転送しないため、dovecot-oauth2.conf.ext 側で
+    #   pass_attrs = userdb_acl_groups=%%{oauth2:userdb_acl_groups}
+    # を設定して introspection の "userdb_acl_groups" クレームを passdb extra field に
+    # マップする (dovecot-oauth2-external-secret.yaml 参照)。これにより userdb field
+    # acl_groups へ反映され Dovecot ACL plugin の group= マッチが機能する。
+    # LDAP user_attrs (%%{passdb:xxx}) は展開非対応のため使えない。
     return {
         "userdb_acl_groups": ",".join(sorted({
             g.attributes.get("mailAclSlug")
