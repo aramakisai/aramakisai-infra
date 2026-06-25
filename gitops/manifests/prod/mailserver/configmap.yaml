@@ -74,15 +74,24 @@ data:
     # (タスク4.1で発覚)。メール PVC のルート /var/mail は 0777 docker 所有で書込可能なため、
     # ここに共有 index を置く。DMS は全ユーザー単一 uid 5000 のため共有 index で問題ない。
     #
-    # subscriptions = no + list = yes: 共有メールボックスは購読状態に依存せず常に LIST に出す。
-    # list = children だと「子メールボックスを持つ namespace のみ表示」となり、まだ Drafts/Sent 等の
-    # サブフォルダが自動生成されていない部署 (受信のみで一度もクライアント接続していない maildir) が
-    # LIST から消える (実機確認: pr だけ子フォルダがあり表示され、他部署は SELECT 可能なのに
-    # LIST に出なかった)。list = yes なら子の有無に関わらず Shared/<dept> が出る。
-    # アクセス制御は acl plugin が担保する: LIST 応答は lookup 権限 (l) を持つ (= group= が
-    # acl_groups にマッチする) ユーザーにのみ各 namespace を返し、非メンバーは fail-closed で除外
-    # される (Req 2.2)。acl_groups は oauth2 introspection の userdb_acl_groups 経由で注入される
+    # subscriptions = no + list = children: 共有メールボックスの LIST 可視性を ACL で
+    # fail-closed に制御する (Req 2.2)。
+    #
+    # list = yes は子の有無に関わらず namespace prefix を常に LIST へ出すため、アクセス権の
+    # ない部署も \Noselect ノードとして全ユーザーに名前が漏れる (実機確認)。一方 list = children は
+    # 「ユーザーが LIST 可能な子メールボックスを持つ namespace のみ表示」する。Dovecot vfile ACL は
+    # 子に dovecot-acl が無ければ親 (= 部署ルート) の ACL を継承するため、子メールボックスの可視性も
+    # group= マッチ (acl_groups) で決まる。結果:
+    #   - 部署メンバー (acl_groups=<dept>): 自部署の子のみ可視 → 自部署のみ LIST に出る
+    #   - リーダー (acl_groups=leader,...): 全部署が group=leader を継承するため全部署の子が可視
+    #     → 全部署が LIST に出る (実機確認: 会計のみユーザーは pr の子を一切 LIST できない)
+    # acl_groups は oauth2 introspection の userdb_acl_groups 経由で注入される
     # (dovecot-oauth2-external-secret.yaml の pass_attrs 参照)。
+    #
+    # 前提: list = children のゲートには各部署 maildir に最低1つの子メールボックスが必要。
+    # 受信専用で一度もクライアント接続していない部署は子が無く LIST に出ないため、
+    # acl-postsync-job.yaml が全部署に標準サブフォルダ (Drafts/Sent/Junk/Trash) を冪等作成する。
+    # 部署受信トレイ (maildir ルート) は "Shared/<dept>" 自体を SELECT してアクセスする。
     # subscriptions = no は Roundcube 側 imap_force_list=true で補い、購読不要で表示させる。
     namespace {
       type = shared
@@ -90,7 +99,7 @@ data:
       prefix = Shared/planning/
       location = maildir:/var/mail/aramakisai.com/planning:INDEX=/var/mail/.indexes/aramakisai.com/planning
       subscriptions = no
-      list = yes
+      list = children
     }
     namespace {
       type = shared
@@ -98,7 +107,7 @@ data:
       prefix = Shared/accounting/
       location = maildir:/var/mail/aramakisai.com/accounting:INDEX=/var/mail/.indexes/aramakisai.com/accounting
       subscriptions = no
-      list = yes
+      list = children
     }
     namespace {
       type = shared
@@ -106,7 +115,7 @@ data:
       prefix = Shared/booth/
       location = maildir:/var/mail/aramakisai.com/booth:INDEX=/var/mail/.indexes/aramakisai.com/booth
       subscriptions = no
-      list = yes
+      list = children
     }
     namespace {
       type = shared
@@ -114,7 +123,7 @@ data:
       prefix = Shared/stage/
       location = maildir:/var/mail/aramakisai.com/stage:INDEX=/var/mail/.indexes/aramakisai.com/stage
       subscriptions = no
-      list = yes
+      list = children
     }
     namespace {
       type = shared
@@ -122,7 +131,7 @@ data:
       prefix = Shared/pr/
       location = maildir:/var/mail/aramakisai.com/pr:INDEX=/var/mail/.indexes/aramakisai.com/pr
       subscriptions = no
-      list = yes
+      list = children
     }
     namespace {
       type = shared
@@ -130,7 +139,7 @@ data:
       prefix = Shared/admin/
       location = maildir:/var/mail/aramakisai.com/admin:INDEX=/var/mail/.indexes/aramakisai.com/admin
       subscriptions = no
-      list = yes
+      list = children
     }
     namespace {
       type = shared
@@ -138,7 +147,7 @@ data:
       prefix = Shared/general-affairs/
       location = maildir:/var/mail/aramakisai.com/general-affairs:INDEX=/var/mail/.indexes/aramakisai.com/general-affairs
       subscriptions = no
-      list = yes
+      list = children
     }
     namespace {
       type = shared
@@ -146,7 +155,7 @@ data:
       prefix = Shared/noreply/
       location = maildir:/var/mail/aramakisai.com/noreply:INDEX=/var/mail/.indexes/aramakisai.com/noreply
       subscriptions = no
-      list = yes
+      list = children
     }
   # Postfix LDAP グループマップ オーバーライド (メーリングリスト用):
   # DMS が自動生成する ldap-groups.cf は result_attribute=mail のみのため、

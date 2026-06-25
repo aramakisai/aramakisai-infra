@@ -25,6 +25,9 @@ spec:
             - |
               set -euo pipefail
               BASE="/var/mail/aramakisai.com"
+              # メール実効 UID/GID (DOVECOT_USER_ATTRS の uid=5000/gid=5000 と一致)
+              MAIL_UID=5000
+              MAIL_GID=5000
               # 各共有メールボックスに leader と admin のアクセス権を追加
               for box in planning accounting booth stage pr admin general-affairs; do
                 ACL_FILE="$BASE/$box/dovecot-acl"
@@ -43,8 +46,23 @@ spec:
                   echo "[!] ACL file not found: $ACL_FILE"
                   exit 1
                 fi
+                # list = children のゲート用に標準サブフォルダ (子メールボックス) を冪等作成する。
+                # 子は dovecot-acl を持たないため部署ルートの group= ACL を継承し、可視性は
+                # acl_groups で fail-closed に制御される (configmap.yaml の namespace コメント参照)。
+                # Maildir++ 形式: .<Folder>/{cur,new,tmp} + maildirfolder 空ファイル。
+                # 所有者は Dovecot 実効 UID(5000) にしないと Permission denied で開けない。
+                for folder in Drafts Sent Junk Trash; do
+                  DIR="$BASE/$box/.$folder"
+                  if [ ! -d "$DIR" ]; then
+                    mkdir -p "$DIR/cur" "$DIR/new" "$DIR/tmp"
+                    touch "$DIR/maildirfolder"
+                    chown -R "$MAIL_UID:$MAIL_GID" "$DIR"
+                    chmod -R 0700 "$DIR"
+                    echo "[+] Created subfolder $box/.$folder"
+                  fi
+                done
               done
-              echo "[*] ACL update complete"
+              echo "[*] ACL + subfolder update complete"
           volumeMounts:
             - name: data
               mountPath: /var/mail
