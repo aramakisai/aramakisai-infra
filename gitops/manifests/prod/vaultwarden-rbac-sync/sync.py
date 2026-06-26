@@ -14,7 +14,6 @@ import os
 import socket
 import subprocess
 import sys
-import tempfile
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -611,45 +610,66 @@ class PermissionDiffEngine:
         )
 
 
+def _der_parse_tlv(data: bytes, pos: int) -> tuple[int, bytes, int]:
+    """DER TLV (tag, value, next_pos) を返す。"""
+    tag = data[pos]; pos += 1
+    length = data[pos]; pos += 1
+    if length & 0x80:
+        n = length & 0x7f
+        length = int.from_bytes(data[pos:pos + n], "big")
+        pos += n
+    return tag, data[pos:pos + length], pos + length
+
+
+def _parse_rsa_public_key_der(der: bytes) -> tuple[int, int]:
+    """SubjectPublicKeyInfo DER から RSA (n, e) を取り出す。"""
+    _, outer, _ = _der_parse_tlv(der, 0)           # SEQUENCE (outer)
+    _, _algo, pos = _der_parse_tlv(outer, 0)        # AlgorithmIdentifier SEQUENCE
+    _, bit_string, _ = _der_parse_tlv(outer, pos)   # BIT STRING
+    rsa_der = bit_string[1:]                         # skip unused-bits byte
+    _, rsa_seq, _ = _der_parse_tlv(rsa_der, 0)      # RSAPublicKey SEQUENCE
+    _, n_bytes, pos2 = _der_parse_tlv(rsa_seq, 0)   # modulus INTEGER
+    _, e_bytes, _ = _der_parse_tlv(rsa_seq, pos2)   # publicExponent INTEGER
+    return (int.from_bytes(n_bytes.lstrip(b"\x00"), "big"),
+            int.from_bytes(e_bytes.lstrip(b"\x00"), "big"))
+
+
+def _mgf1_sha1(seed: bytes, length: int) -> bytes:
+    """MGF1 with SHA-1 (RFC 8017 B.2.1)。"""
+    import hashlib, struct
+    t = b""
+    for i in range((length + 19) // 20):
+        t += hashlib.sha1(seed + struct.pack(">I", i)).digest()
+    return t[:length]
+
+
 def _rsa_oaep_sha1_encrypt(pub_key_der_b64: str, plaintext: bytes) -> str:
     """RSA-OAEP-SHA1でplaintextを暗号化し、base64文字列を返す。
 
     Bitwarden CipherString type 4 (Rsa2048_OaepSha1_B64) の暗号化部分。
-    openssl pkeyutl を使用 (Python標準ライブラリのみで完結、cryptography不要)。
+    Python標準ライブラリのみで実装 (hashlib + pow(m,e,n))。
     pub_key_der_b64: base64エンコードされたDER形式RSA公開鍵 (SubjectPublicKeyInfo)
     """
+    import hashlib
     pub_key_der = base64.b64decode(pub_key_der_b64)
-    with tempfile.TemporaryDirectory() as tmpdir:
-        der_path = os.path.join(tmpdir, "pub.der")
-        pem_path = os.path.join(tmpdir, "pub.pem")
-        plain_path = os.path.join(tmpdir, "plain.bin")
-        with open(der_path, "wb") as f:
-            f.write(pub_key_der)
-        with open(plain_path, "wb") as f:
-            f.write(plaintext)
-        conv = subprocess.run(
-            ["openssl", "pkey", "-pubin", "-inform", "DER", "-outform", "PEM",
-             "-in", der_path, "-out", pem_path],
-            capture_output=True,
-        )
-        if conv.returncode != 0:
-            raise VaultwardenApiError(
-                f"RSA公開鍵DER→PEM変換失敗: {conv.stderr.decode(errors='replace')}"
-            )
-        enc = subprocess.run(
-            ["openssl", "pkeyutl", "-encrypt", "-pubin",
-             "-inkey", pem_path,
-             "-pkeyopt", "rsa_padding_mode:oaep",
-             "-pkeyopt", "rsa_oaep_md:sha1",
-             "-pkeyopt", "rsa_mgf1_md:sha1",
-             "-in", plain_path],
-            capture_output=True,
-        )
-        if enc.returncode != 0:
-            raise VaultwardenApiError(
-                f"RSA-OAEP-SHA1暗号化失敗: {enc.stderr.decode(errors='replace')}"
-            )
-        return base64.b64encode(enc.stdout).decode("ascii")
+    n, e = _parse_rsa_public_key_der(pub_key_der)
+    k = (n.bit_length() + 7) // 8   # キー長 (バイト) = 256 for RSA-2048
+    h_len = 20                        # SHA-1 ダイジェスト長
+    m_len = len(plaintext)
+    if m_len > k - 2 * h_len - 2:
+        raise VaultwardenApiError(f"RSA-OAEP: plaintext too long ({m_len} bytes)")
+    # OAEP エンコーディング (RFC 8017 §7.1.1)
+    l_hash = hashlib.sha1(b"").digest()
+    ps = bytes(k - m_len - 2 * h_len - 2)
+    db = l_hash + ps + b"\x01" + plaintext
+    seed = os.urandom(h_len)
+    masked_db = bytes(a ^ b for a, b in zip(db, _mgf1_sha1(seed, len(db))))
+    masked_seed = bytes(a ^ b for a, b in zip(seed, _mgf1_sha1(masked_db, h_len)))
+    em = b"\x00" + masked_seed + masked_db
+    # RSA 暗号化: c = m^e mod n
+    m_int = int.from_bytes(em, "big")
+    c_int = pow(m_int, e, n)
+    return base64.b64encode(c_int.to_bytes(k, "big")).decode("ascii")
 
 
 def _collection_grant_to_payload(grant: CollectionGrant) -> dict:
