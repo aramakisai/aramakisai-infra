@@ -63,8 +63,9 @@ spec:
               value: mail.aramakisai.com
             - name: EMAIL_SMTP_PORT
               value: "587"
+            # フルアドレス必須 (Dovecot mail=%u 検索、bae2c4c で domain 補完撤去のため)
             - name: EMAIL_SMTP_USER
-              value: noreply
+              value: noreply@aramakisai.com # confidential:allow
             - name: EMAIL_SMTP_PASSWORD
               valueFrom:
                 secretKeyRef:

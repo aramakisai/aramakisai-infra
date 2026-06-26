@@ -65,8 +65,9 @@ server:
       value: "mail.aramakisai.com"
     - name: AUTHENTIK_EMAIL__PORT
       value: "587"
+    # フルアドレス必須 (Dovecot mail=%u 検索、bae2c4c で domain 補完撤去のため)
     - name: AUTHENTIK_EMAIL__USERNAME
-      value: "noreply"
+      value: "noreply@aramakisai.com" # confidential:allow
     - name: AUTHENTIK_EMAIL__PASSWORD
       valueFrom:
         secretKeyRef:
@@ -118,8 +119,9 @@ worker:
       value: "mail.aramakisai.com"
     - name: AUTHENTIK_EMAIL__PORT
       value: "587"
+    # フルアドレス必須 (Dovecot mail=%u 検索、bae2c4c で domain 補完撤去のため)
     - name: AUTHENTIK_EMAIL__USERNAME
-      value: "noreply"
+      value: "noreply@aramakisai.com" # confidential:allow
     - name: AUTHENTIK_EMAIL__PASSWORD
       valueFrom:
         secretKeyRef:

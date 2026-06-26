@@ -92,8 +92,12 @@ spec:
               value: "587"
             - name: SMTP_SECURITY
               value: "starttls"
+            # フルアドレス必須: DOVECOT_PASS_FILTER は mail=%u で検索するため、
+            # ドメイン無し "noreply" では mail=noreply にマッチせず unknown user になる
+            # (Dovecot の auth_username_format によるドメイン補完は commit bae2c4c で
+            # OAuth2 フルメールログイン対応のため撤去済み)。
             - name: SMTP_USERNAME
-              value: "noreply"
+              value: "noreply@aramakisai.com" # confidential:allow
             - name: SMTP_FROM
               value: "noreply@aramakisai.com" # confidential:allow
             - name: SMTP_PASSWORD
