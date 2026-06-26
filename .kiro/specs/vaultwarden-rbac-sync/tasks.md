@@ -183,19 +183,24 @@
   - _Requirements: 10.2, 10.3, 13.3, 13.4
   - _Depends: 8.1, 8.2
 
-- [ ] 11. Vaultwarden Org Member 自動Confirm実装
+- [x] 11. Vaultwarden Org Member 自動Confirm実装
 
-- [ ] 11.1 ORG_KEY をInfisicalに保存し ExternalSecret に追加
-  - ブートストラップ時に生成した org symmetric key (64 bytes) を base64 で `VAULTWARDEN_ORG_KEY` としてInfisicalに登録する
-  - `external-secret.yaml` に `VAULTWARDEN_ORG_KEY` エントリを追加
+- [x] 11.1 ORG_KEY をInfisicalに保存し ExternalSecret に追加
+  - ブートストラップ時に生成した org symmetric key (64 bytes) を base64 で `VAULTWARDEN_ORG_KEY` としてInfisicalに登録する（**人手作業**: `infisical secrets set VAULTWARDEN_ORG_KEY=<base64_value>` を実行）
+  - `external-secret.yaml` に `VAULTWARDEN_ORG_KEY` エントリを追加済み
   - **なぜInfisicalか**: org鍵をGitに入れず、ESO経由でPodに注入することでシークレット管理を一元化する
 
-- [ ] 11.2 sync.py に自動Confirmロジックを追加
-  - `VaultwardenOrgClient.confirm_member(org_id, member_id, user_public_key_der, org_key_bytes)` を実装
+- [x] 11.2 sync.py に自動Confirmロジックを追加
+  - `VaultwardenOrgClient.confirm_member(org_id, member_id, user_id, org_key_bytes)` を実装
     - 対象ユーザーのRSA公開鍵を `GET /api/users/{user_id}/public-key` で取得
     - `org_key_bytes` をRSA-OAEP-SHA1で暗号化 → CipherString type 4
     - `POST /api/organizations/{org_id}/users/{member_id}/confirm` に `{"key": "<cipherstring>"}` をPOST
-  - `SyncOrchestrator.run()` のステップに「status=1 (Accepted) メンバーを自動Confirm」を追加（招待送信の後、Collection権限適用の前）
-  - Confirmは`cryptography`ライブラリが必要 → Dockerfile/initContainerまたはimage変更が必要か検討
+  - RSA-OAEP-SHA1暗号化は `openssl pkeyutl` via subprocess で実装（`cryptography` pip不要、alpine/k8s:1.32.13に openssl 標準搭載）
+  - `SyncOrchestrator.run()` のステップに「status=1 (Accepted) メンバーを自動Confirm」を追加済み（招待送信の後、Collection権限適用の前）
+  - `Member.user_id` フィールド追加、`AutoConfirmPlan` dataclass追加、`SyncPlan.auto_confirm` フィールド追加
+  - `confirm_pending` を status=0 (Invited/Accept待ち) のみに変更し、status=1 は `auto_confirm` へ分離
+  - Discord通知を「自動Confirm済み: N件」「招待済み・未Accept: N件」に更新
+  - `VAULTWARDEN_ORG_KEY` 未設定時は自動Confirmをスキップ（後方互換性維持）
+  - TDDテスト14件: `tests/test_task11_auto_confirm.py` (全件パス済み)
   - _Requirements: 6.3（Confirm待ち検出・通知）を「自動Confirm」に昇格_
   - _Note: ユーザーが招待メールのリンクをクリックして Accept する操作（status 0→1）は本人確認の意味があり自動化しない。Accept後のConfirm（status 1→2）のみ自動化対象。_

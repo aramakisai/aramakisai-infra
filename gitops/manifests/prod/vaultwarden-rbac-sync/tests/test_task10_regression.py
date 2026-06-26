@@ -271,7 +271,7 @@ class TestConcurrencyExclusion:
                 orgs={"荒牧祭実行委員会": "org-uuid"},
                 states={"荒牧祭実行委員会": org_state},
             )
-            return [mapping], FakeAuthentikGroupClient({"広報": [email]}), fake_vw, FakeDiscordNotifier()
+            return [mapping], FakeAuthentikGroupClient({"広報": [email]}), fake_vw, FakeDiscordNotifier(), None
 
         with patch("subprocess.run", side_effect=store.run):
             # 第1プロセスがLeaseを取得したまま保持 (同時実行を模倣)
@@ -328,7 +328,7 @@ class TestConcurrencyExclusion:
                 orgs={"荒牧祭実行委員会": "org-uuid"},
                 states={"荒牧祭実行委員会": org_state},
             )
-            return [mapping], FakeAuthentikGroupClient({"企画": [email]}), fake_vw, FakeDiscordNotifier()
+            return [mapping], FakeAuthentikGroupClient({"企画": [email]}), fake_vw, FakeDiscordNotifier(), None
 
         with patch("subprocess.run", side_effect=store.run):
             run_cron_mode(lock_manager=SyncLockManager("prod"), client_factory=make_clients)

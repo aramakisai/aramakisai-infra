@@ -57,7 +57,7 @@ class TestRunCronMode:
 
         def fake_client_factory():
             run_log.append("client_factory")
-            return [], object(), object(), object()
+            return [], object(), object(), object(), None
 
         class FakeOrchestrator:
             def __init__(self, *args, **kwargs):
@@ -84,7 +84,7 @@ class TestRunCronMode:
 
         def fake_client_factory():
             called.append(True)
-            return [], object(), object(), object()
+            return [], object(), object(), object(), None
 
         result = run_cron_mode(lock_manager=lock, client_factory=fake_client_factory)
 
@@ -97,7 +97,7 @@ class TestRunCronMode:
         lock = FakeLockManager(acquire_result=True)
 
         def fake_client_factory():
-            return [], object(), object(), object()
+            return [], object(), object(), object(), None
 
         class RaisingOrchestrator:
             def __init__(self, *args, **kwargs):
@@ -288,7 +288,7 @@ class TestBuildClientsFromEnv:
         monkeypatch.setenv("VAULTWARDEN_SA_CLIENT_SECRET", "vw-secret")
         monkeypatch.setenv("DISCORD_WEBHOOK_URL", "https://discord.example.com/webhook")
 
-        mappings, authentik_client, vaultwarden_client, discord_notifier = build_clients_from_env()
+        mappings, authentik_client, vaultwarden_client, discord_notifier, org_key_bytes = build_clients_from_env()
 
         assert len(mappings) == 1
         assert mappings[0].authentik_group == "広報"

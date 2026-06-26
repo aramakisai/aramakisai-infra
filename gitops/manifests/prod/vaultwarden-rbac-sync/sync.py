@@ -6,12 +6,15 @@ Authentikグループメンバーシップを正本として、Vaultwarden Organ
 (Trigger Receiver常駐) の2種類。
 """
 import argparse
+import base64
 import hmac
 import json
 import logging
 import os
 import socket
+import subprocess
 import sys
+import tempfile
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -263,6 +266,7 @@ class VaultwardenOrgClient:
                     CollectionGrant(c["id"], c["readOnly"], c["hidePasswords"], c["manage"])
                     for c in (user.get("collections") or [])
                 ],
+                user_id=user.get("userId", ""),
             )
             for user in users_payload.get("data", [])
         ]
@@ -297,6 +301,28 @@ class VaultwardenOrgClient:
             "groups": [],
         }
         self._request_json("POST", f"/api/organizations/{org_id}/users/invite", body=body)
+
+    def confirm_member(
+        self, org_id: str, member_id: str, user_id: str, org_key_bytes: bytes
+    ) -> None:
+        """status=1 (Accepted) メンバーをConfirmする (Requirement 11, task 11.2)。
+
+        対象ユーザーのRSA公開鍵を取得し、org_key_bytesをRSA-OAEP-SHA1で暗号化して
+        CipherString type 4 として POST /api/organizations/{orgId}/users/{memberId}/confirm に送信する。
+        """
+        pk_payload = self._request_json("GET", f"/api/users/{user_id}/public-key")
+        pub_key_b64 = pk_payload.get("PublicKey") or pk_payload.get("publicKey", "")
+        if not pub_key_b64:
+            raise VaultwardenApiError(
+                f"ユーザー {user_id} の公開鍵が取得できませんでした"
+            )
+        encrypted_b64 = _rsa_oaep_sha1_encrypt(pub_key_b64, org_key_bytes)
+        cipher_string = f"4.{encrypted_b64}"
+        self._request_json(
+            "POST",
+            f"/api/organizations/{org_id}/users/{member_id}/confirm",
+            body={"key": cipher_string},
+        )
 
     def put_member_collections(
         self, org_id: str, member_id: str, member_type: int, collections: list["CollectionGrant"]
@@ -343,6 +369,7 @@ class Member:
     member_type: int
     status: int
     collections: list[CollectionGrant]
+    user_id: str = ""  # 実ユーザーUUID。confirm_member の公開鍵取得に使用 (task 11)
 
 
 @dataclass(frozen=True)
@@ -352,8 +379,9 @@ class OrgState:
 
 
 # 実機検証済み (research.md「Confirm前のPUTの実際の挙動」、Bitwarden公開APIのMembershipStatus enumと一致):
-# Invited=0, Accepted=1, Confirmed=2, Revoked=-1。Confirmed以外は全てConfirm待ち通知の対象とする (6.5)。
+# Invited=0, Accepted=1, Confirmed=2, Revoked=-1。
 VAULTWARDEN_STATUS_CONFIRMED = 2
+VAULTWARDEN_STATUS_ACCEPTED = 1  # ユーザーがAcceptリンクをクリック済み → 自動Confirm対象 (task 11)
 
 PERMISSION_TO_COLLECTION_FLAGS = {
     "can_view": (True, False, False),
@@ -402,12 +430,12 @@ def remove_collection_grants(
 
 
 def filter_confirm_pending(members: list[Member]) -> list[Member]:
-    """招待済みだが未Confirmのメンバーを抽出する (Requirement 6.5)。
+    """招待済みだが未Acceptのメンバーを抽出する (status=0, Invited)。
 
-    Discord通知 (Confirm待ち一覧) の判定にのみ使う。PUT送信のスキップ判定には使わない
-    (未ConfirmメンバーへのPUTはスキップ不要、design.md参照)。
+    Discord通知 (Accept待ち一覧) の判定にのみ使う。status=1 (Accepted) は自動Confirmされる (task 11)。
+    PUT送信のスキップ判定には使わない (未ConfirmメンバーへのPUTはスキップ不要、design.md参照)。
     """
-    return [member for member in members if member.status != VAULTWARDEN_STATUS_CONFIRMED]
+    return [member for member in members if member.status == 0]
 
 
 @dataclass(frozen=True)
@@ -419,8 +447,18 @@ class InvitePlan:
 
 @dataclass(frozen=True)
 class ConfirmPendingPlan:
+    """status=0 (Invited) メンバー: ユーザーがAcceptリンクをクリックするまで待機中。"""
     email: str
     org_id: str
+
+
+@dataclass(frozen=True)
+class AutoConfirmPlan:
+    """status=1 (Accepted) メンバー: ユーザーがAccept済み → 自動Confirm対象 (task 11)。"""
+    member_id: str
+    user_id: str
+    org_id: str
+    email: str
 
 
 @dataclass(frozen=True)
@@ -442,7 +480,8 @@ class RemovalPlan:
 @dataclass(frozen=True)
 class SyncPlan:
     invites: list[InvitePlan]
-    confirm_pending: list[ConfirmPendingPlan]
+    confirm_pending: list[ConfirmPendingPlan]  # status=0: Accept待ち
+    auto_confirm: list[AutoConfirmPlan]         # status=1: Accepted → 自動Confirm対象
     collection_updates: list[UpdatePlan]
     collection_removals: list[RemovalPlan]
     unchanged_count: int
@@ -462,6 +501,7 @@ class PermissionDiffEngine:
     ) -> SyncPlan:
         invites: list[InvitePlan] = []
         confirm_pending: list[ConfirmPendingPlan] = []
+        auto_confirm: list[AutoConfirmPlan] = []
         collection_updates: list[UpdatePlan] = []
         collection_removals: list[RemovalPlan] = []
         unchanged_count = 0
@@ -492,8 +532,17 @@ class PermissionDiffEngine:
 
                 member_desired = desired.get(member_key, {})
 
-                # Check confirm pending
-                if member.status != VAULTWARDEN_STATUS_CONFIRMED:
+                # Confirm待ち / 自動Confirm 判定
+                if member.status == VAULTWARDEN_STATUS_ACCEPTED and member.user_id:
+                    # status=1: ユーザーがAccept済み → 自動Confirm対象 (task 11)
+                    auto_confirm.append(AutoConfirmPlan(
+                        member_id=member.member_id,
+                        user_id=member.user_id,
+                        org_id=org_id,
+                        email=member.email,
+                    ))
+                elif member.status != VAULTWARDEN_STATUS_CONFIRMED:
+                    # status=0 (Invited) や -1 (Revoked): Accept待ち通知対象
                     confirm_pending.append(ConfirmPendingPlan(email=member.email, org_id=org_id))
 
                 # Calculate desired collections for this member
@@ -555,10 +604,52 @@ class PermissionDiffEngine:
         return SyncPlan(
             invites=invites,
             confirm_pending=confirm_pending,
+            auto_confirm=auto_confirm,
             collection_updates=collection_updates,
             collection_removals=collection_removals,
             unchanged_count=unchanged_count,
         )
+
+
+def _rsa_oaep_sha1_encrypt(pub_key_der_b64: str, plaintext: bytes) -> str:
+    """RSA-OAEP-SHA1でplaintextを暗号化し、base64文字列を返す。
+
+    Bitwarden CipherString type 4 (Rsa2048_OaepSha1_B64) の暗号化部分。
+    openssl pkeyutl を使用 (Python標準ライブラリのみで完結、cryptography不要)。
+    pub_key_der_b64: base64エンコードされたDER形式RSA公開鍵 (SubjectPublicKeyInfo)
+    """
+    pub_key_der = base64.b64decode(pub_key_der_b64)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        der_path = os.path.join(tmpdir, "pub.der")
+        pem_path = os.path.join(tmpdir, "pub.pem")
+        plain_path = os.path.join(tmpdir, "plain.bin")
+        with open(der_path, "wb") as f:
+            f.write(pub_key_der)
+        with open(plain_path, "wb") as f:
+            f.write(plaintext)
+        conv = subprocess.run(
+            ["openssl", "pkey", "-pubin", "-inform", "DER", "-outform", "PEM",
+             "-in", der_path, "-out", pem_path],
+            capture_output=True,
+        )
+        if conv.returncode != 0:
+            raise VaultwardenApiError(
+                f"RSA公開鍵DER→PEM変換失敗: {conv.stderr.decode(errors='replace')}"
+            )
+        enc = subprocess.run(
+            ["openssl", "pkeyutl", "-encrypt", "-pubin",
+             "-inkey", pem_path,
+             "-pkeyopt", "rsa_padding_mode:oaep",
+             "-pkeyopt", "rsa_oaep_md:sha1",
+             "-pkeyopt", "rsa_mgf1_md:sha1",
+             "-in", plain_path],
+            capture_output=True,
+        )
+        if enc.returncode != 0:
+            raise VaultwardenApiError(
+                f"RSA-OAEP-SHA1暗号化失敗: {enc.stderr.decode(errors='replace')}"
+            )
+        return base64.b64encode(enc.stdout).decode("ascii")
 
 
 def _collection_grant_to_payload(grant: CollectionGrant) -> dict:
@@ -579,11 +670,13 @@ class SyncOrchestrator:
         authentik_client: AuthentikGroupClient,
         vaultwarden_client: VaultwardenOrgClient,
         discord_notifier: "DiscordNotifier",
+        org_key_bytes: bytes | None = None,
     ):
         self._mappings = mappings
         self._authentik = authentik_client
         self._vaultwarden = vaultwarden_client
         self._discord = discord_notifier
+        self._org_key_bytes = org_key_bytes
 
     def run(self, dry_run: bool = False) -> "SyncPlan":
         """同期フローを実行する。
@@ -631,6 +724,7 @@ class SyncOrchestrator:
 
         # 5. 適用 (dry_run でなければ)
         if not dry_run:
+            # 5a. 招待
             for invite in plan.invites:
                 try:
                     self._vaultwarden.invite_member(
@@ -644,6 +738,19 @@ class SyncOrchestrator:
                     log_event("invite_failed", email=invite.email, error=str(exc))
                     errors.append(f"invite {invite.email}: {exc}")
 
+            # 5b. 自動Confirm (status=1 → status=2, org_key_bytes が提供されている場合のみ)
+            if self._org_key_bytes:
+                for ac in plan.auto_confirm:
+                    try:
+                        self._vaultwarden.confirm_member(
+                            ac.org_id, ac.member_id, ac.user_id, self._org_key_bytes
+                        )
+                        log_event("member_confirmed", email=ac.email, member_id=ac.member_id)
+                    except VaultwardenApiError as exc:
+                        log_event("confirm_failed", email=ac.email, error=str(exc))
+                        errors.append(f"confirm {ac.email}: {exc}")
+
+            # 5c. Collection権限更新
             for update in plan.collection_updates:
                 try:
                     # Merge desired with existing non-target collections via full replace
@@ -709,15 +816,19 @@ class SyncOrchestrator:
         lines = [
             f"{mode_label}Vaultwarden RBAC Sync 完了",
             f"- 招待: {len(plan.invites)}件",
+            f"- 自動Confirm: {len(plan.auto_confirm)}件",
             f"- 権限更新: {len(plan.collection_updates)}件",
             f"- 権限削除: {len(plan.collection_removals)}件",
             f"- 変更なし: {plan.unchanged_count}件",
-            f"- Confirm待ち: {len(plan.confirm_pending)}件",
         ]
+        if plan.auto_confirm:
+            emails = [p.email for p in plan.auto_confirm]
+            lines.append(f"  自動Confirm済み: {', '.join(emails)}")
         if plan.confirm_pending:
             emails = [p.email for p in plan.confirm_pending]
-            lines.append(f"  Confirm待ちユーザー: {', '.join(emails)}")
-            lines.append("  Vaultwarden Web UIでConfirm操作を行ってください")
+            lines.append(f"- 招待済み・未Accept: {len(plan.confirm_pending)}件")
+            lines.append(f"  Acceptを待機中: {', '.join(emails)}")
+            lines.append("  (ユーザーがAcceptすると次回同期で自動Confirmされます)")
         if errors:
             lines.append("エラー:")
             for err in errors:
@@ -875,6 +986,7 @@ class DiscordNotifier:
     def notify(self, message: str) -> None:
         """通知を送信する。失敗しても例外を伝播させない (同期処理の成否に影響しない)。"""
         if not self._webhook_url:
+            log_event("discord_skipped", reason="webhook_url_empty")
             return
         body = json.dumps({"content": message}, ensure_ascii=False).encode("utf-8")
         request = Request(
@@ -884,19 +996,19 @@ class DiscordNotifier:
         )
         try:
             with urlopen(request, timeout=self._timeout) as response:
-                pass
-        except Exception:
-            # 通知失敗は無視 (Requirement 11.4)
-            pass
+                log_event("discord_notified", status=response.status)
+        except Exception as exc:
+            log_event("discord_notify_failed", error=str(exc))
 
 
 def build_clients_from_env() -> tuple[
-    list[MappingEntry], AuthentikGroupClient, VaultwardenOrgClient, DiscordNotifier
+    list[MappingEntry], AuthentikGroupClient, VaultwardenOrgClient, DiscordNotifier, bytes | None
 ]:
     """環境変数とマウント済みmapping.jsonから各クライアントを構築する (Requirement 12.1)。
 
     Authentik/Vaultwardenのbase URLはクラスター内サービスDNS固定値として
     マニフェストに直接記述される (ldap-outpost等の既存パターン踏襲、シークレットではない)。
+    VAULTWARDEN_ORG_KEY が設定されている場合、自動Confirmが有効化される (task 11)。
     """
     mapping_path = os.environ.get("MAPPING_CONFIG_PATH", DEFAULT_MAPPING_PATH)
     with open(mapping_path, encoding="utf-8") as f:
@@ -912,7 +1024,9 @@ def build_clients_from_env() -> tuple[
         client_secret=os.environ["VAULTWARDEN_SA_CLIENT_SECRET"],
     )
     discord_notifier = DiscordNotifier(os.environ.get("DISCORD_WEBHOOK_URL", ""))
-    return mappings, authentik_client, vaultwarden_client, discord_notifier
+    org_key_b64 = os.environ.get("VAULTWARDEN_ORG_KEY", "")
+    org_key_bytes = base64.b64decode(org_key_b64) if org_key_b64 else None
+    return mappings, authentik_client, vaultwarden_client, discord_notifier, org_key_bytes
 
 
 def run_cron_mode(
@@ -932,8 +1046,11 @@ def run_cron_mode(
         return 0
 
     try:
-        mappings, authentik_client, vaultwarden_client, discord_notifier = client_factory()
-        orchestrator = SyncOrchestrator(mappings, authentik_client, vaultwarden_client, discord_notifier)
+        mappings, authentik_client, vaultwarden_client, discord_notifier, org_key_bytes = client_factory()
+        orchestrator = SyncOrchestrator(
+            mappings, authentik_client, vaultwarden_client, discord_notifier,
+            org_key_bytes=org_key_bytes,
+        )
         orchestrator.run(dry_run=False)
     finally:
         lock_manager.release()
@@ -1042,8 +1159,11 @@ def run_serve_mode() -> int:
     port = int(os.environ.get("PORT", "8080"))
 
     def run_sync() -> None:
-        mappings, authentik_client, vaultwarden_client, discord_notifier = build_clients_from_env()
-        orchestrator = SyncOrchestrator(mappings, authentik_client, vaultwarden_client, discord_notifier)
+        mappings, authentik_client, vaultwarden_client, discord_notifier, org_key_bytes = build_clients_from_env()
+        orchestrator = SyncOrchestrator(
+            mappings, authentik_client, vaultwarden_client, discord_notifier,
+            org_key_bytes=org_key_bytes,
+        )
         orchestrator.run(dry_run=False)
 
     receiver = TriggerReceiver(trigger_token, lock_manager, run_sync)

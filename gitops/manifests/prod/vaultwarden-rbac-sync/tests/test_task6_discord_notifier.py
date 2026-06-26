@@ -63,6 +63,7 @@ class TestDiscordNotifier:
         plan = SyncPlan(
             invites=[InvitePlan("new@example.com", "org-1", [])],
             confirm_pending=[ConfirmPendingPlan("pending@example.com", "org-1")],
+            auto_confirm=[],
             collection_updates=[UpdatePlan("m1", "org-1", 2, [])],
             collection_removals=[RemovalPlan("m2", "org-1", 2, {"c1"})],
             unchanged_count=3,
@@ -78,7 +79,7 @@ class TestDiscordNotifier:
         assert "権限更新: 1件" in summary
         assert "権限削除: 1件" in summary
         assert "変更なし: 3件" in summary
-        assert "Confirm待ち: 1件" in summary
+        assert "未Accept: 1件" in summary
         assert "pending@example.com" in summary
 
     def test_summary_contains_errors(self):
@@ -86,7 +87,7 @@ class TestDiscordNotifier:
         from sync import SyncPlan
 
         plan = SyncPlan(
-            invites=[], confirm_pending=[], collection_updates=[],
+            invites=[], confirm_pending=[], auto_confirm=[], collection_updates=[],
             collection_removals=[], unchanged_count=0,
         )
 
@@ -103,7 +104,7 @@ class TestDiscordNotifier:
         from sync import SyncPlan
 
         plan = SyncPlan(
-            invites=[], confirm_pending=[], collection_updates=[],
+            invites=[], confirm_pending=[], auto_confirm=[], collection_updates=[],
             collection_removals=[], unchanged_count=0,
         )
 
