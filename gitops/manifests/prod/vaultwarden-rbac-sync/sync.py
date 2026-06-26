@@ -196,6 +196,9 @@ class VaultwardenOrgClient:
                 "client_id": self._client_id,
                 "client_secret": self._client_secret,
                 "scope": "api",
+                "device_type": "21",
+                "device_identifier": "vaultwarden-rbac-sync",
+                "device_name": "vaultwarden-rbac-sync",
             }
         ).encode("utf-8")
         request = Request(
