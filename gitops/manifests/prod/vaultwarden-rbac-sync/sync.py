@@ -992,7 +992,10 @@ class DiscordNotifier:
         request = Request(
             self._webhook_url,
             data=body,
-            headers={"Content-Type": "application/json"},
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": "DiscordBot (aramakisai-infra, 1.0)",
+            },
         )
         try:
             with urlopen(request, timeout=self._timeout) as response:
