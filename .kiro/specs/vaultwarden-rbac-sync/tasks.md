@@ -172,8 +172,9 @@
   - _Requirements: 8.1, 8.2, 8.3
   - _Depends: 9.1, 9.2
 
-- [ ] 10.3 冪等性・同時実行排他のリグレッション確認
-  - 差分が存在しない状態でCronJobを実行した場合、Vaultwarden側に変更が発生せず正常終了することを確認できる
-  - CronJobとイベント駆動トリガーがほぼ同時に発火した場合、一方のみが実行され他方はLease競合により実行を見送ることを確認できる
+- [x] 10.3 冪等性・同時実行排他のリグレッション確認
+  - 差分が存在しない状態でCronJobを実行した場合、Vaultwarden側に変更が発生せず正常終了することを確認できる（`tests/test_task10_regression.py` TestIdempotency 3件）
+  - CronJobとイベント駆動トリガーがほぼ同時に発火した場合、一方のみが実行され他方はLease競合により実行を見送ることを確認できる（TestConcurrencyExclusion 3件）
+  - **バグ修正（2026-06-26、task 10実装時に実機で発覚）**: `_utc_now_rfc3339()`が秒のみのタイムスタンプ（`2026-06-26T05:00:03Z`）を生成していたため、K8s Lease の `acquireTime`/`renewTime`（`MicroTime`型）がBadRequestになりCronJob全3回が`lease_acquire_error → cron_skipped_lease_busy`でスキップされていた。`%f`（マイクロ秒）を追加し修正。`sync.py`と`script-configmap.yaml`の両方に反映済み。TestMicroTimeFormat 2件で回帰防止。
   - _Requirements: 10.2, 10.3, 13.3, 13.4
   - _Depends: 8.1, 8.2

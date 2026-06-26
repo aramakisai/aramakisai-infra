@@ -720,7 +720,8 @@ class SyncOrchestrator:
 
 
 def _utc_now_rfc3339() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    # Kubernetes MicroTime requires microseconds (%f); seconds-only format causes BadRequest.
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
 def _parse_rfc3339(value: str) -> datetime:
