@@ -49,7 +49,7 @@
   - _Requirements: 1.1, 1.2, 4.1, 4.4_
   - _Boundary: RbacMappingConfigMap_
   - **完了（2026-06-26）**: Vaultwarden API (RSA-OAEP + AES-256-CBC クライアント暗号化) でOrg/Collectionを自動作成した。旧org 0f320a47を/admin APIで削除し、admin@aramakisai.com（Personal API Key）で新org b7a4c50d-ee91-4fe4-b11d-f0b31209abd6を作成（auto-confirmed as Owner）。8 Collection作成、23エントリすべて新UUIDで更新済み。ExternalSecretキー名不一致も修正。E2Eテスト（vaultwarden-rbac-sync-manual-03）で管理者グループ2名への招待送信を確認。 # confidential:allow
-  - **残作業（人手）**: Authentikグループ`リーダー`/`Googleアカウント`の新規作成、`VAULTWARDEN_RBAC_SYNC_AUTHENTIK_API_TOKEN`への`authentik_core.view_group`権限付与、invited userのConfirm（Web Vault Org Owner操作）
+  - **残作業**: invited userのAccept後Confirm（後述task 11で自動化予定）。Authentikグループ`リーダー`/`Googleアカウント`・`view_group`権限は`authentik_vaultwarden_rbac_sync.tf`で適用済みのため人手作業なし。
 
 - [x] 2. (P) AuthentikGroupClient実装によるグループメンバーシップ取得
   - 専用Authentik APIトークン（`PRESENCE_AUTHENTIK_API_TOKEN`パターン踏襲）での認証処理を実装
@@ -182,3 +182,20 @@
   - **バグ修正（2026-06-26、task 10実装時に実機で発覚）**: `_utc_now_rfc3339()`が秒のみのタイムスタンプ（`2026-06-26T05:00:03Z`）を生成していたため、K8s Lease の `acquireTime`/`renewTime`（`MicroTime`型）がBadRequestになりCronJob全3回が`lease_acquire_error → cron_skipped_lease_busy`でスキップされていた。`%f`（マイクロ秒）を追加し修正。`sync.py`と`script-configmap.yaml`の両方に反映済み。TestMicroTimeFormat 2件で回帰防止。
   - _Requirements: 10.2, 10.3, 13.3, 13.4
   - _Depends: 8.1, 8.2
+
+- [ ] 11. Vaultwarden Org Member 自動Confirm実装
+
+- [ ] 11.1 ORG_KEY をInfisicalに保存し ExternalSecret に追加
+  - ブートストラップ時に生成した org symmetric key (64 bytes) を base64 で `VAULTWARDEN_ORG_KEY` としてInfisicalに登録する
+  - `external-secret.yaml` に `VAULTWARDEN_ORG_KEY` エントリを追加
+  - **なぜInfisicalか**: org鍵をGitに入れず、ESO経由でPodに注入することでシークレット管理を一元化する
+
+- [ ] 11.2 sync.py に自動Confirmロジックを追加
+  - `VaultwardenOrgClient.confirm_member(org_id, member_id, user_public_key_der, org_key_bytes)` を実装
+    - 対象ユーザーのRSA公開鍵を `GET /api/users/{user_id}/public-key` で取得
+    - `org_key_bytes` をRSA-OAEP-SHA1で暗号化 → CipherString type 4
+    - `POST /api/organizations/{org_id}/users/{member_id}/confirm` に `{"key": "<cipherstring>"}` をPOST
+  - `SyncOrchestrator.run()` のステップに「status=1 (Accepted) メンバーを自動Confirm」を追加（招待送信の後、Collection権限適用の前）
+  - Confirmは`cryptography`ライブラリが必要 → Dockerfile/initContainerまたはimage変更が必要か検討
+  - _Requirements: 6.3（Confirm待ち検出・通知）を「自動Confirm」に昇格_
+  - _Note: ユーザーが招待メールのリンクをクリックして Accept する操作（status 0→1）は本人確認の意味があり自動化しない。Accept後のConfirm（status 1→2）のみ自動化対象。_
