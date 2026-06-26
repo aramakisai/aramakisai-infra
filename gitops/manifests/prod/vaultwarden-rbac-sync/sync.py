@@ -241,9 +241,12 @@ class VaultwardenOrgClient:
         return json.loads(raw) if raw else {}
 
     def list_organizations(self) -> list["Organization"]:
-        """Vaultwarden上の全Organization一覧を取得する (Requirement 3.1)。"""
-        payload = self._request_json("GET", "/api/organizations")
-        return [Organization(org["id"], org["name"]) for org in payload.get("data", [])]
+        """Vaultwarden上の全Organization一覧を取得する (Requirement 3.1)。
+        Vaultwarden は /api/organizations を実装しない。
+        /api/accounts/profile の organizations フィールドを使う。
+        """
+        payload = self._request_json("GET", "/api/accounts/profile")
+        return [Organization(org["id"], org["name"]) for org in payload.get("organizations", [])]
 
     def get_org_state(self, org_id: str) -> "OrgState":
         """対象Organizationのメンバー一覧・Collection一覧を取得する (Requirement 3.1, 3.2)。"""
