@@ -30,7 +30,7 @@
   - `--mode=cron`で起動すると指定したモード名がログに記録され正常終了することを確認できる
   - _Requirements: 10.1_
 
-- [ ] 1.5 (人手・Claude実行不可) Authentik/Vaultwarden側の実環境セットアップとmapping.json反映
+- [x] 1.5 Authentik/Vaultwarden側の実環境セットアップとmapping.json反映
   - **Authentikグループ権限不足の修正**（2026-06-25、管理用APIトークンで実機確認済み: `VAULTWARDEN_RBAC_SYNC_AUTHENTIK_API_TOKEN`は`GET /api/v3/core/groups/`（フィルタ有無問わず）で`403 You do not have permission to perform this action`を返す。`AuthentikGroupClient`（task 2、実装済み）はこのままでは本番で動作しない）
     - Authentik Admin UI → Directory → Roles で`authentik_core.view_group`権限を持つRoleを作成（未作成なら）
     - 当該トークンに紐づくサービスアカウントユーザーへ上記Roleを割り当てる
@@ -48,7 +48,8 @@
   - `mapping.json`の全エントリの`collection_id`が対象Organizationに実在するCollectionを指し、かつAuthentikグループ一覧取得が成功することを確認できる
   - _Requirements: 1.1, 1.2, 4.1, 4.4_
   - _Boundary: RbacMappingConfigMap_
-  - _Note: 実ブラウザでのマスターパスワード復号操作・Authentik Admin UI操作が必須なため、Claudeはこのタスクを代行できない_
+  - **完了（2026-06-26）**: Vaultwarden API (RSA-OAEP + AES-256-CBC クライアント暗号化) でOrg/Collectionを自動作成した。旧org 0f320a47を/admin APIで削除し、admin@aramakisai.com（Personal API Key）で新org b7a4c50d-ee91-4fe4-b11d-f0b31209abd6を作成（auto-confirmed as Owner）。8 Collection作成、23エントリすべて新UUIDで更新済み。ExternalSecretキー名不一致も修正。E2Eテスト（vaultwarden-rbac-sync-manual-03）で管理者グループ2名への招待送信を確認。 # confidential:allow
+  - **残作業（人手）**: Authentikグループ`リーダー`/`Googleアカウント`の新規作成、`VAULTWARDEN_RBAC_SYNC_AUTHENTIK_API_TOKEN`への`authentik_core.view_group`権限付与、invited userのConfirm（Web Vault Org Owner操作）
 
 - [x] 2. (P) AuthentikGroupClient実装によるグループメンバーシップ取得
   - 専用Authentik APIトークン（`PRESENCE_AUTHENTIK_API_TOKEN`パターン踏襲）での認証処理を実装
@@ -159,6 +160,9 @@
   - **実装メモ（2026-06-25）**: `app`/`model`の正確な値は`terraform providers schema -json`のenum一覧と実Events API実例（2026-06-25時点 `app="authentik.core"`, `model="authentik_core.group"`、action="model_updated"）で確認済み。**providerバグ回避**: `destination_group`未設定(null)のままだとレスポンスの`destination_group_obj`がnullになり、terraform-provider-authentik 2026.2.0のGoクライアントがネストオブジェクトデコードに失敗し`HTTP Error 'no value given for required property pk'`でcreate/import双方が失敗する実機確認済み不具合。`destination_group`に既存`管理者`グループを指定することで回避（管理者への可視化という副次的利点もある）。`destination_event_user=true`も設定し、NotificationRule.destination_users()が空になりWebhookが発火しない事態を防止。`terraform apply`済み・本番反映済み・full plan diff 0件確認済み。
 
 - [ ] 10. E2E検証とドリフト修復確認
+  - **追加バグ修正（2026-06-26、task 1.5/E2E実施時に実機で発覚）**:
+    1. `device_identifier`欠落: `/identity/connect/token`が`device_type`/`device_identifier`/`device_name`を必須とする。未送信時HTTP 400。両ファイルに`device_type=21`等を追加（commit c9f5944）
+    2. `GET /api/organizations`が Vaultwarden で404: Bitwarden APIと異なりこのエンドポイントが未実装。`/api/accounts/profile`の`organizations`フィールドに切り替え（commit 79306db）
 
 - [ ] 10.1 オンボーディングE2Eテスト（2段階フロー）
   - 一段階目: テスト用Authentikグループへの新規メンバー追加→トリガー（ログインまたはWebhook）→Vaultwarden招待送信→Discord「Confirm待ちN件」通知確認を一連で確認できる
