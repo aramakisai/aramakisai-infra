@@ -149,11 +149,25 @@ ID=$(curl -sf -H "Authorization: Bearer $TAILSCALE_API_KEY" \
 
 ---
 
+## ランタイム侵入検知 (Falco + intrusion-response.yml)
+
+- **Falco**: `gitops/apps/prod/falco.yaml` で DaemonSet としてデプロイ済み。falcosidekick 経由で `DISCORD_OPS_WEBHOOK_URL` に通知
+- **自動 dispatch は行わない**: 過検知リスク（CNPG barman backup・mailserver 設定生成等の正常動作も検知しうる）と falcosidekick のペイロード非互換性のため、Falco アラートから `intrusion-response` への自動 dispatch は実装していない
+- **手動 dispatch**: Falco 通知を受けた人間が侵害を判断し、`.github/workflows/intrusion-response.yml` を `workflow_dispatch` で手動発火する
+- **intrusion-response.yml の動作**:
+  1. forensics: `kubectl logs`・`kubectl get events`・`kubectl get networkpolicy` を GitHub Actions Artifacts に保存 (90日保持)
+  2. isolate: 指定 namespace に egress/ingress 全拒否 NetworkPolicy を適用
+  3. notify: Discord に全シークレット一覧とローテーション手順を通知
+- **再構築は手動**: シークレットローテーション完了後に人間が手動で `dr-recovery` を dispatch する。ローテーション前の自動再構築は行わない
+
+---
+
 ## 参照先
 
 - DR 手順全文: `docs/dr-runbook.md`
 - 検出ワークフロー: `.github/workflows/dr-trigger.yml` / `.github/scripts/dr-trigger.sh`
 - 自動復旧スクリプト: `.github/scripts/recovery.sh`
 - 復旧ワークフロー: `.github/workflows/dr-recovery.yml`
+- 侵入対応ワークフロー: `.github/workflows/intrusion-response.yml`
 - CNPG 移行時の詳細知見: `.kiro/specs/single-node-migration/design.md` の「実装時の知見」セクション
 - DR起動トリガー引き継ぎの設計判断: `.kiro/specs/observability-v2/design.md` の「DR Trigger」セクション

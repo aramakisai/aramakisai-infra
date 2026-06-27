@@ -1,0 +1,180 @@
+name: Intrusion Response
+
+on:
+  workflow_dispatch:
+    inputs:
+      namespace:
+        description: '対象 namespace (必須、例: prod)'
+        required: true
+        type: string
+      pod_selector:
+        description: 'Pod セレクター (任意、空の場合は namespace 全 Pod を対象)'
+        required: false
+        default: ''
+        type: string
+
+concurrency:
+  group: intrusion-response
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  forensics:
+    name: Forensics — 証拠保全
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Validate inputs
+        run: |
+          if [[ -z "${{ inputs.namespace }}" ]]; then
+            echo "::error::namespace が空です。対象 namespace を指定してください"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - name: Setup Tailscale
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: Install kubectl and Infisical
+        run: |
+          KUBECTL_VERSION=$(curl -Ls https://dl.k8s.io/release/stable.txt)
+          curl -LO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+          chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+
+          curl -1sLf 'https://dl.cloudsmith.io/public/infisical/infisical-cli/setup.deb.sh' | sudo -E bash
+          sudo apt-get install -y infisical
+
+      - name: Collect forensics data
+        env:
+          INFISICAL_CLIENT_ID: ${{ secrets.INFISICAL_CLIENT_ID }}
+          INFISICAL_CLIENT_SECRET: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+          INFISICAL_PROJECT_ID: ${{ secrets.INFISICAL_PROJECT_ID }}
+        run: |
+          NAMESPACE="${{ inputs.namespace }}"
+          KUBECONFIG_FILE="/tmp/kubeconfig-ir"
+
+          KUBECONFIG_CONTENT=$(infisical secrets get KUBECONFIG --env=prod --plain 2>/dev/null) \
+            || { echo "::error::KUBECONFIG の取得に失敗しました"; exit 1; }
+          echo "${KUBECONFIG_CONTENT}" > "${KUBECONFIG_FILE}"
+          chmod 600 "${KUBECONFIG_FILE}"
+
+          mkdir -p /tmp/forensics
+
+          kubectl --kubeconfig="${KUBECONFIG_FILE}" logs \
+            -n "${NAMESPACE}" --all-containers --tail=1000 \
+            > /tmp/forensics/pod-logs.txt 2>&1 \
+            || echo "::warning::Pod ログの取得に失敗しました (部分取得の可能性あり)"
+
+          kubectl --kubeconfig="${KUBECONFIG_FILE}" get events \
+            -n "${NAMESPACE}" --sort-by='.lastTimestamp' \
+            > /tmp/forensics/events.txt 2>&1 \
+            || echo "::warning::Events の取得に失敗しました"
+
+          kubectl --kubeconfig="${KUBECONFIG_FILE}" get networkpolicy \
+            -n "${NAMESPACE}" -o yaml \
+            > /tmp/forensics/networkpolicies.yaml 2>&1 \
+            || echo "::warning::NetworkPolicy の取得に失敗しました"
+
+          kubectl --kubeconfig="${KUBECONFIG_FILE}" get pods \
+            -n "${NAMESPACE}" -o wide \
+            > /tmp/forensics/pods.txt 2>&1 \
+            || echo "::warning::Pod 一覧の取得に失敗しました"
+
+          echo "namespace=${NAMESPACE}" > /tmp/forensics/metadata.txt
+          echo "pod_selector=${{ inputs.pod_selector }}" >> /tmp/forensics/metadata.txt
+          echo "collected_at=$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> /tmp/forensics/metadata.txt
+
+      - name: Upload forensics artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: forensics-${{ inputs.namespace }}-${{ github.run_id }}
+          path: /tmp/forensics/
+          retention-days: 90
+
+  isolate:
+    name: Isolate — ネットワーク遮断
+    runs-on: ubuntu-latest
+    needs: forensics
+    timeout-minutes: 10
+
+    steps:
+      - name: Setup Tailscale
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: Install kubectl and Infisical
+        run: |
+          KUBECTL_VERSION=$(curl -Ls https://dl.k8s.io/release/stable.txt)
+          curl -LO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+          chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+
+          curl -1sLf 'https://dl.cloudsmith.io/public/infisical/infisical-cli/setup.deb.sh' | sudo -E bash
+          sudo apt-get install -y infisical
+
+      - name: Apply isolation NetworkPolicy
+        env:
+          INFISICAL_CLIENT_ID: ${{ secrets.INFISICAL_CLIENT_ID }}
+          INFISICAL_CLIENT_SECRET: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+          INFISICAL_PROJECT_ID: ${{ secrets.INFISICAL_PROJECT_ID }}
+        run: |
+          NAMESPACE="${{ inputs.namespace }}"
+          KUBECONFIG_FILE="/tmp/kubeconfig-ir"
+
+          KUBECONFIG_CONTENT=$(infisical secrets get KUBECONFIG --env=prod --plain 2>/dev/null) \
+            || { echo "::error::KUBECONFIG の取得に失敗しました"; exit 1; }
+          echo "${KUBECONFIG_CONTENT}" > "${KUBECONFIG_FILE}"
+          chmod 600 "${KUBECONFIG_FILE}"
+
+          kubectl --kubeconfig="${KUBECONFIG_FILE}" apply -f - <<EOF
+          apiVersion: networking.k8s.io/v1
+          kind: NetworkPolicy
+          metadata:
+            name: intrusion-isolation
+            namespace: ${NAMESPACE}
+          spec:
+            podSelector: {}
+            policyTypes:
+              - Ingress
+              - Egress
+          EOF
+
+          echo "NetworkPolicy 適用完了: namespace=${NAMESPACE} の全 Pod の ingress/egress を遮断しました"
+
+  notify:
+    name: Notify — Discord ローテーション通知
+    runs-on: ubuntu-latest
+    needs: isolate
+    timeout-minutes: 5
+
+    steps:
+      - name: Send Discord notification
+        run: |
+          NAMESPACE="${{ inputs.namespace }}"
+          POD_SELECTOR="${{ inputs.pod_selector }}"
+          PS_DISPLAY="${POD_SELECTOR:-全 Pod}"
+          RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          BODY=$(jq -n \
+            --arg ns "${NAMESPACE}" \
+            --arg ps "${PS_DISPLAY}" \
+            --arg url "${RUN_URL}" \
+            '{
+              content: ("🚨 **侵入対応実行完了** 🚨\n\n**対象 namespace**: `" + $ns + "`\n**Pod セレクター**: `" + $ps + "`\n**実行ログ**: " + $url + "\n\n**実施済み**:\n• forensics 保存済み (GitHub Actions Artifacts 90日保持)\n• NetworkPolicy 適用済み (ingress/egress 全遮断)\n\n**ローテーション必須シークレット一覧 (Infisical)**:\n`HCLOUD_TOKEN` `CLOUDFLARE_API_TOKEN` `TAILSCALE_OAUTH_CLIENT_ID` `TAILSCALE_OAUTH_CLIENT_SECRET`\n`TF_VAR_k3s_token` `TF_VAR_tailscale_api_key` `TF_VAR_authentik_cf_client_id` `TF_VAR_authentik_cf_client_secret`\n`K3S_TOKEN` `CLOUDFLARE_TUNNEL_TOKEN` `CLOUDFLARE_TUNNEL_ID` `INFISICAL_CLIENT_ID` `INFISICAL_CLIENT_SECRET`\n`ARGOCD_GITHUB_DEPLOY_KEY` `TFC_API_TOKEN` `TFC_WORKSPACE_ID` `TAILSCALE_API_KEY` `TAILSCALE_TAILNET`\n`AUTHENTIK_SECRET_KEY` `AUTHENTIK_DB_PASSWORD` `NOREPLY_SMTP_PASSWORD`\n`MAILSERVER_LDAP_BIND_PASSWORD` `MAILSERVER_DKIM_KEY` `MAILSERVER_RESTIC_PASSWORD` `B2_APPLICATION_KEY_ID` `B2_APPLICATION_KEY`\n`DIRECTUS_SECRET` `DIRECTUS_ADMIN_EMAIL` `DIRECTUS_ADMIN_PASSWORD` `DIRECTUS_DB_PASSWORD`\n`LOKI_URL` `LOKI_USERNAME` `LOKI_PASSWORD` `PROMETHEUS_REMOTE_WRITE_URL` `PROMETHEUS_USERNAME` `PROMETHEUS_PASSWORD`\n`MAIL_OAUTH2_CLIENT_SECRET` `ROUNDCUBE_DES_KEY`\n`TF_VAR_authentik_room_presence_client_secret` `PRESENCE_AUTH_SECRET` `PRESENCE_AUTHENTIK_API_TOKEN` `PRESENCE_RESET_SECRET` `PRESENCE_DISCORD_BOT_TOKEN`\n`VAULTWARDEN_ADMIN_TOKEN` `VAULTWARDEN_DB_PASSWORD` `VAULTWARDEN_OIDC_CLIENT_ID` `VAULTWARDEN_OIDC_CLIENT_SECRET` `VAULTWARDEN_RESTIC_PASSWORD`\n`VAULTWARDEN_RBAC_SYNC_AUTHENTIK_API_TOKEN` `VAULTWARDEN_RBAC_SYNC_SERVICE_ACCOUNT_CLIENT_ID` `VAULTWARDEN_RBAC_SYNC_SERVICE_ACCOUNT_CLIENT_SECRET`\n`TF_VAR_vaultwarden_rbac_sync_trigger_token` `DISCORD_OPS_WEBHOOK_URL`\n\n**GitHub Actions Secrets もローテーション**:\n`INFISICAL_CLIENT_ID` `INFISICAL_CLIENT_SECRET`\n\n⚠️ **次のアクション**:\n1. 上記すべてのシークレットを Infisical でローテーション\n2. GitHub Actions Secrets の `INFISICAL_CLIENT_ID`/`INFISICAL_CLIENT_SECRET` もローテーション\n3. **ローテーション完了後**に `dr-recovery` を手動 dispatch\n\n🔴 **ローテーション完了前に `dr-recovery` を実行しないこと**")
+            }')
+
+          curl -sf -X POST "${{ secrets.DISCORD_OPS_WEBHOOK_URL }}" \
+            -H "Content-Type: application/json" \
+            -d "${BODY}" \
+            || { echo "::error::Discord 通知の送信に失敗しました"; exit 1; }
