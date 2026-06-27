@@ -1,0 +1,23 @@
+---
+# KVM テスト用インベントリ
+# recovery.sh の DR_ANSIBLE_INVENTORY として使用する
+# ansible_host は dr-kvm-create.sh が VM 作成後に書き換える
+#
+# 使い方:
+#   DR_ANSIBLE_INVENTORY=/path/to/kvm-test.yml で recovery.sh に渡す
+
+all:
+  children:
+    k3s_server:
+      hosts:
+        kvm-test:
+          ansible_host: PLACEHOLDER_KVM_IP
+          k3s_role: server
+          k3s_cluster_init: true
+          k3s_private_ip: 10.0.1.1
+
+  vars:
+    ansible_user: root
+    ansible_ssh_extra_args: "-o ConnectTimeout=30 -o StrictHostKeyChecking=no"
+    k3s_version: v1.32.3+k3s1
+    k3s_token: "{{ lookup('env', 'K3S_TOKEN') }}"

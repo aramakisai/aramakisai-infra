@@ -24,33 +24,92 @@ die() { log "ERROR: $*"; exit 1; }
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 KUBECONFIG_FILE="/tmp/kubeconfig-recovery"
 
+# ローカルテスト用フラグ (デフォルトはすべて 0 = 本番モード)
+#
+# DR_LOCAL_TEST=1          : Steps 2-5 をすべてスキップ (k3d 既存クラスター向け)
+# DR_SKIP_TAILSCALE_DELETE=1: Step 2 (Tailscale デバイス削除) のみスキップ
+# DR_SKIP_TFC=1             : Step 3 (Terraform Cloud Run) のみスキップ
+# DR_SKIP_TAILSCALE_WAIT=1  : Step 4 (Tailscale 登録待機) のみスキップ
+# DR_SKIP_ANSIBLE=1         : Step 5 (Ansible) のみスキップ
+# DR_ANSIBLE_INVENTORY      : Ansible に使う inventory ファイルパス (デフォルト: tailscale.yml)
+#
+# KVM テスト向け推奨設定:
+#   DR_SKIP_TAILSCALE_DELETE=1 DR_SKIP_TFC=1 DR_SKIP_TAILSCALE_WAIT=1 \
+#   DR_ANSIBLE_INVENTORY=/path/to/kvm-test.yml \
+#   KUBECONFIG_FILE=/tmp/kubeconfig-kvm-test \
+#   infisical run --env=prod -- bash .github/scripts/recovery.sh
+DR_LOCAL_TEST="${DR_LOCAL_TEST:-0}"
+DR_SKIP_TAILSCALE_DELETE="${DR_SKIP_TAILSCALE_DELETE:-0}"
+DR_SKIP_TFC="${DR_SKIP_TFC:-0}"
+DR_SKIP_TAILSCALE_WAIT="${DR_SKIP_TAILSCALE_WAIT:-0}"
+DR_SKIP_ANSIBLE="${DR_SKIP_ANSIBLE:-0}"
+DR_ANSIBLE_INVENTORY="${DR_ANSIBLE_INVENTORY:-}"
+
+# DR_LOCAL_TEST=1 は全フラグを有効化するショートカット
+if [[ "${DR_LOCAL_TEST}" == "1" ]]; then
+  DR_SKIP_TAILSCALE_DELETE=1
+  DR_SKIP_TFC=1
+  DR_SKIP_TAILSCALE_WAIT=1
+  DR_SKIP_ANSIBLE=1
+fi
+
 kubectl_r() { kubectl --kubeconfig="${KUBECONFIG_FILE}" "$@"; }
 
 # ============================================================
 # 1. 必須環境変数チェック
 # ============================================================
 
-REQUIRED_VARS=(
-  INFISICAL_CLIENT_ID
-  INFISICAL_CLIENT_SECRET
-  K3S_TOKEN
-  ARGOCD_GITHUB_DEPLOY_KEY
-  TAILSCALE_API_KEY
-  TAILSCALE_TAILNET
-  TFC_API_TOKEN
-  TFC_WORKSPACE_ID
-  CLOUDFLARE_TUNNEL_TOKEN
-  CLOUDFLARE_TUNNEL_ID
-  KUBECONFIG
-)
+if [[ "${DR_LOCAL_TEST}" == "1" ]]; then
+  # k3d ローカルテストモード: インフラ系変数は不要
+  REQUIRED_VARS=(
+    INFISICAL_CLIENT_ID
+    INFISICAL_CLIENT_SECRET
+  )
+  log "[LOCAL TEST MODE] Steps 2-5 (Tailscale/TFC/Ansible) をスキップします"
+  log "[LOCAL TEST MODE] KUBECONFIG_FILE=${KUBECONFIG_FILE}"
+  if [[ ! -f "${KUBECONFIG_FILE}" ]]; then
+    [[ -n "${KUBECONFIG:-}" ]] || die "KUBECONFIG または KUBECONFIG_FILE が必要です"
+    echo "${KUBECONFIG}" > "${KUBECONFIG_FILE}"
+    chmod 600 "${KUBECONFIG_FILE}"
+  fi
+elif [[ "${DR_SKIP_TAILSCALE_DELETE}" == "1" && "${DR_SKIP_TFC}" == "1" && "${DR_SKIP_TAILSCALE_WAIT}" == "1" ]]; then
+  # KVM テストモード: Tailscale/TFC スキップ、Ansible は実行
+  REQUIRED_VARS=(
+    INFISICAL_CLIENT_ID
+    INFISICAL_CLIENT_SECRET
+    K3S_TOKEN
+    ARGOCD_GITHUB_DEPLOY_KEY
+    CLOUDFLARE_TUNNEL_TOKEN
+    CLOUDFLARE_TUNNEL_ID
+  )
+  log "[KVM TEST MODE] Tailscale/TFC をスキップ、Ansible で KVM VM をブートストラップします"
+  log "[KVM TEST MODE] DR_ANSIBLE_INVENTORY=${DR_ANSIBLE_INVENTORY:-tailscale.yml}"
+  log "[KVM TEST MODE] KUBECONFIG_FILE=${KUBECONFIG_FILE}"
+else
+  REQUIRED_VARS=(
+    INFISICAL_CLIENT_ID
+    INFISICAL_CLIENT_SECRET
+    K3S_TOKEN
+    ARGOCD_GITHUB_DEPLOY_KEY
+    TAILSCALE_API_KEY
+    TAILSCALE_TAILNET
+    TFC_API_TOKEN
+    TFC_WORKSPACE_ID
+    CLOUDFLARE_TUNNEL_TOKEN
+    CLOUDFLARE_TUNNEL_ID
+    KUBECONFIG
+  )
+fi
 
 for VAR in "${REQUIRED_VARS[@]}"; do
   [[ -n "${!VAR:-}" ]] || die "必須環境変数が未設定です: $VAR"
 done
 
-# KUBECONFIG 環境変数の内容をファイルに書き出す (kubectl は file path を要求するため)
-echo "${KUBECONFIG}" > "${KUBECONFIG_FILE}"
-chmod 600 "${KUBECONFIG_FILE}"
+# 本番モード (Tailscale/TFC を実行するケース) のみ KUBECONFIG env var を事前書き出し
+if [[ "${DR_LOCAL_TEST}" != "1" && "${DR_SKIP_TAILSCALE_DELETE}" != "1" ]]; then
+  echo "${KUBECONFIG}" > "${KUBECONFIG_FILE}"
+  chmod 600 "${KUBECONFIG_FILE}"
+fi
 
 log "環境変数チェック完了"
 
@@ -78,6 +137,10 @@ log "CNPG Job クリーンアップ完了 (または非 fatal スキップ)"
 #    新ノードが prod-node-1-1 として登録されるのを防ぐ
 # ============================================================
 
+if [[ "${DR_SKIP_TAILSCALE_DELETE}" == "1" ]]; then
+  log "[SKIP] Step2 (Tailscale デバイス削除) をスキップします"
+else
+
 log "Tailscale から prod-node-1 を削除します"
 
 DEVICE_IDS=$(curl -sf \
@@ -96,9 +159,15 @@ else
   done
 fi
 
+fi  # DR_SKIP_TAILSCALE_DELETE Step2
+
 # ============================================================
 # 3. Terraform Cloud API でプランを作成・適用
 # ============================================================
+
+if [[ "${DR_SKIP_TFC}" == "1" ]]; then
+  log "[SKIP] Step3 (Terraform Cloud Run) をスキップします"
+else
 
 log "Terraform Cloud でプランを作成します (Workspace: ${TFC_WORKSPACE_ID})"
 
@@ -159,9 +228,15 @@ while true; do
   ELAPSED=$(( ELAPSED + SLEEP_INTERVAL ))
 done
 
+fi  # DR_SKIP_TFC Step3
+
 # ============================================================
 # 4. Tailscale に prod-node-1 として登録されるまでポーリング
 # ============================================================
+
+if [[ "${DR_SKIP_TAILSCALE_WAIT}" == "1" ]]; then
+  log "[SKIP] Step4 (Tailscale 登録待機) をスキップします"
+else
 
 log "Tailscale への prod-node-1 登録を待機します (最大10分)"
 TS_TIMEOUT=600
@@ -186,11 +261,18 @@ while true; do
   TS_ELAPSED=$(( TS_ELAPSED + TS_SLEEP ))
 done
 
+fi  # DR_SKIP_TAILSCALE_WAIT Step4
+
 # ============================================================
 # 5. Ansible でシングルノード K3s をブートストラップ
 # ============================================================
 
-log "Ansible Playbook を実行します"
+if [[ "${DR_SKIP_ANSIBLE}" == "1" ]]; then
+  log "[SKIP] Step5 (Ansible k3s ブートストラップ) をスキップします"
+else
+
+_ANSIBLE_INVENTORY="${DR_ANSIBLE_INVENTORY:-${REPO_ROOT}/ansible/inventory/tailscale.yml}"
+log "Ansible Playbook を実行します (inventory: ${_ANSIBLE_INVENTORY})"
 ANSIBLE_HOST_KEY_CHECKING=False \
   K3S_TOKEN="${K3S_TOKEN}" \
   CLOUDFLARE_TUNNEL_TOKEN="${CLOUDFLARE_TUNNEL_TOKEN}" \
@@ -199,15 +281,32 @@ ANSIBLE_HOST_KEY_CHECKING=False \
   INFISICAL_CLIENT_SECRET="${INFISICAL_CLIENT_SECRET}" \
   ARGOCD_GITHUB_DEPLOY_KEY="${ARGOCD_GITHUB_DEPLOY_KEY}" \
   ansible-playbook \
-    -i "${REPO_ROOT}/ansible/inventory/tailscale.yml" \
+    -i "${_ANSIBLE_INVENTORY}" \
     "${REPO_ROOT}/ansible/playbooks/k3s-bootstrap.yml"
 
 # Ansible が新しい kubeconfig を Infisical に登録するため、再取得して上書きする
-KUBECONFIG_NEW=$(infisical secrets get KUBECONFIG --env=prod --plain 2>/dev/null || true)
-if [[ -n "$KUBECONFIG_NEW" ]]; then
-  echo "${KUBECONFIG_NEW}" > "${KUBECONFIG_FILE}"
-  log "kubeconfig を Infisical から再取得しました"
+# DR_ANSIBLE_INVENTORY が指定されている場合は Infisical への登録はスキップされるため
+# VM から直接 kubeconfig を取得する
+if [[ -n "${DR_ANSIBLE_INVENTORY:-}" ]]; then
+  KVM_HOST=$(grep -A2 'k3s_server:' "${DR_ANSIBLE_INVENTORY}" \
+    | grep 'ansible_host:' | awk '{print $2}' | head -1 || true)
+  if [[ -n "$KVM_HOST" ]]; then
+    log "KVM VM (${KVM_HOST}) から kubeconfig を取得します"
+    ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+      root@"${KVM_HOST}" cat /etc/rancher/k3s/k3s.yaml \
+      | sed "s|https://127.0.0.1:6443|https://${KVM_HOST}:6443|g" \
+      > "${KUBECONFIG_FILE}"
+    log "kubeconfig を KVM VM から取得しました"
+  fi
+else
+  KUBECONFIG_NEW=$(infisical secrets get KUBECONFIG --env=prod --plain 2>/dev/null || true)
+  if [[ -n "$KUBECONFIG_NEW" ]]; then
+    echo "${KUBECONFIG_NEW}" > "${KUBECONFIG_FILE}"
+    log "kubeconfig を Infisical から再取得しました"
+  fi
 fi
+
+fi  # DR_SKIP_ANSIBLE Step5
 
 # ============================================================
 # 6. ArgoCD sync 完了・CNPG healthy を待機
@@ -348,8 +447,22 @@ spec:
 EOF
 
 log "VolSync リストア完了を待機します (最大30分)"
-kubectl_r wait replicationdestination/mailserver-restore -n prod \
-  --for=condition=Reconciled --timeout=1800s
+_VOLSYNC_TIMEOUT=1800
+_VOLSYNC_ELAPSED=0
+while true; do
+  _RESULT=$(kubectl_r get replicationdestination/mailserver-restore -n prod \
+    -o jsonpath='{.status.latestMoverStatus.result}' 2>/dev/null || true)
+  if [[ "$_RESULT" == "Successful" ]]; then
+    log "VolSync リストア成功"
+    break
+  elif [[ "$_RESULT" == "Failed" ]]; then
+    die "VolSync リストアが失敗しました"
+  fi
+  (( _VOLSYNC_ELAPSED >= _VOLSYNC_TIMEOUT )) && die "VolSync リストアがタイムアウトしました (${_VOLSYNC_TIMEOUT}s)"
+  log "  VolSync 待機中... result=${_RESULT:-同期中} (${_VOLSYNC_ELAPSED}s)"
+  sleep 15
+  _VOLSYNC_ELAPSED=$(( _VOLSYNC_ELAPSED + 15 ))
+done
 
 log "VolSync リストア完了"
 

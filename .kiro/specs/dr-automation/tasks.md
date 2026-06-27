@@ -13,8 +13,8 @@
   - `grep -i stalwart .github/scripts/recovery.sh` が一致なしになることを確認できれば完了
   - _Requirements: 00-1, 00-2_
 
-- [ ] 2. DR ワークフローが動作するための運用基盤をセットアップする
-- [ ] 2.1 (P) GitHub Actions Secrets と Tailscale tag:ci を設定する
+- [x] 2. DR ワークフローが動作するための運用基盤をセットアップする
+- [x] 2.1 (P) GitHub Actions Secrets と Tailscale tag:ci を設定する
   - リポジトリの Settings → Secrets and variables → Actions に `INFISICAL_CLIENT_ID`／`INFISICAL_CLIENT_SECRET`／`INFISICAL_PROJECT_ID`／`TS_OAUTH_CLIENT_ID`／`TS_OAUTH_SECRET` を登録する（`TAILSCALE_API_KEY`・`TAILSCALE_TAILNET`・`DISCORD_OPS_WEBHOOK_URL` は observability-v2 で登録済み）
   - Tailscale ACL の `tagOwners` に `tag:ci` を追加し、Machines: Create 権限のみを持つ専用 OAuth Client を新規発行する
   - `dr-recovery.yml` を手動 `repository_dispatch` で発火し、Tailscale 接続ステップと Infisical シークレット読み込みステップが成功することを確認できれば完了
@@ -80,6 +80,19 @@
 
 - [ ] 7. DR・侵入対応フローのエンドツーエンド検証を行う
 - [ ] 7.1 recovery.sh 全体の通し実行で RTO 30 分以内と Step7 の成功を確認する
+  - **ローカル統合テスト完了（2026-06-27）**: `.github/scripts/dr-local-test.sh` で k3d クラスターに対して自己修復ステップを検証（PASS=13 FAIL=0）
+    - ✓ Step0 / Step6a / Step6b / Step7末尾 はローカル検証済み
+  - **KVM テスト試行 (2026-06-27) → 断念**: Arch Linux 上の KVM/libvirt で Debian 13 trixie VM を起動し Ansible（Step5）をテストしようとしたが、libvirt nftables バックエンドが masquerade ルールを自動追加しない問題で VM からのインターネット接続が確立できずに断念。環境汚染のためクリーンアップ済み。
+    - 判明した技術情報:
+      - Debian 13 trixie genericcloud イメージは **UEFI 必須**（OVMF: `/usr/share/edk2/x64/OVMF_CODE.4m.fd`）。BIOS モードでは GRUB ブートループ。
+      - cloud-init ISO: `mkisofs -volid cidata -joliet -rock user-data meta-data network-config` で正常作成確認済み
+      - `recovery.sh` の KVM テストモードフラグ (`DR_SKIP_TAILSCALE_DELETE=1 DR_SKIP_TFC=1 DR_SKIP_TAILSCALE_WAIT=1 DR_ANSIBLE_INVENTORY=kvm-test.yml KUBECONFIG_FILE=...`) は正常動作確認済み
+      - Ansible の swap ロールは KVM VM 上で成功（apt update 失敗は NAT 問題のみ）
+  - **次のアプローチ**: VirtualBox で Debian 13 VM を作成し Ansible テストを実施する
+    - VirtualBox の NAT ネットワークは自動設定されるため libvirt NAT 問題は発生しない
+    - `DR_ANSIBLE_INVENTORY=ansible/inventory/kvm-test.yml` で VM IP を指定して `recovery.sh` を実行する
+    - VirtualBox GUI で Debian 13 ISO からインストール、または `vboxmanage` でクラウドイメージをインポートする
+  - **未完了（データ整合性確認が必要）**: k3d に全アプリ（ArgoCD + ESO + CNPG Cluster + VolSync + Authentik/Directus/Roundcube）をデプロイし、HOS 実データからのリストアとアプリ動作を確認する
   - メンテナンスウィンドウ内で実際の `prod-node-1` 再作成（または同等の検証手順）を行い、Step1〜Step7 がすべて成功し、Authentik／Directus／Roundcube が 30 分以内に復旧することを確認する
   - メールデータが VolSync リストアによって最大 6 時間以内の RPO で復旧していることを確認できれば完了
   - _Requirements: 05_
