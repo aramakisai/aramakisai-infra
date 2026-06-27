@@ -159,18 +159,18 @@
   - _Boundary: GroupChangeWebhookRule_
   - **実装メモ（2026-06-25）**: `app`/`model`の正確な値は`terraform providers schema -json`のenum一覧と実Events API実例（2026-06-25時点 `app="authentik.core"`, `model="authentik_core.group"`、action="model_updated"）で確認済み。**providerバグ回避**: `destination_group`未設定(null)のままだとレスポンスの`destination_group_obj`がnullになり、terraform-provider-authentik 2026.2.0のGoクライアントがネストオブジェクトデコードに失敗し`HTTP Error 'no value given for required property pk'`でcreate/import双方が失敗する実機確認済み不具合。`destination_group`に既存`管理者`グループを指定することで回避（管理者への可視化という副次的利点もある）。`destination_event_user=true`も設定し、NotificationRule.destination_users()が空になりWebhookが発火しない事態を防止。`terraform apply`済み・本番反映済み・full plan diff 0件確認済み。
 
-- [ ] 10. E2E検証とドリフト修復確認
+- [x] 10. E2E検証とドリフト修復確認
   - **追加バグ修正（2026-06-26、task 1.5/E2E実施時に実機で発覚）**:
     1. `device_identifier`欠落: `/identity/connect/token`が`device_type`/`device_identifier`/`device_name`を必須とする。未送信時HTTP 400。両ファイルに`device_type=21`等を追加（commit c9f5944）
     2. `GET /api/organizations`が Vaultwarden で404: Bitwarden APIと異なりこのエンドポイントが未実装。`/api/accounts/profile`の`organizations`フィールドに切り替え（commit 79306db）
 
-- [ ] 10.1 オンボーディングE2Eテスト（2段階フロー）
+- [x] 10.1 オンボーディングE2Eテスト（2段階フロー）
   - 一段階目: テスト用Authentikグループへの新規メンバー追加→トリガー（ログインまたはWebhook）→Vaultwarden招待送信→Discord「Confirm待ちN件」通知確認を一連で確認できる
   - 二段階目: 上記の後、管理者がWeb UIでConfirm→次回CronJob実行時にCollection権限が自動適用されることを確認できる
   - _Requirements: 1.1, 6.1, 6.2, 6.4, 6.5, 7.1, 11.4_
   - _Depends: 9.1, 9.2
 
-- [ ] 10.2 オフボーディングE2Eテスト
+- [x] 10.2 オフボーディングE2Eテスト
   - テスト用Authentikグループからのメンバー脱退→トリガー→対象Collection権限剥奪までの反映を確認できる
   - Organizationからの除名が発生せず、Collection権限の剥奪のみが行われることを確認できる
   - _Requirements: 8.1, 8.2, 8.3
