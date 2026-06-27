@@ -125,14 +125,12 @@ kubectl_r wait --for=condition=established \
 for _C in authentik-db directus-db vaultwarden-db presence-db; do
   if kubectl_r get cluster "${_C}" -n prod &>/dev/null; then
     log "  既存クラスター ${_C} を削除します"
-    kubectl_r delete jobs -n prod -l "cnpg.io/cluster=${_C}" --ignore-not-found
-    kubectl_r delete cluster "${_C}" -n prod --wait=false
+    kubectl_r delete jobs -n prod -l "cnpg.io/cluster=${_C}" --ignore-not-found 2>/dev/null || true
+    kubectl_r delete cluster "${_C}" -n prod --wait=false --ignore-not-found 2>/dev/null || true
   fi
 done
-# 削除完了を待つ (最大 4 分)
-for _C in authentik-db directus-db vaultwarden-db presence-db; do
-  kubectl_r wait cluster "${_C}" -n prod --for=delete --timeout=240s 2>/dev/null || true
-done
+# ArgoCD が bootstrap.recovery で即時再作成するため、削除完了を待たずに進む
+# (Step9 で Cluster が healthy になるまで待機する)
 
 log "CNPG クリーンアップ完了 — ArgoCD sync で bootstrap.recovery として再作成されます"
 
@@ -147,6 +145,27 @@ log "root.yaml apply 完了 — ArgoCD が全アプリを sync します"
 # ============================================================
 # 8. ESO ClusterSecretStore が Ready になるまで待機
 # ============================================================
+
+log "=== Step7.5: CNPG バックアップを無効化 (本番 HOS を汚染しないため) ==="
+# k3d テストクラスターが本番と同じ HOS パスに書き込まないよう
+# ArgoCD が CNPG クラスターを作成した後、backup セクションを削除する
+# externalClusters (リストア用) は残す
+_CNPG_ELAPSED=0
+_CLUSTERS_PATCHED=0
+for _C in authentik-db directus-db vaultwarden-db presence-db; do
+  until kubectl_r get cluster "${_C}" -n prod &>/dev/null; do
+    (( _CNPG_ELAPSED >= 120 )) && break
+    sleep 5; _CNPG_ELAPSED=$(( _CNPG_ELAPSED + 5 ))
+  done
+  if kubectl_r get cluster "${_C}" -n prod &>/dev/null; then
+    if kubectl_r patch cluster "${_C}" -n prod --type=json \
+      -p '[{"op":"remove","path":"/spec/backup"}]' 2>/dev/null; then
+      log "  ${_C} backup section 削除完了"
+      (( _CLUSTERS_PATCHED++ )) || true
+    fi
+  fi
+done
+log "CNPG バックアップ停止完了 (${_CLUSTERS_PATCHED}/4 クラスター)"
 
 log "=== Step8: ESO ClusterSecretStore 待機 ==="
 log "ClusterSecretStore CRD が作成されるまでポーリングします (最大 10 分)"
