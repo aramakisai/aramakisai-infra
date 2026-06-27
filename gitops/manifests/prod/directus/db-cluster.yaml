@@ -20,7 +20,29 @@ spec:
       wal_compression: "on"
 
   bootstrap:
-    initdb: {}
+    recovery:
+      source: directus-db
+
+  externalClusters:
+    - name: directus-db
+      barmanObjectStore:
+        destinationPath: "s3://aramakisai-backups/cnpg/directus-db"
+        endpointURL: "https://fsn1.your-objectstorage.com"
+        serverName: directus-db
+        s3Credentials:
+          accessKeyId:
+            name: hetzner-os-credentials
+            key: ACCESS_KEY_ID
+          secretAccessKey:
+            name: hetzner-os-credentials
+            key: SECRET_ACCESS_KEY
+          region:
+            name: hetzner-os-credentials
+            key: REGION
+        wal:
+          compression: gzip
+        data:
+          compression: gzip
 
   backup:
     barmanObjectStore:
