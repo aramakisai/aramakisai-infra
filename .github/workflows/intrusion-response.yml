@@ -44,17 +44,11 @@ jobs:
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:ci
 
-      - name: Install kubectl and Infisical
+      - name: Install kubectl
         run: |
           KUBECTL_VERSION=$(curl -Ls https://dl.k8s.io/release/stable.txt)
           curl -LO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
           chmod +x kubectl && sudo mv kubectl /usr/local/bin/
-
-          curl -1sLf 'https://dl.cloudsmith.io/public/infisical/infisical-cli/gpg.key' \
-            | sudo gpg --dearmor -o /usr/share/keyrings/infisical.gpg
-          echo "deb [signed-by=/usr/share/keyrings/infisical.gpg] https://dl.cloudsmith.io/public/infisical/infisical-cli/deb/debian any-version main" \
-            | sudo tee /etc/apt/sources.list.d/infisical.list
-          sudo apt-get update -qq && sudo apt-get install -y infisical
 
       - name: Collect forensics data
         env:
@@ -67,9 +61,18 @@ jobs:
           KUBECONFIG_FILE="/tmp/kubeconfig-ir"
           mkdir -p /tmp/forensics
 
-          # infisical run で KUBECONFIG シークレットを注入してファイルに書き出す
-          infisical run --env=prod -- bash -c \
-            'printf "%s" "${KUBECONFIG}" > "'"${KUBECONFIG_FILE}"'"' \
+          # Infisical REST API で KUBECONFIG シークレットを取得 (CLI バージョン非依存)
+          _ACCESS_TOKEN=$(curl -sf -X POST \
+            "https://app.infisical.com/api/v1/auth/universal-auth/login" \
+            -H "Content-Type: application/json" \
+            -d "{\"clientId\":\"${INFISICAL_CLIENT_ID}\",\"clientSecret\":\"${INFISICAL_CLIENT_SECRET}\"}" \
+            | jq -r '.accessToken') \
+            || { echo "::error::Infisical 認証に失敗しました"; exit 1; }
+
+          curl -sf \
+            "https://app.infisical.com/api/v3/secrets/raw/KUBECONFIG?workspaceId=${INFISICAL_PROJECT_ID}&environment=prod" \
+            -H "Authorization: Bearer ${_ACCESS_TOKEN}" \
+            | jq -r '.secret.secretValue' > "${KUBECONFIG_FILE}" \
             || { echo "::error::KUBECONFIG の取得に失敗しました"; exit 1; }
           chmod 600 "${KUBECONFIG_FILE}"
 
@@ -118,17 +121,11 @@ jobs:
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:ci
 
-      - name: Install kubectl and Infisical
+      - name: Install kubectl
         run: |
           KUBECTL_VERSION=$(curl -Ls https://dl.k8s.io/release/stable.txt)
           curl -LO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
           chmod +x kubectl && sudo mv kubectl /usr/local/bin/
-
-          curl -1sLf 'https://dl.cloudsmith.io/public/infisical/infisical-cli/gpg.key' \
-            | sudo gpg --dearmor -o /usr/share/keyrings/infisical.gpg
-          echo "deb [signed-by=/usr/share/keyrings/infisical.gpg] https://dl.cloudsmith.io/public/infisical/infisical-cli/deb/debian any-version main" \
-            | sudo tee /etc/apt/sources.list.d/infisical.list
-          sudo apt-get update -qq && sudo apt-get install -y infisical
 
       - name: Apply isolation NetworkPolicy
         env:
@@ -139,8 +136,17 @@ jobs:
         run: |
           KUBECONFIG_FILE="/tmp/kubeconfig-ir"
 
-          infisical run --env=prod -- bash -c \
-            'printf "%s" "${KUBECONFIG}" > "'"${KUBECONFIG_FILE}"'"' \
+          _ACCESS_TOKEN=$(curl -sf -X POST \
+            "https://app.infisical.com/api/v1/auth/universal-auth/login" \
+            -H "Content-Type: application/json" \
+            -d "{\"clientId\":\"${INFISICAL_CLIENT_ID}\",\"clientSecret\":\"${INFISICAL_CLIENT_SECRET}\"}" \
+            | jq -r '.accessToken') \
+            || { echo "::error::Infisical 認証に失敗しました"; exit 1; }
+
+          curl -sf \
+            "https://app.infisical.com/api/v3/secrets/raw/KUBECONFIG?workspaceId=${INFISICAL_PROJECT_ID}&environment=prod" \
+            -H "Authorization: Bearer ${_ACCESS_TOKEN}" \
+            | jq -r '.secret.secretValue' > "${KUBECONFIG_FILE}" \
             || { echo "::error::KUBECONFIG の取得に失敗しました"; exit 1; }
           chmod 600 "${KUBECONFIG_FILE}"
 
