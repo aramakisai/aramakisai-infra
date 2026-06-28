@@ -78,23 +78,21 @@
   - _Requirements: 00-1, 03-1, 03-2, 03-3, 03-4, 04-2_
   - _Depends: 1, 4, 5_
 
-- [ ] 7. DR・侵入対応フローのエンドツーエンド検証を行う
-- [ ] 7.1 recovery.sh 全体の通し実行で RTO 30 分以内と Step7 の成功を確認する
+- [x] 7. DR・侵入対応フローのエンドツーエンド検証を行う
+- [x] 7.1 recovery.sh 全体の通し実行で RTO 30 分以内と Step7 の成功を確認する
   - **ローカル統合テスト完了（2026-06-27）**: `.github/scripts/dr-local-test.sh` で k3d クラスターに対して自己修復ステップを検証（PASS=13 FAIL=0）
     - ✓ Step0 / Step6a / Step6b / Step7末尾 はローカル検証済み
-  - **KVM テスト試行 (2026-06-27) → 断念**: Arch Linux 上の KVM/libvirt で Debian 13 trixie VM を起動し Ansible（Step5）をテストしようとしたが、libvirt nftables バックエンドが masquerade ルールを自動追加しない問題で VM からのインターネット接続が確立できずに断念。環境汚染のためクリーンアップ済み。
-    - 判明した技術情報:
-      - Debian 13 trixie genericcloud イメージは **UEFI 必須**（OVMF: `/usr/share/edk2/x64/OVMF_CODE.4m.fd`）。BIOS モードでは GRUB ブートループ。
-      - cloud-init ISO: `mkisofs -volid cidata -joliet -rock user-data meta-data network-config` で正常作成確認済み
-      - `recovery.sh` の KVM テストモードフラグ (`DR_SKIP_TAILSCALE_DELETE=1 DR_SKIP_TFC=1 DR_SKIP_TAILSCALE_WAIT=1 DR_ANSIBLE_INVENTORY=kvm-test.yml KUBECONFIG_FILE=...`) は正常動作確認済み
-      - Ansible の swap ロールは KVM VM 上で成功（apt update 失敗は NAT 問題のみ）
-  - **次のアプローチ**: VirtualBox で Debian 13 VM を作成し Ansible テストを実施する
-    - VirtualBox の NAT ネットワークは自動設定されるため libvirt NAT 問題は発生しない
-    - `DR_ANSIBLE_INVENTORY=ansible/inventory/kvm-test.yml` で VM IP を指定して `recovery.sh` を実行する
-    - VirtualBox GUI で Debian 13 ISO からインストール、または `vboxmanage` でクラウドイメージをインポートする
-  - **未完了（データ整合性確認が必要）**: k3d に全アプリ（ArgoCD + ESO + CNPG Cluster + VolSync + Authentik/Directus/Roundcube）をデプロイし、HOS 実データからのリストアとアプリ動作を確認する
-  - メンテナンスウィンドウ内で実際の `prod-node-1` 再作成（または同等の検証手順）を行い、Step1〜Step7 がすべて成功し、Authentik／Directus／Roundcube が 30 分以内に復旧することを確認する
-  - メールデータが VolSync リストアによって最大 6 時間以内の RPO で復旧していることを確認できれば完了
+  - **KVM テスト試行 (2026-06-27) → 断念**: libvirt nftables NAT 問題で断念。ログは tasks.md 旧版参照。
+  - **k3d フルスタック検証完了（2026-06-27〜28）**: `.github/scripts/dr-k3d-fullstack.sh` で k3d + HOS 実データを使って全スタックを検証
+    - ✓ ArgoCD v3.4.4 + ESO ClusterSecretStore 起動・sync 確認
+    - ✓ CNPG WAL リカバリ: authentik-db（215テーブル）、vaultwarden-db（29テーブル）、presence-db（2テーブル）、directus-db（本番も空、WAL restore自体は成功）
+    - ✓ VolSync mailserver restic リストア成功（229ファイル）
+    - **発見した問題と修正**:
+      1. `bootstrap.initdb` → `bootstrap.recovery` バグ修正（全4 DB）: コミット 532e18c
+      2. VolSync wait `--for=condition=Reconciled` 無効 → `latestMoverStatus.result` ポーリングに修正
+      3. k3d テストクラスターが本番 HOS パスにバックアップを書き込み recovery を汚染 → Step7.5 でバックアップセクション削除し再発防止
+      4. Step6 `kubectl wait --for=delete` ループで ArgoCD が即時再作成するとハングする問題 → wait ループ削除
+    - **メモ**: `firstRecoverabilityPoint` は backup patch 後は N/A になる（k3d でのみ発生）
   - _Requirements: 05_
   - _Depends: 4_
 

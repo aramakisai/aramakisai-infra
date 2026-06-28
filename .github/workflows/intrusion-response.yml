@@ -58,39 +58,40 @@ jobs:
           INFISICAL_CLIENT_ID: ${{ secrets.INFISICAL_CLIENT_ID }}
           INFISICAL_CLIENT_SECRET: ${{ secrets.INFISICAL_CLIENT_SECRET }}
           INFISICAL_PROJECT_ID: ${{ secrets.INFISICAL_PROJECT_ID }}
+          IR_NAMESPACE: ${{ inputs.namespace }}
+          IR_POD_SELECTOR: ${{ inputs.pod_selector }}
         run: |
-          NAMESPACE="${{ inputs.namespace }}"
           KUBECONFIG_FILE="/tmp/kubeconfig-ir"
-
-          KUBECONFIG_CONTENT=$(infisical secrets get KUBECONFIG --env=prod --plain 2>/dev/null) \
-            || { echo "::error::KUBECONFIG の取得に失敗しました"; exit 1; }
-          echo "${KUBECONFIG_CONTENT}" > "${KUBECONFIG_FILE}"
-          chmod 600 "${KUBECONFIG_FILE}"
-
           mkdir -p /tmp/forensics
 
+          # infisical run で KUBECONFIG シークレットを注入してファイルに書き出す
+          infisical run --env=prod -- bash -c \
+            'printf "%s" "${KUBECONFIG}" > "'"${KUBECONFIG_FILE}"'"' \
+            || { echo "::error::KUBECONFIG の取得に失敗しました"; exit 1; }
+          chmod 600 "${KUBECONFIG_FILE}"
+
           kubectl --kubeconfig="${KUBECONFIG_FILE}" logs \
-            -n "${NAMESPACE}" --all-containers --tail=1000 \
+            -n "${IR_NAMESPACE}" --all-containers --tail=1000 \
             > /tmp/forensics/pod-logs.txt 2>&1 \
             || echo "::warning::Pod ログの取得に失敗しました (部分取得の可能性あり)"
 
           kubectl --kubeconfig="${KUBECONFIG_FILE}" get events \
-            -n "${NAMESPACE}" --sort-by='.lastTimestamp' \
+            -n "${IR_NAMESPACE}" --sort-by='.lastTimestamp' \
             > /tmp/forensics/events.txt 2>&1 \
             || echo "::warning::Events の取得に失敗しました"
 
           kubectl --kubeconfig="${KUBECONFIG_FILE}" get networkpolicy \
-            -n "${NAMESPACE}" -o yaml \
+            -n "${IR_NAMESPACE}" -o yaml \
             > /tmp/forensics/networkpolicies.yaml 2>&1 \
             || echo "::warning::NetworkPolicy の取得に失敗しました"
 
           kubectl --kubeconfig="${KUBECONFIG_FILE}" get pods \
-            -n "${NAMESPACE}" -o wide \
+            -n "${IR_NAMESPACE}" -o wide \
             > /tmp/forensics/pods.txt 2>&1 \
             || echo "::warning::Pod 一覧の取得に失敗しました"
 
-          echo "namespace=${NAMESPACE}" > /tmp/forensics/metadata.txt
-          echo "pod_selector=${{ inputs.pod_selector }}" >> /tmp/forensics/metadata.txt
+          echo "namespace=${IR_NAMESPACE}" > /tmp/forensics/metadata.txt
+          echo "pod_selector=${IR_POD_SELECTOR}" >> /tmp/forensics/metadata.txt
           echo "collected_at=$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> /tmp/forensics/metadata.txt
 
       - name: Upload forensics artifacts
@@ -128,13 +129,13 @@ jobs:
           INFISICAL_CLIENT_ID: ${{ secrets.INFISICAL_CLIENT_ID }}
           INFISICAL_CLIENT_SECRET: ${{ secrets.INFISICAL_CLIENT_SECRET }}
           INFISICAL_PROJECT_ID: ${{ secrets.INFISICAL_PROJECT_ID }}
+          IR_NAMESPACE: ${{ inputs.namespace }}
         run: |
-          NAMESPACE="${{ inputs.namespace }}"
           KUBECONFIG_FILE="/tmp/kubeconfig-ir"
 
-          KUBECONFIG_CONTENT=$(infisical secrets get KUBECONFIG --env=prod --plain 2>/dev/null) \
+          infisical run --env=prod -- bash -c \
+            'printf "%s" "${KUBECONFIG}" > "'"${KUBECONFIG_FILE}"'"' \
             || { echo "::error::KUBECONFIG の取得に失敗しました"; exit 1; }
-          echo "${KUBECONFIG_CONTENT}" > "${KUBECONFIG_FILE}"
           chmod 600 "${KUBECONFIG_FILE}"
 
           kubectl --kubeconfig="${KUBECONFIG_FILE}" apply -f - <<EOF
@@ -142,7 +143,7 @@ jobs:
           kind: NetworkPolicy
           metadata:
             name: intrusion-isolation
-            namespace: ${NAMESPACE}
+            namespace: ${IR_NAMESPACE}
           spec:
             podSelector: {}
             policyTypes:
@@ -150,7 +151,7 @@ jobs:
               - Egress
           EOF
 
-          echo "NetworkPolicy 適用完了: namespace=${NAMESPACE} の全 Pod の ingress/egress を遮断しました"
+          echo "NetworkPolicy 適用完了: namespace=${IR_NAMESPACE} の全 Pod の ingress/egress を遮断しました"
 
   notify:
     name: Notify — Discord ローテーション通知
