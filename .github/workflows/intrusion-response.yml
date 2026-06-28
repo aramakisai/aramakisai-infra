@@ -76,9 +76,15 @@ jobs:
             || { echo "::error::KUBECONFIG の取得に失敗しました"; exit 1; }
           chmod 600 "${KUBECONFIG_FILE}"
 
-          # Tailscale MagicDNS が未解決の場合に備え IP で上書き
-          _TS_IP=$(tailscale ip -4 prod-node-1 2>/dev/null || true)
-          if [[ -n "${_TS_IP}" ]]; then
+          # Tailscale デーモンはシステム権限で動作するため sudo が必要
+          _TS_IP=$(sudo tailscale ip -4 prod-node-1 2>/dev/null || true)
+          if [[ -z "${_TS_IP}" ]] || [[ ! "${_TS_IP}" =~ ^[0-9] ]]; then
+            _TS_IP=$(sudo tailscale status --json 2>/dev/null \
+              | jq -r '.Peer[] | select(.HostName == "prod-node-1") | .TailscaleIPs[0]' 2>/dev/null \
+              || echo "")
+          fi
+          echo "prod-node-1 Tailscale IP: ${_TS_IP:-NOT FOUND}"
+          if [[ -n "${_TS_IP}" ]] && [[ "${_TS_IP}" =~ ^[0-9] ]]; then
             sed -i "s/prod-node-1/${_TS_IP}/g" "${KUBECONFIG_FILE}"
             echo "prod-node-1 → ${_TS_IP} に置換"
           fi
@@ -157,12 +163,12 @@ jobs:
             || { echo "::error::KUBECONFIG の取得に失敗しました"; exit 1; }
           chmod 600 "${KUBECONFIG_FILE}"
 
-          # Tailscale MagicDNS が未解決の場合に備え IP で上書き
+          # Tailscale デーモンはシステム権限で動作するため sudo が必要
           echo "Tailscale status:"
-          tailscale status 2>&1 || true
-          _TS_IP=$(tailscale ip -4 prod-node-1 2>/dev/null || true)
+          sudo tailscale status 2>&1 || true
+          _TS_IP=$(sudo tailscale ip -4 prod-node-1 2>/dev/null || true)
           if [[ -z "${_TS_IP}" ]] || [[ ! "${_TS_IP}" =~ ^[0-9] ]]; then
-            _TS_IP=$(tailscale status --json 2>/dev/null \
+            _TS_IP=$(sudo tailscale status --json 2>/dev/null \
               | jq -r '.Peer[] | select(.HostName == "prod-node-1") | .TailscaleIPs[0]' 2>/dev/null \
               || echo "")
           fi
