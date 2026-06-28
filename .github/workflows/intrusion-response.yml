@@ -50,8 +50,11 @@ jobs:
           curl -LO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
           chmod +x kubectl && sudo mv kubectl /usr/local/bin/
 
-          curl -1sLf 'https://dl.cloudsmith.io/public/infisical/infisical-cli/setup.deb.sh' | sudo -E bash
-          sudo apt-get install -y infisical
+          curl -1sLf 'https://dl.cloudsmith.io/public/infisical/infisical-cli/gpg.key' \
+            | sudo gpg --dearmor -o /usr/share/keyrings/infisical.gpg
+          echo "deb [signed-by=/usr/share/keyrings/infisical.gpg] https://dl.cloudsmith.io/public/infisical/infisical-cli/deb/debian any-version main" \
+            | sudo tee /etc/apt/sources.list.d/infisical.list
+          sudo apt-get update -qq && sudo apt-get install -y infisical
 
       - name: Collect forensics data
         env:
@@ -121,8 +124,11 @@ jobs:
           curl -LO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
           chmod +x kubectl && sudo mv kubectl /usr/local/bin/
 
-          curl -1sLf 'https://dl.cloudsmith.io/public/infisical/infisical-cli/setup.deb.sh' | sudo -E bash
-          sudo apt-get install -y infisical
+          curl -1sLf 'https://dl.cloudsmith.io/public/infisical/infisical-cli/gpg.key' \
+            | sudo gpg --dearmor -o /usr/share/keyrings/infisical.gpg
+          echo "deb [signed-by=/usr/share/keyrings/infisical.gpg] https://dl.cloudsmith.io/public/infisical/infisical-cli/deb/debian any-version main" \
+            | sudo tee /etc/apt/sources.list.d/infisical.list
+          sudo apt-get update -qq && sudo apt-get install -y infisical
 
       - name: Apply isolation NetworkPolicy
         env:
