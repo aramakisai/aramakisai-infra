@@ -163,9 +163,21 @@ jobs:
             || { echo "::error::KUBECONFIG の取得に失敗しました"; exit 1; }
           chmod 600 "${KUBECONFIG_FILE}"
 
-          # Tailscale デーモンはシステム権限で動作するため sudo が必要
-          echo "Tailscale status:"
+          # Tailscale デバッグ
+          echo "=== Tailscale プロセス確認 ==="
+          ps aux | grep tailscale || true
+          echo "=== Tailscale ソケット ==="
+          ls -la /var/run/tailscale/ 2>/dev/null || echo "ソケットなし"
+          echo "=== tailscaled ログ ==="
+          sudo cat /root/tailscaled.log 2>/dev/null | tail -20 || true
+          echo "=== sudo tailscale status (raw) ==="
           sudo tailscale status 2>&1 || true
+          echo "=== sudo tailscale ip (all) ==="
+          sudo tailscale ip 2>&1 || true
+          echo "=== sudo tailscale status --json ==="
+          sudo tailscale status --json 2>&1 | head -30 || true
+
+          # Tailscale IP 解決
           _TS_IP=$(sudo tailscale ip -4 prod-node-1 2>/dev/null || true)
           if [[ -z "${_TS_IP}" ]] || [[ ! "${_TS_IP}" =~ ^[0-9] ]]; then
             _TS_IP=$(sudo tailscale status --json 2>/dev/null \
