@@ -76,6 +76,13 @@ jobs:
             || { echo "::error::KUBECONFIG の取得に失敗しました"; exit 1; }
           chmod 600 "${KUBECONFIG_FILE}"
 
+          # Tailscale MagicDNS が未解決の場合に備え IP で上書き
+          _TS_IP=$(tailscale ip -4 prod-node-1 2>/dev/null || true)
+          if [[ -n "${_TS_IP}" ]]; then
+            sed -i "s/prod-node-1/${_TS_IP}/g" "${KUBECONFIG_FILE}"
+            echo "prod-node-1 → ${_TS_IP} に置換"
+          fi
+
           kubectl --kubeconfig="${KUBECONFIG_FILE}" logs \
             -n "${IR_NAMESPACE}" --all-containers --tail=1000 \
             > /tmp/forensics/pod-logs.txt 2>&1 \
@@ -150,7 +157,14 @@ jobs:
             || { echo "::error::KUBECONFIG の取得に失敗しました"; exit 1; }
           chmod 600 "${KUBECONFIG_FILE}"
 
-          kubectl --kubeconfig="${KUBECONFIG_FILE}" apply -f - <<EOF
+          # Tailscale MagicDNS が未解決の場合に備え IP で上書き
+          _TS_IP=$(tailscale ip -4 prod-node-1 2>/dev/null || true)
+          if [[ -n "${_TS_IP}" ]]; then
+            sed -i "s/prod-node-1/${_TS_IP}/g" "${KUBECONFIG_FILE}"
+            echo "prod-node-1 → ${_TS_IP} に置換"
+          fi
+
+          kubectl --kubeconfig="${KUBECONFIG_FILE}" apply --validate=false -f - <<EOF
           apiVersion: networking.k8s.io/v1
           kind: NetworkPolicy
           metadata:
