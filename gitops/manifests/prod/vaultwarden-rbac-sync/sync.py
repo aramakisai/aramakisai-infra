@@ -515,6 +515,11 @@ class PermissionDiffEngine:
                     desired[key] = {}
                 desired[key][entry.collection_id] = entry.permission
 
+        # mapping管理対象のcollection IDをorg単位で収集 (非管理collectionとの混在を無視するため)
+        mapping_managed_cids_by_org: dict[str, set[str]] = {}
+        for entry in mappings:
+            mapping_managed_cids_by_org.setdefault(entry.organization, set()).add(entry.collection_id)
+
         # Track which members were processed
         processed_members: set[tuple[str, str]] = set()
 
@@ -524,6 +529,7 @@ class PermissionDiffEngine:
                 continue
 
             valid_collection_ids = {c.collection_id for c in org_state.collections}
+            managed_cids = mapping_managed_cids_by_org.get(org_name, set())
 
             for member in org_state.members:
                 member_key = (member.email.lower(), org_name)
@@ -552,16 +558,14 @@ class PermissionDiffEngine:
 
                 current_grants = member.collections
 
-                # Determine if update needed
+                # mapping管理対象のcollection IDのみで差分を計算する。
+                # 非管理collection (手動付与等) が混在しても偽更新が発生しないようにする。
                 current_map = {g.collection_id: g for g in current_grants}
                 desired_map = {g.collection_id: g for g in desired_grants}
+                current_map_managed = {cid: g for cid, g in current_map.items() if cid in managed_cids}
 
-                if current_map == desired_map:
-                    if member_desired or not current_grants:
-                        unchanged_count += 1
-                    else:
-                        # Member has collections but no mapping desires any — removal case
-                        pass
+                if current_map_managed == desired_map:
+                    unchanged_count += 1
                 else:
                     if desired_grants:
                         collection_updates.append(
@@ -573,14 +577,17 @@ class PermissionDiffEngine:
                             )
                         )
                     else:
-                        # All collections should be removed
-                        if current_grants:
+                        # mapping管理対象のcollectionのみ除去 (非管理collectionは保持)
+                        managed_to_remove = {
+                            g.collection_id for g in current_grants if g.collection_id in managed_cids
+                        }
+                        if managed_to_remove:
                             collection_removals.append(
                                 RemovalPlan(
                                     member_id=member.member_id,
                                     org_id=org_id,
                                     member_type=member.member_type,
-                                    collection_ids={g.collection_id for g in current_grants},
+                                    collection_ids=managed_to_remove,
                                 )
                             )
 
@@ -691,12 +698,14 @@ class SyncOrchestrator:
         vaultwarden_client: VaultwardenOrgClient,
         discord_notifier: "DiscordNotifier",
         org_key_bytes: bytes | None = None,
+        notify_state: "NotifyStateManager | None" = None,
     ):
         self._mappings = mappings
         self._authentik = authentik_client
         self._vaultwarden = vaultwarden_client
         self._discord = discord_notifier
         self._org_key_bytes = org_key_bytes
+        self._notify_state = notify_state
 
     def run(self, dry_run: bool = False) -> "SyncPlan":
         """同期フローを実行する。
@@ -820,39 +829,37 @@ class SyncOrchestrator:
                     log_event("removal_failed", member_id=removal.member_id, error=str(exc))
                     errors.append(f"removal {removal.member_id}: {exc}")
 
-        # 6. Discord通知
-        summary = self._build_summary(plan, dry_run, errors)
-        try:
-            self._discord.notify(summary)
-        except Exception as exc:
-            log_event("discord_notify_failed", error=str(exc))
+        # 6. Discord通知 (confirm_pending のみ、新規メンバーのみ)
+        if plan.confirm_pending:
+            pending_emails = {p.email for p in plan.confirm_pending}
+            already_notified = (
+                self._notify_state.get_notified_emails() if self._notify_state else set()
+            )
+            new_emails = pending_emails - already_notified
+            if new_emails:
+                message = self._build_confirm_pending_message(new_emails)
+                try:
+                    self._discord.notify(message)
+                except Exception as exc:
+                    log_event("discord_notify_failed", error=str(exc))
+                log_event("discord_pending_notified", new_count=len(new_emails))
+            else:
+                log_event("discord_pending_already_notified", pending_count=len(pending_emails))
+            if self._notify_state:
+                self._notify_state.save_notified_emails(pending_emails)
 
         # Attach errors to plan for test assertions
         object.__setattr__(plan, "errors", errors)
         return plan
 
-    def _build_summary(self, plan: SyncPlan, dry_run: bool, errors: list[str]) -> str:
-        mode_label = "[dry-run] " if dry_run else ""
+    def _build_confirm_pending_message(self, new_emails: set[str]) -> str:
         lines = [
-            f"{mode_label}Vaultwarden RBAC Sync 完了",
-            f"- 招待: {len(plan.invites)}件",
-            f"- 自動Confirm: {len(plan.auto_confirm)}件",
-            f"- 権限更新: {len(plan.collection_updates)}件",
-            f"- 権限削除: {len(plan.collection_removals)}件",
-            f"- 変更なし: {plan.unchanged_count}件",
+            "Vaultwarden 招待承認待ち",
+            "以下のメンバーが招待メールを未Accept（クリック待ち）です:",
         ]
-        if plan.auto_confirm:
-            emails = [p.email for p in plan.auto_confirm]
-            lines.append(f"  自動Confirm済み: {', '.join(emails)}")
-        if plan.confirm_pending:
-            emails = [p.email for p in plan.confirm_pending]
-            lines.append(f"- 招待済み・未Accept: {len(plan.confirm_pending)}件")
-            lines.append(f"  Acceptを待機中: {', '.join(emails)}")
-            lines.append("  (ユーザーがAcceptすると次回同期で自動Confirmされます)")
-        if errors:
-            lines.append("エラー:")
-            for err in errors:
-                lines.append(f"  - {err}")
+        for email in sorted(new_emails):
+            lines.append(f"  - {email}")
+        lines.append("メール受信ボックスの招待リンクをクリックするよう案内してください。")
         return "\n".join(lines)
 
 
@@ -996,6 +1003,70 @@ class SyncLockManager:
         self._holder_identity = None
 
 
+class NotifyStateManager:
+    """confirm_pending通知済みemailセットをK8s ConfigMapで永続化する。
+
+    同一のInvited(status=0)メンバーを毎回のcron実行で重複通知しないよう、
+    通知済みセットを追跡する。解決済み（Acceptされた）emailは自動的に除去される。
+    """
+
+    CONFIGMAP_NAME = "vaultwarden-rbac-sync-notify-state"
+
+    def __init__(self, namespace: str):
+        self._namespace = namespace
+
+    def get_notified_emails(self) -> set[str]:
+        result = subprocess.run(
+            ["kubectl", "get", "configmap", self.CONFIGMAP_NAME, "-n", self._namespace, "-o", "json"],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            return set()
+        try:
+            cm = json.loads(result.stdout)
+            raw = cm.get("data", {}).get("notified_emails", "[]")
+            return set(json.loads(raw))
+        except (json.JSONDecodeError, KeyError, TypeError):
+            return set()
+
+    def save_notified_emails(self, emails: set[str]) -> None:
+        manifest = {
+            "apiVersion": "v1",
+            "kind": "ConfigMap",
+            "metadata": {"name": self.CONFIGMAP_NAME, "namespace": self._namespace},
+            "data": {"notified_emails": json.dumps(sorted(emails))},
+        }
+        manifest_json = json.dumps(manifest)
+
+        create_result = subprocess.run(
+            ["kubectl", "create", "-f", "-"],
+            input=manifest_json, capture_output=True, text=True,
+        )
+        if create_result.returncode == 0:
+            return
+
+        if "AlreadyExists" not in create_result.stderr:
+            log_event("notify_state_save_error", error=create_result.stderr.strip())
+            return
+
+        get_result = subprocess.run(
+            ["kubectl", "get", "configmap", self.CONFIGMAP_NAME, "-n", self._namespace, "-o", "json"],
+            capture_output=True, text=True,
+        )
+        if get_result.returncode != 0:
+            log_event("notify_state_save_error", error=get_result.stderr.strip())
+            return
+
+        current = json.loads(get_result.stdout)
+        manifest["metadata"]["resourceVersion"] = current["metadata"]["resourceVersion"]
+        replace_result = subprocess.run(
+            ["kubectl", "replace", "-f", "-"],
+            input=json.dumps(manifest), capture_output=True, text=True,
+        )
+        if replace_result.returncode != 0:
+            log_event("notify_state_save_error", error=replace_result.stderr.strip())
+
+
 class DiscordNotifier:
     """Discord Ops Webhook への通知クライアント (Requirement 11.1, 11.2, 11.3, 11.4)。"""
 
@@ -1073,6 +1144,7 @@ def run_cron_mode(
         orchestrator = SyncOrchestrator(
             mappings, authentik_client, vaultwarden_client, discord_notifier,
             org_key_bytes=org_key_bytes,
+            notify_state=NotifyStateManager(namespace=K8S_NAMESPACE),
         )
         orchestrator.run(dry_run=False)
     finally:
@@ -1186,6 +1258,7 @@ def run_serve_mode() -> int:
         orchestrator = SyncOrchestrator(
             mappings, authentik_client, vaultwarden_client, discord_notifier,
             org_key_bytes=org_key_bytes,
+            notify_state=NotifyStateManager(namespace=K8S_NAMESPACE),
         )
         orchestrator.run(dry_run=False)
 

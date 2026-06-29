@@ -141,15 +141,13 @@ class TestOnboardingPhase1:
         assert grant.hide_passwords is True  # can_view_except_passwords: hidePasswords=True
         assert grant.manage is False
 
-    def test_discord_shows_invite_count(self):
-        """Discordに招待件数サマリーが通知される (Requirement 11.4)。"""
+    def test_discord_not_notified_on_invite_only(self):
+        """招待のみ（confirm_pending=0）ではDiscordに通知しない。"""
         orch, _, fake_discord = self._make_orchestrator(vw_members=[])
 
         orch.run(dry_run=False)
 
-        assert len(fake_discord.messages) == 1
-        msg = fake_discord.messages[0]
-        assert "招待: 1件" in msg
+        assert len(fake_discord.messages) == 0
 
     def test_no_put_on_first_invite(self):
         """初回招待ではCollection権限PUTは不要（招待APIが権限も指定するため）。"""
@@ -225,15 +223,15 @@ class TestOnboardingPhase1Invited:
         assert plan.confirm_pending[0].email == self.ALICE
 
     def test_discord_reports_accept_pending_members(self):
-        """Discordに未Accept件数と対象メールが通知される (Requirement 11.4)。"""
+        """Discordに未Acceptメンバーのメールが通知される。"""
         orch, _, fake_discord = self._make_orchestrator()
 
         orch.run(dry_run=False)
 
         assert len(fake_discord.messages) == 1
         msg = fake_discord.messages[0]
-        assert "招待済み・未Accept: 1件" in msg
         assert self.ALICE in msg
+        assert "招待" in msg
 
     def test_no_auto_confirm_for_status0(self):
         """status=0(Invited)はauto_confirmの対象外 (Acceptリンク未クリック)。"""
@@ -333,15 +331,13 @@ class TestOnboardingPhase2:
 
         assert len(plan.confirm_pending) == 0
 
-    def test_discord_shows_auto_confirm_count(self):
-        """Discordに自動Confirm件数が通知される (Requirement 11.4)。"""
+    def test_discord_not_notified_on_auto_confirm_only(self):
+        """自動Confirmのみ（confirm_pending=0）ではDiscordに通知しない。"""
         orch, _, fake_discord = self._make_orchestrator()
 
         orch.run(dry_run=False)
 
-        msg = fake_discord.messages[0]
-        assert "自動Confirm: 1件" in msg
-        assert self.ALICE in msg
+        assert len(fake_discord.messages) == 0
 
     def test_auto_confirm_skipped_without_org_key(self):
         """VAULTWARDEN_ORG_KEY未設定時はauto_confirmをスキップ (後方互換)。"""
@@ -434,15 +430,13 @@ class TestOffboardingE2E:
         # plan.collection_removals の member_id で元のメンバーIDが保持されていることを確認
         assert plan.collection_removals[0].member_id == self.BOB_MEMBER_ID
 
-    def test_discord_shows_collection_removal_count(self):
-        """Discordに権限削除件数が通知される (Requirement 11.4)。"""
+    def test_discord_not_notified_on_collection_removal_only(self):
+        """権限削除のみ（confirm_pending=0）ではDiscordに通知しない。"""
         orch, _, fake_discord = self._make_orchestrator(ak_members=[])
 
         orch.run(dry_run=False)
 
-        assert len(fake_discord.messages) == 1
-        msg = fake_discord.messages[0]
-        assert "権限削除: 1件" in msg
+        assert len(fake_discord.messages) == 0
 
     def test_active_member_unchanged_when_still_in_group(self):
         """グループ継続所属メンバーの権限は変更されない (冪等性 / Requirement 8.2)。"""

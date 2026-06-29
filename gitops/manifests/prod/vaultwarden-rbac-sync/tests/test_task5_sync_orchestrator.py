@@ -236,8 +236,8 @@ class TestSyncOrchestrator:
 
     # -- discord notification -----------------------------------------------
 
-    def test_discord_notification_on_completion(self):
-        """Discord notified on completion (Req 11.1, 11.3)."""
+    def test_discord_not_notified_without_confirm_pending(self):
+        """confirm_pendingがない場合はDiscordに通知しない。"""
         from sync import SyncOrchestrator
 
         mappings = [MappingEntry("広報", "SNS", "coll-1", "can_view")]
@@ -261,5 +261,32 @@ class TestSyncOrchestrator:
         )
         orch.run(dry_run=False)
 
+        assert len(fake_discord.messages) == 0
+
+    def test_discord_notified_for_new_confirm_pending(self):
+        """新規のconfirm_pendingメンバーがいる場合はDiscordに通知する。"""
+        from sync import SyncOrchestrator
+
+        mappings = [MappingEntry("広報", "SNS", "coll-1", "can_view")]
+        fake_vw = FakeVaultwardenOrgClient(
+            orgs={"SNS": "org-1"},
+            states={
+                "SNS": self._make_state(
+                    members=[Member("m1", "pending@example.com", 2, 0, [])],
+                    collection_ids=["coll-1"],
+                )
+            },
+        )
+        fake_ak = FakeAuthentikGroupClient({"広報": ["pending@example.com"]})
+        fake_discord = FakeDiscordNotifier()
+
+        orch = SyncOrchestrator(
+            mappings=mappings,
+            authentik_client=fake_ak,
+            vaultwarden_client=fake_vw,
+            discord_notifier=fake_discord,
+        )
+        orch.run(dry_run=False)
+
         assert len(fake_discord.messages) == 1
-        assert "完了" in fake_discord.messages[0] or "complete" in fake_discord.messages[0]
+        assert "pending@example.com" in fake_discord.messages[0]

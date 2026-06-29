@@ -64,6 +64,7 @@ customRules:
         or (k8s.ns.name=cnpg-system and container.image.repository=ghcr.io/cloudnative-pg/cloudnative-pg)
         or (k8s.ns.name=monitoring and container.image.repository=docker.io/netdata/netdata)
         or (k8s.ns.name=prod and proc.name=manager and container.image.repository=ghcr.io/cloudnative-pg/postgresql)
+        or (k8s.ns.name=prod and container.image.repository=alpine/k8s)
 
 # Falcosidekick: Falcoアラートを Discord Webhook へ転送する。
 # single nodeのためreplicaCount既定値(2)を1へ削減し、軽量プロキシとしてリソースを絞る。

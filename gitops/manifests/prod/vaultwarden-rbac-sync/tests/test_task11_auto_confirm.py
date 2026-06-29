@@ -396,8 +396,8 @@ class TestAutoConfirmInOrchestrator:
         assert hasattr(plan, "errors")
         assert any("confirm" in e for e in plan.errors)
 
-    def test_discord_summary_shows_auto_confirm_count(self):
-        """Discord通知に自動Confirm件数と未Accept件数が含まれる。"""
+    def test_discord_notified_for_invited_member_not_auto_confirm(self):
+        """Discord通知はstatus=0(Invited)のメンバーのみ。status=1(Accepted)はログのみ。"""
         from sync import SyncOrchestrator, MappingEntry, OrgState, Member, Collection
 
         mappings = [MappingEntry("部門A", "TestOrg", "coll-1", "can_view")]
@@ -429,10 +429,8 @@ class TestAutoConfirmInOrchestrator:
 
         assert len(fake_discord.messages) == 1
         msg = fake_discord.messages[0]
-        # 自動Confirm件数が通知に含まれる
-        assert "1" in msg  # auto_confirm 1件
-        # 未Accept件数が通知に含まれる
-        assert "invited" in msg.lower() or "Accept" in msg or "accept" in msg.lower()
+        assert "invited@example.com" in msg
+        assert "accepted@example.com" not in msg
 
 
 # ---------------------------------------------------------------------------

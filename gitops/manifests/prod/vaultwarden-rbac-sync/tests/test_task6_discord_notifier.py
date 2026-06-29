@@ -51,66 +51,20 @@ class TestDiscordNotifier:
         notifier = DiscordNotifier("")
         notifier.notify("test message")  # Should not raise
 
-    # -- summary format ---------------------------------------------------
+    # -- confirm pending message format ---------------------------------------------------
 
-    def test_summary_contains_counts(self):
-        """Summary includes invite/update/removal/unchanged/confirm_pending counts."""
-        from sync import (
-            SyncPlan, InvitePlan, UpdatePlan, RemovalPlan, ConfirmPendingPlan,
-            CollectionGrant,
-        )
-
-        plan = SyncPlan(
-            invites=[InvitePlan("new@example.com", "org-1", [])],
-            confirm_pending=[ConfirmPendingPlan("pending@example.com", "org-1")],
-            auto_confirm=[],
-            collection_updates=[UpdatePlan("m1", "org-1", 2, [])],
-            collection_removals=[RemovalPlan("m2", "org-1", 2, {"c1"})],
-            unchanged_count=3,
-        )
-
-        # Build summary using SyncOrchestrator internal helper
+    def test_confirm_pending_message_contains_emails(self):
+        """confirm_pending通知メッセージに未Acceptメールが含まれる。"""
         import sync
-        notifier = DiscordNotifier("")
         orch = sync.SyncOrchestrator.__new__(sync.SyncOrchestrator)
-        summary = orch._build_summary(plan, dry_run=False, errors=[])
+        msg = orch._build_confirm_pending_message({"a@example.com", "b@example.com"})
+        assert "a@example.com" in msg
+        assert "b@example.com" in msg
+        assert "招待" in msg
 
-        assert "招待: 1件" in summary
-        assert "権限更新: 1件" in summary
-        assert "権限削除: 1件" in summary
-        assert "変更なし: 3件" in summary
-        assert "未Accept: 1件" in summary
-        assert "pending@example.com" in summary
-
-    def test_summary_contains_errors(self):
-        """Summary includes error details when errors exist (Req 11.2)."""
-        from sync import SyncPlan
-
-        plan = SyncPlan(
-            invites=[], confirm_pending=[], auto_confirm=[], collection_updates=[],
-            collection_removals=[], unchanged_count=0,
-        )
-
+    def test_confirm_pending_message_sorted(self):
+        """メールアドレスがソート順で列挙される。"""
         import sync
-        notifier = DiscordNotifier("")
         orch = sync.SyncOrchestrator.__new__(sync.SyncOrchestrator)
-        summary = orch._build_summary(plan, dry_run=False, errors=["invite failed: x"])
-
-        assert "エラー:" in summary
-        assert "invite failed: x" in summary
-
-    def test_dry_run_label_in_summary(self):
-        """dry-run mode prefixes summary with [dry-run]."""
-        from sync import SyncPlan
-
-        plan = SyncPlan(
-            invites=[], confirm_pending=[], auto_confirm=[], collection_updates=[],
-            collection_removals=[], unchanged_count=0,
-        )
-
-        import sync
-        notifier = DiscordNotifier("")
-        orch = sync.SyncOrchestrator.__new__(sync.SyncOrchestrator)
-        summary = orch._build_summary(plan, dry_run=True, errors=[])
-
-        assert "[dry-run]" in summary
+        msg = orch._build_confirm_pending_message({"z@example.com", "a@example.com"})
+        assert msg.index("a@example.com") < msg.index("z@example.com")

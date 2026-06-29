@@ -221,8 +221,8 @@ class TestIdempotency:
         assert len(fake_vw.puts) == 0
         assert plan.unchanged_count == 2
 
-    def test_discord_summary_shows_zero_changes_on_idempotent_run(self):
-        """冪等実行のDiscord通知: 招待・更新・削除がすべて0件。"""
+    def test_discord_not_notified_on_idempotent_run(self):
+        """冪等実行（変更なし・confirm_pending=0）ではDiscordに通知しない。"""
         mapping = MappingEntry("総務", "荒牧祭実行委員会", "coll-uuid", "can_edit")
         email = "soumu@example.com"
 
@@ -241,11 +241,7 @@ class TestIdempotency:
         )
         orch.run(dry_run=False)
 
-        assert len(fake_discord.messages) == 1
-        msg = fake_discord.messages[0]
-        assert "招待: 0件" in msg
-        assert "権限更新: 0件" in msg
-        assert "権限削除: 0件" in msg
+        assert len(fake_discord.messages) == 0
 
 
 # ---------------------------------------------------------------------------
