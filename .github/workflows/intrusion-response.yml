@@ -37,13 +37,6 @@ jobs:
 
       - uses: actions/checkout@v4
 
-      - name: Setup Tailscale
-        uses: tailscale/github-action@v3
-        with:
-          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
-          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
-          tags: tag:ci
-
       - name: Install kubectl
         run: |
           KUBECTL_VERSION=$(curl -Ls https://dl.k8s.io/release/stable.txt)
@@ -61,7 +54,7 @@ jobs:
           KUBECONFIG_FILE="/tmp/kubeconfig-ir"
           mkdir -p /tmp/forensics
 
-          # Infisical REST API で KUBECONFIG シークレットを取得 (CLI バージョン非依存)
+          # Infisical REST API で ACCESS_TOKEN を取得
           _ACCESS_TOKEN=$(curl -sf -X POST \
             "https://app.infisical.com/api/v1/auth/universal-auth/login" \
             -H "Content-Type: application/json" \
@@ -69,6 +62,7 @@ jobs:
             | jq -r '.accessToken') \
             || { echo "::error::Infisical 認証に失敗しました"; exit 1; }
 
+          # KUBECONFIG を取得
           curl -sf \
             "https://app.infisical.com/api/v3/secrets/raw/KUBECONFIG?workspaceId=${INFISICAL_PROJECT_ID}&environment=prod" \
             -H "Authorization: Bearer ${_ACCESS_TOKEN}" \
@@ -76,17 +70,58 @@ jobs:
             || { echo "::error::KUBECONFIG の取得に失敗しました"; exit 1; }
           chmod 600 "${KUBECONFIG_FILE}"
 
-          # Tailscale デーモンはシステム権限で動作するため sudo が必要
-          _TS_IP=$(sudo tailscale ip -4 prod-node-1 2>/dev/null || true)
-          if [[ -z "${_TS_IP}" ]] || [[ ! "${_TS_IP}" =~ ^[0-9] ]]; then
-            _TS_IP=$(sudo tailscale status --json 2>/dev/null \
-              | jq -r '.Peer[] | select(.HostName == "prod-node-1") | .TailscaleIPs[0]' 2>/dev/null \
-              || echo "")
-          fi
+          # Tailscale API Key と Tailnet を Infisical から取得
+          _TS_API_KEY=$(curl -sf \
+            "https://app.infisical.com/api/v3/secrets/raw/TAILSCALE_API_KEY?workspaceId=${INFISICAL_PROJECT_ID}&environment=prod" \
+            -H "Authorization: Bearer ${_ACCESS_TOKEN}" \
+            | jq -r '.secret.secretValue') \
+            || { echo "::error::TAILSCALE_API_KEY の取得に失敗しました"; exit 1; }
+          echo "::add-mask::${_TS_API_KEY}"
+
+          _TS_TAILNET=$(curl -sf \
+            "https://app.infisical.com/api/v3/secrets/raw/TAILSCALE_TAILNET?workspaceId=${INFISICAL_PROJECT_ID}&environment=prod" \
+            -H "Authorization: Bearer ${_ACCESS_TOKEN}" \
+            | jq -r '.secret.secretValue') \
+            || { echo "::error::TAILSCALE_TAILNET の取得に失敗しました"; exit 1; }
+
+          # Tailscale API で prod-node-1 の Tailscale IP を取得 (接続不要)
+          _TS_IP=$(curl -sf \
+            "https://api.tailscale.com/api/v2/tailnet/${_TS_TAILNET}/devices" \
+            -u "${_TS_API_KEY}:" \
+            | jq -r '.devices[] | select(.hostname == "prod-node-1") | .addresses[0]' 2>/dev/null \
+            || echo "")
           echo "prod-node-1 Tailscale IP: ${_TS_IP:-NOT FOUND}"
-          if [[ -n "${_TS_IP}" ]] && [[ "${_TS_IP}" =~ ^[0-9] ]]; then
+
+          if [[ -n "${_TS_IP}" ]] && [[ "${_TS_IP}" =~ ^100\. ]]; then
+            # 一時 Auth Key を生成 (10分有効, ephemeral, preauthorized)
+            _TS_AUTH_KEY=$(curl -sf -X POST \
+              "https://api.tailscale.com/api/v2/tailnet/${_TS_TAILNET}/keys" \
+              -u "${_TS_API_KEY}:" \
+              -H "Content-Type: application/json" \
+              -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true}}},"expirySeconds":600}' \
+              | jq -r '.key') \
+              || { echo "::warning::Tailscale Auth Key 生成に失敗しました"; }
+            echo "::add-mask::${_TS_AUTH_KEY}"
+
+            if [[ -n "${_TS_AUTH_KEY}" ]]; then
+              # tailscale をインストールして Tailnet に接続
+              curl -fsSL https://tailscale.com/install.sh | sh 2>/dev/null
+              sudo tailscaled --state=mem: 2>/tmp/tailscaled.log &
+              sleep 3
+              if sudo tailscale up --authkey="${_TS_AUTH_KEY}" --accept-routes \
+                --hostname="gh-ci-ir-${GITHUB_RUN_ID}" 2>&1; then
+                echo "Tailscale 接続完了"
+              else
+                echo "::warning::tailscale up に失敗しました (kubectl も失敗します)"
+                tail -20 /tmp/tailscaled.log || true
+              fi
+            fi
+
+            # KUBECONFIG の hostname を Tailscale IP に置換
             sed -i "s/prod-node-1/${_TS_IP}/g" "${KUBECONFIG_FILE}"
-            echo "prod-node-1 → ${_TS_IP} に置換"
+            echo "KUBECONFIG: prod-node-1 → ${_TS_IP} に置換"
+          else
+            echo "::warning::prod-node-1 の Tailscale IP が取得できませんでした"
           fi
 
           kubectl --kubeconfig="${KUBECONFIG_FILE}" logs \
@@ -127,13 +162,6 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - name: Setup Tailscale
-        uses: tailscale/github-action@v3
-        with:
-          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
-          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
-          tags: tag:ci
-
       - name: Install kubectl
         run: |
           KUBECTL_VERSION=$(curl -Ls https://dl.k8s.io/release/stable.txt)
@@ -149,6 +177,7 @@ jobs:
         run: |
           KUBECONFIG_FILE="/tmp/kubeconfig-ir"
 
+          # Infisical REST API で ACCESS_TOKEN を取得
           _ACCESS_TOKEN=$(curl -sf -X POST \
             "https://app.infisical.com/api/v1/auth/universal-auth/login" \
             -H "Content-Type: application/json" \
@@ -156,6 +185,7 @@ jobs:
             | jq -r '.accessToken') \
             || { echo "::error::Infisical 認証に失敗しました"; exit 1; }
 
+          # KUBECONFIG を取得
           curl -sf \
             "https://app.infisical.com/api/v3/secrets/raw/KUBECONFIG?workspaceId=${INFISICAL_PROJECT_ID}&environment=prod" \
             -H "Authorization: Bearer ${_ACCESS_TOKEN}" \
@@ -163,31 +193,54 @@ jobs:
             || { echo "::error::KUBECONFIG の取得に失敗しました"; exit 1; }
           chmod 600 "${KUBECONFIG_FILE}"
 
-          # Tailscale デバッグ
-          echo "=== Tailscale プロセス確認 ==="
-          ps aux | grep tailscale || true
-          echo "=== Tailscale ソケット ==="
-          ls -la /var/run/tailscale/ 2>/dev/null || echo "ソケットなし"
-          echo "=== tailscaled ログ ==="
-          sudo cat /root/tailscaled.log 2>/dev/null | tail -20 || true
-          echo "=== sudo tailscale status (raw) ==="
-          sudo tailscale status 2>&1 || true
-          echo "=== sudo tailscale ip (all) ==="
-          sudo tailscale ip 2>&1 || true
-          echo "=== sudo tailscale status --json ==="
-          sudo tailscale status --json 2>&1 | head -30 || true
+          # Tailscale API Key と Tailnet を Infisical から取得
+          _TS_API_KEY=$(curl -sf \
+            "https://app.infisical.com/api/v3/secrets/raw/TAILSCALE_API_KEY?workspaceId=${INFISICAL_PROJECT_ID}&environment=prod" \
+            -H "Authorization: Bearer ${_ACCESS_TOKEN}" \
+            | jq -r '.secret.secretValue') \
+            || { echo "::error::TAILSCALE_API_KEY の取得に失敗しました"; exit 1; }
+          echo "::add-mask::${_TS_API_KEY}"
 
-          # Tailscale IP 解決
-          _TS_IP=$(sudo tailscale ip -4 prod-node-1 2>/dev/null || true)
-          if [[ -z "${_TS_IP}" ]] || [[ ! "${_TS_IP}" =~ ^[0-9] ]]; then
-            _TS_IP=$(sudo tailscale status --json 2>/dev/null \
-              | jq -r '.Peer[] | select(.HostName == "prod-node-1") | .TailscaleIPs[0]' 2>/dev/null \
-              || echo "")
-          fi
+          _TS_TAILNET=$(curl -sf \
+            "https://app.infisical.com/api/v3/secrets/raw/TAILSCALE_TAILNET?workspaceId=${INFISICAL_PROJECT_ID}&environment=prod" \
+            -H "Authorization: Bearer ${_ACCESS_TOKEN}" \
+            | jq -r '.secret.secretValue') \
+            || { echo "::error::TAILSCALE_TAILNET の取得に失敗しました"; exit 1; }
+
+          # Tailscale API で prod-node-1 の Tailscale IP を取得 (接続不要)
+          _TS_IP=$(curl -sf \
+            "https://api.tailscale.com/api/v2/tailnet/${_TS_TAILNET}/devices" \
+            -u "${_TS_API_KEY}:" \
+            | jq -r '.devices[] | select(.hostname == "prod-node-1") | .addresses[0]' 2>/dev/null \
+            || echo "")
           echo "prod-node-1 Tailscale IP: ${_TS_IP:-NOT FOUND}"
-          if [[ -n "${_TS_IP}" ]] && [[ "${_TS_IP}" =~ ^[0-9] ]]; then
+
+          if [[ -n "${_TS_IP}" ]] && [[ "${_TS_IP}" =~ ^100\. ]]; then
+            # 一時 Auth Key を生成 (10分有効, ephemeral, preauthorized)
+            _TS_AUTH_KEY=$(curl -sf -X POST \
+              "https://api.tailscale.com/api/v2/tailnet/${_TS_TAILNET}/keys" \
+              -u "${_TS_API_KEY}:" \
+              -H "Content-Type: application/json" \
+              -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true}}},"expirySeconds":600}' \
+              | jq -r '.key') \
+              || { echo "::error::Tailscale Auth Key 生成に失敗しました"; exit 1; }
+            echo "::add-mask::${_TS_AUTH_KEY}"
+
+            # tailscale をインストールして Tailnet に接続
+            curl -fsSL https://tailscale.com/install.sh | sh 2>/dev/null
+            sudo tailscaled --state=mem: 2>/tmp/tailscaled.log &
+            sleep 3
+            sudo tailscale up --authkey="${_TS_AUTH_KEY}" --accept-routes \
+              --hostname="gh-ci-ir-${GITHUB_RUN_ID}" 2>&1 \
+              || { echo "::error::tailscale up に失敗しました"; tail -20 /tmp/tailscaled.log; exit 1; }
+            echo "Tailscale 接続完了"
+
+            # KUBECONFIG の hostname を Tailscale IP に置換
             sed -i "s/prod-node-1/${_TS_IP}/g" "${KUBECONFIG_FILE}"
-            echo "prod-node-1 → ${_TS_IP} に置換"
+            echo "KUBECONFIG: prod-node-1 → ${_TS_IP} に置換"
+          else
+            echo "::error::prod-node-1 の Tailscale IP が取得できませんでした"
+            exit 1
           fi
 
           kubectl --kubeconfig="${KUBECONFIG_FILE}" apply --validate=false -f - <<EOF
