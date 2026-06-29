@@ -72,7 +72,7 @@ jobs:
 
           # Tailscale API Key と Tailnet を Infisical から取得
           _TS_API_KEY=$(curl -sf \
-            "https://app.infisical.com/api/v3/secrets/raw/TAILSCALE_API_KEY?workspaceId=${INFISICAL_PROJECT_ID}&environment=prod" \
+            "https://app.infisical.com/api/v3/secrets/raw/TF_VAR_tailscale_api_key?workspaceId=${INFISICAL_PROJECT_ID}&environment=prod" \
             -H "Authorization: Bearer ${_ACCESS_TOKEN}" \
             | jq -r '.secret.secretValue') \
             || { echo "::error::TAILSCALE_API_KEY の取得に失敗しました"; exit 1; }
@@ -195,7 +195,7 @@ jobs:
 
           # Tailscale API Key と Tailnet を Infisical から取得
           _TS_API_KEY=$(curl -sf \
-            "https://app.infisical.com/api/v3/secrets/raw/TAILSCALE_API_KEY?workspaceId=${INFISICAL_PROJECT_ID}&environment=prod" \
+            "https://app.infisical.com/api/v3/secrets/raw/TF_VAR_tailscale_api_key?workspaceId=${INFISICAL_PROJECT_ID}&environment=prod" \
             -H "Authorization: Bearer ${_ACCESS_TOKEN}" \
             | jq -r '.secret.secretValue') \
             || { echo "::error::TAILSCALE_API_KEY の取得に失敗しました"; exit 1; }
