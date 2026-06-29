@@ -96,8 +96,14 @@
   - _Requirements: 05_
   - _Depends: 4_
 
-- [ ] 7.2 intrusion-response.yml の E2E 実行を確認する
-  - `workflow_dispatch` で `namespace=prod` を指定して発火し、forensics Artifacts 生成・NetworkPolicy 適用・Discord 通知（ローテーション一覧含む）の一連の流れを確認する
-  - 確認できれば完了
+- [x] 7.2 intrusion-response.yml の E2E 実行を確認する
+  - **E2E 検証完了 (2026-06-29)**: `namespace=prod` で workflow_dispatch し、全ジョブ成功確認
+    - ✓ Forensics: Artifacts `forensics-prod-28354961281` 生成・90日保持
+    - ✓ Isolate: `intrusion-isolation` NetworkPolicy を prod に適用 (テスト後削除済み)
+    - ✓ Notify: Discord に2メッセージ (サマリー + シークレット一覧) 送信
+  - **修正した問題**:
+    1. `TS_OAUTH_CLIENT_ID`/`TS_OAUTH_SECRET` 未設定 → `tailscale/github-action` 廃止、Infisical の `TF_VAR_tailscale_api_key` から動的 Auth Key 生成に変更
+    2. Tailscale IP → KUBECONFIG 置換時の TLS 証明書 SAN 不一致 → `/etc/hosts` に追加する方式に変更
+    3. Discord content 2000文字超過 → 2メッセージ (サマリー + シークレット一覧) に分割
   - _Requirements: 04-2_
   - _Depends: 5.1_
