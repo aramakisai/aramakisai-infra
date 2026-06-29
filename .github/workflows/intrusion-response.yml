@@ -117,9 +117,9 @@ jobs:
               fi
             fi
 
-            # KUBECONFIG の hostname を Tailscale IP に置換
-            sed -i "s/prod-node-1/${_TS_IP}/g" "${KUBECONFIG_FILE}"
-            echo "KUBECONFIG: prod-node-1 → ${_TS_IP} に置換"
+            # /etc/hosts に追加 (TLS証明書の hostname 検証を維持するため IP 置換しない)
+            echo "${_TS_IP} prod-node-1" | sudo tee -a /etc/hosts
+            echo "prod-node-1 → ${_TS_IP} (/etc/hosts に追加)"
           else
             echo "::warning::prod-node-1 の Tailscale IP が取得できませんでした"
           fi
@@ -235,9 +235,9 @@ jobs:
               || { echo "::error::tailscale up に失敗しました"; tail -20 /tmp/tailscaled.log; exit 1; }
             echo "Tailscale 接続完了"
 
-            # KUBECONFIG の hostname を Tailscale IP に置換
-            sed -i "s/prod-node-1/${_TS_IP}/g" "${KUBECONFIG_FILE}"
-            echo "KUBECONFIG: prod-node-1 → ${_TS_IP} に置換"
+            # /etc/hosts に追加 (TLS証明書の hostname 検証を維持するため IP 置換しない)
+            echo "${_TS_IP} prod-node-1" | sudo tee -a /etc/hosts
+            echo "prod-node-1 → ${_TS_IP} (/etc/hosts に追加)"
           else
             echo "::error::prod-node-1 の Tailscale IP が取得できませんでした"
             exit 1
