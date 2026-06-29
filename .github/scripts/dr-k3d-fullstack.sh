@@ -196,8 +196,8 @@ log "ESO ClusterSecretStore 準備完了"
 # 9. CNPG Cluster が healthy になるまで待機
 # ============================================================
 
-log "=== Step9: CNPG Cluster healthy 待機 ==="
-# ArgoCD が db-cluster.yaml を sync して Cluster CR を作成するまで待つ
+log "=== Step9: CNPG Cluster healthy 待機 (並列) ==="
+# ArgoCD が db-cluster.yaml を sync して Cluster CR を作成するまで待つ (並列)
 for CLUSTER in authentik-db directus-db vaultwarden-db presence-db; do
   log "  ${CLUSTER} の Cluster CR 作成を待機します (最大 5 分)"
   _ELAPSED=0
@@ -207,14 +207,24 @@ for CLUSTER in authentik-db directus-db vaultwarden-db presence-db; do
     _ELAPSED=$(( _ELAPSED + 10 ))
   done
 done
-# Cluster CR が揃ったら healthy を待つ
+# 全 Cluster の healthy を並列待機 (最大 90 分: authentik-db の WAL リカバリが最長)
+_PIDS=()
 for CLUSTER in authentik-db directus-db vaultwarden-db presence-db; do
-  log "  ${CLUSTER} の healthy を待機します (最大 20 分)"
-  kubectl_r wait cluster "${CLUSTER}" -n prod \
-    --for=jsonpath='{.status.phase}'='Cluster in healthy state' \
-    --timeout=1200s \
-    || log "  警告: ${CLUSTER} の healthy 待機タイムアウト"
+  (
+    if kubectl_r wait cluster "${CLUSTER}" -n prod \
+      --for=jsonpath='{.status.phase}'='Cluster in healthy state' \
+      --timeout=5400s; then
+      log "  ${CLUSTER} healthy 確認"
+    else
+      log "  警告: ${CLUSTER} の healthy 待機タイムアウト (90 分)"
+    fi
+  ) &
+  _PIDS+=($!)
 done
+for _PID in "${_PIDS[@]}"; do
+  wait "${_PID}" || true
+done
+log "CNPG 並列待機完了"
 
 # ============================================================
 # 10. mailserver PVC が作成されるまで待機してから VolSync リストア
