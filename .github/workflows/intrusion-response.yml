@@ -271,16 +271,24 @@ jobs:
           POD_SELECTOR="${{ inputs.pod_selector }}"
           PS_DISPLAY="${POD_SELECTOR:-全 Pod}"
           RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          WEBHOOK="${{ secrets.DISCORD_OPS_WEBHOOK_URL }}"
 
-          BODY=$(jq -n \
+          # メッセージ1: サマリー (2000文字以内に収める)
+          BODY1=$(jq -n \
             --arg ns "${NAMESPACE}" \
             --arg ps "${PS_DISPLAY}" \
             --arg url "${RUN_URL}" \
-            '{
-              content: ("🚨 **侵入対応実行完了** 🚨\n\n**対象 namespace**: `" + $ns + "`\n**Pod セレクター**: `" + $ps + "`\n**実行ログ**: " + $url + "\n\n**実施済み**:\n• forensics 保存済み (GitHub Actions Artifacts 90日保持)\n• NetworkPolicy 適用済み (ingress/egress 全遮断)\n\n**ローテーション必須シークレット一覧 (Infisical)**:\n`HCLOUD_TOKEN` `CLOUDFLARE_API_TOKEN` `TAILSCALE_OAUTH_CLIENT_ID` `TAILSCALE_OAUTH_CLIENT_SECRET`\n`TF_VAR_k3s_token` `TF_VAR_tailscale_api_key` `TF_VAR_authentik_cf_client_id` `TF_VAR_authentik_cf_client_secret`\n`K3S_TOKEN` `CLOUDFLARE_TUNNEL_TOKEN` `CLOUDFLARE_TUNNEL_ID` `INFISICAL_CLIENT_ID` `INFISICAL_CLIENT_SECRET`\n`ARGOCD_GITHUB_DEPLOY_KEY` `TFC_API_TOKEN` `TFC_WORKSPACE_ID` `TAILSCALE_API_KEY` `TAILSCALE_TAILNET`\n`AUTHENTIK_SECRET_KEY` `AUTHENTIK_DB_PASSWORD` `NOREPLY_SMTP_PASSWORD`\n`MAILSERVER_LDAP_BIND_PASSWORD` `MAILSERVER_DKIM_KEY` `MAILSERVER_RESTIC_PASSWORD` `B2_APPLICATION_KEY_ID` `B2_APPLICATION_KEY`\n`DIRECTUS_SECRET` `DIRECTUS_ADMIN_EMAIL` `DIRECTUS_ADMIN_PASSWORD` `DIRECTUS_DB_PASSWORD`\n`LOKI_URL` `LOKI_USERNAME` `LOKI_PASSWORD` `PROMETHEUS_REMOTE_WRITE_URL` `PROMETHEUS_USERNAME` `PROMETHEUS_PASSWORD`\n`MAIL_OAUTH2_CLIENT_SECRET` `ROUNDCUBE_DES_KEY`\n`TF_VAR_authentik_room_presence_client_secret` `PRESENCE_AUTH_SECRET` `PRESENCE_AUTHENTIK_API_TOKEN` `PRESENCE_RESET_SECRET` `PRESENCE_DISCORD_BOT_TOKEN`\n`VAULTWARDEN_ADMIN_TOKEN` `VAULTWARDEN_DB_PASSWORD` `VAULTWARDEN_OIDC_CLIENT_ID` `VAULTWARDEN_OIDC_CLIENT_SECRET` `VAULTWARDEN_RESTIC_PASSWORD`\n`VAULTWARDEN_RBAC_SYNC_AUTHENTIK_API_TOKEN` `VAULTWARDEN_RBAC_SYNC_SERVICE_ACCOUNT_CLIENT_ID` `VAULTWARDEN_RBAC_SYNC_SERVICE_ACCOUNT_CLIENT_SECRET`\n`TF_VAR_vaultwarden_rbac_sync_trigger_token` `DISCORD_OPS_WEBHOOK_URL`\n\n**GitHub Actions Secrets もローテーション**:\n`INFISICAL_CLIENT_ID` `INFISICAL_CLIENT_SECRET`\n\n⚠️ **次のアクション**:\n1. 上記すべてのシークレットを Infisical でローテーション\n2. GitHub Actions Secrets の `INFISICAL_CLIENT_ID`/`INFISICAL_CLIENT_SECRET` もローテーション\n3. **ローテーション完了後**に `dr-recovery` を手動 dispatch\n\n🔴 **ローテーション完了前に `dr-recovery` を実行しないこと**")
-            }')
+            '{content: ("🚨 **侵入対応実行完了** 🚨\n\n**対象 namespace**: `" + $ns + "`\n**Pod セレクター**: `" + $ps + "`\n**実行ログ**: " + $url + "\n\n**実施済み**:\n• forensics 保存済み (Artifacts 90日保持)\n• NetworkPolicy 適用済み (ingress/egress 全遮断)\n\n⚠️ **次のアクション**:\n1. 下記シークレットを全てローテーション (次のメッセージ参照)\n2. GitHub Secrets の `INFISICAL_CLIENT_ID`/`INFISICAL_CLIENT_SECRET` もローテーション\n3. **ローテーション完了後**に `dr-recovery` を手動 dispatch\n\n🔴 **ローテーション完了前に `dr-recovery` を実行しないこと**")}')
 
-          curl -sf -X POST "${{ secrets.DISCORD_OPS_WEBHOOK_URL }}" \
+          curl -sf -X POST "${WEBHOOK}" \
             -H "Content-Type: application/json" \
-            -d "${BODY}" \
-            || { echo "::error::Discord 通知の送信に失敗しました"; exit 1; }
+            -d "${BODY1}" \
+            || { echo "::error::Discord 通知 (サマリー) の送信に失敗しました"; exit 1; }
+
+          # メッセージ2: ローテーション必須シークレット一覧
+          BODY2=$(jq -n '{content: "**ローテーション必須 (Infisical)**:\n`HCLOUD_TOKEN` `CLOUDFLARE_API_TOKEN` `TAILSCALE_OAUTH_CLIENT_ID` `TAILSCALE_OAUTH_CLIENT_SECRET`\n`TF_VAR_k3s_token` `TF_VAR_tailscale_api_key` `TF_VAR_authentik_cf_client_id` `TF_VAR_authentik_cf_client_secret`\n`K3S_TOKEN` `CLOUDFLARE_TUNNEL_TOKEN` `CLOUDFLARE_TUNNEL_ID` `INFISICAL_CLIENT_ID` `INFISICAL_CLIENT_SECRET`\n`ARGOCD_GITHUB_DEPLOY_KEY` `TFC_API_TOKEN` `TFC_WORKSPACE_ID` `TAILSCALE_API_KEY` `TAILSCALE_TAILNET`\n`AUTHENTIK_SECRET_KEY` `AUTHENTIK_DB_PASSWORD` `NOREPLY_SMTP_PASSWORD`\n`MAILSERVER_LDAP_BIND_PASSWORD` `MAILSERVER_DKIM_KEY` `MAILSERVER_RESTIC_PASSWORD` `B2_APPLICATION_KEY_ID` `B2_APPLICATION_KEY`\n`DIRECTUS_SECRET` `DIRECTUS_ADMIN_EMAIL` `DIRECTUS_ADMIN_PASSWORD` `DIRECTUS_DB_PASSWORD`\n`LOKI_URL` `LOKI_USERNAME` `LOKI_PASSWORD` `PROMETHEUS_REMOTE_WRITE_URL` `PROMETHEUS_USERNAME` `PROMETHEUS_PASSWORD`\n`MAIL_OAUTH2_CLIENT_SECRET` `ROUNDCUBE_DES_KEY`\n`TF_VAR_authentik_room_presence_client_secret` `PRESENCE_AUTH_SECRET` `PRESENCE_AUTHENTIK_API_TOKEN` `PRESENCE_RESET_SECRET` `PRESENCE_DISCORD_BOT_TOKEN`\n`VAULTWARDEN_ADMIN_TOKEN` `VAULTWARDEN_DB_PASSWORD` `VAULTWARDEN_OIDC_CLIENT_ID` `VAULTWARDEN_OIDC_CLIENT_SECRET` `VAULTWARDEN_RESTIC_PASSWORD`\n`VAULTWARDEN_RBAC_SYNC_AUTHENTIK_API_TOKEN` `VAULTWARDEN_RBAC_SYNC_SERVICE_ACCOUNT_CLIENT_ID` `VAULTWARDEN_RBAC_SYNC_SERVICE_ACCOUNT_CLIENT_SECRET`\n`TF_VAR_vaultwarden_rbac_sync_trigger_token` `DISCORD_OPS_WEBHOOK_URL`\n\n**GitHub Actions Secrets もローテーション**:\n`INFISICAL_CLIENT_ID` `INFISICAL_CLIENT_SECRET`"}')
+
+          curl -sf -X POST "${WEBHOOK}" \
+            -H "Content-Type: application/json" \
+            -d "${BODY2}" \
+            || echo "::warning::Discord 通知 (シークレット一覧) の送信に失敗しました"
