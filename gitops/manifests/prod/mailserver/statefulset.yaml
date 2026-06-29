@@ -108,8 +108,12 @@ spec:
             # 2026-06-26: auth_username_format 削除により %d がユーザーの入力ドメイン (gmail.com 等)
             # に展開されるようになった。メールボックスは aramakisai.com 配下に統一しているため
             # %d の代わりに静的に aramakisai.com を指定する。
+            # 2026-06-28: 全属性静的値のため Dovecot が LDAP に attrs=[] (全属性要求) を送り、
+            # Authentik outpost が ml-admin の mailAlias multi-value 属性をシリアライズ失敗して
+            # 空応答を返す → Dovecot userdb TEMPFAIL → admin@ 宛 451 エラー。
+            # mail=_ldap_check を先頭に追加し attrs=["mail"] を強制することで回避する。
             - name: DOVECOT_USER_ATTRS
-              value: "=uid=5000,=gid=5000,=home=/var/mail/aramakisai.com/%n,=mail=maildir:/var/mail/aramakisai.com/%n"
+              value: "mail=_ldap_check,=uid=5000,=gid=5000,=home=/var/mail/aramakisai.com/%n,=mail=maildir:/var/mail/aramakisai.com/%n"
             # Roundcube OAuth2 クライアントシークレット (OAUTHBEARER introspection 用)
             - name: MAIL_OAUTH2_CLIENT_SECRET
               valueFrom:

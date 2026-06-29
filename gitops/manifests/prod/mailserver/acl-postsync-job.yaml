@@ -32,14 +32,20 @@ spec:
               for box in planning accounting booth stage pr admin general-affairs; do
                 ACL_FILE="$BASE/$box/dovecot-acl"
                 if [ -f "$ACL_FILE" ]; then
-                  # leader が未設定なら追加
-                  if ! grep -q "^group=leader " "$ACL_FILE"; then
-                    echo "group=leader lrws" >> "$ACL_FILE"
+                  # leader: lrwste (read/write/seen/mark-deleted/expunge)
+                  if grep -q "^group=leader " "$ACL_FILE"; then
+                    sed -i 's/^group=leader .*/group=leader lrwste/' "$ACL_FILE"
+                    echo "[~] Updated leader ACL in $box"
+                  else
+                    echo "group=leader lrwste" >> "$ACL_FILE"
                     echo "[+] Added leader ACL to $box"
                   fi
-                  # admin が未設定なら追加
-                  if ! grep -q "^group=admin " "$ACL_FILE"; then
-                    echo "group=admin lrws" >> "$ACL_FILE"
+                  # admin: lrwste (read/write/seen/mark-deleted/expunge)
+                  if grep -q "^group=admin " "$ACL_FILE"; then
+                    sed -i 's/^group=admin .*/group=admin lrwste/' "$ACL_FILE"
+                    echo "[~] Updated admin ACL in $box"
+                  else
+                    echo "group=admin lrwste" >> "$ACL_FILE"
                     echo "[+] Added admin ACL to $box"
                   fi
                 else
