@@ -72,10 +72,13 @@ spec:
             # fan-out 展開の対象から除外する
             - name: LDAP_QUERY_FILTER_GROUP
               value: "(&(objectClass=group)(mail=%s)(!(mailListMigrated=true)))"
+            # 2026-06-29: ML メールアドレスと同一メールを持つ別 LDAP エントリが存在し、
+            # Dovecot userdb が複数マッチで TEMPFAIL を返していた。
+            # mailListAddress=true を追加して ML 専用ユーザーに一意に絞り込む。
             - name: DOVECOT_USER_FILTER
-              value: "(&(objectClass=inetOrgPerson)(mail=%u)(ak-active=true))"
+              value: "(&(objectClass=inetOrgPerson)(mail=%u)(ak-active=true)(mailListAddress=true))"
             - name: DOVECOT_PASS_FILTER
-              value: "(&(objectClass=inetOrgPerson)(mail=%u)(ak-active=true))"
+              value: "(&(objectClass=inetOrgPerson)(mail=%u)(ak-active=true)(mailListAddress=true))"
             # 送信者なりすまし防止: MLアドレスをFromに使える送信者をグループメンバーに限定する
             # 2026-06-23 hotfix: SENDERSフィルタを設定すると docker-mailserver の
             # 仕様上 USER/ALIAS/GROUP フィルタの自動OR結合が無効化される
