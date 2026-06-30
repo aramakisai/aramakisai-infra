@@ -37,6 +37,11 @@ output "vaultwarden_rbac_sync_authentik_token" {
   sensitive   = true
 }
 
+output "pages_project_subdomain" {
+  description = "Cloudflare Pages 自動割り当てサブドメイン (<project>.pages.dev)"
+  value       = cloudflare_pages_project.aramakisai_web.subdomain
+}
+
 # Hetzner Object Storage は hcloud provider 非対応のため手動管理
 # バケット名: aramakisai-backups
 # output "object_storage_bucket" {

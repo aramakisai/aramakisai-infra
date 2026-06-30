@@ -71,6 +71,10 @@ spec:
                 secretKeyRef:
                   name: directus-secrets
                   key: EMAIL_SMTP_PASSWORD
+            - name: CORS_ENABLED
+              value: "true"
+            - name: CORS_ORIGIN
+              value: "https://aramakisai.com"
           resources:
             requests:
               memory: "256Mi"

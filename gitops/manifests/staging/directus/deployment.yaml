@@ -43,6 +43,10 @@ spec:
               value: directus
             - name: PUBLIC_URL
               value: https://stg-api.aramakisai.com
+            - name: CORS_ENABLED
+              value: "true"
+            - name: CORS_ORIGIN
+              value: "*"
             - name: STORAGE_LOCATIONS
               value: local
             - name: STORAGE_LOCAL_ROOT

@@ -23,15 +23,19 @@ resource "cloudflare_record" "idp" {
   comment = "Authentik IdP (Cloudflare Tunnel)"
 }
 
-# Staging フロントエンド
-resource "cloudflare_record" "stg" {
-  zone_id = var.cloudflare_zone_id
-  name    = "stg"
-  value   = local.tunnel_cname
-  type    = "CNAME"
-  proxied = true
-  comment = "Staging frontend (Cloudflare Tunnel)"
-}
+# Production フロントエンド (Cloudflare Pages)
+# CNAME Flattening により apex でも CNAME が使用可能
+# TODO: フロントエンド移行完了後にコメントアウトを解除して apply する
+# resource "cloudflare_record" "apex" {
+#   zone_id = var.cloudflare_zone_id
+#   name    = "@"
+#   value   = "aramakisai-web.pages.dev"
+#   type    = "CNAME"
+#   proxied = true
+#   comment = "Production frontend (Cloudflare Pages)"
+# }
+
+# Staging フロントエンドは廃止 — Cloudflare Pages PR preview URL (*.pages.dev) を使用
 
 # Staging API
 # api.stg (2階層) は Cloudflare Universal SSL のカバー範囲外 (TLS handshake failure) のため

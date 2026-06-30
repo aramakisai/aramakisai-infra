@@ -40,11 +40,8 @@ resource "cloudflare_zero_trust_access_identity_provider" "authentik" {
 # Cloudflare Access Applications
 #
 # 保護対象:
-#   stg.aramakisai.com       Staging Frontend (Authentik OIDC)
-#   stg-api.aramakisai.com   Staging API      (Authentik OIDC)
-#                            ※ api.stg.aramakisai.com (2階層) は Cloudflare Universal SSL の
-#                              カバー範囲外 (aramakisai.com / *.aramakisai.com のみ) のため
-#                              TLS handshake failure になる。1階層hostnameに変更して回避。
+#   (なし - stg/api_stg は廃止。staging frontend は Cloudflare Pages PR preview URL を使用。
+#           stg-api.aramakisai.com は Directus 自身の admin 認証のみで保護)
 #
 # 非保護 (自前認証あり):
 #   webmail.aramakisai.com   Roundcube が Authentik OAuth2 で保護
@@ -52,40 +49,13 @@ resource "cloudflare_zero_trust_access_identity_provider" "authentik" {
 #   argocd.aramakisai.com    ArgoCD 自前認証 (admin / Authentik SSO) で保護
 # ============================================================
 
-resource "cloudflare_zero_trust_access_application" "stg" {
-  account_id       = var.cloudflare_account_id
-  name             = "Staging Frontend"
-  domain           = "stg.aramakisai.com"
-  type             = "self_hosted"
-  session_duration = "24h"
-
-  # auto_redirect_to_identity requires allowed_idps with exactly one IdP
-  auto_redirect_to_identity = local.authentik_configured
-  allowed_idps              = local.authentik_configured ? [cloudflare_zero_trust_access_identity_provider.authentik[0].id] : []
-}
-
-resource "cloudflare_zero_trust_access_application" "api_stg" {
-  account_id       = var.cloudflare_account_id
-  name             = "Staging API"
-  domain           = "stg-api.aramakisai.com"
-  type             = "self_hosted"
-  session_duration = "24h"
-
-  # auto_redirect_to_identity requires allowed_idps with exactly one IdP
-  auto_redirect_to_identity = local.authentik_configured
-  allowed_idps              = local.authentik_configured ? [cloudflare_zero_trust_access_identity_provider.authentik[0].id] : []
-}
-
 # ============================================================
 # Cloudflare Access Policies
-# Authentik IdP が登録済みの場合のみ作成する
+# 保護対象 Application が存在しないため空 Map
 # ============================================================
 
 locals {
-  access_applications = local.authentik_configured ? {
-    stg     = cloudflare_zero_trust_access_application.stg.id
-    api_stg = cloudflare_zero_trust_access_application.api_stg.id
-  } : {}
+  access_applications = {}
 }
 
 resource "cloudflare_zero_trust_access_policy" "allow_authentik" {
