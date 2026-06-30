@@ -48,6 +48,24 @@ make kubectl ARGS="get pods -A"
 ```
 決して `kubectl` を直接ローカルで実行しないこと。必ず `make kubectl` 経由で kubeconfig を注入して実行すること。
 
+### GitOps 原則：クラスタへの直接操作禁止
+
+`gitops/` 配下のリソースはすべて ArgoCD が正本。**直接 `kubectl patch/edit/apply` でクラスタを変更することを禁止する。**
+
+live リソースに Git にない差分（直接 patch で追加されたフィールド等）が残存していても、ArgoCD の client-side apply は「last-applied-configuration に記録されていない外部追加フィールド」を除去しないため、ArgoCD が "Synced" を表示していても実際はドリフトが存在する場合がある。
+
+**クラスタリソースを修正する正しい手順:**
+
+1. Git manifest を修正してコミット・プッシュ
+2. ArgoCD で sync（必要なら Hard Refresh + Force Sync / server-side apply）
+
+```bash
+# SSA で全フィールドの ownership を ArgoCD に渡す（フィールドドリフト解消）
+argocd app sync <app-name> --server-side --force
+```
+
+**例外（直接操作が許される場合）:** ArgoCD 自身が管理しない Bootstrap リソース（`infisical-auth` Secret、ArgoCD インストール直後の初期 Secret 等）のみ。
+
 ## ブートストラップフロー
 
 1. **Terraform Apply**: Hetzner シングルノード（`prod-node-1`）作成 (cloud-init で Tailscale 自動インストール) & 各種 DNS・トンネル・サードパーティ（Authentik、Netdata、Healthchecks.io等）設定。
