@@ -118,25 +118,57 @@ log "hetzner-os-credentials Secret 作成完了"
 
 log "=== Step6: 既存 CNPG クラスターをクリーンアップ (冪等性) ==="
 
-# CNPG CRD が確立しているか確認
-kubectl_r wait --for=condition=established \
-  crd/clusters.postgresql.cnpg.io --timeout=60s
-
-for _C in authentik-db directus-db vaultwarden-db presence-db; do
-  if kubectl_r get cluster "${_C}" -n prod &>/dev/null; then
-    log "  既存クラスター ${_C} を削除します"
-    kubectl_r delete jobs -n prod -l "cnpg.io/cluster=${_C}" --ignore-not-found 2>/dev/null || true
-    kubectl_r delete cluster "${_C}" -n prod --wait=false --ignore-not-found 2>/dev/null || true
-  fi
-done
+# CNPG CRD が既にインストール済みの場合のみクリーンアップ実行
+# (初回実行時は CRD 未存在のためスキップ; ArgoCD が Step7 以降でインストールする)
+if kubectl_r get crd clusters.postgresql.cnpg.io &>/dev/null; then
+  kubectl_r wait --for=condition=established \
+    crd/clusters.postgresql.cnpg.io --timeout=60s
+  for _C in authentik-db directus-db vaultwarden-db presence-db; do
+    if kubectl_r get cluster "${_C}" -n prod &>/dev/null; then
+      log "  既存クラスター ${_C} を削除します"
+      kubectl_r delete jobs -n prod -l "cnpg.io/cluster=${_C}" --ignore-not-found 2>/dev/null || true
+      kubectl_r delete cluster "${_C}" -n prod --wait=false --ignore-not-found 2>/dev/null || true
+    fi
+  done
+  log "CNPG クリーンアップ完了 — ArgoCD sync で bootstrap.recovery として再作成されます"
+else
+  log "CNPG CRD 未インストール — 初回実行のためクリーンアップをスキップ"
+fi
 # ArgoCD が bootstrap.recovery で即時再作成するため、削除完了を待たずに進む
 # (Step9 で Cluster が healthy になるまで待機する)
-
-log "CNPG クリーンアップ完了 — ArgoCD sync で bootstrap.recovery として再作成されます"
 
 # ============================================================
 # 7. App of Apps (root.yaml) apply → ArgoCD が全アプリを sync
 # ============================================================
+
+log "=== Step6.5: 本番バックアップ書き込み防止ループ起動 (App of Apps apply 前) ==="
+# ---------------------------------------------------------------
+# 保護対象:
+#   1. CNPG Cluster の spec.backup (barman WAL streaming → prod S3)
+#   2. CNPG ScheduledBackup CR (週次フルバックアップ → prod S3)
+#   3. VolSync ReplicationSource CR (mailserver/vaultwarden → prod Restic)
+#
+# ArgoCD が sync するたびに上記を復元しようとするため、
+# App of Apps apply の前にバックグラウンドループを起動し、
+# 出現次第即削除する (10 秒間隔で継続)
+# ---------------------------------------------------------------
+_prod_backup_guard() {
+  while true; do
+    # 1. CNPG spec.backup 除去
+    for _C in authentik-db directus-db vaultwarden-db presence-db; do
+      kubectl_r patch cluster "${_C}" -n prod --type=json \
+        -p '[{"op":"remove","path":"/spec/backup"}]' 2>/dev/null || true
+    done
+    # 2. CNPG ScheduledBackup CR 削除
+    kubectl_r delete scheduledbackup --all -n prod --ignore-not-found 2>/dev/null || true
+    # 3. VolSync ReplicationSource CR 削除 (バックアップ方向のみ; ReplicationDestination は残す)
+    kubectl_r delete replicationsource --all -n prod --ignore-not-found 2>/dev/null || true
+    sleep 10
+  done
+}
+_prod_backup_guard &
+_BACKUP_LOOP_PID=$!
+log "本番バックアップ防止ループ起動 (PID=${_BACKUP_LOOP_PID}、間隔 10s)"
 
 log "=== Step7: App of Apps apply ==="
 kubectl_r apply -n argocd -f "${REPO_ROOT}/gitops/root.yaml"
@@ -145,42 +177,6 @@ log "root.yaml apply 完了 — ArgoCD が全アプリを sync します"
 # ============================================================
 # 8. ESO ClusterSecretStore が Ready になるまで待機
 # ============================================================
-
-log "=== Step7.5: CNPG バックアップを無効化 (本番 HOS を汚染しないため) ==="
-# k3d テストクラスターが本番と同じ HOS パスに WAL/base-backup を書き込まないよう
-# backup セクションを削除し、ArgoCD が再 sync しても 30 秒ごとに再削除するループを
-# バックグラウンドで常駐させる (ArgoCD の自動 sync に対する防御)
-_cnpg_remove_backup() {
-  while true; do
-    for _C in authentik-db directus-db vaultwarden-db presence-db; do
-      kubectl_r patch cluster "${_C}" -n prod --type=json \
-        -p '[{"op":"remove","path":"/spec/backup"}]' 2>/dev/null || true
-    done
-    sleep 30
-  done
-}
-
-# 各クラスター CR の出現を待ってから初回削除
-_CNPG_ELAPSED=0
-_CLUSTERS_PATCHED=0
-for _C in authentik-db directus-db vaultwarden-db presence-db; do
-  until kubectl_r get cluster "${_C}" -n prod &>/dev/null; do
-    (( _CNPG_ELAPSED >= 120 )) && break
-    sleep 5; _CNPG_ELAPSED=$(( _CNPG_ELAPSED + 5 ))
-  done
-  if kubectl_r get cluster "${_C}" -n prod &>/dev/null; then
-    if kubectl_r patch cluster "${_C}" -n prod --type=json \
-      -p '[{"op":"remove","path":"/spec/backup"}]' 2>/dev/null; then
-      log "  ${_C} backup section 削除完了"
-      (( _CLUSTERS_PATCHED++ )) || true
-    fi
-  fi
-done
-log "CNPG バックアップ停止完了 (${_CLUSTERS_PATCHED}/4 クラスター)"
-
-# バックグラウンドで再削除ループを起動 (スクリプト終了時に自動終了)
-_cnpg_remove_backup &
-_BACKUP_LOOP_PID=$!
 
 log "=== Step8: ESO ClusterSecretStore 待機 ==="
 log "ClusterSecretStore CRD が作成されるまでポーリングします (最大 10 分)"
@@ -364,17 +360,18 @@ _check_db() {
 
 _check_db "authentik-db"   "authentik"   "postgres"
 _check_db "directus-db"    "directus"    "postgres"
-_check_db "vaultwarden-db" "vaultwarden" "postgres"
-_check_db "presence-db"    "presence"    "postgres"
+# vaultwarden-db / presence-db は CNPG bootstrap 時に DB 名が "app" で作成される
+_check_db "vaultwarden-db" "app"         "postgres"
+_check_db "presence-db"    "app"         "postgres"
 
-# mailserver データ確認
+# mailserver データ確認 (Dovecot Maildir 形式: cur/ new/ 配下のファイルを計上)
 log "  mailserver-data PVC の内容確認"
 MAIL_POD=$(kubectl_r get pod -n prod -l app=mailserver \
   -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
 if [[ -n "$MAIL_POD" ]]; then
   MAIL_COUNT=$(kubectl_r exec -n prod "${MAIL_POD}" \
-    -- find /var/mail -type f -name "*.idx" 2>/dev/null | wc -l || true)
-  log "  mailserver メールボックスファイル数: ${MAIL_COUNT:-取得失敗}"
+    -- find /var/mail -type f \( -path "*/cur/*" -o -path "*/new/*" \) 2>/dev/null | wc -l || true)
+  log "  mailserver メールボックスファイル数 (cur+new): ${MAIL_COUNT:-取得失敗}"
 else
   log "  警告: mailserver Pod が見つかりません"
 fi
