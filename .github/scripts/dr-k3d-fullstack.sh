@@ -147,9 +147,20 @@ log "root.yaml apply 完了 — ArgoCD が全アプリを sync します"
 # ============================================================
 
 log "=== Step7.5: CNPG バックアップを無効化 (本番 HOS を汚染しないため) ==="
-# k3d テストクラスターが本番と同じ HOS パスに書き込まないよう
-# ArgoCD が CNPG クラスターを作成した後、backup セクションを削除する
-# externalClusters (リストア用) は残す
+# k3d テストクラスターが本番と同じ HOS パスに WAL/base-backup を書き込まないよう
+# backup セクションを削除し、ArgoCD が再 sync しても 30 秒ごとに再削除するループを
+# バックグラウンドで常駐させる (ArgoCD の自動 sync に対する防御)
+_cnpg_remove_backup() {
+  while true; do
+    for _C in authentik-db directus-db vaultwarden-db presence-db; do
+      kubectl_r patch cluster "${_C}" -n prod --type=json \
+        -p '[{"op":"remove","path":"/spec/backup"}]' 2>/dev/null || true
+    done
+    sleep 30
+  done
+}
+
+# 各クラスター CR の出現を待ってから初回削除
 _CNPG_ELAPSED=0
 _CLUSTERS_PATCHED=0
 for _C in authentik-db directus-db vaultwarden-db presence-db; do
@@ -166,6 +177,10 @@ for _C in authentik-db directus-db vaultwarden-db presence-db; do
   fi
 done
 log "CNPG バックアップ停止完了 (${_CLUSTERS_PATCHED}/4 クラスター)"
+
+# バックグラウンドで再削除ループを起動 (スクリプト終了時に自動終了)
+_cnpg_remove_backup &
+_BACKUP_LOOP_PID=$!
 
 log "=== Step8: ESO ClusterSecretStore 待機 ==="
 log "ClusterSecretStore CRD が作成されるまでポーリングします (最大 10 分)"
@@ -401,3 +416,6 @@ log "URL: http://localhost:8083"
 log ""
 log "ArgoCD 管理者パスワード確認:"
 log "kubectl --kubeconfig=/tmp/kubeconfig-dr-test get secret argocd-initial-admin-secret -n argocd -o jsonpath='{.data.password}' | base64 -d && echo"
+
+# バックグラウンドの backup 削除ループを終了
+kill "${_BACKUP_LOOP_PID}" 2>/dev/null || true
