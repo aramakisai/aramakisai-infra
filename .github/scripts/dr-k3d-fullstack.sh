@@ -130,6 +130,16 @@ if kubectl_r get crd clusters.postgresql.cnpg.io &>/dev/null; then
       kubectl_r delete cluster "${_C}" -n prod --wait=false --ignore-not-found 2>/dev/null || true
     fi
   done
+  # PVC 削除を待機: --wait=false で削除した Cluster の finalizer 完了前に ArgoCD が
+  # 同名 Cluster を再作成すると PVC 名衝突が起きるため、PVC が消えるまで待つ
+  for _C in authentik-db directus-db vaultwarden-db presence-db; do
+    _ELAPSED=0
+    while kubectl_r get pvc "${_C}-1" -n prod &>/dev/null; do
+      (( _ELAPSED >= 120 )) && { log "  警告: ${_C}-1 PVC 削除待機タイムアウト (2 分)"; break; }
+      sleep 5
+      _ELAPSED=$(( _ELAPSED + 5 ))
+    done
+  done
   log "CNPG クリーンアップ完了 — ArgoCD sync で bootstrap.recovery として再作成されます"
 else
   log "CNPG CRD 未インストール — 初回実行のためクリーンアップをスキップ"
@@ -168,6 +178,7 @@ _prod_backup_guard() {
 }
 _prod_backup_guard &
 _BACKUP_LOOP_PID=$!
+trap 'kill "${_BACKUP_LOOP_PID}" 2>/dev/null || true' EXIT
 log "本番バックアップ防止ループ起動 (PID=${_BACKUP_LOOP_PID}、間隔 10s)"
 
 log "=== Step7: App of Apps apply ==="
@@ -264,6 +275,17 @@ kubectl_r wait pod -n prod -l app=mailserver --for=delete --timeout=60s 2>/dev/n
 kubectl_r wait --for=condition=established \
   crd/replicationdestinations.volsync.backube --timeout=300s
 
+# ESO が mailserver-restic-secret を同期するまで待機
+# (Step8 で ClusterSecretStore Ready 確認済みだが、Secret 同期は非同期のため)
+log "mailserver-restic-secret が作成されるまで待機します (最大 5 分)"
+_SECRET_ELAPSED=0
+until kubectl_r get secret mailserver-restic-secret -n prod &>/dev/null; do
+  (( _SECRET_ELAPSED >= 300 )) && die "mailserver-restic-secret が 5 分以内に作成されませんでした"
+  sleep 10
+  _SECRET_ELAPSED=$(( _SECRET_ELAPSED + 10 ))
+done
+log "mailserver-restic-secret 確認"
+
 RESTORE_TRIGGER="dr-k3d-$(date +%Y%m%dT%H%M%S)"
 kubectl_r apply -f - <<EOF
 apiVersion: volsync.backube/v1alpha1
@@ -313,8 +335,9 @@ kubectl_r scale statefulset mailserver -n prod --replicas=1
 log "=== Step11: ArgoCD 全 Application Healthy 待機 (最大 30 分) ==="
 ARGOCD_ELAPSED=0
 while true; do
+  # shellcheck disable=SC2126  # grep -c exits 1 when count=0, breaking the loop; wc -l always exits 0
   NOT_HEALTHY=$(kubectl_r get applications -n argocd --no-headers 2>/dev/null \
-    | awk '{print $3}' | grep -cv "Healthy" || echo "99")
+    | awk '{print $3}' | grep -v "Healthy" | wc -l)
 
   [[ "$NOT_HEALTHY" -eq 0 ]] && { log "全 ArgoCD Application が Healthy になりました"; break; }
   (( ARGOCD_ELAPSED >= 1800 )) && { log "警告: ArgoCD Healthy 待機タイムアウト"; break; }
@@ -414,5 +437,4 @@ log ""
 log "ArgoCD 管理者パスワード確認:"
 log "kubectl --kubeconfig=/tmp/kubeconfig-dr-test get secret argocd-initial-admin-secret -n argocd -o jsonpath='{.data.password}' | base64 -d && echo"
 
-# バックグラウンドの backup 削除ループを終了
-kill "${_BACKUP_LOOP_PID}" 2>/dev/null || true
+# バックグラウンドの backup 削除ループは EXIT trap で終了
