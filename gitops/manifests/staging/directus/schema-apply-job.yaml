@@ -1,0 +1,67 @@
+---
+# Directus スキーマ適用 PostSync Job (staging)
+# ArgoCD sync 後に自動実行: migration + schema apply
+# schema-configmap.yaml が更新されるたびに再実行される
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: directus-schema-apply
+  namespace: staging
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: HookSucceeded
+spec:
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: schema-apply
+          image: directus/directus:12.1.1
+          command: [sh, -c]
+          args:
+            - |
+              set -euo pipefail
+              echo "[1/2] Running database migrations..."
+              node /directus/cli.js database migrate:latest
+              echo "[2/2] Applying schema snapshot..."
+              node /directus/cli.js schema apply --yes /snapshot/snapshot.yaml
+              echo "Done."
+          envFrom:
+            - secretRef:
+                name: directus-staging-secrets
+          env:
+            - name: DB_CLIENT
+              value: pg
+            - name: DB_HOST
+              value: directus-staging-db-rw.staging.svc.cluster.local
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_DATABASE
+              value: directus
+            - name: DB_USER
+              value: directus
+            - name: EXTENSIONS_PATH
+              value: /directus/extensions
+          volumeMounts:
+            - name: snapshot
+              mountPath: /snapshot
+              readOnly: true
+            - name: migrations
+              mountPath: /directus/extensions/migrations
+              readOnly: true
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "250m"
+      volumes:
+        - name: snapshot
+          configMap:
+            name: directus-schema
+        - name: migrations
+          configMap:
+            name: directus-migrations
+            optional: true

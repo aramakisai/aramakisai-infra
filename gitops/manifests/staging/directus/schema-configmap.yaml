@@ -1,0 +1,3793 @@
+apiVersion: v1
+data:
+  snapshot.yaml: |
+    version: 1
+    directus: 12.1.1
+    vendor: postgres
+    collections:
+      - collection: announcements
+        meta:
+          accountability: all
+          archive_app_filter: true
+          archive_field: null
+          archive_value: null
+          autosave_revision_interval: null
+          collapse: open
+          collection: announcements
+          color: null
+          display_template: '{{title}}'
+          group: null
+          hidden: false
+          icon: campaign
+          item_duplication_fields: null
+          note: お知らせ。published_atで公開日時管理。
+          preview_url: null
+          singleton: false
+          sort: 7
+          sort_field: null
+          status: active
+          translations: null
+          unarchive_value: null
+          versioning: false
+        schema:
+          name: announcements
+      - collection: faq_items
+        meta:
+          accountability: all
+          archive_app_filter: true
+          archive_field: null
+          archive_value: null
+          autosave_revision_interval: null
+          collapse: open
+          collection: faq_items
+          color: null
+          display_template: '{{question}}'
+          group: null
+          hidden: false
+          icon: help
+          item_duplication_fields: null
+          note: FAQ。sort順に取得。
+          preview_url: null
+          singleton: false
+          sort: 8
+          sort_field: sort
+          status: active
+          translations: null
+          unarchive_value: null
+          versioning: false
+        schema:
+          name: faq_items
+      - collection: festival_meta
+        meta:
+          accountability: all
+          archive_app_filter: true
+          archive_field: null
+          archive_value: null
+          autosave_revision_interval: null
+          collapse: open
+          collection: festival_meta
+          color: null
+          display_template: '{{name}}'
+          group: null
+          hidden: false
+          icon: festival
+          item_duplication_fields: null
+          note: 祭全体メタ情報シングルトン (id=1固定)
+          preview_url: null
+          singleton: true
+          sort: 10
+          sort_field: null
+          status: active
+          translations: null
+          unarchive_value: null
+          versioning: false
+        schema:
+          name: festival_meta
+      - collection: map_areas
+        meta:
+          accountability: all
+          archive_app_filter: true
+          archive_field: null
+          archive_value: null
+          autosave_revision_interval: null
+          collapse: open
+          collection: map_areas
+          color: null
+          display_template: '{{name}}'
+          group: null
+          hidden: false
+          icon: map
+          item_duplication_fields: null
+          note: OSMに描画するゾーン/エリア定義
+          preview_url: null
+          singleton: false
+          sort: 1
+          sort_field: sort
+          status: active
+          translations: null
+          unarchive_value: null
+          versioning: false
+        schema:
+          name: map_areas
+      - collection: page_access
+        meta:
+          accountability: all
+          archive_app_filter: true
+          archive_field: null
+          archive_value: null
+          autosave_revision_interval: null
+          collapse: open
+          collection: page_access
+          color: null
+          display_template: null
+          group: null
+          hidden: false
+          icon: directions
+          item_duplication_fields: null
+          note: アクセスページシングルトン (id=1固定)
+          preview_url: null
+          singleton: true
+          sort: 12
+          sort_field: null
+          status: active
+          translations: null
+          unarchive_value: null
+          versioning: false
+        schema:
+          name: page_access
+      - collection: page_contact
+        meta:
+          accountability: all
+          archive_app_filter: true
+          archive_field: null
+          archive_value: null
+          autosave_revision_interval: null
+          collapse: open
+          collection: page_contact
+          color: null
+          display_template: null
+          group: null
+          hidden: false
+          icon: contact_support
+          item_duplication_fields: null
+          note: お問い合わせページシングルトン (id=1固定)
+          preview_url: null
+          singleton: true
+          sort: 13
+          sort_field: null
+          status: active
+          translations: null
+          unarchive_value: null
+          versioning: false
+        schema:
+          name: page_contact
+      - collection: page_home
+        meta:
+          accountability: all
+          archive_app_filter: true
+          archive_field: null
+          archive_value: null
+          autosave_revision_interval: null
+          collapse: open
+          collection: page_home
+          color: null
+          display_template: null
+          group: null
+          hidden: false
+          icon: home
+          item_duplication_fields: null
+          note: トップページシングルトン (id=1固定)
+          preview_url: null
+          singleton: true
+          sort: 11
+          sort_field: null
+          status: active
+          translations: null
+          unarchive_value: null
+          versioning: false
+        schema:
+          name: page_home
+      - collection: performance_slots
+        meta:
+          accountability: all
+          archive_app_filter: true
+          archive_field: null
+          archive_value: null
+          autosave_revision_interval: null
+          collapse: open
+          collection: performance_slots
+          color: null
+          display_template: '{{stage_id.name}} / {{time_slot_id.label}}'
+          group: null
+          hidden: false
+          icon: event
+          item_duplication_fields: null
+          note: タイムテーブル本体。stage×time_slot×student_exhibitionの組み合わせ。
+          preview_url: null
+          singleton: false
+          sort: 6
+          sort_field: null
+          status: active
+          translations: null
+          unarchive_value: null
+          versioning: false
+        schema:
+          name: performance_slots
+      - collection: sponsors
+        meta:
+          accountability: all
+          archive_app_filter: true
+          archive_field: null
+          archive_value: null
+          autosave_revision_interval: null
+          collapse: open
+          collection: sponsors
+          color: null
+          display_template: '{{name}}'
+          group: null
+          hidden: false
+          icon: handshake
+          item_duplication_fields: null
+          note: 協賛一元管理テーブル。typeでブース出展・広告協賛を区別。
+          preview_url: null
+          singleton: false
+          sort: 4
+          sort_field: sort
+          status: active
+          translations: null
+          unarchive_value: null
+          versioning: false
+        schema:
+          name: sponsors
+      - collection: stages
+        meta:
+          accountability: all
+          archive_app_filter: true
+          archive_field: null
+          archive_value: null
+          autosave_revision_interval: null
+          collapse: open
+          collection: stages
+          color: null
+          display_template: '{{name}}'
+          group: null
+          hidden: false
+          icon: theater_comedy
+          item_duplication_fields: null
+          note: ステージマスタ。実行委員が事前定義。
+          preview_url: null
+          singleton: false
+          sort: 5
+          sort_field: sort
+          status: active
+          translations: null
+          unarchive_value: null
+          versioning: false
+        schema:
+          name: stages
+      - collection: student_exhibitions
+        meta:
+          accountability: all
+          archive_app_filter: true
+          archive_field: status
+          archive_value: draft
+          autosave_revision_interval: null
+          collapse: open
+          collection: student_exhibitions
+          color: null
+          display_template: '{{name}}'
+          group: null
+          hidden: false
+          icon: groups
+          item_duplication_fields: null
+          note: 学生団体統合テーブル。出展・出演・両方を同一レコードで管理。
+          preview_url: null
+          singleton: false
+          sort: 3
+          sort_field: null
+          status: active
+          translations: null
+          unarchive_value: published
+          versioning: false
+        schema:
+          name: student_exhibitions
+      - collection: time_slots
+        meta:
+          accountability: all
+          archive_app_filter: true
+          archive_field: null
+          archive_value: null
+          autosave_revision_interval: null
+          collapse: open
+          collection: time_slots
+          color: null
+          display_template: '{{label}}'
+          group: null
+          hidden: false
+          icon: schedule
+          item_duplication_fields: null
+          note: タイムスロットマスタ (実行委員が祭前に一括定義)
+          preview_url: null
+          singleton: false
+          sort: 2
+          sort_field: sort
+          status: active
+          translations: null
+          unarchive_value: null
+          versioning: false
+        schema:
+          name: time_slots
+      - collection: topics
+        meta:
+          accountability: all
+          archive_app_filter: true
+          archive_field: null
+          archive_value: null
+          autosave_revision_interval: null
+          collapse: open
+          collection: topics
+          color: null
+          display_template: '{{title}}'
+          group: null
+          hidden: false
+          icon: article
+          item_duplication_fields: null
+          note: 告知カード。駐車場マップ・模擬店マップ・デジタルパンフ等。
+          preview_url: null
+          singleton: false
+          sort: 9
+          sort_field: sort
+          status: active
+          translations: null
+          unarchive_value: null
+          versioning: false
+        schema:
+          name: topics
+    fields:
+      - collection: announcements
+        field: id
+        type: integer
+        meta:
+          collection: announcements
+          conditions: null
+          display: null
+          display_options: null
+          field: id
+          group: null
+          hidden: true
+          interface: input
+          note: null
+          options: null
+          readonly: true
+          required: false
+          searchable: true
+          sort: 1
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: id
+          table: announcements
+          data_type: integer
+          default_value: nextval('announcements_id_seq'::regclass)
+          max_length: null
+          numeric_precision: 32
+          numeric_scale: 0
+          is_nullable: false
+          is_unique: true
+          is_indexed: false
+          is_primary_key: true
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: true
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: announcements
+        field: title
+        type: string
+        meta:
+          collection: announcements
+          conditions: null
+          display: raw
+          display_options: null
+          field: title
+          group: null
+          hidden: false
+          interface: input
+          note: null
+          options: null
+          readonly: false
+          required: true
+          searchable: true
+          sort: 2
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: title
+          table: announcements
+          data_type: character varying
+          default_value: null
+          max_length: 255
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: false
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: announcements
+        field: body
+        type: text
+        meta:
+          collection: announcements
+          conditions: null
+          display: raw
+          display_options: null
+          field: body
+          group: null
+          hidden: false
+          interface: input-rich-text-html
+          note: null
+          options: null
+          readonly: false
+          required: false
+          searchable: true
+          sort: 3
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: body
+          table: announcements
+          data_type: text
+          default_value: null
+          max_length: null
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: announcements
+        field: published_at
+        type: timestamp
+        meta:
+          collection: announcements
+          conditions: null
+          display: datetime
+          display_options:
+            relative: true
+          field: published_at
+          group: null
+          hidden: false
+          interface: datetime
+          note: 公開日時 (NULLは非公開)
+          options: null
+          readonly: false
+          required: false
+          searchable: true
+          sort: 4
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: published_at
+          table: announcements
+          data_type: timestamp with time zone
+          default_value: null
+          max_length: null
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: faq_items
+        field: id
+        type: integer
+        meta:
+          collection: faq_items
+          conditions: null
+          display: null
+          display_options: null
+          field: id
+          group: null
+          hidden: true
+          interface: input
+          note: null
+          options: null
+          readonly: true
+          required: false
+          searchable: true
+          sort: 1
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: id
+          table: faq_items
+          data_type: integer
+          default_value: nextval('faq_items_id_seq'::regclass)
+          max_length: null
+          numeric_precision: 32
+          numeric_scale: 0
+          is_nullable: false
+          is_unique: true
+          is_indexed: false
+          is_primary_key: true
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: true
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: faq_items
+        field: question
+        type: string
+        meta:
+          collection: faq_items
+          conditions: null
+          display: raw
+          display_options: null
+          field: question
+          group: null
+          hidden: false
+          interface: input
+          note: null
+          options: null
+          readonly: false
+          required: true
+          searchable: true
+          sort: 2
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: question
+          table: faq_items
+          data_type: character varying
+          default_value: null
+          max_length: 500
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: false
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: faq_items
+        field: answer
+        type: text
+        meta:
+          collection: faq_items
+          conditions: null
+          display: raw
+          display_options: null
+          field: answer
+          group: null
+          hidden: false
+          interface: input-multiline
+          note: null
+          options: null
+          readonly: false
+          required: true
+          searchable: true
+          sort: 3
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: answer
+          table: faq_items
+          data_type: text
+          default_value: null
+          max_length: null
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: false
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: faq_items
+        field: sort
+        type: integer
+        meta:
+          collection: faq_items
+          conditions: null
+          display: raw
+          display_options: null
+          field: sort
+          group: null
+          hidden: false
+          interface: input
+          note: 表示順
+          options: null
+          readonly: false
+          required: false
+          searchable: true
+          sort: 4
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: sort
+          table: faq_items
+          data_type: integer
+          default_value: null
+          max_length: null
+          numeric_precision: 32
+          numeric_scale: 0
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: festival_meta
+        field: id
+        type: integer
+        meta:
+          collection: festival_meta
+          conditions: null
+          display: null
+          display_options: null
+          field: id
+          group: null
+          hidden: true
+          interface: input
+          note: null
+          options: null
+          readonly: true
+          required: false
+          searchable: true
+          sort: 1
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: id
+          table: festival_meta
+          data_type: integer
+          default_value: nextval('festival_meta_id_seq'::regclass)
+          max_length: null
+          numeric_precision: 32
+          numeric_scale: 0
+          is_nullable: false
+          is_unique: true
+          is_indexed: false
+          is_primary_key: true
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: true
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: festival_meta
+        field: name
+        type: string
+        meta:
+          collection: festival_meta
+          conditions: null
+          display: raw
+          display_options: null
+          field: name
+          group: null
+          hidden: false
+          interface: input
+          note: 祭名
+          options:
+            placeholder: '例: 第○○回 荒牧祭'
+          readonly: false
+          required: true
+          searchable: true
+          sort: 2
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: name
+          table: festival_meta
+          data_type: character varying
+          default_value: null
+          max_length: 255
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: false
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: festival_meta
+        field: event_days
+        type: json
+        meta:
+          collection: festival_meta
+          conditions: null
+          display: raw
+          display_options: null
+          field: event_days
+          group: null
+          hidden: false
+          interface: input-code
+          note: 日ごと開催時間 [{label, open, close}]
+          options:
+            language: json
+            placeholder: '[{"label":"11/8(土)","open":"10:00","close":"17:30"}]'
+          readonly: false
+          required: false
+          searchable: true
+          sort: 3
+          special:
+            - cast-json
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: event_days
+          table: festival_meta
+          data_type: json
+          default_value: null
+          max_length: null
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: festival_meta
+        field: admission_fee
+        type: string
+        meta:
+          collection: festival_meta
+          conditions: null
+          display: raw
+          display_options: null
+          field: admission_fee
+          group: null
+          hidden: false
+          interface: input
+          note: 入場料
+          options:
+            placeholder: '例: 無料'
+          readonly: false
+          required: false
+          searchable: true
+          sort: 4
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: half
+        schema:
+          name: admission_fee
+          table: festival_meta
+          data_type: character varying
+          default_value: null
+          max_length: 100
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: festival_meta
+        field: payment_note
+        type: string
+        meta:
+          collection: festival_meta
+          conditions: null
+          display: raw
+          display_options: null
+          field: payment_note
+          group: null
+          hidden: false
+          interface: input
+          note: 支払い注記
+          options:
+            placeholder: '例: 現金のみ'
+          readonly: false
+          required: false
+          searchable: true
+          sort: 5
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: half
+        schema:
+          name: payment_note
+          table: festival_meta
+          data_type: character varying
+          default_value: null
+          max_length: 255
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: festival_meta
+        field: parking_capacity
+        type: integer
+        meta:
+          collection: festival_meta
+          conditions: null
+          display: raw
+          display_options: null
+          field: parking_capacity
+          group: null
+          hidden: false
+          interface: input
+          note: 駐車場収容台数
+          options:
+            min: 0
+            placeholder: '例: 840'
+          readonly: false
+          required: false
+          searchable: true
+          sort: 6
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: half
+        schema:
+          name: parking_capacity
+          table: festival_meta
+          data_type: integer
+          default_value: null
+          max_length: null
+          numeric_precision: 32
+          numeric_scale: 0
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: festival_meta
+        field: parking_map
+        type: uuid
+        meta:
+          collection: festival_meta
+          conditions: null
+          display: image
+          display_options: null
+          field: parking_map
+          group: null
+          hidden: false
+          interface: file-image
+          note: 駐車場マップ画像
+          options: null
+          readonly: false
+          required: false
+          searchable: true
+          sort: 7
+          special:
+            - file
+          translations: null
+          validation: null
+          validation_message: null
+          width: half
+        schema:
+          name: parking_map
+          table: festival_meta
+          data_type: uuid
+          default_value: null
+          max_length: null
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: directus_files
+          foreign_key_column: id
+      - collection: map_areas
+        field: id
+        type: integer
+        meta:
+          collection: map_areas
+          conditions: null
+          display: null
+          display_options: null
+          field: id
+          group: null
+          hidden: true
+          interface: input
+          note: null
+          options: null
+          readonly: true
+          required: false
+          searchable: true
+          sort: 1
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: id
+          table: map_areas
+          data_type: integer
+          default_value: nextval('map_areas_id_seq'::regclass)
+          max_length: null
+          numeric_precision: 32
+          numeric_scale: 0
+          is_nullable: false
+          is_unique: true
+          is_indexed: false
+          is_primary_key: true
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: true
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: map_areas
+        field: name
+        type: string
+        meta:
+          collection: map_areas
+          conditions: null
+          display: raw
+          display_options: null
+          field: name
+          group: null
+          hidden: false
+          interface: input
+          note: '表示名 (例: "Aゾーン")'
+          options: null
+          readonly: false
+          required: true
+          searchable: true
+          sort: 2
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: name
+          table: map_areas
+          data_type: character varying
+          default_value: null
+          max_length: 255
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: false
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: map_areas
+        field: geometry
+        type: json
+        meta:
+          collection: map_areas
+          conditions: null
+          display: raw
+          display_options: null
+          field: geometry
+          group: null
+          hidden: false
+          interface: input-code
+          note: GeoJSON Polygon
+          options:
+            language: json
+          readonly: false
+          required: true
+          searchable: true
+          sort: 3
+          special:
+            - cast-json
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: geometry
+          table: map_areas
+          data_type: json
+          default_value: null
+          max_length: null
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: false
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: map_areas
+        field: sort
+        type: integer
+        meta:
+          collection: map_areas
+          conditions: null
+          display: raw
+          display_options: null
+          field: sort
+          group: null
+          hidden: false
+          interface: input
+          note: 表示順
+          options: null
+          readonly: false
+          required: false
+          searchable: true
+          sort: 4
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: sort
+          table: map_areas
+          data_type: integer
+          default_value: null
+          max_length: null
+          numeric_precision: 32
+          numeric_scale: 0
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: page_access
+        field: id
+        type: integer
+        meta:
+          collection: page_access
+          conditions: null
+          display: null
+          display_options: null
+          field: id
+          group: null
+          hidden: true
+          interface: input
+          note: null
+          options: null
+          readonly: true
+          required: false
+          searchable: true
+          sort: 1
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: id
+          table: page_access
+          data_type: integer
+          default_value: nextval('page_access_id_seq'::regclass)
+          max_length: null
+          numeric_precision: 32
+          numeric_scale: 0
+          is_nullable: false
+          is_unique: true
+          is_indexed: false
+          is_primary_key: true
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: true
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: page_access
+        field: content
+        type: text
+        meta:
+          collection: page_access
+          conditions: null
+          display: raw
+          display_options: null
+          field: content
+          group: null
+          hidden: false
+          interface: input-rich-text-html
+          note: 交通アクセス案内 (バス路線・時刻・徒歩距離・混雑注意)
+          options: null
+          readonly: false
+          required: false
+          searchable: true
+          sort: 2
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: content
+          table: page_access
+          data_type: text
+          default_value: null
+          max_length: null
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: page_access
+        field: map_embed_url
+        type: string
+        meta:
+          collection: page_access
+          conditions: null
+          display: raw
+          display_options: null
+          field: map_embed_url
+          group: null
+          hidden: false
+          interface: input
+          note: 地図埋め込みURL
+          options:
+            placeholder: https://maps.google.com/...
+          readonly: false
+          required: false
+          searchable: true
+          sort: 3
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: map_embed_url
+          table: page_access
+          data_type: character varying
+          default_value: null
+          max_length: 500
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: page_contact
+        field: id
+        type: integer
+        meta:
+          collection: page_contact
+          conditions: null
+          display: null
+          display_options: null
+          field: id
+          group: null
+          hidden: true
+          interface: input
+          note: null
+          options: null
+          readonly: true
+          required: false
+          searchable: true
+          sort: 1
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: id
+          table: page_contact
+          data_type: integer
+          default_value: nextval('page_contact_id_seq'::regclass)
+          max_length: null
+          numeric_precision: 32
+          numeric_scale: 0
+          is_nullable: false
+          is_unique: true
+          is_indexed: false
+          is_primary_key: true
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: true
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: page_contact
+        field: content
+        type: text
+        meta:
+          collection: page_contact
+          conditions: null
+          display: raw
+          display_options: null
+          field: content
+          group: null
+          hidden: false
+          interface: input-rich-text-html
+          note: 問い合わせ案内本文
+          options: null
+          readonly: false
+          required: false
+          searchable: true
+          sort: 2
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: content
+          table: page_contact
+          data_type: text
+          default_value: null
+          max_length: null
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: page_contact
+        field: form_embed_url
+        type: string
+        meta:
+          collection: page_contact
+          conditions: null
+          display: raw
+          display_options: null
+          field: form_embed_url
+          group: null
+          hidden: false
+          interface: input
+          note: Google Forms iframe埋め込みURL
+          options:
+            placeholder: https://docs.google.com/forms/...
+          readonly: false
+          required: false
+          searchable: true
+          sort: 3
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: form_embed_url
+          table: page_contact
+          data_type: character varying
+          default_value: null
+          max_length: 500
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: page_home
+        field: id
+        type: integer
+        meta:
+          collection: page_home
+          conditions: null
+          display: null
+          display_options: null
+          field: id
+          group: null
+          hidden: true
+          interface: input
+          note: null
+          options: null
+          readonly: true
+          required: false
+          searchable: true
+          sort: 1
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: id
+          table: page_home
+          data_type: integer
+          default_value: nextval('page_home_id_seq'::regclass)
+          max_length: null
+          numeric_precision: 32
+          numeric_scale: 0
+          is_nullable: false
+          is_unique: true
+          is_indexed: false
+          is_primary_key: true
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: true
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: page_home
+        field: blocks
+        type: json
+        meta:
+          collection: page_home
+          conditions: null
+          display: raw
+          display_options: null
+          field: blocks
+          group: null
+          hidden: false
+          interface: input-code
+          note: コンテンツブロック (JSON)
+          options:
+            language: json
+          readonly: false
+          required: false
+          searchable: true
+          sort: 2
+          special:
+            - cast-json
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: blocks
+          table: page_home
+          data_type: json
+          default_value: null
+          max_length: null
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: performance_slots
+        field: id
+        type: integer
+        meta:
+          collection: performance_slots
+          conditions: null
+          display: null
+          display_options: null
+          field: id
+          group: null
+          hidden: true
+          interface: input
+          note: null
+          options: null
+          readonly: true
+          required: false
+          searchable: true
+          sort: 1
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: id
+          table: performance_slots
+          data_type: integer
+          default_value: nextval('performance_slots_id_seq'::regclass)
+          max_length: null
+          numeric_precision: 32
+          numeric_scale: 0
+          is_nullable: false
+          is_unique: true
+          is_indexed: false
+          is_primary_key: true
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: true
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: performance_slots
+        field: stage_id
+        type: integer
+        meta:
+          collection: performance_slots
+          conditions: null
+          display: related-values
+          display_options:
+            template: '{{name}}'
+          field: stage_id
+          group: null
+          hidden: false
+          interface: select-dropdown-m2o
+          note: ステージ (NOT NULL)
+          options:
+            template: '{{name}}'
+          readonly: false
+          required: true
+          searchable: true
+          sort: 2
+          special:
+            - m2o
+          translations: null
+          validation: null
+          validation_message: null
+          width: half
+        schema:
+          name: stage_id
+          table: performance_slots
+          data_type: integer
+          default_value: null
+          max_length: null
+          numeric_precision: 32
+          numeric_scale: 0
+          is_nullable: false
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: stages
+          foreign_key_column: id
+      - collection: performance_slots
+        field: time_slot_id
+        type: integer
+        meta:
+          collection: performance_slots
+          conditions: null
+          display: related-values
+          display_options:
+            template: '{{label}}'
+          field: time_slot_id
+          group: null
+          hidden: false
+          interface: select-dropdown-m2o
+          note: タイムスロット (NOT NULL)
+          options:
+            template: '{{label}}'
+          readonly: false
+          required: true
+          searchable: true
+          sort: 3
+          special:
+            - m2o
+          translations: null
+          validation: null
+          validation_message: null
+          width: half
+        schema:
+          name: time_slot_id
+          table: performance_slots
+          data_type: integer
+          default_value: null
+          max_length: null
+          numeric_precision: 32
+          numeric_scale: 0
+          is_nullable: false
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: time_slots
+          foreign_key_column: id
+      - collection: performance_slots
+        field: exhibition_id
+        type: integer
+        meta:
+          collection: performance_slots
+          conditions: null
+          display: related-values
+          display_options:
+            template: '{{name}}'
+          field: exhibition_id
+          group: null
+          hidden: false
+          interface: select-dropdown-m2o
+          note: 団体 (NULL可。団体なし出演はtitleを使用)
+          options:
+            filter:
+              status:
+                _eq: published
+            template: '{{name}}'
+          readonly: false
+          required: false
+          searchable: true
+          sort: 4
+          special:
+            - m2o
+          translations: null
+          validation: null
+          validation_message: null
+          width: half
+        schema:
+          name: exhibition_id
+          table: performance_slots
+          data_type: integer
+          default_value: null
+          max_length: null
+          numeric_precision: 32
+          numeric_scale: 0
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: student_exhibitions
+          foreign_key_column: id
+      - collection: performance_slots
+        field: title
+        type: string
+        meta:
+          collection: performance_slots
+          conditions: null
+          display: raw
+          display_options: null
+          field: title
+          group: null
+          hidden: false
+          interface: input
+          note: 表示名 (exhibition_idがNULLの場合必須)
+          options:
+            placeholder: 団体なし出演の場合は必須
+          readonly: false
+          required: false
+          searchable: true
+          sort: 5
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: half
+        schema:
+          name: title
+          table: performance_slots
+          data_type: character varying
+          default_value: null
+          max_length: 255
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: sponsors
+        field: id
+        type: integer
+        meta:
+          collection: sponsors
+          conditions: null
+          display: null
+          display_options: null
+          field: id
+          group: null
+          hidden: true
+          interface: input
+          note: null
+          options: null
+          readonly: true
+          required: false
+          searchable: true
+          sort: 1
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: id
+          table: sponsors
+          data_type: integer
+          default_value: nextval('sponsors_id_seq'::regclass)
+          max_length: null
+          numeric_precision: 32
+          numeric_scale: 0
+          is_nullable: false
+          is_unique: true
+          is_indexed: false
+          is_primary_key: true
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: true
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: sponsors
+        field: type
+        type: string
+        meta:
+          collection: sponsors
+          conditions: null
+          display: labels
+          display_options: null
+          field: type
+          group: null
+          hidden: false
+          interface: select-dropdown
+          note: null
+          options:
+            choices:
+              - text: 広告協賛
+                value: ad
+              - text: 協賛
+                value: sponsor
+              - text: キッチンカー
+                value: food_truck
+              - text: その他
+                value: other
+          readonly: false
+          required: true
+          searchable: true
+          sort: 2
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: half
+        schema:
+          name: type
+          table: sponsors
+          data_type: character varying
+          default_value: sponsor
+          max_length: 50
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: false
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: sponsors
+        field: name
+        type: string
+        meta:
+          collection: sponsors
+          conditions: null
+          display: raw
+          display_options: null
+          field: name
+          group: null
+          hidden: false
+          interface: input
+          note: null
+          options: null
+          readonly: false
+          required: true
+          searchable: true
+          sort: 3
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: half
+        schema:
+          name: name
+          table: sponsors
+          data_type: character varying
+          default_value: null
+          max_length: 255
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: false
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: sponsors
+        field: logo
+        type: uuid
+        meta:
+          collection: sponsors
+          conditions: null
+          display: image
+          display_options: null
+          field: logo
+          group: null
+          hidden: false
+          interface: file-image
+          note: ロゴ画像
+          options: null
+          readonly: false
+          required: false
+          searchable: true
+          sort: 4
+          special:
+            - file
+          translations: null
+          validation: null
+          validation_message: null
+          width: half
+        schema:
+          name: logo
+          table: sponsors
+          data_type: uuid
+          default_value: null
+          max_length: null
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: directus_files
+          foreign_key_column: id
+      - collection: sponsors
+        field: url
+        type: string
+        meta:
+          collection: sponsors
+          conditions: null
+          display: raw
+          display_options: null
+          field: url
+          group: null
+          hidden: false
+          interface: input
+          note: Webサイト URL
+          options:
+            placeholder: https://...
+          readonly: false
+          required: false
+          searchable: true
+          sort: 5
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: half
+        schema:
+          name: url
+          table: sponsors
+          data_type: character varying
+          default_value: null
+          max_length: 500
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: sponsors
+        field: description
+        type: text
+        meta:
+          collection: sponsors
+          conditions: null
+          display: raw
+          display_options: null
+          field: description
+          group: null
+          hidden: false
+          interface: input-multiline
+          note: 説明・応援メッセージ
+          options: null
+          readonly: false
+          required: false
+          searchable: true
+          sort: 6
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: description
+          table: sponsors
+          data_type: text
+          default_value: null
+          max_length: null
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: sponsors
+        field: business_category
+        type: string
+        meta:
+          collection: sponsors
+          conditions: null
+          display: raw
+          display_options: null
+          field: business_category
+          group: null
+          hidden: false
+          interface: input
+          note: 業種タグ (地元協賛のみ)
+          options:
+            placeholder: '例: ラーメン店、銀行'
+          readonly: false
+          required: false
+          searchable: true
+          sort: 7
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: half
+        schema:
+          name: business_category
+          table: sponsors
+          data_type: character varying
+          default_value: null
+          max_length: 100
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: sponsors
+        field: address
+        type: string
+        meta:
+          collection: sponsors
+          conditions: null
+          display: raw
+          display_options: null
+          field: address
+          group: null
+          hidden: false
+          interface: input
+          note: 住所 (地元協賛のみ)
+          options: null
+          readonly: false
+          required: false
+          searchable: true
+          sort: 8
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: half
+        schema:
+          name: address
+          table: sponsors
+          data_type: character varying
+          default_value: null
+          max_length: 500
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: sponsors
+        field: tier
+        type: string
+        meta:
+          collection: sponsors
+          conditions: null
+          display: labels
+          display_options: null
+          field: tier
+          group: null
+          hidden: false
+          interface: select-dropdown
+          note: 協賛ランク (広告協賛のみ)
+          options:
+            allowOther: true
+            choices:
+              - text: プラチナ
+                value: platinum
+              - text: ゴールド
+                value: gold
+              - text: シルバー
+                value: silver
+              - text: ブロンズ
+                value: bronze
+          readonly: false
+          required: false
+          searchable: true
+          sort: 9
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: half
+        schema:
+          name: tier
+          table: sponsors
+          data_type: character varying
+          default_value: null
+          max_length: 50
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: sponsors
+        field: area_id
+        type: integer
+        meta:
+          collection: sponsors
+          conditions: null
+          display: related-values
+          display_options:
+            template: '{{name}}'
+          field: area_id
+          group: null
+          hidden: false
+          interface: select-dropdown-m2o
+          note: マップ配置エリア (広告協賛はNULL)
+          options:
+            template: '{{name}}'
+          readonly: false
+          required: false
+          searchable: true
+          sort: 10
+          special:
+            - m2o
+          translations: null
+          validation: null
+          validation_message: null
+          width: half
+        schema:
+          name: area_id
+          table: sponsors
+          data_type: integer
+          default_value: null
+          max_length: null
+          numeric_precision: 32
+          numeric_scale: 0
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: map_areas
+          foreign_key_column: id
+      - collection: sponsors
+        field: booth_number
+        type: integer
+        meta:
+          collection: sponsors
+          conditions: null
+          display: raw
+          display_options: null
+          field: booth_number
+          group: null
+          hidden: false
+          interface: input
+          note: エリア内ブース番号 (area_id+booth_number UNIQUE)
+          options:
+            min: 1
+          readonly: false
+          required: false
+          searchable: true
+          sort: 11
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: half
+        schema:
+          name: booth_number
+          table: sponsors
+          data_type: integer
+          default_value: null
+          max_length: null
+          numeric_precision: 32
+          numeric_scale: 0
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: sponsors
+        field: booth_label
+        type: string
+        meta:
+          collection: sponsors
+          conditions: null
+          display: raw
+          display_options: null
+          field: booth_label
+          group: null
+          hidden: false
+          interface: input
+          note: マップ表示ラベル
+          options: null
+          readonly: false
+          required: false
+          searchable: true
+          sort: 12
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: half
+        schema:
+          name: booth_label
+          table: sponsors
+          data_type: character varying
+          default_value: null
+          max_length: 50
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: sponsors
+        field: sort
+        type: integer
+        meta:
+          collection: sponsors
+          conditions: null
+          display: raw
+          display_options: null
+          field: sort
+          group: null
+          hidden: false
+          interface: input
+          note: 表示順
+          options: null
+          readonly: false
+          required: false
+          searchable: true
+          sort: 13
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: sort
+          table: sponsors
+          data_type: integer
+          default_value: null
+          max_length: null
+          numeric_precision: 32
+          numeric_scale: 0
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: stages
+        field: id
+        type: integer
+        meta:
+          collection: stages
+          conditions: null
+          display: null
+          display_options: null
+          field: id
+          group: null
+          hidden: true
+          interface: input
+          note: null
+          options: null
+          readonly: true
+          required: false
+          searchable: true
+          sort: 1
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: id
+          table: stages
+          data_type: integer
+          default_value: nextval('stages_id_seq'::regclass)
+          max_length: null
+          numeric_precision: 32
+          numeric_scale: 0
+          is_nullable: false
+          is_unique: true
+          is_indexed: false
+          is_primary_key: true
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: true
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: stages
+        field: name
+        type: string
+        meta:
+          collection: stages
+          conditions: null
+          display: raw
+          display_options: null
+          field: name
+          group: null
+          hidden: false
+          interface: input
+          note: ステージ名
+          options:
+            placeholder: '例: メインステージ'
+          readonly: false
+          required: true
+          searchable: true
+          sort: 2
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: name
+          table: stages
+          data_type: character varying
+          default_value: null
+          max_length: 255
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: false
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: stages
+        field: area_id
+        type: integer
+        meta:
+          collection: stages
+          conditions: null
+          display: related-values
+          display_options:
+            template: '{{name}}'
+          field: area_id
+          group: null
+          hidden: false
+          interface: select-dropdown-m2o
+          note: 出演場所エリア (OSM Polygon)
+          options:
+            template: '{{name}}'
+          readonly: false
+          required: false
+          searchable: true
+          sort: 3
+          special:
+            - m2o
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: area_id
+          table: stages
+          data_type: integer
+          default_value: null
+          max_length: null
+          numeric_precision: 32
+          numeric_scale: 0
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: map_areas
+          foreign_key_column: id
+      - collection: stages
+        field: sort
+        type: integer
+        meta:
+          collection: stages
+          conditions: null
+          display: raw
+          display_options: null
+          field: sort
+          group: null
+          hidden: false
+          interface: input
+          note: 表示順
+          options: null
+          readonly: false
+          required: false
+          searchable: true
+          sort: 4
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: sort
+          table: stages
+          data_type: integer
+          default_value: null
+          max_length: null
+          numeric_precision: 32
+          numeric_scale: 0
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: student_exhibitions
+        field: id
+        type: integer
+        meta:
+          collection: student_exhibitions
+          conditions: null
+          display: null
+          display_options: null
+          field: id
+          group: null
+          hidden: true
+          interface: input
+          note: null
+          options: null
+          readonly: true
+          required: false
+          searchable: true
+          sort: 1
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: id
+          table: student_exhibitions
+          data_type: integer
+          default_value: nextval('student_exhibitions_id_seq'::regclass)
+          max_length: null
+          numeric_precision: 32
+          numeric_scale: 0
+          is_nullable: false
+          is_unique: true
+          is_indexed: false
+          is_primary_key: true
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: true
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: student_exhibitions
+        field: user_created
+        type: uuid
+        meta:
+          collection: student_exhibitions
+          conditions: null
+          display: user
+          display_options: null
+          field: user_created
+          group: null
+          hidden: true
+          interface: select-dropdown-m2o
+          note: Directus組み込み。UNIQUE (1ユーザー:1レコード)
+          options:
+            template: '{{avatar.$thumbnail}} {{first_name}} {{last_name}}'
+          readonly: true
+          required: false
+          searchable: true
+          sort: 2
+          special:
+            - user-created
+          translations: null
+          validation: null
+          validation_message: null
+          width: half
+        schema:
+          name: user_created
+          table: student_exhibitions
+          data_type: uuid
+          default_value: null
+          max_length: null
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: true
+          is_unique: true
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: directus_users
+          foreign_key_column: id
+      - collection: student_exhibitions
+        field: date_created
+        type: timestamp
+        meta:
+          collection: student_exhibitions
+          conditions: null
+          display: datetime
+          display_options:
+            relative: true
+          field: date_created
+          group: null
+          hidden: true
+          interface: datetime
+          note: null
+          options: null
+          readonly: true
+          required: false
+          searchable: true
+          sort: 3
+          special:
+            - date-created
+          translations: null
+          validation: null
+          validation_message: null
+          width: half
+        schema:
+          name: date_created
+          table: student_exhibitions
+          data_type: timestamp with time zone
+          default_value: null
+          max_length: null
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: student_exhibitions
+        field: user_updated
+        type: uuid
+        meta:
+          collection: student_exhibitions
+          conditions: null
+          display: user
+          display_options: null
+          field: user_updated
+          group: null
+          hidden: true
+          interface: select-dropdown-m2o
+          note: null
+          options:
+            template: '{{avatar.$thumbnail}} {{first_name}} {{last_name}}'
+          readonly: true
+          required: false
+          searchable: true
+          sort: 4
+          special:
+            - user-updated
+          translations: null
+          validation: null
+          validation_message: null
+          width: half
+        schema:
+          name: user_updated
+          table: student_exhibitions
+          data_type: uuid
+          default_value: null
+          max_length: null
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: directus_users
+          foreign_key_column: id
+      - collection: student_exhibitions
+        field: date_updated
+        type: timestamp
+        meta:
+          collection: student_exhibitions
+          conditions: null
+          display: datetime
+          display_options:
+            relative: true
+          field: date_updated
+          group: null
+          hidden: true
+          interface: datetime
+          note: null
+          options: null
+          readonly: true
+          required: false
+          searchable: true
+          sort: 5
+          special:
+            - date-updated
+          translations: null
+          validation: null
+          validation_message: null
+          width: half
+        schema:
+          name: date_updated
+          table: student_exhibitions
+          data_type: timestamp with time zone
+          default_value: null
+          max_length: null
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: student_exhibitions
+        field: status
+        type: string
+        meta:
+          collection: student_exhibitions
+          conditions: null
+          display: labels
+          display_options:
+            choices:
+              - background: '#2ECDA7'
+                foreground: '#FFFFFF'
+                text: 公開
+                value: published
+              - background: '#A2B5CD'
+                foreground: '#FFFFFF'
+                text: 下書き
+                value: draft
+          field: status
+          group: null
+          hidden: false
+          interface: select-dropdown
+          note: null
+          options:
+            choices:
+              - color: '#2ECDA7'
+                text: 公開
+                value: published
+              - color: '#A2B5CD'
+                text: 下書き
+                value: draft
+          readonly: false
+          required: true
+          searchable: true
+          sort: 6
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: status
+          table: student_exhibitions
+          data_type: character varying
+          default_value: draft
+          max_length: 50
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: false
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: student_exhibitions
+        field: name
+        type: string
+        meta:
+          collection: student_exhibitions
+          conditions: null
+          display: raw
+          display_options: null
+          field: name
+          group: null
+          hidden: false
+          interface: input
+          note: 団体名
+          options: null
+          readonly: false
+          required: true
+          searchable: true
+          sort: 7
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: name
+          table: student_exhibitions
+          data_type: character varying
+          default_value: null
+          max_length: 255
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: false
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: student_exhibitions
+        field: slug
+        type: string
+        meta:
+          collection: student_exhibitions
+          conditions: null
+          display: raw
+          display_options: null
+          field: slug
+          group: null
+          hidden: false
+          interface: input
+          note: URLスラッグ (UNIQUE)
+          options:
+            lowercase: true
+            slug: true
+            trim: true
+          readonly: false
+          required: true
+          searchable: true
+          sort: 8
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: slug
+          table: student_exhibitions
+          data_type: character varying
+          default_value: null
+          max_length: 100
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: false
+          is_unique: true
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: student_exhibitions
+        field: category
+        type: string
+        meta:
+          collection: student_exhibitions
+          conditions: null
+          display: labels
+          display_options: null
+          field: category
+          group: null
+          hidden: false
+          interface: select-dropdown
+          note: 表示分類 (掲載判定とは独立)
+          options:
+            choices:
+              - text: ステージ
+                value: stage
+              - text: 出展
+                value: exhibit
+              - text: 模擬店
+                value: vendor
+              - text: その他
+                value: other
+          readonly: false
+          required: true
+          searchable: true
+          sort: 9
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: half
+        schema:
+          name: category
+          table: student_exhibitions
+          data_type: character varying
+          default_value: other
+          max_length: 50
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: false
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: student_exhibitions
+        field: location
+        type: string
+        meta:
+          collection: student_exhibitions
+          conditions: null
+          display: raw
+          display_options: null
+          field: location
+          group: null
+          hidden: false
+          interface: input
+          note: 人間可読な開催場所名
+          options:
+            placeholder: '例: 第一体育館、A棟101教室'
+          readonly: false
+          required: false
+          searchable: true
+          sort: 10
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: half
+        schema:
+          name: location
+          table: student_exhibitions
+          data_type: character varying
+          default_value: null
+          max_length: 255
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: student_exhibitions
+        field: area_id
+        type: integer
+        meta:
+          collection: student_exhibitions
+          conditions: null
+          display: related-values
+          display_options:
+            template: '{{name}}'
+          field: area_id
+          group: null
+          hidden: false
+          interface: select-dropdown-m2o
+          note: マップ配置エリア (NULL=マップ非掲載)
+          options:
+            template: '{{name}}'
+          readonly: false
+          required: false
+          searchable: true
+          sort: 11
+          special:
+            - m2o
+          translations: null
+          validation: null
+          validation_message: null
+          width: half
+        schema:
+          name: area_id
+          table: student_exhibitions
+          data_type: integer
+          default_value: null
+          max_length: null
+          numeric_precision: 32
+          numeric_scale: 0
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: map_areas
+          foreign_key_column: id
+      - collection: student_exhibitions
+        field: booth_number
+        type: integer
+        meta:
+          collection: student_exhibitions
+          conditions: null
+          display: raw
+          display_options: null
+          field: booth_number
+          group: null
+          hidden: false
+          interface: input
+          note: エリア内ブース番号 (area_id+booth_number UNIQUE)
+          options:
+            min: 1
+          readonly: false
+          required: false
+          searchable: true
+          sort: 12
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: half
+        schema:
+          name: booth_number
+          table: student_exhibitions
+          data_type: integer
+          default_value: null
+          max_length: null
+          numeric_precision: 32
+          numeric_scale: 0
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: student_exhibitions
+        field: booth_label
+        type: string
+        meta:
+          collection: student_exhibitions
+          conditions: null
+          display: raw
+          display_options: null
+          field: booth_label
+          group: null
+          hidden: false
+          interface: input
+          note: マップ表示ラベル
+          options: null
+          readonly: false
+          required: false
+          searchable: true
+          sort: 13
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: half
+        schema:
+          name: booth_label
+          table: student_exhibitions
+          data_type: character varying
+          default_value: null
+          max_length: 50
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: student_exhibitions
+        field: description
+        type: text
+        meta:
+          collection: student_exhibitions
+          conditions: null
+          display: raw
+          display_options: null
+          field: description
+          group: null
+          hidden: false
+          interface: input-multiline
+          note: 一覧表示用短文
+          options: null
+          readonly: false
+          required: false
+          searchable: true
+          sort: 14
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: description
+          table: student_exhibitions
+          data_type: text
+          default_value: null
+          max_length: null
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: student_exhibitions
+        field: content
+        type: text
+        meta:
+          collection: student_exhibitions
+          conditions: null
+          display: raw
+          display_options: null
+          field: content
+          group: null
+          hidden: false
+          interface: input-rich-text-html
+          note: ページ本文 (HTML) ※フロントエンドでXSS sanitize必須
+          options: null
+          readonly: false
+          required: false
+          searchable: true
+          sort: 15
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: content
+          table: student_exhibitions
+          data_type: text
+          default_value: null
+          max_length: null
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: student_exhibitions
+        field: images
+        type: json
+        meta:
+          collection: student_exhibitions
+          conditions: null
+          display: raw
+          display_options: null
+          field: images
+          group: null
+          hidden: false
+          interface: files
+          note: 画像リスト
+          options: null
+          readonly: false
+          required: false
+          searchable: true
+          sort: 16
+          special:
+            - cast-json
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: images
+          table: student_exhibitions
+          data_type: json
+          default_value: null
+          max_length: null
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: time_slots
+        field: id
+        type: integer
+        meta:
+          collection: time_slots
+          conditions: null
+          display: null
+          display_options: null
+          field: id
+          group: null
+          hidden: true
+          interface: input
+          note: null
+          options: null
+          readonly: true
+          required: false
+          searchable: true
+          sort: 1
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: id
+          table: time_slots
+          data_type: integer
+          default_value: nextval('time_slots_id_seq'::regclass)
+          max_length: null
+          numeric_precision: 32
+          numeric_scale: 0
+          is_nullable: false
+          is_unique: true
+          is_indexed: false
+          is_primary_key: true
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: true
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: time_slots
+        field: label
+        type: string
+        meta:
+          collection: time_slots
+          conditions: null
+          display: raw
+          display_options: null
+          field: label
+          group: null
+          hidden: false
+          interface: input
+          note: 表示ラベル
+          options:
+            placeholder: '例: 13:00-13:30'
+          readonly: false
+          required: true
+          searchable: true
+          sort: 2
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: label
+          table: time_slots
+          data_type: character varying
+          default_value: null
+          max_length: 50
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: false
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: time_slots
+        field: start_at
+        type: time
+        meta:
+          collection: time_slots
+          conditions: null
+          display: datetime
+          display_options:
+            format: HH:mm
+          field: start_at
+          group: null
+          hidden: false
+          interface: datetime
+          note: 開始時刻
+          options:
+            type: time
+          readonly: false
+          required: true
+          searchable: true
+          sort: 3
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: half
+        schema:
+          name: start_at
+          table: time_slots
+          data_type: time without time zone
+          default_value: null
+          max_length: null
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: false
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: time_slots
+        field: end_at
+        type: time
+        meta:
+          collection: time_slots
+          conditions: null
+          display: datetime
+          display_options:
+            format: HH:mm
+          field: end_at
+          group: null
+          hidden: false
+          interface: datetime
+          note: 終了時刻
+          options:
+            type: time
+          readonly: false
+          required: true
+          searchable: true
+          sort: 4
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: half
+        schema:
+          name: end_at
+          table: time_slots
+          data_type: time without time zone
+          default_value: null
+          max_length: null
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: false
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: time_slots
+        field: sort
+        type: integer
+        meta:
+          collection: time_slots
+          conditions: null
+          display: raw
+          display_options: null
+          field: sort
+          group: null
+          hidden: false
+          interface: input
+          note: 時系列順
+          options: null
+          readonly: false
+          required: false
+          searchable: true
+          sort: 5
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: sort
+          table: time_slots
+          data_type: integer
+          default_value: null
+          max_length: null
+          numeric_precision: 32
+          numeric_scale: 0
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: topics
+        field: id
+        type: integer
+        meta:
+          collection: topics
+          conditions: null
+          display: null
+          display_options: null
+          field: id
+          group: null
+          hidden: true
+          interface: input
+          note: null
+          options: null
+          readonly: true
+          required: false
+          searchable: true
+          sort: 1
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: id
+          table: topics
+          data_type: integer
+          default_value: nextval('topics_id_seq'::regclass)
+          max_length: null
+          numeric_precision: 32
+          numeric_scale: 0
+          is_nullable: false
+          is_unique: true
+          is_indexed: false
+          is_primary_key: true
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: true
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: topics
+        field: title
+        type: string
+        meta:
+          collection: topics
+          conditions: null
+          display: raw
+          display_options: null
+          field: title
+          group: null
+          hidden: false
+          interface: input
+          note: null
+          options: null
+          readonly: false
+          required: true
+          searchable: true
+          sort: 2
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: title
+          table: topics
+          data_type: character varying
+          default_value: null
+          max_length: 255
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: false
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: topics
+        field: body
+        type: text
+        meta:
+          collection: topics
+          conditions: null
+          display: raw
+          display_options: null
+          field: body
+          group: null
+          hidden: false
+          interface: input-multiline
+          note: null
+          options: null
+          readonly: false
+          required: false
+          searchable: true
+          sort: 3
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: body
+          table: topics
+          data_type: text
+          default_value: null
+          max_length: null
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: topics
+        field: image
+        type: uuid
+        meta:
+          collection: topics
+          conditions: null
+          display: image
+          display_options: null
+          field: image
+          group: null
+          hidden: false
+          interface: file-image
+          note: サムネイル画像
+          options: null
+          readonly: false
+          required: false
+          searchable: true
+          sort: 4
+          special:
+            - file
+          translations: null
+          validation: null
+          validation_message: null
+          width: half
+        schema:
+          name: image
+          table: topics
+          data_type: uuid
+          default_value: null
+          max_length: null
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: directus_files
+          foreign_key_column: id
+      - collection: topics
+        field: link_url
+        type: string
+        meta:
+          collection: topics
+          conditions: null
+          display: raw
+          display_options: null
+          field: link_url
+          group: null
+          hidden: false
+          interface: input
+          note: 遷移先URL
+          options:
+            placeholder: https://...
+          readonly: false
+          required: false
+          searchable: true
+          sort: 5
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: half
+        schema:
+          name: link_url
+          table: topics
+          data_type: character varying
+          default_value: null
+          max_length: 500
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: topics
+        field: attachment
+        type: uuid
+        meta:
+          collection: topics
+          conditions: null
+          display: file
+          display_options: null
+          field: attachment
+          group: null
+          hidden: false
+          interface: file
+          note: PDF添付 (デジタルパンフ等)
+          options: null
+          readonly: false
+          required: false
+          searchable: true
+          sort: 6
+          special:
+            - file
+          translations: null
+          validation: null
+          validation_message: null
+          width: half
+        schema:
+          name: attachment
+          table: topics
+          data_type: uuid
+          default_value: null
+          max_length: null
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: directus_files
+          foreign_key_column: id
+      - collection: topics
+        field: sort
+        type: integer
+        meta:
+          collection: topics
+          conditions: null
+          display: raw
+          display_options: null
+          field: sort
+          group: null
+          hidden: false
+          interface: input
+          note: 表示順
+          options: null
+          readonly: false
+          required: false
+          searchable: true
+          sort: 7
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: sort
+          table: topics
+          data_type: integer
+          default_value: null
+          max_length: null
+          numeric_precision: 32
+          numeric_scale: 0
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+    systemFields: []
+    relations:
+      - collection: festival_meta
+        field: parking_map
+        related_collection: directus_files
+        meta:
+          junction_field: null
+          many_collection: festival_meta
+          many_field: parking_map
+          one_allowed_collections: null
+          one_collection: directus_files
+          one_collection_field: null
+          one_deselect_action: nullify
+          one_field: null
+          sort_field: null
+        schema:
+          table: festival_meta
+          column: parking_map
+          foreign_key_table: directus_files
+          foreign_key_column: id
+          constraint_name: festival_meta_parking_map_foreign
+          on_update: NO ACTION
+          on_delete: SET NULL
+      - collection: performance_slots
+        field: stage_id
+        related_collection: stages
+        meta:
+          junction_field: null
+          many_collection: performance_slots
+          many_field: stage_id
+          one_allowed_collections: null
+          one_collection: stages
+          one_collection_field: null
+          one_deselect_action: nullify
+          one_field: null
+          sort_field: null
+        schema:
+          table: performance_slots
+          column: stage_id
+          foreign_key_table: stages
+          foreign_key_column: id
+          constraint_name: performance_slots_stage_id_foreign
+          on_update: NO ACTION
+          on_delete: RESTRICT
+      - collection: performance_slots
+        field: time_slot_id
+        related_collection: time_slots
+        meta:
+          junction_field: null
+          many_collection: performance_slots
+          many_field: time_slot_id
+          one_allowed_collections: null
+          one_collection: time_slots
+          one_collection_field: null
+          one_deselect_action: nullify
+          one_field: null
+          sort_field: null
+        schema:
+          table: performance_slots
+          column: time_slot_id
+          foreign_key_table: time_slots
+          foreign_key_column: id
+          constraint_name: performance_slots_time_slot_id_foreign
+          on_update: NO ACTION
+          on_delete: RESTRICT
+      - collection: performance_slots
+        field: exhibition_id
+        related_collection: student_exhibitions
+        meta:
+          junction_field: null
+          many_collection: performance_slots
+          many_field: exhibition_id
+          one_allowed_collections: null
+          one_collection: student_exhibitions
+          one_collection_field: null
+          one_deselect_action: nullify
+          one_field: null
+          sort_field: null
+        schema:
+          table: performance_slots
+          column: exhibition_id
+          foreign_key_table: student_exhibitions
+          foreign_key_column: id
+          constraint_name: performance_slots_exhibition_id_foreign
+          on_update: NO ACTION
+          on_delete: SET NULL
+      - collection: sponsors
+        field: area_id
+        related_collection: map_areas
+        meta:
+          junction_field: null
+          many_collection: sponsors
+          many_field: area_id
+          one_allowed_collections: null
+          one_collection: map_areas
+          one_collection_field: null
+          one_deselect_action: nullify
+          one_field: null
+          sort_field: null
+        schema:
+          table: sponsors
+          column: area_id
+          foreign_key_table: map_areas
+          foreign_key_column: id
+          constraint_name: sponsors_area_id_foreign
+          on_update: NO ACTION
+          on_delete: SET NULL
+      - collection: sponsors
+        field: logo
+        related_collection: directus_files
+        meta:
+          junction_field: null
+          many_collection: sponsors
+          many_field: logo
+          one_allowed_collections: null
+          one_collection: directus_files
+          one_collection_field: null
+          one_deselect_action: nullify
+          one_field: null
+          sort_field: null
+        schema:
+          table: sponsors
+          column: logo
+          foreign_key_table: directus_files
+          foreign_key_column: id
+          constraint_name: sponsors_logo_foreign
+          on_update: NO ACTION
+          on_delete: SET NULL
+      - collection: stages
+        field: area_id
+        related_collection: map_areas
+        meta:
+          junction_field: null
+          many_collection: stages
+          many_field: area_id
+          one_allowed_collections: null
+          one_collection: map_areas
+          one_collection_field: null
+          one_deselect_action: nullify
+          one_field: null
+          sort_field: null
+        schema:
+          table: stages
+          column: area_id
+          foreign_key_table: map_areas
+          foreign_key_column: id
+          constraint_name: stages_area_id_foreign
+          on_update: NO ACTION
+          on_delete: SET NULL
+      - collection: student_exhibitions
+        field: area_id
+        related_collection: map_areas
+        meta:
+          junction_field: null
+          many_collection: student_exhibitions
+          many_field: area_id
+          one_allowed_collections: null
+          one_collection: map_areas
+          one_collection_field: null
+          one_deselect_action: nullify
+          one_field: null
+          sort_field: null
+        schema:
+          table: student_exhibitions
+          column: area_id
+          foreign_key_table: map_areas
+          foreign_key_column: id
+          constraint_name: student_exhibitions_area_id_foreign
+          on_update: NO ACTION
+          on_delete: SET NULL
+      - collection: student_exhibitions
+        field: user_created
+        related_collection: directus_users
+        meta:
+          junction_field: null
+          many_collection: student_exhibitions
+          many_field: user_created
+          one_allowed_collections: null
+          one_collection: directus_users
+          one_collection_field: null
+          one_deselect_action: nullify
+          one_field: null
+          sort_field: null
+        schema:
+          table: student_exhibitions
+          column: user_created
+          foreign_key_table: directus_users
+          foreign_key_column: id
+          constraint_name: student_exhibitions_user_created_foreign
+          on_update: NO ACTION
+          on_delete: SET NULL
+      - collection: student_exhibitions
+        field: user_updated
+        related_collection: directus_users
+        meta:
+          junction_field: null
+          many_collection: student_exhibitions
+          many_field: user_updated
+          one_allowed_collections: null
+          one_collection: directus_users
+          one_collection_field: null
+          one_deselect_action: nullify
+          one_field: null
+          sort_field: null
+        schema:
+          table: student_exhibitions
+          column: user_updated
+          foreign_key_table: directus_users
+          foreign_key_column: id
+          constraint_name: student_exhibitions_user_updated_foreign
+          on_update: NO ACTION
+          on_delete: SET NULL
+      - collection: topics
+        field: image
+        related_collection: directus_files
+        meta:
+          junction_field: null
+          many_collection: topics
+          many_field: image
+          one_allowed_collections: null
+          one_collection: directus_files
+          one_collection_field: null
+          one_deselect_action: nullify
+          one_field: null
+          sort_field: null
+        schema:
+          table: topics
+          column: image
+          foreign_key_table: directus_files
+          foreign_key_column: id
+          constraint_name: topics_image_foreign
+          on_update: NO ACTION
+          on_delete: SET NULL
+      - collection: topics
+        field: attachment
+        related_collection: directus_files
+        meta:
+          junction_field: null
+          many_collection: topics
+          many_field: attachment
+          one_allowed_collections: null
+          one_collection: directus_files
+          one_collection_field: null
+          one_deselect_action: nullify
+          one_field: null
+          sort_field: null
+        schema:
+          table: topics
+          column: attachment
+          foreign_key_table: directus_files
+          foreign_key_column: id
+          constraint_name: topics_attachment_foreign
+          on_update: NO ACTION
+          on_delete: SET NULL
+kind: ConfigMap
+metadata:
+  name: directus-schema
+  namespace: staging
