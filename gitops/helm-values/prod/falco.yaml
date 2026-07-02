@@ -16,13 +16,15 @@ resources:
 
 customRules:
   rules-custom.yaml: |-
-    # mailserver (docker-mailserver) は起動時に Postfix/Dovecot の設定を /etc 配下に再生成し、
-    # cert-manager はベースイメージの update-ca-certificates で /etc/ssl/certs を更新する。
-    # いずれも正常な定期処理のため namespace/image/proc.name 単位で除外する。
+    # mailserver (docker-mailserver) は起動時に Postfix/Dovecot の設定を /etc 配下に再生成する。
+    # この再生成は start-mailserver.sh・sort・bash(user-patches.sh)・postconf 等 多数のプロセスから
+    # /etc/dms-settings・/etc/postfix/* 等へ広範に書き込むため、proc.name 単位の列挙では漏れる。
+    # docker-mailserver イメージによる /etc 書き込みは正常な起動処理のため image+namespace 単位で除外する。
+    # cert-manager はベースイメージの update-ca-certificates で /etc/ssl/certs を更新する正常処理のため除外する。
+    # ※container.image.repository はレジストリ接頭辞込み (docker.io/...) で一致させる必要がある。
     - macro: known_etc_writer
       condition: >
-        ((k8s.ns.name=prod and container.image.repository=mailserver/docker-mailserver
-          and proc.name in (postfix-script, postconf, dovecot, doveconf, update-ca-certificates))
+        ((k8s.ns.name=prod and container.image.repository=docker.io/mailserver/docker-mailserver)
          or (k8s.ns.name=cert-manager and proc.name in (update-ca-certificates)))
 
     # falco-rules:5 (デフォルトで投入される OCI artifact) には "Write below etc" 系のルールが
