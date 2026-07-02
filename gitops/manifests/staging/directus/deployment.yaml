@@ -60,7 +60,7 @@ spec:
                   name: directus-staging-secrets
                   key: AUTH_AUTHENTIK_CLIENT_SECRET
             - name: AUTH_AUTHENTIK_ISSUER_URL
-              value: https://auth.aramakisai.com/application/o/directus-stg/
+              value: https://idp.aramakisai.com/application/o/directus-stg/
             - name: AUTH_AUTHENTIK_IDENTIFIER_KEY
               value: email
             - name: AUTH_AUTHENTIK_ALLOW_PUBLIC_REGISTRATION
