@@ -47,6 +47,28 @@ spec:
               value: "true"
             - name: CORS_ORIGIN
               value: "*"
+            # Authentik OIDC SSO
+            - name: AUTH_PROVIDERS
+              value: authentik
+            - name: AUTH_AUTHENTIK_DRIVER
+              value: openid
+            - name: AUTH_AUTHENTIK_CLIENT_ID
+              value: directus-stg
+            - name: AUTH_AUTHENTIK_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: directus-staging-secrets
+                  key: AUTH_AUTHENTIK_CLIENT_SECRET
+            - name: AUTH_AUTHENTIK_ISSUER_URL
+              value: https://auth.aramakisai.com/application/o/directus-stg/
+            - name: AUTH_AUTHENTIK_IDENTIFIER_KEY
+              value: email
+            - name: AUTH_AUTHENTIK_ALLOW_PUBLIC_REGISTRATION
+              value: "true"
+            - name: AUTH_AUTHENTIK_DEFAULT_ROLE_ID
+              value: ""
+            - name: AUTH_AUTHENTIK_ROLE_CLAIM
+              value: groups
             - name: STORAGE_LOCATIONS
               value: local
             - name: STORAGE_LOCAL_ROOT
