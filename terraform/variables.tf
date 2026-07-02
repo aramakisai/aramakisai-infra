@@ -172,6 +172,20 @@ variable "mailserver_ldap_bind_password" {
   default     = ""
 }
 
+variable "directus_prod_oidc_client_secret" {
+  description = "Directus prod OIDC Client Secret (directus-prod)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "directus_stg_oidc_client_secret" {
+  description = "Directus stg OIDC Client Secret (directus-stg)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 variable "vaultwarden_rbac_sync_trigger_token" {
   description = "vaultwarden-rbac-sync Trigger Receiver共有ベアラートークン (Authentik側のExpression Policy/Webhookに埋め込む)"
   type        = string
