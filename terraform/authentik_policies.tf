@@ -8,7 +8,7 @@
 resource "authentik_policy_expression" "require_discord_link" {
   name       = "require-discord-link-policy"
   expression = <<-EOT
-is_linked = ak_is_group_member(request.user, name="discord-linked-users")
+is_linked = ak_is_group_member(request.user, name="executive")
 
 if not is_linked:
     ak_message("このアプリケーションを利用するにはDiscord連携が必要です。画面右上の歯車マーク（設定）から「Connected Services」を開き、Discordを連携してください。")

@@ -2,10 +2,16 @@
 # Discord ソーシャルログイン連携 (アバター & ロール同期)
 # ============================================================
 
-# Discord 連携済みユーザーを識別するグループ
+# 荒牧祭実行委員グループ (旧: discord-linked-users)
+# Discord 連携済みユーザー = 実行委員の意味論を正確に表現するためリネーム
 # このグループへの所属が他アプリへのアクセス条件になる (require-discord-link-policy)
-resource "authentik_group" "discord_linked_users" {
-  name = "discord-linked-users"
+resource "authentik_group" "executive" {
+  name = "executive"
+}
+
+moved {
+  from = authentik_group.discord_linked_users
+  to   = authentik_group.executive
 }
 
 # 1. Discord Property Mapping
@@ -80,7 +86,7 @@ if not isinstance(discord_roles, list):
 new_pks = set()
 
 try:
-    new_pks.add(Group.objects.get(name="discord-linked-users").pk)
+    new_pks.add(Group.objects.get(name="executive").pk)
 except Group.DoesNotExist:
     pass
 
@@ -91,13 +97,13 @@ for g in Group.objects.filter(attributes__discord_role_ids__isnull=False):
     if any(r in g.attributes.get("discord_role_ids", []) for r in discord_roles):
         new_pks.add(g.pk)
 
-# Discord 管理グループ (discord_role_id / discord_role_ids 属性 + discord-linked-users)
+# Discord 管理グループ (discord_role_id / discord_role_ids 属性 + executive)
 managed_pks = set(
     list(Group.objects.filter(attributes__discord_role_id__isnull=False).values_list('pk', flat=True)) +
     list(Group.objects.filter(attributes__discord_role_ids__isnull=False).values_list('pk', flat=True))
 )
 try:
-    managed_pks.add(Group.objects.get(name="discord-linked-users").pk)
+    managed_pks.add(Group.objects.get(name="executive").pk)
 except Group.DoesNotExist:
     pass
 
