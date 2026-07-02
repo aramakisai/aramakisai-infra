@@ -64,7 +64,15 @@ customRules:
         or (k8s.ns.name=cnpg-system and container.image.repository=ghcr.io/cloudnative-pg/cloudnative-pg)
         or (k8s.ns.name=monitoring and container.image.repository=docker.io/netdata/netdata)
         or (k8s.ns.name=prod and proc.name=manager and container.image.repository=ghcr.io/cloudnative-pg/postgresql)
-        or (k8s.ns.name=prod and container.image.repository=alpine/k8s)
+        or (k8s.ns.name=prod and container.image.repository=docker.io/alpine/k8s)
+
+    # authentik server (gunicorn/dumb-init) は worker との内部通信のため dup3 で
+    # stdout/stdin をソケットへ張り替える正常動作。upstream の Redirect STDOUT/STDIN to
+    # Network Connection in Container が container.name=server で大量発報するため除外する。
+    # exception macro user_known_stand_streams_redirect_activities (既定never_true) を上書き。
+    - macro: user_known_stand_streams_redirect_activities
+      condition: >
+        (k8s.ns.name=prod and container.image.repository=ghcr.io/goauthentik/server)
 
 # Falcosidekick: Falcoアラートを Discord Webhook へ転送する。
 # single nodeのためreplicaCount既定値(2)を1へ削減し、軽量プロキシとしてリソースを絞る。
