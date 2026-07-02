@@ -93,8 +93,6 @@ spec:
               value: email
             - name: AUTH_AUTHENTIK_ALLOW_PUBLIC_REGISTRATION
               value: "true"
-            - name: AUTH_AUTHENTIK_DEFAULT_ROLE_ID
-              value: ""
             - name: AUTH_AUTHENTIK_ROLE_CLAIM
               value: groups
           resources:
