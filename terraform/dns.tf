@@ -177,33 +177,6 @@ resource "cloudflare_record" "dkim" {
 }
 
 # ============================================================
-# Resend バウンスドメイン (send.aramakisai.com)
-# ============================================================
-#
-# Resend のバウンスアドレスは <id>@send.aramakisai.com 形式。
-# MX レコードがないと NO_DNS_FOR_FROM でスパムスコアが悪化し、
-# SPF がないと SPF_NONE で認証失敗になる。
-
-resource "cloudflare_record" "send_mx" {
-  zone_id  = var.cloudflare_zone_id
-  name     = "send"
-  value    = "feedback-smtp.ap-northeast-1.amazonses.com"
-  type     = "MX"
-  priority = 10
-  proxied  = false
-  comment  = "Resend bounce domain MX (SES feedback SMTP)"
-}
-
-resource "cloudflare_record" "send_spf" {
-  zone_id = var.cloudflare_zone_id
-  name    = "send"
-  value   = "v=spf1 include:amazonses.com ~all"
-  type    = "TXT"
-  proxied = false
-  comment = "SPF for Resend bounce domain"
-}
-
-# ============================================================
 # SMTP TLS レポート
 # ============================================================
 

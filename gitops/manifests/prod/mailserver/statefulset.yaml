@@ -123,17 +123,8 @@ spec:
                 secretKeyRef:
                   name: mailserver-secrets
                   key: MAIL_OAUTH2_CLIENT_SECRET
-            # SMTP リレー設定 (Resend)
-            # DMS は RELAYHOST ではなく DEFAULT_RELAY_HOST を使う
-            - name: DEFAULT_RELAY_HOST
-              value: "[smtp.resend.com]:587"
-            - name: RELAY_USER
-              value: "resend"
-            - name: RELAY_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: mailserver-secrets
-                  key: RESEND_API_KEY
+            # SMTP 直接配送 (2026-07-01: Resend リレー廃止)
+            # DEFAULT_RELAY_HOST 未設定 → Postfix が宛先ドメインの MX へ直接配送する
             # セキュリティ・スパム設定
             - name: ENABLE_FAIL2BAN
               value: "1"
