@@ -209,3 +209,17 @@ data:
     timeout = 30
     version = 3
     INNEREOF
+  # OpenDKIM KeyTable/SigningTable/TrustedHosts:
+  # `setup config dkim domain` はこれらを /tmp/docker-mailserver/opendkim/ 配下に
+  # 生成するが、その場所はConfigMap/Secretマウントではなく実行時の一時領域のため
+  # Pod再作成のたびに失われる (dkim-keys Secret でマウントしているのは keys/ 配下の
+  # 秘密鍵のみで、この3ファイルは対象外だった)。mail-tester.com でのDKIM未署名検知
+  # (2026-07-03) で発覚。3ファイルとも秘匿情報を含まないためConfigMapで宣言的に永続化する。
+  opendkim-keytable: |
+    mail._domainkey.aramakisai.com aramakisai.com:mail:/etc/opendkim/keys/aramakisai.com/mail.private
+  opendkim-signingtable: |
+    *@aramakisai.com mail._domainkey.aramakisai.com
+  opendkim-trustedhosts: |
+    127.0.0.1
+    localhost
+    aramakisai.com

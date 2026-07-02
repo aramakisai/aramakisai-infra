@@ -191,6 +191,18 @@ spec:
             - name: dkim-keys
               mountPath: /tmp/docker-mailserver/opendkim/keys
               readOnly: true
+            - name: dms-config
+              mountPath: /tmp/docker-mailserver/opendkim/KeyTable
+              subPath: opendkim-keytable
+              readOnly: true
+            - name: dms-config
+              mountPath: /tmp/docker-mailserver/opendkim/SigningTable
+              subPath: opendkim-signingtable
+              readOnly: true
+            - name: dms-config
+              mountPath: /tmp/docker-mailserver/opendkim/TrustedHosts
+              subPath: opendkim-trustedhosts
+              readOnly: true
           livenessProbe:
             tcpSocket:
               port: 25
@@ -221,6 +233,12 @@ spec:
                 path: ldap-groups.cf
               - key: user-patches.sh
                 path: user-patches.sh
+              - key: opendkim-keytable
+                path: opendkim-keytable
+              - key: opendkim-signingtable
+                path: opendkim-signingtable
+              - key: opendkim-trustedhosts
+                path: opendkim-trustedhosts
         - name: dovecot-oauth2
           secret:
             secretName: dovecot-oauth2-config
