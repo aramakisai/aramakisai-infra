@@ -63,15 +63,29 @@ data:
     }
   20260701C-rbac-roles.js: |
     /**
-     * Tasks 6.1, 6.2: RBAC ロール定義
+     * Tasks 6.1, 6.2: RBAC ロール定義 (Directus 12 対応)
      * - executive: 全コレクション CRUD (superadmin とは別ロール)
      * - student_exhibitor: student_exhibitions の自レコードのみ編集、他は published READ のみ
+     *
+     * Directus 12 変更点:
+     *   - directus_roles から admin_access/app_access/enforce_tfa/ip_access が削除
+     *   - directus_policies テーブルでアクセス制御
+     *   - directus_access (junction) でロールとポリシーを紐付け
+     *   - directus_permissions は policy カラム参照 (role 廃止)
+     *   - fields カラムは text 型 (カンマ区切り文字列, 配列不可)
      *
      * Task 6.3 (Authentik OIDC マッピング) は aramakisai-infra で管理。
      */
 
+    import { randomUUID } from "crypto";
+
     const EXECUTIVE_ROLE_ID = "65869bf1-6622-4bab-8aec-785d0db2c32a";
     const STUDENT_EXHIBITOR_ROLE_ID = "49c93d00-c61f-418b-a1db-5118260f4667";
+
+    // ポリシー ID (固定 UUID)
+    // NOTE: prod で API 経由作成済みの executive policy ID を使用
+    const EXECUTIVE_POLICY_ID = "5001c2e1-4050-4655-88b2-34a444345504";
+    const STUDENT_EXHIBITOR_POLICY_ID = "40bfc0da-e037-4df3-a0c4-00584bf6c9a5";
 
     const ALL_COLLECTIONS = [
       "map_areas",
@@ -106,58 +120,87 @@ data:
       "page_contact",
     ];
 
-    // Fields student_exhibitor can UPDATE on student_exhibitions
-    const STUDENT_UPDATABLE_FIELDS = [
-      "name",
-      "slug",
-      "description",
-      "content",
-      "images",
-      "status",
-    ];
+    // Fields student_exhibitor can UPDATE on student_exhibitions (comma-separated text)
+    const STUDENT_UPDATABLE_FIELDS = "name,slug,description,content,images,status";
 
     export async function up(knex) {
-      // ── Roles ──────────────────────────────────────────────────────
-      await knex("directus_roles").insert([
-        {
-          id: EXECUTIVE_ROLE_ID,
-          name: "executive",
-          icon: "verified",
-          description: "荒牧祭実行委員。全コレクション管理権限。",
-          ip_access: null,
-          enforce_tfa: false,
-          admin_access: false,
-          app_access: true,
-        },
-        {
-          id: STUDENT_EXHIBITOR_ROLE_ID,
-          name: "student_exhibitor",
-          icon: "school",
-          description: "学生団体担当者。自団体レコードのみ編集。",
-          ip_access: null,
-          enforce_tfa: false,
-          admin_access: false,
-          app_access: true,
-        },
-      ]);
+      // ── Roles (Directus 12: admin_access/app_access はロールに存在しない) ──
+      await knex("directus_roles")
+        .insert([
+          {
+            id: EXECUTIVE_ROLE_ID,
+            name: "executive",
+            icon: "verified",
+            description: "荒牧祭実行委員。全コレクション管理権限。",
+          },
+          {
+            id: STUDENT_EXHIBITOR_ROLE_ID,
+            name: "student_exhibitor",
+            icon: "school",
+            description: "学生団体担当者。自団体レコードのみ編集。",
+          },
+        ])
+        .onConflict("id")
+        .ignore();
+
+      // ── Policies (app_access はポリシーで管理) ─────────────────────
+      await knex("directus_policies")
+        .insert([
+          {
+            id: EXECUTIVE_POLICY_ID,
+            name: "executive",
+            icon: "verified",
+            admin_access: false,
+            app_access: true,
+            enforce_tfa: false,
+          },
+          {
+            id: STUDENT_EXHIBITOR_POLICY_ID,
+            name: "student_exhibitor",
+            icon: "school",
+            admin_access: false,
+            app_access: true,
+            enforce_tfa: false,
+          },
+        ])
+        .onConflict("id")
+        .ignore();
+
+      // ── Role ↔ Policy junction (directus_access) ─────────────────
+      // directus_access に (role, policy) unique constraint なし → 既存チェックで冪等性確保
+      for (const [role, policy] of [
+        [EXECUTIVE_ROLE_ID, EXECUTIVE_POLICY_ID],
+        [STUDENT_EXHIBITOR_ROLE_ID, STUDENT_EXHIBITOR_POLICY_ID],
+      ]) {
+        const exists = await knex("directus_access").where({ role, policy }).first();
+        if (!exists) {
+          await knex("directus_access").insert({ id: randomUUID(), role, policy, sort: 0 });
+        }
+      }
+
+      // ── Permissions: delete-then-insert で冪等性確保 ─────────────
+      // directus_permissions に (policy, collection, action) unique constraint なし
+      await knex("directus_permissions")
+        .whereIn("policy", [EXECUTIVE_POLICY_ID, STUDENT_EXHIBITOR_POLICY_ID])
+        .delete();
 
       // ── executive: CRUD on all collections ────────────────────────
       const executivePerms = ALL_COLLECTIONS.flatMap((collection) =>
         ["create", "read", "update", "delete"].map((action) => ({
-          role: EXECUTIVE_ROLE_ID,
+          policy: EXECUTIVE_POLICY_ID,
           collection,
           action,
           permissions: {},
           validation: null,
           presets: null,
-          fields: ["*"],
+          fields: "*",
         }))
       );
       await knex("directus_permissions").insert(executivePerms);
 
       // ── student_exhibitor: CREATE on student_exhibitions ──────────
       await knex("directus_permissions").insert({
-        role: STUDENT_EXHIBITOR_ROLE_ID,
+        policy: STUDENT_EXHIBITOR_POLICY_ID,
         collection: "student_exhibitions",
         action: "create",
         permissions: {},
@@ -168,7 +211,7 @@ data:
 
       // ── student_exhibitor: UPDATE own record only ─────────────────
       await knex("directus_permissions").insert({
-        role: STUDENT_EXHIBITOR_ROLE_ID,
+        policy: STUDENT_EXHIBITOR_POLICY_ID,
         collection: "student_exhibitions",
         action: "update",
         permissions: { user_created: { _eq: "$CURRENT_USER" } },
@@ -192,13 +235,13 @@ data:
         }
 
         return {
-          role: STUDENT_EXHIBITOR_ROLE_ID,
+          policy: STUDENT_EXHIBITOR_POLICY_ID,
           collection,
           action: "read",
           permissions,
           validation: null,
           presets: null,
-          fields: ["*"],
+          fields: "*",
         };
       });
       await knex("directus_permissions").insert(readPerms);
@@ -206,7 +249,15 @@ data:
 
     export async function down(knex) {
       await knex("directus_permissions")
+        .whereIn("policy", [EXECUTIVE_POLICY_ID, STUDENT_EXHIBITOR_POLICY_ID])
+        .delete();
+
+      await knex("directus_access")
         .whereIn("role", [EXECUTIVE_ROLE_ID, STUDENT_EXHIBITOR_ROLE_ID])
+        .delete();
+
+      await knex("directus_policies")
+        .whereIn("id", [EXECUTIVE_POLICY_ID, STUDENT_EXHIBITOR_POLICY_ID])
         .delete();
 
       await knex("directus_roles")
