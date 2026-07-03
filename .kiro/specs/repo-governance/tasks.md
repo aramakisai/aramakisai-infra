@@ -2,14 +2,14 @@
 
 ## Tasks
 
-- [ ] 1. PR検証用 CI ワークフローの追加
+- [x] 1. PR検証用 CI ワークフローの追加
   - `.github/workflows/pr-validation.yml` を新規作成する。
   - トリガー条件を `main` への Pull Request (`opened`, `synchronize`, `reopened`) とする。
   - ジョブステップで `actions/checkout@v4`、`astral-sh/setup-uv@v3`、`make setup`、`make lint` を順に実行し、静的解析チェックを走らせる。
   - _Requirements: 3_
   - _Boundary: pr-validation.yml_
 
-- [ ] 2. Pull Request テンプレートの追加
+- [x] 2. Pull Request テンプレートの追加
   - `.github/pull_request_template.md` を新規作成する。
   - 変更概要、関連仕様書、手動検証の実施チェックリスト、インフラ影響範囲（Hetzner / Cloudflare / シークレット / DB）のチェック項目を記述する。
   - _Requirements: 2_
