@@ -1,6 +1,8 @@
 ---
 # Directus スキーマ適用 PostSync Job (staging)
-# ArgoCD sync 後に自動実行: migration + schema apply
+# ArgoCD sync 後に自動実行: schema apply + migration
+# (順序重要: 先に schema apply でテーブルを作ってからでないと、
+#  テーブル構造に依存するカスタム migration が "relation does not exist" で失敗する)
 # schema-configmap.yaml が更新されるたびに再実行される
 apiVersion: batch/v1
 kind: Job
@@ -22,10 +24,10 @@ spec:
           args:
             - |
               set -euo pipefail
-              echo "[1/2] Running database migrations..."
-              node /directus/cli.js database migrate:latest
-              echo "[2/2] Applying schema snapshot..."
+              echo "[1/2] Applying schema snapshot..."
               node /directus/cli.js schema apply --yes /snapshot/snapshot.yaml
+              echo "[2/2] Running database migrations..."
+              node /directus/cli.js database migrate:latest
               echo "Done."
           envFrom:
             - secretRef:
