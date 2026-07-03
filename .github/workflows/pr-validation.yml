@@ -8,8 +8,22 @@ on:
       - opened
       - synchronize
       - reopened
+      - edited
 
 jobs:
+  staging-gate:
+    name: Staging Checklist Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check staging verification checklist
+        env:
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: python3 scripts/check_staging_gate.py
+
   lint-and-validate:
     name: Lint & Validate
     runs-on: ubuntu-latest
