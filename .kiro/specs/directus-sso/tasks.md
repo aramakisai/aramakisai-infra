@@ -77,8 +77,12 @@
   - _Boundary: gitops/manifests/staging/directus/_
   - _Depends: 6.1_
 
-- [ ] 7. E2E 動作検証
-- [ ] 7.1 Terraform apply で Authentik リソースが意図通り作成されることを確認する
+- [x] 7. E2E 動作検証
+- [x] 7.1 Terraform apply で Authentik リソースが意図通り作成されることを確認する
+  - ⚠️ **既知問題**: 新規作成 Provider は grant_types=[] になる (Terraform provider 非サポート)。apply 後に以下で手動修正が必要:
+    ```bash
+    infisical run --env=prod -- bash -c 'curl -s -X PATCH -H "Authorization: Bearer $AUTHENTIK_TOKEN" -H "Content-Type: application/json" -d "{\"grant_types\":[\"authorization_code\",\"implicit\",\"client_credentials\",\"password\",\"refresh_token\"]}" "https://idp.aramakisai.com/api/v3/providers/oauth2/<ID>/"'
+    ```
   - `infisical run --env=prod -- terraform plan` で `executive` グループが destroy なし、新規リソース（`student_exhibitor`・Provider 2 件・Application 2 件）のみが差分に現れることを確認する
   - `infisical run --env=prod -- terraform apply` を実行する
   - Authentik UI でグループ一覧に `executive`・`student_exhibitor` が存在し、Directus (prod/stg) アプリが Applications 画面に表示されることを確認する
