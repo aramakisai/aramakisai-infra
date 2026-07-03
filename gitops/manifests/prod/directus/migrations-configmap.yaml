@@ -119,6 +119,7 @@ data:
       "page_contact",
     ];
 
+    // Fields student_exhibitor can UPDATE on student_exhibitions (comma-separated text)
     const STUDENT_UPDATABLE_FIELDS = "name,slug,description,content,images,status";
 
     export async function up(knex) {
