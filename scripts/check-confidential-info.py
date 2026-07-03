@@ -22,6 +22,7 @@ EMAIL_ALLOWLIST = [
     re.compile(r'^[^@]+@domain\.com$', re.IGNORECASE),
     re.compile(r'^[^@]+@users\.noreply\.github\.com$', re.IGNORECASE),
     re.compile(r'^[^@]+@noreply\.github\.com$', re.IGNORECASE),
+    re.compile(r'^[^@]+@aramakisai\.com$', re.IGNORECASE),      # Organization's own domain (intentional config)
     re.compile(r'^[^@]+@aramakisai\.invalid$', re.IGNORECASE),  # Internal sample domain
     re.compile(r'^[^@]+@example\.invalid$', re.IGNORECASE),     # External sample domain
     re.compile(r'^git@github\.com$', re.IGNORECASE),           # Git SSH URL

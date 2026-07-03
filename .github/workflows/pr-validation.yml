@@ -1,0 +1,43 @@
+name: PR Validation
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+jobs:
+  lint-and-validate:
+    name: Lint & Validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install dependencies
+        run: make setup
+
+      - name: Install Ansible and collections
+        run: |
+          pip install ansible-core --quiet
+          ansible-galaxy collection install ansible.posix
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Install kubeconform
+        run: |
+          curl -sLo /tmp/kubeconform.tar.gz https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz
+          tar -xzf /tmp/kubeconform.tar.gz -C /usr/local/bin kubeconform
+          chmod +x /usr/local/bin/kubeconform
+
+      - name: Run linters
+        run: make lint
+        env:
+          SKIP: terraform_validate
