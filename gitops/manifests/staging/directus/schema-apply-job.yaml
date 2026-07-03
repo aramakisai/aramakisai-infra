@@ -17,7 +17,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: schema-apply
-          image: directus/directus:11.1.2
+          image: directus/directus:12.1.1
           command: [sh, -c]
           args:
             - |
