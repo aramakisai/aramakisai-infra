@@ -23,5 +23,10 @@ jobs:
       - name: Install dependencies
         run: make setup
 
+      - name: Install Ansible and collections
+        run: |
+          pip install ansible-core --quiet
+          ansible-galaxy collection install ansible.posix
+
       - name: Run linters
         run: make lint
