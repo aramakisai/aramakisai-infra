@@ -7,16 +7,19 @@ data:
      * Directus schema snapshot は CHECK 制約非対応のため custom migration で担保する
      */
     export async function up(knex) {
-      await knex.schema.table("performance_slots", (table) => {
-        table.unique(["stage_id", "time_slot_id"], {
-          indexName: "performance_slots_stage_id_time_slot_id_unique",
-        });
-      });
+      await knex.raw(`
+        CREATE UNIQUE INDEX IF NOT EXISTS performance_slots_stage_id_time_slot_id_unique
+        ON performance_slots (stage_id, time_slot_id)
+      `);
 
       await knex.raw(`
-        ALTER TABLE performance_slots
-        ADD CONSTRAINT performance_slots_exhibition_or_title_required
-        CHECK (exhibition_id IS NOT NULL OR title IS NOT NULL)
+        DO $$ BEGIN
+          ALTER TABLE performance_slots
+          ADD CONSTRAINT performance_slots_exhibition_or_title_required
+          CHECK (exhibition_id IS NOT NULL OR title IS NOT NULL);
+        EXCEPTION
+          WHEN duplicate_object THEN NULL;
+        END $$;
       `);
     }
 
@@ -42,14 +45,14 @@ data:
     export async function up(knex) {
       // student_exhibitions: (area_id, booth_number) unique where both are NOT NULL
       await knex.raw(`
-        CREATE UNIQUE INDEX student_exhibitions_area_booth_unique
+        CREATE UNIQUE INDEX IF NOT EXISTS student_exhibitions_area_booth_unique
         ON student_exhibitions (area_id, booth_number)
         WHERE area_id IS NOT NULL AND booth_number IS NOT NULL
       `);
 
       // sponsors: (area_id, booth_number) unique where both are NOT NULL
       await knex.raw(`
-        CREATE UNIQUE INDEX sponsors_area_booth_unique
+        CREATE UNIQUE INDEX IF NOT EXISTS sponsors_area_booth_unique
         ON sponsors (area_id, booth_number)
         WHERE area_id IS NOT NULL AND booth_number IS NOT NULL
       `);

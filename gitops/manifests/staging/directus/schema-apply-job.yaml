@@ -1,9 +1,16 @@
 ---
 # Directus スキーマ適用 PostSync Job (staging)
 # ArgoCD sync 後に自動実行: schema apply + migration
-# (順序重要: 先に schema apply でテーブルを作ってからでないと、
-#  テーブル構造に依存するカスタム migration が "relation does not exist" で失敗する)
 # schema-configmap.yaml が更新されるたびに再実行される
+#
+# カスタム migration (extensions/migrations/*.js) は `directus database
+# migrate:latest` / `bootstrap` 経由では実行されない。この Directus バージョンでは
+# 起動時に `select "version" from directus_migrations`(ORDER BY なし)の結果で
+# 「outstanding migrations あり」と誤判定し、"Skipping CLI extensions
+# initialization due to outstanding migrations." のログとともに拡張機能
+# (custom migrations 含む) のロード自体を毎回スキップしてしまう既知動作のため。
+# 回避策として、Directus 内蔵の knex を直接 require し、migration ファイルを
+# ESM (.mjs) としてコピーした上で up() を直接呼び出す。
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -25,10 +32,43 @@ spec:
           args:
             - |
               set -euo pipefail
-              echo "[1/2] Applying schema snapshot..."
+              echo "[1/3] Applying schema snapshot..."
               node /directus/cli.js schema apply --yes /snapshot/snapshot.yaml
-              echo "[2/2] Running database migrations..."
+              echo "[2/3] Running core database migrations..."
               node /directus/cli.js database migrate:latest
+
+              echo "[3/3] Running custom migrations (extensions/migrations)..."
+              mkdir -p /tmp/mig
+              for f in /directus/extensions/migrations/*.js; do
+                base=$(basename "$f" .js)
+                cp "$f" "/tmp/mig/${base}.mjs"
+              done
+              node -e '
+              const knex = require("/directus/node_modules/.pnpm/node_modules/knex")({
+                client: "pg",
+                connection: {
+                  host: process.env.DB_HOST,
+                  port: Number(process.env.DB_PORT),
+                  database: process.env.DB_DATABASE,
+                  user: process.env.DB_USER,
+                  password: process.env.DB_PASSWORD,
+                },
+              });
+              (async () => {
+                const fs = require("fs");
+                const files = fs.readdirSync("/tmp/mig").sort();
+                for (const f of files) {
+                  console.log("Running custom migration:", f);
+                  const mod = await import("/tmp/mig/" + f);
+                  await mod.up(knex);
+                }
+                await knex.destroy();
+                console.log("Custom migrations done.");
+              })().catch((err) => {
+                console.error(err);
+                process.exit(1);
+              });
+              '
               echo "Done."
           envFrom:
             - secretRef:
