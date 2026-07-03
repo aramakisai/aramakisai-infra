@@ -14,6 +14,7 @@ metadata:
     argocd.argoproj.io/hook-delete-policy: HookSucceeded
 spec:
   ttlSecondsAfterFinished: 3600
+  backoffLimit: 1
   template:
     spec:
       restartPolicy: OnFailure
