@@ -88,7 +88,7 @@
   - Authentik UI でグループ一覧に `executive`・`student_exhibitor` が存在し、Directus (prod/stg) アプリが Applications 画面に表示されることを確認する
   - _Requirements: 1.1, 2.1, 2.3_
 
-- [ ] 7.2 Directus SSO ログインで正しいロールが付与されることを確認する
+- [x] 7.2 Directus SSO ログインで正しいロールが付与されることを確認する
   - `executive` グループのユーザーで Directus に "Authentik でログイン" を実行し、Directus ユーザーが `executive` ロールで作成されることを確認する
   - どのグループにも属さないユーザーでのログイン試行がアクセス拒否されることを確認する
   - 実行委員と学生団体が同一アカウントに重複しないことを確認する（FR-2.2）
