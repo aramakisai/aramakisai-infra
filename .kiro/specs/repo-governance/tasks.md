@@ -15,7 +15,7 @@
   - _Requirements: 2_
   - _Boundary: pull_request_template.md_
 
-- [ ] 3. GitHub リポジトリのブランチ保護規則設定（手動タスク）
+- [x] 3. GitHub リポジトリのブランチ保護規則設定（手動タスク）
   - GitHub Web UI の Settings -> Branches より、`main` ブランチに対して以下の保護ルールを設定する。
     - **Require a pull request before merging** を有効化。
     - **Require approvals** を有効化（必要な承認数: 1）。
@@ -24,7 +24,7 @@
   - _Requirements: 1, 4, 5_
   - _Boundary: GitHub Repository Settings (Manual)_
 
-- [ ] 4. 動作検証およびCIの成否確認（検証タスク）
+- [x] 4. 動作検証およびCIの成否確認（検証タスク）
   - `repo-governance` スペックマージ後、検証用のテストブランチ（例: `feat/test-governance-ci`）を作成する。
   - わざと yamllint や shellcheck が失敗するようなエラーを混入させたコミットをプッシュして PR を作成する。
   - 以下を確認する：
