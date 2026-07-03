@@ -106,7 +106,7 @@ spec:
               cpu: "500m"
           readinessProbe:
             httpGet:
-              path: /server/health
+              path: /server/info
               port: 8055
             initialDelaySeconds: 15
             periodSeconds: 10
