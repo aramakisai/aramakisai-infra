@@ -104,6 +104,8 @@ resource "authentik_user" "vaultwarden_rbac_sync" {
   type     = "service_account"
   password = random_password.vaultwarden_rbac_sync_password.result
   roles    = [authentik_rbac_role.vaultwarden_rbac_sync_group_reader.id]
+  # service_account はメール未設定だとログインしてAPIキー取得等ができないため必須
+  email = "admin@aramakisai.com"
 }
 
 resource "authentik_token" "vaultwarden_rbac_sync" {

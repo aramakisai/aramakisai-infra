@@ -38,3 +38,31 @@ resource "authentik_policy_binding" "cloudflare_require_discord" {
   policy = authentik_policy_expression.require_discord_link.id
   order  = 10
 }
+
+# Vaultwarden へのポリシーバインド
+resource "authentik_policy_binding" "vaultwarden_require_discord" {
+  target = authentik_application.vaultwarden.uuid
+  policy = authentik_policy_expression.require_discord_link.id
+  order  = 10
+}
+
+# Room Presence Tracker へのポリシーバインド
+resource "authentik_policy_binding" "room_presence_require_discord" {
+  target = authentik_application.room_presence.uuid
+  policy = authentik_policy_expression.require_discord_link.id
+  order  = 10
+}
+
+# Directus (prod) へのポリシーバインド
+resource "authentik_policy_binding" "directus_prod_require_discord" {
+  target = authentik_application.directus_prod.uuid
+  policy = authentik_policy_expression.require_discord_link.id
+  order  = 10
+}
+
+# Directus (stg) へのポリシーバインド
+resource "authentik_policy_binding" "directus_stg_require_discord" {
+  target = authentik_application.directus_stg.uuid
+  policy = authentik_policy_expression.require_discord_link.id
+  order  = 10
+}
