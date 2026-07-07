@@ -1,25 +1,22 @@
 apiVersion: v1
 data:
-  m01-performance-slots-check.js: |
+  20260701A-performance-slots-check.js: |
     /**
      * Task 4.3: performance_slots の CHECK 制約
      * exhibition_id か title の少なくとも一方が必須 (両方 NULL は不可)
      * Directus schema snapshot は CHECK 制約非対応のため custom migration で担保する
      */
     export async function up(knex) {
-      await knex.raw(`
-        CREATE UNIQUE INDEX IF NOT EXISTS performance_slots_stage_id_time_slot_id_unique
-        ON performance_slots (stage_id, time_slot_id)
-      `);
+      await knex.schema.table("performance_slots", (table) => {
+        table.unique(["stage_id", "time_slot_id"], {
+          indexName: "performance_slots_stage_id_time_slot_id_unique",
+        });
+      });
 
       await knex.raw(`
-        DO $$ BEGIN
-          ALTER TABLE performance_slots
-          ADD CONSTRAINT performance_slots_exhibition_or_title_required
-          CHECK (exhibition_id IS NOT NULL OR title IS NOT NULL);
-        EXCEPTION
-          WHEN duplicate_object THEN NULL;
-        END $$;
+        ALTER TABLE performance_slots
+        ADD CONSTRAINT performance_slots_exhibition_or_title_required
+        CHECK (exhibition_id IS NOT NULL OR title IS NOT NULL)
       `);
     }
 
@@ -36,7 +33,7 @@ data:
         );
       });
     }
-  m02-composite-unique-constraints.js: |
+  20260701B-composite-unique-constraints.js: |
     /**
      * Tasks 2.2, 3.1: composite UNIQUE constraints
      * (area_id, booth_number) on student_exhibitions and sponsors
@@ -45,14 +42,14 @@ data:
     export async function up(knex) {
       // student_exhibitions: (area_id, booth_number) unique where both are NOT NULL
       await knex.raw(`
-        CREATE UNIQUE INDEX IF NOT EXISTS student_exhibitions_area_booth_unique
+        CREATE UNIQUE INDEX student_exhibitions_area_booth_unique
         ON student_exhibitions (area_id, booth_number)
         WHERE area_id IS NOT NULL AND booth_number IS NOT NULL
       `);
 
       // sponsors: (area_id, booth_number) unique where both are NOT NULL
       await knex.raw(`
-        CREATE UNIQUE INDEX IF NOT EXISTS sponsors_area_booth_unique
+        CREATE UNIQUE INDEX sponsors_area_booth_unique
         ON sponsors (area_id, booth_number)
         WHERE area_id IS NOT NULL AND booth_number IS NOT NULL
       `);
@@ -64,7 +61,7 @@ data:
       );
       await knex.raw("DROP INDEX IF EXISTS sponsors_area_booth_unique");
     }
-  m03-rbac-roles.js: |
+  20260701C-rbac-roles.js: |
     /**
      * Tasks 6.1, 6.2: RBAC ロール定義 (Directus 12 対応)
      * - executive: 全コレクション CRUD (superadmin とは別ロール)
