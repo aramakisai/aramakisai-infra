@@ -187,6 +187,58 @@ data:
           versioning: false
         schema:
           name: page_home
+      - collection: page_privacy
+        meta:
+          accountability: all
+          archive_app_filter: true
+          archive_field: null
+          archive_value: null
+          autosave_revision_interval: null
+          collapse: open
+          collection: page_privacy
+          color: null
+          display_template: null
+          group: null
+          hidden: false
+          icon: privacy_tip
+          item_duplication_fields: null
+          note: プライバシーポリシーページシングルトン (id=1固定)
+          preview_url: null
+          singleton: true
+          sort: 14
+          sort_field: null
+          status: active
+          translations: null
+          unarchive_value: null
+          versioning: false
+        schema:
+          name: page_privacy
+      - collection: page_sponsor_guide
+        meta:
+          accountability: all
+          archive_app_filter: true
+          archive_field: null
+          archive_value: null
+          autosave_revision_interval: null
+          collapse: open
+          collection: page_sponsor_guide
+          color: null
+          display_template: null
+          group: null
+          hidden: false
+          icon: handshake
+          item_duplication_fields: null
+          note: 協賛要項ページシングルトン (id=1固定)
+          preview_url: null
+          singleton: true
+          sort: 15
+          sort_field: null
+          status: active
+          translations: null
+          unarchive_value: null
+          versioning: false
+        schema:
+          name: page_sponsor_guide
       - collection: performance_slots
         meta:
           accountability: all
@@ -1429,6 +1481,207 @@ data:
           data_type: json
           default_value: null
           max_length: null
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: page_privacy
+        field: id
+        type: integer
+        meta:
+          collection: page_privacy
+          conditions: null
+          display: null
+          display_options: null
+          field: id
+          group: null
+          hidden: true
+          interface: input
+          note: null
+          options: null
+          readonly: true
+          required: false
+          searchable: true
+          sort: 1
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: id
+          table: page_privacy
+          data_type: integer
+          default_value: nextval('page_privacy_id_seq'::regclass)
+          max_length: null
+          numeric_precision: 32
+          numeric_scale: 0
+          is_nullable: false
+          is_unique: true
+          is_indexed: false
+          is_primary_key: true
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: true
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: page_privacy
+        field: content
+        type: text
+        meta:
+          collection: page_privacy
+          conditions: null
+          display: raw
+          display_options: null
+          field: content
+          group: null
+          hidden: false
+          interface: input-rich-text-html
+          note: プライバシーポリシー本文
+          options: null
+          readonly: false
+          required: false
+          searchable: true
+          sort: 2
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: content
+          table: page_privacy
+          data_type: text
+          default_value: null
+          max_length: null
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: page_sponsor_guide
+        field: id
+        type: integer
+        meta:
+          collection: page_sponsor_guide
+          conditions: null
+          display: null
+          display_options: null
+          field: id
+          group: null
+          hidden: true
+          interface: input
+          note: null
+          options: null
+          readonly: true
+          required: false
+          searchable: true
+          sort: 1
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: id
+          table: page_sponsor_guide
+          data_type: integer
+          default_value: nextval('page_sponsor_guide_id_seq'::regclass)
+          max_length: null
+          numeric_precision: 32
+          numeric_scale: 0
+          is_nullable: false
+          is_unique: true
+          is_indexed: false
+          is_primary_key: true
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: true
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: page_sponsor_guide
+        field: content
+        type: text
+        meta:
+          collection: page_sponsor_guide
+          conditions: null
+          display: raw
+          display_options: null
+          field: content
+          group: null
+          hidden: false
+          interface: input-rich-text-html
+          note: 協賛要項本文
+          options: null
+          readonly: false
+          required: false
+          searchable: true
+          sort: 2
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: content
+          table: page_sponsor_guide
+          data_type: text
+          default_value: null
+          max_length: null
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: page_sponsor_guide
+        field: pdf_url
+        type: string
+        meta:
+          collection: page_sponsor_guide
+          conditions: null
+          display: raw
+          display_options: null
+          field: pdf_url
+          group: null
+          hidden: false
+          interface: input
+          note: 協賛要項PDF資料URL
+          options:
+            placeholder: https://...
+          readonly: false
+          required: false
+          searchable: true
+          sort: 3
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: pdf_url
+          table: page_sponsor_guide
+          data_type: character varying
+          default_value: null
+          max_length: 500
           numeric_precision: null
           numeric_scale: null
           is_nullable: true

@@ -103,6 +103,7 @@ data:
       "page_contact",
     ];
 
+    // Collections student_exhibitor can READ (published only)
     const PUBLIC_COLLECTIONS = [
       "map_areas",
       "time_slots",
