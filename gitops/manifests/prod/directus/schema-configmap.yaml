@@ -3786,6 +3786,46 @@ data:
           has_auto_increment: false
           foreign_key_table: null
           foreign_key_column: null
+      - collection: announcements
+        field: internal_note
+        type: text
+        meta:
+          collection: announcements
+          conditions: null
+          display: null
+          display_options: null
+          field: internal_note
+          group: null
+          hidden: true
+          interface: input-multiline
+          note: 'repo-governance タスク6.5 (directus-schema-sync cross-repo PR 作成) の E2E 検証用フィールド。additive-only のダミー field。'
+          options: null
+          readonly: false
+          required: false
+          searchable: false
+          sort: 99
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: internal_note
+          table: announcements
+          data_type: text
+          default_value: null
+          max_length: null
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
     systemFields: []
     relations:
       - collection: festival_meta
