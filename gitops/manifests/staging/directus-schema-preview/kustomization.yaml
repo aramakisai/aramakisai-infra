@@ -1,0 +1,15 @@
+---
+# directus-schema-preview ApplicationSet (gitops/apps/staging/directus-schema-preview-appset.yaml)
+# が open な directus-schema-* PR ごとに ephemeral Application として使う base。
+#
+# 実体は staging/directus/ の schema 関連 3 リソースを参照するだけ。Deployment/DB/Service は
+# 意図的に含めない — それらは main を追跡する directus-staging Application が専有管理しており、
+# ここに含めると同じリソースを2つの Application が取り合いフィールドドリフトを起こす。
+#
+# ApplicationSet 側で spec.source.kustomize.nameSuffix に "-pr-<PR番号>" を指定することで、
+# ConfigMap/Job 名がユニークになり(kustomize の nameReference 機能で Job の volume 参照も
+# 自動的に付け替わる)、main 側が管理する同名リソースと衝突しない。
+resources:
+  - ../directus/schema-configmap.yaml
+  - ../directus/migrations-configmap.yaml
+  - ../directus/schema-apply-job.yaml

@@ -49,6 +49,7 @@ repos:
           - "1.32.3"
         language: system
         files: ^gitops/manifests/.*\.yaml$
+        exclude: /kustomization\.yaml$
         types: [yaml]
 
       - id: check-confidential-info

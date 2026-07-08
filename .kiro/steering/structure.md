@@ -97,6 +97,10 @@ spec:
         key: <INFISICAL_KEY>
 ```
 
+## ApplicationSet (ephemeral PR-preview) パターン
+
+`apps/<env>/` には通常の `Application` に加え、`ApplicationSet`(`pullRequest` generator)も配置できる。open な PR ごとに ephemeral な `Application` を自動生成・自動削除する用途で、対象リソースは既存サービスの一部ファイルを kustomize overlay で参照する専用ディレクトリ(例: `manifests/staging/<service>-preview/`)に切り出し、`spec.source.kustomize.nameSuffix` でリソース名をユニーク化して常設 Application と競合しないようにする。詳細は `tech.md` の「Directus schema PR の staging 事前検証」参照。
+
 ## ArgoCD Sync Wave パターン
 
 - `sync-wave: "-1"` → ESO・ClusterSecretStore・CloudNativePG Operator・cert-manager・nginx-ingress (前提基盤)
