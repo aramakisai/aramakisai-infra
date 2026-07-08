@@ -1,0 +1,50 @@
+---
+# directus-schema-* PR (aramakisai-web の schema-sync workflow が生成) が open な間だけ、
+# その PR ブランチの schema-configmap/migrations-configmap/schema-apply-job を実 staging DB
+# に対して検証適用する ephemeral Application を自動生成する。
+#
+# 背景: staging/directus.yaml は targetRevision: main のため、PR マージ後にしか schema が
+# staging に反映されない。一方 infra PR のマージ前チェックリストは「staging での確認」を
+# 必須化しており(scripts/check_staging_gate.py)、マージ前に staging 確認ができないと
+# 恒久的にマージ不可になるデッドロックがあった。この ApplicationSet でマージ前検証を可能にする。
+#
+# PR が close されると generator がその PR を返さなくなり、finalizer により生成された
+# Application と配下リソース(ConfigMap/Job)は自動削除される。
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: directus-schema-preview
+  namespace: argocd
+spec:
+  generators:
+    - pullRequest:
+        github:
+          owner: aramakisai
+          repo: aramakisai-infra
+          appSecretName: argocd-applicationset-github-app
+        filters:
+          - branchMatch: "^directus-schema-"
+        requeueAfterSeconds: 60
+  template:
+    metadata:
+      name: "directus-schema-preview-{{number}}"
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+    spec:
+      project: default
+      source:
+        repoURL: git@github.com:aramakisai/aramakisai-infra.git
+        targetRevision: "{{head_sha}}"
+        path: gitops/manifests/staging/directus-schema-preview
+        kustomize:
+          nameSuffix: "-pr-{{number}}"
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: staging
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=false
+          - ServerSideApply=true

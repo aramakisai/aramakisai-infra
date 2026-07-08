@@ -69,6 +69,11 @@ infisical run -- ansible-playbook k3s-bootstrap.yml
 - `null_resource` + `local-exec` は HCP Terraform リモート実行非対応のため `main.tf` でコメントアウト済み。
 - **Terraform 完了後、常に手動で Ansible を実行する**（設定変更のみの場合も同様）。
 
+### Directus schema PR の staging 事前検証 (ApplicationSet)
+- **背景**: `gitops/apps/staging/directus.yaml` は `targetRevision: main` のため、staging は PR マージ後にしかスキーマを受け取れない。一方 infra PR のマージ前チェックリスト（`aramakisai-web/.github/workflows/directus-schema-sync.yml` が生成、`scripts/check_staging_gate.py` が必須 status check として強制）は「staging での確認」を要求しており、マージ前に検証不能な構造的デッドロックがあった。
+- **解決**: `gitops/apps/staging/directus-schema-preview-appset.yaml` の ApplicationSet(`pullRequest` generator)が、open な `directus-schema-*` PR ごとに ephemeral Application `directus-schema-preview-<PR番号>` を自動生成し、PR ブランチの `gitops/manifests/staging/directus-schema-preview/`(schema-configmap・migrations-configmap・schema-apply-job のみの kustomize overlay)を実 staging DB に適用する。`kustomize.nameSuffix: "-pr-<PR番号>"` でリソース名をユニーク化し、main を追跡する `directus-staging` Application(Deployment/DB/Service 等を専有管理)とのリソース競合を回避している。PR が閉じられると生成物は自動削除される。
+- **認証**: PR 一覧取得には `aramakisai-infra` への `pull-requests: read-only` のみを持つ専用 GitHub App を使用（`ARGOCD_APPLICATIONSET_GITHUB_APP_*`、既存の書き込み権限を持つ web→infra 用 App とは分離）。
+
 ## 監視スタック
 
 | コンポーネント | 役割 | 状態 |
@@ -114,6 +119,7 @@ infisical run -- ansible-playbook -i ansible/inventory/tailscale.yml ansible/pla
   - **Vaultwarden**: `VAULTWARDEN_ADMIN_TOKEN`, `VAULTWARDEN_DB_PASSWORD`, `VAULTWARDEN_ORG_CREATION_USERS`, `VAULTWARDEN_OIDC_CLIENT_ID`, `VAULTWARDEN_OIDC_CLIENT_SECRET`, `VAULTWARDEN_RESTIC_REPOSITORY`, `VAULTWARDEN_RESTIC_PASSWORD`（SMTP は専用キーを持たず、Authentik の `NOREPLY_SMTP_PASSWORD` を再利用）
   - **Directus SSO**: `DIRECTUS_PROD_OIDC_CLIENT_SECRET`（prod 用 Authentik OIDC Client Secret）, `DIRECTUS_STG_OIDC_CLIENT_SECRET`（stg 用）。`DIRECTUS_PROD_OIDC_CLIENT_ID` / `DIRECTUS_STG_OIDC_CLIENT_ID` は `"directus-prod"` / `"directus-stg"` 固定でコードに直書き（変数なし）。
   - **Vaultwarden RBAC Sync**: `VAULTWARDEN_RBAC_SYNC_AUTHENTIK_API_TOKEN`（`PRESENCE_AUTHENTIK_API_TOKEN`と同パターン、`terraform/authentik_vaultwarden_rbac_sync.tf`で発行）, `VAULTWARDEN_RBAC_SYNC_SERVICE_ACCOUNT_CLIENT_ID`, `VAULTWARDEN_RBAC_SYNC_SERVICE_ACCOUNT_CLIENT_SECRET`（Vaultwarden専用サービスアカウントのPersonal API Key、手動ブートストラップ必須）, `TF_VAR_vaultwarden_rbac_sync_trigger_token`（Trigger Receiver共有ベアラートークン）, `DISCORD_OPS_WEBHOOK_URL`（既存キーを再利用、新規作成なし）
+  - **ArgoCD ApplicationSet (directus-schema-preview)**: `ARGOCD_APPLICATIONSET_GITHUB_APP_ID`, `ARGOCD_APPLICATIONSET_GITHUB_APP_INSTALLATION_ID`, `ARGOCD_APPLICATIONSET_GITHUB_APP_PRIVATE_KEY`（aramakisai-infra への `pull-requests: read-only` のみを持つ専用 GitHub App。PR generator が open な `directus-schema-*` PR を検出するために使用）
 
 ### Commit Protection & Coding Standards
 - **パス漏洩防止**: pre-commit フック `scripts/check-confidential-info.py` がローカル絶対パスや非許可メールのコミットをブロック。

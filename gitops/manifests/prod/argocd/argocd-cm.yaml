@@ -16,3 +16,7 @@ data:
     clientSecret: $argocd-oidc-secret:clientSecret
     requestedScopes: ["openid", "profile", "email", "groups"]
   admin.enabled: "false"
+  # directus-schema-preview kustomization が既存 staging/directus/ 配下のファイルを
+  # 相対パス(../)で参照するため、kustomize デフォルトの load restrictor を緩和する。
+  # 対象はこのプライベートリポジトリ内のファイルのみで、外部/任意パスへのアクセスは伴わない。
+  kustomize.buildOptions: --load-restrictor LoadRestrictionsNone
