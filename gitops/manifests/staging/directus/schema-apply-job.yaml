@@ -56,11 +56,25 @@ spec:
               });
               (async () => {
                 const fs = require("fs");
+                const hasTable = await knex.schema.hasTable("directus_custom_migrations");
+                if (!hasTable) {
+                  await knex.schema.createTable("directus_custom_migrations", (table) => {
+                    table.string("name").primary();
+                    table.timestamp("executed_at").defaultTo(knex.fn.now());
+                  });
+                }
                 const files = fs.readdirSync("/tmp/mig").sort();
                 for (const f of files) {
+                  const name = f.replace(/\.mjs$/, "");
+                  const applied = await knex("directus_custom_migrations").where({ name }).first();
+                  if (applied) {
+                    console.log("Skipping already-applied custom migration:", name);
+                    continue;
+                  }
                   console.log("Running custom migration:", f);
                   const mod = await import("/tmp/mig/" + f);
                   await mod.up(knex);
+                  await knex("directus_custom_migrations").insert({ name });
                 }
                 await knex.destroy();
                 console.log("Custom migrations done.");
