@@ -28,8 +28,10 @@ resource "cloudflare_zero_trust_access_identity_provider" "authentik" {
 
     # Authentik 標準エンドポイント
     # Provider slug は Authentik 管理画面で "cloudflare" に設定すること
-    auth_url  = "https://idp.aramakisai.com/application/o/cloudflare/authorize/"
-    token_url = "https://idp.aramakisai.com/application/o/cloudflare/token/"
+    # 注意: authorize/token は slug 非スコープの共通エンドポイント (Authentik側の仕様)。
+    #       jwks のみ slug スコープ。/.well-known/openid-configuration で要確認。
+    auth_url  = "https://idp.aramakisai.com/application/o/authorize/"
+    token_url = "https://idp.aramakisai.com/application/o/token/"
     certs_url = "https://idp.aramakisai.com/application/o/cloudflare/jwks/"
 
     scopes = ["openid", "email", "profile"]
@@ -40,8 +42,8 @@ resource "cloudflare_zero_trust_access_identity_provider" "authentik" {
 # Cloudflare Access Applications
 #
 # 保護対象:
-#   (なし - stg/api_stg は廃止。staging frontend は Cloudflare Pages PR preview URL を使用。
-#           stg-api.aramakisai.com は Directus 自身の admin 認証のみで保護)
+#   aramakisai-web.aramakisai.workers.dev   Workers.dev 既定URL (本番は aramakisai.com 経由)
+#                                            誤って外部に晒さないよう Authentik OIDC で保護
 #
 # 非保護 (自前認証あり):
 #   webmail.aramakisai.com   Roundcube が Authentik OAuth2 で保護
@@ -49,13 +51,26 @@ resource "cloudflare_zero_trust_access_identity_provider" "authentik" {
 #   argocd.aramakisai.com    ArgoCD 自前認証 (admin / Authentik SSO) で保護
 # ============================================================
 
+resource "cloudflare_zero_trust_access_application" "aramakisai_web_workers_dev" {
+  account_id       = var.cloudflare_account_id
+  name             = "aramakisai-web (workers.dev)"
+  domain           = "aramakisai-web.aramakisai.workers.dev"
+  type             = "self_hosted"
+  session_duration = "24h"
+
+  # auto_redirect_to_identity requires allowed_idps with exactly one IdP
+  auto_redirect_to_identity = local.authentik_configured
+  allowed_idps              = local.authentik_configured ? [cloudflare_zero_trust_access_identity_provider.authentik[0].id] : []
+}
+
 # ============================================================
 # Cloudflare Access Policies
-# 保護対象 Application が存在しないため空 Map
 # ============================================================
 
 locals {
-  access_applications = {}
+  access_applications = {
+    aramakisai_web_workers_dev = cloudflare_zero_trust_access_application.aramakisai_web_workers_dev.id
+  }
 }
 
 resource "cloudflare_zero_trust_access_policy" "allow_authentik" {

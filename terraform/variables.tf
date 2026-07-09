@@ -156,7 +156,9 @@ variable "vaultwarden_oidc_client_secret" {
 variable "cloudflare_access_redirect_uris" {
   description = "Cloudflare Access OIDC Redirect URIs"
   type        = list(string)
-  default     = ["https://aramakisai.cloudflareaccess.com/cdn-cgi/access/callback"]
+  # team domain は Cloudflare Zero Trust Organization の auth_domain (Access > Settings > Custom Pages 等で確認)
+  # `curl -H "Authorization: Bearer $CF_TOKEN" https://api.cloudflare.com/client/v4/accounts/<account_id>/access/organizations` で取得可能
+  default = ["https://summer-smoke-c298.cloudflareaccess.com/cdn-cgi/access/callback"]
 }
 
 variable "discord_guild_id" {

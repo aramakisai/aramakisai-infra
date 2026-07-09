@@ -65,6 +65,14 @@ infisical run -- ansible-playbook k3s-bootstrap.yml
 - **healthchecksio_mailserver_backup_ping_url**: mailserver バックアップの生存確認用。Infisical の `HEALTHCHECKS_MAILSERVER_BACKUP_PING_URL` へ反映。
 - **netdata_room_id**: Netdata Cloud aramakisai-prod Room ID。Infisical の `NETDATA_CLAIM_ROOMS` へ反映し、エージェントの Claim に使用。
 
+### Authentik OIDC エンドポイント仕様 (Cloudflare Access IdP 連携)
+- Authentik の OAuth2 `authorize`/`token` エンドポイントは **slug 非スコープ**の共通パス（`/application/o/authorize/`, `/application/o/token/`）。`jwks`/`issuer`/`end-session` は引き続き slug スコープ（`/application/o/<slug>/jwks/` 等）。
+- `access.tf` の `cloudflare_zero_trust_access_identity_provider.authentik` の `auth_url`/`token_url` にこの点を反映済み。設定変更時は `https://idp.aramakisai.com/application/o/<slug>/.well-known/openid-configuration` で実際のエンドポイントパスを確認してから合わせること（Authentik バージョンアップでパス仕様が変わり得る）。
+- 2026-07-08: `access_applications` マップが長期間空だったため、この不一致（slug スコープの古い URL のまま）が実トラフィックで検証されず放置され、初めて Access アプリを追加した際に authorize 側 404 として顕在化した。
+- **team domain 注意**: `variables.tf` の `cloudflare_access_redirect_uris` は Cloudflare Zero Trust Organization の実 `auth_domain`（例: `<random-words>.cloudflareaccess.com`）を使うこと。`<チーム名>.cloudflareaccess.com` という推測値は実際のteam domainと一致しないことがある。確認は `curl -H "Authorization: Bearer $CF_TOKEN" https://api.cloudflare.com/client/v4/accounts/<account_id>/access/organizations` の `auth_domain`。ここが Authentik 側 `allowed_redirect_uris`（strict match）と食い違うと "Redirect URI Error" になる。2026-07-08 に同様の理由で不一致を検知・修正。
+- **grant_types 空リスト問題**: terraform-provider-authentik `< 2026.5.0` は OAuth2 Provider の `grant_types` 属性をサポートしておらず、新規作成された Provider は Authentik server 側で `grant_types` が空リストのままになる。この状態だと `authorize` は通っても `token` 交換時に `Invalid grant_type for provider`（400、認証ログには `auth_via: unauthenticated` として記録される）で失敗し、CF Access 側には「Failed to fetch user/group information from the identity provider」と表示される。2026-07-09 にプロバイダを `>= 2026.5.0` へ更新し、`authentik_provider_oauth2.cloudflare`/`room_presence` に `grant_types = ["authorization_code", "refresh_token"]` を明示（room_presence は従来 API 直接 PATCH で暫定対応していたものを Terraform 管理に統一）。既存の argocd/vaultwarden/roundcube/directus-* は 2026.5.0 未満の provider で作成済みのため元々値が入っており影響なし。
+- **provider アップグレード時の副作用**: terraform-provider-authentik `2026.5.0` は `allowed_redirect_uris` の `redirect_uri_type` を新たに round-trip するようになった。HCL 側で明示していないと `"authorization" -> null` の diff が出て apply すると型指定が失われかねないため、既存の `allowed_redirect_uris` ブロック全てに `redirect_uri_type = "authorization"` を明示済み（2026-07-09）。同provider の今後のアップグレードでも `terraform plan` で全 `authentik_provider_oauth2.*` の diff を必ず確認すること。
+
 ### Ansible 実行タイミング
 - `null_resource` + `local-exec` は HCP Terraform リモート実行非対応のため `main.tf` でコメントアウト済み。
 - **Terraform 完了後、常に手動で Ansible を実行する**（設定変更のみの場合も同様）。
