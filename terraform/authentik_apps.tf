@@ -91,8 +91,9 @@ resource "authentik_provider_oauth2" "roundcube" {
 
   allowed_redirect_uris = [
     {
-      matching_mode = "strict"
-      url           = "https://webmail.aramakisai.com/index.php/login/oauth"
+      matching_mode     = "strict"
+      url               = "https://webmail.aramakisai.com/index.php/login/oauth"
+      redirect_uri_type = "authorization"
     }
   ]
 
@@ -126,8 +127,9 @@ resource "authentik_provider_oauth2" "argocd" {
 
   allowed_redirect_uris = [
     {
-      matching_mode = "strict"
-      url           = "https://argocd.aramakisai.com/auth/callback"
+      matching_mode     = "strict"
+      url               = "https://argocd.aramakisai.com/auth/callback"
+      redirect_uri_type = "authorization"
     }
   ]
 
@@ -156,13 +158,18 @@ resource "authentik_provider_oauth2" "cloudflare" {
   client_secret = var.authentik_cf_client_secret
   signing_key   = data.authentik_certificate_key_pair.default.id
 
+  # 未指定だと Authentik 側で grant_types が空リストのままになり
+  # authorize は通っても token 交換時に "Invalid grant_type for provider" (400) で失敗する
+  grant_types = ["authorization_code", "refresh_token"]
+
   authorization_flow = data.authentik_flow.default_authorization.id
   invalidation_flow  = data.authentik_flow.default_invalidation.id
 
   allowed_redirect_uris = [
     for uri in var.cloudflare_access_redirect_uris : {
-      matching_mode = "strict"
-      url           = uri
+      matching_mode     = "strict"
+      url               = uri
+      redirect_uri_type = "authorization"
     }
   ]
 
@@ -208,8 +215,9 @@ resource "authentik_provider_oauth2" "vaultwarden" {
 
   allowed_redirect_uris = [
     {
-      matching_mode = "strict"
-      url           = "https://vault.aramakisai.com/identity/connect/oidc-signin"
+      matching_mode     = "strict"
+      url               = "https://vault.aramakisai.com/identity/connect/oidc-signin"
+      redirect_uri_type = "authorization"
     }
   ]
 
@@ -268,16 +276,17 @@ resource "authentik_provider_oauth2" "room_presence" {
   authorization_flow = data.authentik_flow.default_authorization.id
   invalidation_flow  = data.authentik_flow.default_invalidation.id
 
-  # 注意: grant_types はこのTerraform providerのschemaに存在せず設定不可。
-  # 新規作成されたProviderはgrant_typesが空リストになり、response_type=codeの
-  # authorize要求が"invalid_request: malformed"で即時拒否される
-  # (import済みの他provider [argocd等] は元々全種設定済みだったため発覚しなかった)。
-  # Authentik API (PATCH /api/v3/providers/oauth2/{id}/) で直接修正すること。
+  # 新規作成されたProviderはgrant_typesが空リストのままになり、token交換が
+  # "Invalid grant_type for provider" (400) で失敗する。terraform-provider-authentik
+  # >= 2026.5.0 で grant_types 属性のサポートが追加されたため明示指定 (旧バージョンでは
+  # 設定不可のため API 直接 PATCH で当時暫定対応していたのを Terraform 管理に統一)。
+  grant_types = ["authorization_code", "refresh_token"]
 
   allowed_redirect_uris = [
     {
-      matching_mode = "strict"
-      url           = "https://presence.aramakisai.com/api/auth/callback/authentik"
+      matching_mode     = "strict"
+      url               = "https://presence.aramakisai.com/api/auth/callback/authentik"
+      redirect_uri_type = "authorization"
     }
   ]
 
@@ -319,8 +328,9 @@ resource "authentik_provider_oauth2" "directus_prod" {
   invalidation_flow  = data.authentik_flow.default_invalidation.id
 
   allowed_redirect_uris = [{
-    matching_mode = "strict"
-    url           = "https://api.aramakisai.com/auth/login/authentik/callback"
+    matching_mode     = "strict"
+    url               = "https://api.aramakisai.com/auth/login/authentik/callback"
+    redirect_uri_type = "authorization"
   }]
 
   property_mappings = [
@@ -350,8 +360,9 @@ resource "authentik_provider_oauth2" "directus_stg" {
   invalidation_flow  = data.authentik_flow.default_invalidation.id
 
   allowed_redirect_uris = [{
-    matching_mode = "strict"
-    url           = "https://stg-api.aramakisai.com/auth/login/authentik/callback"
+    matching_mode     = "strict"
+    url               = "https://stg-api.aramakisai.com/auth/login/authentik/callback"
+    redirect_uri_type = "authorization"
   }]
 
   property_mappings = [

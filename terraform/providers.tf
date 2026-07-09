@@ -24,7 +24,7 @@ terraform {
     }
     authentik = {
       source  = "goauthentik/authentik"
-      version = ">= 2024.12.0"
+      version = ">= 2026.5.0" # grant_types 属性サポートに必要 (Authentik server 2026.5.x の grant_types 必須化対応)
     }
     uptimerobot = {
       source  = "uptimerobot/uptimerobot"
