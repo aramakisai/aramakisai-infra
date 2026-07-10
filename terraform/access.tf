@@ -86,3 +86,47 @@ resource "cloudflare_zero_trust_access_policy" "allow_authentik" {
     login_method = [cloudflare_zero_trust_access_identity_provider.authentik[0].id]
   }
 }
+
+# ============================================================
+# Cloudflare Access: E2E CI 専用 Service Token
+#
+# aramakisai-web リポジトリの Playwright E2E テストが
+# Authentik ログインを経由せず aramakisai-web.aramakisai.workers.dev
+# へ非対話アクセスするための専用トークン。
+# duration/min_days_for_renewal + create_before_destroy で
+# ローテーション時の瞬断を避ける。
+# ============================================================
+
+resource "cloudflare_zero_trust_access_service_token" "e2e_ci" {
+  account_id           = var.cloudflare_account_id
+  name                 = "aramakisai-web E2E CI"
+  duration             = "8760h"
+  min_days_for_renewal = 30
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+# ============================================================
+# Cloudflare Access: E2E Service Token 用 non_identity Policy
+#
+# decision = "non_identity" は既存の allow_authentik (decision = "allow")
+# と共存できないため独立リソースとして追加。
+# local.access_applications の for_each には相乗りさせず、
+# aramakisai_web_workers_dev application_id を直接参照する
+# (将来 local.access_applications に他アプリが追加されても
+#  この E2E バイパスが意図せず継承されないようにするため)。
+# ============================================================
+
+resource "cloudflare_zero_trust_access_policy" "allow_e2e_service_token" {
+  account_id     = var.cloudflare_account_id
+  application_id = cloudflare_zero_trust_access_application.aramakisai_web_workers_dev.id
+  name           = "Allow E2E Service Token"
+  precedence     = 2
+  decision       = "non_identity"
+
+  include {
+    service_token = [cloudflare_zero_trust_access_service_token.e2e_ci.id]
+  }
+}

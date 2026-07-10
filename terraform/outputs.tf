@@ -42,6 +42,18 @@ output "pages_project_subdomain" {
   value       = cloudflare_pages_project.aramakisai_web.subdomain
 }
 
+output "e2e_service_token_client_id" {
+  description = "aramakisai-web E2E CI Service Token の client_id (apply後にInfisicalのCF_ACCESS_CLIENT_IDへ手動反映 / 機密情報)"
+  value       = cloudflare_zero_trust_access_service_token.e2e_ci.client_id
+  sensitive   = true
+}
+
+output "e2e_service_token_client_secret" {
+  description = "aramakisai-web E2E CI Service Token の client_secret (apply後にInfisicalのCF_ACCESS_CLIENT_SECRETへ手動反映 / 機密情報)"
+  value       = cloudflare_zero_trust_access_service_token.e2e_ci.client_secret
+  sensitive   = true
+}
+
 # Hetzner Object Storage は hcloud provider 非対応のため手動管理
 # バケット名: aramakisai-backups
 # output "object_storage_bucket" {

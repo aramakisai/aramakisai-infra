@@ -117,6 +117,7 @@ infisical run -- ansible-playbook -i ansible/inventory/tailscale.yml ansible/pla
 ### Infisical で管理するシークレット一覧
 - **IaC & 認証**: `HCLOUD_TOKEN`, `CLOUDFLARE_API_TOKEN`, `TAILSCALE_OAUTH_CLIENT_ID`, `TAILSCALE_OAUTH_CLIENT_SECRET`, `TF_VAR_k3s_token`, `TF_VAR_tailscale_api_key`, `TF_VAR_authentik_cf_client_id`, `TF_VAR_authentik_cf_client_secret`
 - **Ansible & 復旧**: `K3S_TOKEN`, `CLOUDFLARE_TUNNEL_TOKEN`, `CLOUDFLARE_TUNNEL_ID`, `INFISICAL_CLIENT_ID`, `INFISICAL_CLIENT_SECRET`, `ARGOCD_GITHUB_DEPLOY_KEY`, `TFC_API_TOKEN`, `TFC_WORKSPACE_ID`, `TAILSCALE_API_KEY`, `TAILSCALE_TAILNET`
+- **Cloudflare Access (E2E CI)**: `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET`（`aramakisai-web` の Playwright E2E テストが Cloudflare Access の Authentik ログインを迂回するための Service Token。`terraform/access.tf` の `cloudflare_zero_trust_access_service_token.e2e_ci` が発行元。`aramakisai-web` 側 `staging-e2e-verification` spec が前提としていた secret 名と一致しており乖離なし）
 - **アプリ用シークレット**:
   - **Authentik**: `AUTHENTIK_SECRET_KEY`, `AUTHENTIK_DB_PASSWORD`, `NOREPLY_SMTP_PASSWORD`（`noreply@aramakisai.com` 用 SMTP パスワード。Vaultwarden・Directus の SMTP 設定でも同一キーを再利用） <!-- confidential:allow -->
   - **DMS**: `MAILSERVER_LDAP_BIND_PASSWORD`, `MAILSERVER_DKIM_KEY`, `MAILSERVER_RESTIC_PASSWORD`, `B2_APPLICATION_KEY_ID`, `B2_APPLICATION_KEY`
