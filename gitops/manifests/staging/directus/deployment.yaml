@@ -71,9 +71,26 @@ spec:
               value: local
             - name: STORAGE_LOCAL_ROOT
               value: /directus/uploads
+            - name: SENTRY_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: directus-staging-secrets
+                  key: SENTRY_DSN
+            - name: SENTRY_ENVIRONMENT
+              value: staging
+            - name: SENTRY_TRACES_SAMPLE_RATE
+              value: "0"
           volumeMounts:
             - name: uploads
               mountPath: /directus/uploads
+            - name: hooks-sentry-error-tracking
+              mountPath: /directus/extensions/hooks/sentry-error-tracking/package.json
+              subPath: package.json
+              readOnly: true
+            - name: hooks-sentry-error-tracking
+              mountPath: /directus/extensions/hooks/sentry-error-tracking/dist/index.js
+              subPath: index.js
+              readOnly: true
           resources:
             requests:
               memory: "128Mi"
@@ -84,3 +101,7 @@ spec:
       volumes:
         - name: uploads
           emptyDir: {}   # staging はデータ永続化不要
+        - name: hooks-sentry-error-tracking
+          configMap:
+            name: directus-hooks-sentry-error-tracking
+            optional: true

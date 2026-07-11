@@ -95,6 +95,24 @@ spec:
               value: "true"
             - name: AUTH_AUTHENTIK_ROLE_CLAIM
               value: groups
+            - name: SENTRY_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: directus-secrets
+                  key: SENTRY_DSN
+            - name: SENTRY_ENVIRONMENT
+              value: prod
+            - name: SENTRY_TRACES_SAMPLE_RATE
+              value: "0"
+          volumeMounts:
+            - name: hooks-sentry-error-tracking
+              mountPath: /directus/extensions/hooks/sentry-error-tracking/package.json
+              subPath: package.json
+              readOnly: true
+            - name: hooks-sentry-error-tracking
+              mountPath: /directus/extensions/hooks/sentry-error-tracking/dist/index.js
+              subPath: index.js
+              readOnly: true
           resources:
             requests:
               memory: "256Mi"
@@ -110,3 +128,8 @@ spec:
               port: 8055
             initialDelaySeconds: 15
             periodSeconds: 10
+      volumes:
+        - name: hooks-sentry-error-tracking
+          configMap:
+            name: directus-hooks-sentry-error-tracking
+            optional: true
