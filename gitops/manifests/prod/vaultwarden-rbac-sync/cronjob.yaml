@@ -3,12 +3,14 @@
 # --mode=cron で sync.py を起動し、Lease取得→SyncOrchestrator実行(dry_run=False固定)→Lease解放を行う。
 # cronjob.yaml と deployment.yaml (Trigger Receiver) は同一の script-configmap.yaml (sync.py) を
 # マウントし、command の --mode 引数のみが異なる (design.md File Structure Plan参照)。
+# 凍結中 (2026-07-11): suspend: true。Vaultwarden本体が停止中のためsync対象なし
 apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: vaultwarden-rbac-sync
   namespace: prod
 spec:
+  suspend: true
   schedule: "0 * * * *"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3

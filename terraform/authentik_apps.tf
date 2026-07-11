@@ -235,6 +235,8 @@ resource "authentik_application" "vaultwarden" {
   protocol_provider = authentik_provider_oauth2.vaultwarden.id
   open_in_new_tab   = true
   meta_icon         = "fa://fa-solid fa-key"
+  # 凍結中 (2026-07-11): ランチャーから非表示。Provider/Policyは削除しない (再開時はfalseに戻す)
+  meta_hide = true
 }
 
 # ────────────────────────────────────────────────────────────

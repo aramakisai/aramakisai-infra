@@ -1,6 +1,8 @@
 ---
 # Vaultwarden 用 PostgreSQL クラスター (CloudNativePG)
 # CNPG operator (wave: -1) が先にインストールされている前提
+#
+# 凍結中 (2026-07-11): instances: 0。PVC/バックアップは削除しない (再開手順は deployment.yaml 参照)
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
@@ -9,7 +11,7 @@ metadata:
   annotations:
     cnpg.io/skipEmptyWalArchiveCheck: enabled
 spec:
-  instances: 1
+  instances: 0
   imageName: ghcr.io/cloudnative-pg/postgresql:16.8
 
   postgresql:

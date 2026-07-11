@@ -3,6 +3,8 @@
 # --mode=serve で sync.py を起動し、Authentikのログイン/グループ変更イベントから
 # POST /trigger (Bearer認証) を受け取りSyncOrchestratorを非同期起動する常駐Deployment。
 # cronjob.yaml と同一の script-configmap.yaml (sync.py) をマウントし、command の --mode 引数のみが異なる。
+#
+# 凍結中 (2026-07-11): replicas: 0。Vaultwarden本体が停止中のためtrigger受信不要
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -11,7 +13,7 @@ metadata:
   labels:
     app: vaultwarden-rbac-sync
 spec:
-  replicas: 1
+  replicas: 0
   selector:
     matchLabels:
       app: vaultwarden-rbac-sync
