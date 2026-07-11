@@ -2,12 +2,14 @@
 # Vaultwarden DB 日次フルバックアップ (毎日 02:00 UTC)
 # WAL archiving は継続的に行われるため、フルバックアップ間の変更も
 # WAL再生によりPITR可能 (retentionPolicy: 14d で2世代分のフルバックアップを保持)
+# 凍結中 (2026-07-11): suspend: true。DB instances: 0 のためバックアップ対象ポッドが存在しない
 apiVersion: postgresql.cnpg.io/v1
 kind: ScheduledBackup
 metadata:
   name: vaultwarden-db-daily
   namespace: prod
 spec:
+  suspend: true
   schedule: "0 2 * * *"
   backupOwnerReference: self
   cluster:

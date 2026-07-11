@@ -11,6 +11,10 @@
 #
 # DB: PostgreSQL (CloudNativePG Cluster: vaultwarden-db)
 # Storage: PVC (vaultwarden-data) for attachments / sends / icon_cache
+#
+# 凍結中 (2026-07-11): replicas: 0。DB/PVC/バックアップはデータ保持のため削除しない。
+# 再開手順: replicas を 1 に戻す → db-cluster.yaml の instances も 1 に戻す →
+# scheduled-backup.yaml / vaultwarden-rbac-sync の suspend/replicas も元に戻す
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -21,7 +25,7 @@ metadata:
   annotations:
     secret.reloader.stakater.com/reload: "vaultwarden-secrets"
 spec:
-  replicas: 1
+  replicas: 0
   selector:
     matchLabels:
       app: vaultwarden
