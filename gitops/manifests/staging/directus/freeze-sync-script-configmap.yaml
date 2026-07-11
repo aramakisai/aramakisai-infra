@@ -1,0 +1,153 @@
+---
+# Directus staging の自動スケールダウンを制御する Python スクリプト。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: directus-staging-freeze-sync-script
+  namespace: staging
+data:
+  sync.py: |
+    #!/usr/bin/env python3
+    """Directus staging自動凍結・同期スクリプト。
+
+    アクティブな directus-schema-* PRがない間、Directus staging の directus Deploymentを
+    replicas=0 に自動スケールダウンする。DBは常時起動を維持する。
+    """
+    import base64
+    import json
+    import os
+    import subprocess
+    import sys
+    from datetime import datetime, timezone
+    from urllib.error import HTTPError, URLError
+    from urllib.request import Request, urlopen
+
+    def _der_parse_tlv(data: bytes, pos: int) -> tuple[int, bytes, int]:
+        """DER TLV (tag, value, next_pos) を返す。"""
+        tag = data[pos]; pos += 1
+        length = data[pos]; pos += 1
+        if length & 0x80:
+            n = length & 0x7f
+            length = int.from_bytes(data[pos:pos + n], "big")
+            pos += n
+        return tag, data[pos:pos + length], pos + length
+
+    def _parse_rsa_private_key_der(der: bytes) -> tuple[int, int]:
+        """PKCS1 RSAPrivateKey DER から RSA (n, d) を取り出す。"""
+        _, seq, _ = _der_parse_tlv(der, 0)            # SEQUENCE
+        _, _version, pos = _der_parse_tlv(seq, 0)      # version INTEGER
+        _, n_bytes, pos = _der_parse_tlv(seq, pos)     # modulus INTEGER
+        _, _e_bytes, pos = _der_parse_tlv(seq, pos)    # publicExponent INTEGER
+        _, d_bytes, pos = _der_parse_tlv(seq, pos)     # privateExponent INTEGER
+        return (int.from_bytes(n_bytes.lstrip(b"\x00"), "big"),
+                int.from_bytes(d_bytes.lstrip(b"\x00"), "big"))
+
+    def _pkcs1_v1_5_sign(message: bytes, n: int, d: int) -> bytes:
+        """SHA-256 + PKCS#1 v1.5 で署名する (RFC 8017 §9.2)。"""
+        import hashlib
+        digest = hashlib.sha256(message).digest()
+        # SHA-256 ASN.1 prefix (DigestInfo)
+        prefix = bytes.fromhex("3031300d060960864801650304020105000420")
+        t = prefix + digest
+        k = (n.bit_length() + 7) // 8
+        if k < len(t) + 11:
+            raise ValueError("メッセージが長すぎます")
+        ps = b"\xff" * (k - len(t) - 3)
+        em = b"\x00\x01" + ps + b"\x00" + t
+        m_int = int.from_bytes(em, "big")
+        s_int = pow(m_int, d, n)
+        return s_int.to_bytes(k, "big")
+
+    def _b64url(data: bytes) -> str:
+        """Base64URLエンコード (パディングなし)。"""
+        return base64.urlsafe_b64encode(data).decode('ascii').rstrip('=')
+
+    def generate_github_jwt(app_id: str, private_key_pem: str) -> str:
+        """GitHub App 認証用の JWT (RS256) を生成する。"""
+        pem_lines = [line for line in private_key_pem.strip().split("\n")
+                     if line and not line.startswith("-----")]
+        der = base64.b64decode("".join(pem_lines))
+        n, d = _parse_rsa_private_key_der(der)
+
+        header = {"alg": "RS256", "typ": "JWT"}
+        now = int(datetime.now(timezone.utc).timestamp())
+        payload = {"iat": now - 60, "exp": now + 540, "iss": app_id}
+
+        signing_input = f"{_b64url(json.dumps(header, separators=(',', ':')).encode())}.{_b64url(json.dumps(payload, separators=(',', ':')).encode())}"
+        signature = _pkcs1_v1_5_sign(signing_input.encode(), n, d)
+
+        return f"{signing_input}.{_b64url(signature)}"
+
+    def get_installation_token(jwt_token: str, installation_id: str) -> str:
+        """GitHub App の Installation Access Token を取得する。"""
+        url = f"https://api.github.com/app/installations/{installation_id}/access_tokens"
+        req = Request(url, method="POST", headers={
+            "Authorization": f"Bearer {jwt_token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        })
+        try:
+            with urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read())
+                return data["token"]
+        except HTTPError as exc:
+            raise RuntimeError(f"Installation Access Token の取得に失敗しました: HTTP {exc.code}") from exc
+
+    def count_schema_prs(install_token: str) -> int:
+        """directus-schema- プレフィックスの付いた Open PR 数をカウントする。"""
+        url = "https://api.github.com/repos/aramakisai/aramakisai-infra/pulls?state=open&per_page=100"
+        req = Request(url, headers={
+            "Authorization": f"Bearer {install_token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        })
+        try:
+            with urlopen(req, timeout=10) as resp:
+                prs = json.loads(resp.read())
+        except HTTPError as exc:
+            raise RuntimeError(f"PR一覧の取得に失敗しました: HTTP {exc.code}") from exc
+
+        count = sum(1 for pr in prs if pr.get("head", {}).get("ref", "").startswith("directus-schema-"))
+        return count
+
+    def get_current_replicas() -> int:
+        """現在の Deployment replicas を取得する。"""
+        cmd = ["kubectl", "get", "deployment", "directus", "-n", "staging", "-o", "jsonpath={.spec.replicas}"]
+        res = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        return int(res.stdout.strip() or "0")
+
+    def scale_replicas(desired: int):
+        """Deployment の replicas を変更する。"""
+        cmd = ["kubectl", "scale", "deployment/directus", "-n", "staging", f"--replicas={desired}"]
+        subprocess.run(cmd, check=True)
+
+    def main():
+        app_id = os.environ.get("GITHUB_APP_ID")
+        installation_id = os.environ.get("GITHUB_APP_INSTALLATION_ID")
+        private_key = os.environ.get("GITHUB_APP_PRIVATE_KEY")
+
+        if not all([app_id, installation_id, private_key]):
+            print("必須環境変数が設定されていません (GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID, GITHUB_APP_PRIVATE_KEY)", file=sys.stderr)
+            sys.exit(1)
+
+        print("GitHub App 認証を実行中...")
+        jwt_token = generate_github_jwt(app_id, private_key)
+        install_token = get_installation_token(jwt_token, installation_id)
+
+        print("PRをチェック中...")
+        pr_count = count_schema_prs(install_token)
+        print(f"対象のPR数 (directus-schema-*): {pr_count}")
+
+        current_replicas = get_current_replicas()
+        print(f"現在のreplicas: {current_replicas}")
+
+        desired_replicas = 1 if pr_count > 0 else 0
+        if current_replicas != desired_replicas:
+            print(f"replicasを {desired_replicas} にスケールします")
+            scale_replicas(desired_replicas)
+            print("スケール完了")
+        else:
+            print("スケールの必要はありません")
+
+    if __name__ == "__main__":
+        main()
