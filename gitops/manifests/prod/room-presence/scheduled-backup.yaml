@@ -1,11 +1,13 @@
 ---
 # Room Presence DB 日次フルバックアップ (毎日 03:00 UTC)
+# 凍結中 (2026-07-12): suspend: true。DB がhibernation中でバックアップ対象ポッドが存在しない
 apiVersion: postgresql.cnpg.io/v1
 kind: ScheduledBackup
 metadata:
   name: presence-db-daily
   namespace: prod
 spec:
+  suspend: true
   schedule: "0 3 * * *"
   backupOwnerReference: self
   cluster:
