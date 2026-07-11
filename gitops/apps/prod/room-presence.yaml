@@ -9,6 +9,12 @@
 #  migrate Job が走り永久に失敗するため)
 # 本番固有の値 (イメージリポジトリ・Authentik 接続情報など) は helm.valuesObject で上書きする
 # (room-presence-tracker repo の values.yaml はテンプレートのプレースホルダーのまま保つ方針)
+#
+# 凍結中 (2026-07-12): replicaCount: 0, migration.enabled: false。
+# DB (room-presence-db) は hibernation で凍結済みのため、PreSync hookの
+# migrate Jobを有効のままにするとDB接続不可で失敗し続ける。
+# 再開手順: replicaCount を 1 に戻す → migration.enabled を true に戻す →
+# room-presence-db (db-cluster.yaml / scheduled-backup.yaml) の凍結解除
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -26,11 +32,14 @@ spec:
     path: helm/room-presence
     helm:
       valuesObject:
+        replicaCount: 0
         image:
           repository: ghcr.io/aramakisai/room-presence-tracker
         migrate:
           image:
             repository: ghcr.io/aramakisai/room-presence-tracker-migrate
+        migration:
+          enabled: false
         # chart既定512Miは実使用量(約63Mi)に対し過大。ノードのオーバーコミット解消のため削減。
         resources:
           requests:

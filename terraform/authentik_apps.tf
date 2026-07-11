@@ -308,6 +308,8 @@ resource "authentik_application" "room_presence" {
   protocol_provider = authentik_provider_oauth2.room_presence.id
   open_in_new_tab   = true
   meta_icon         = "fa://fa-solid fa-door-open"
+  # 凍結中 (2026-07-12): ランチャーから非表示。Provider/Policyは削除しない (再開時はfalseに戻す)
+  meta_hide = true
 }
 
 # ────────────────────────────────────────────────────────────
