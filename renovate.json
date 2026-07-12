@@ -11,7 +11,7 @@
     "ansible/inventory/**"
   ],
   "terraform": {
-    "fileMatch": [
+    "managerFilePatterns": [
       "terraform/**/*.tf"
     ]
   },
@@ -19,7 +19,7 @@
     "enabled": true
   },
   "kubernetes": {
-    "fileMatch": [
+    "managerFilePatterns": [
       "gitops/manifests/**/*.yaml"
     ]
   }
