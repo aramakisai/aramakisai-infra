@@ -94,19 +94,20 @@ graph TB
 ```
 gitops/
 ├── apps/prod/
-│   └── wikijs.yaml                        # ArgoCD Application (App本体+authストラテジーJob)
-│   └── wikijs-db.yaml                     # ArgoCD Application (CNPG Cluster, sync-wave: -1)
+│   └── wikijs.yaml                        # ArgoCD Application (App本体+authストラテジーJob), path: manifests/prod/wikijs
+│   └── wikijs-db.yaml                     # ArgoCD Application (CNPG Cluster, sync-wave: -1), path: manifests/prod/wikijs-db
+├── manifests/prod/wikijs-db/
+│   ├── db-cluster.yaml                    # CNPG Cluster (wikijs-db)
+│   ├── scheduled-backup.yaml              # 秒付き6フィールドcron
+│   └── external-secret.yaml               # wikijs-db-credentials (CNPG username/password、bootstrap.initdb.secretが参照)
 ├── manifests/prod/wikijs/
-│   ├── namespace.yaml                     # prod namespace利用のため不要(既存prod namespace流用)
 │   ├── deployment.yaml                    # Wiki.js Deployment + Service
 │   ├── pvc.yaml                           # local-path PVC (アップロードファイル用)
-│   ├── external-secret.yaml               # DB password / OIDC client secret / DISCORD_OPS_WEBHOOK_URL
+│   ├── external-secret.yaml               # wikijs-secrets: DB password(参照用) / OIDC client secret / DISCORD_OPS_WEBHOOK_URL
 │   ├── auth-strategy-configmap.yaml       # SQL UPSERTテンプレート
 │   ├── auth-strategy-job.yaml             # PostSync hook Job wave 0 (ttlSecondsAfterFinished設定)
 │   ├── auth-strategy-restart-job.yaml     # PostSync hook Job wave 1 (kubectl rollout restart)
-│   ├── auth-strategy-restart-rbac.yaml    # restart Job専用ServiceAccount/Role (Deployment get/patch限定)
-│   ├── db-cluster.yaml                    # CNPG Cluster (wikijs-db)
-│   └── scheduled-backup.yaml              # 秒付き6フィールドcron
+│   └── auth-strategy-restart-rbac.yaml    # restart Job専用ServiceAccount/Role (Deployment get/patch限定)
 terraform/
 ├── authentik_apps.tf                      # 既存ファイルにwikijs用Provider/Application追記
 ├── tunnel.tf                              # 既存ファイルにwiki.aramakisai.com用ingress_rule追記
@@ -114,6 +115,9 @@ terraform/
 ```
 
 > Ingressリソース(`ingress.yaml`)はこのリポジトリのパターンに存在しない。外部公開はk8s層ではなくTerraform層(`tunnel.tf`/`dns.tf`)が担当する。
+
+> **設計修正(2026-07-13)**: 当初案は全マニフェストを単一の`manifests/prod/wikijs/`ディレクトリへ配置する想定だったが、ArgoCD Applicationの`spec.source.path`はディレクトリ単位でしか指定できず、2つのApplication(`wikijs-db`/`wikijs`)が同一ディレクトリを指すと管理が競合する。`room-presence-db`(`gitops/manifests/prod/room-presence`を`room-presence-db`単独で参照、アプリ本体は別途Helm chart経由)の実例に倣い、DB関連マニフェストを`manifests/prod/wikijs-db/`へ分離する。<br>
+> また新規CNPGクラスタのため`bootstrap.initdb`を使用する(既存の`bootstrap.recovery`はバックアップ蓄積後のみ有効、Data Models節参照)。`bootstrap.initdb.secret.name`は`wikijs-db-credentials`(`wikijs-db`ディレクトリ内`external-secret.yaml`が生成、`username`/`password`キーをtemplateで構成、`directus-db-credentials`と同一パターン)を参照する。同じ`WIKIJS_DB_PASSWORD`をWiki.js Deployment側`wikijs-secrets`(`wikijs`ディレクトリ)からも参照し、2箇所のExternalSecretが同一Infisicalキーを同期する(directusと同じ二重同期パターン)。
 
 > `wikijs-db`(CNPG Cluster)は既存パターンに倣い sync-wave: "-1" の別Applicationとして分離し、アプリ本体(`wikijs`, sync-wave: "0")より先にreadyになるようにする(room-presence-db等と同じ構成)。
 
@@ -219,8 +223,8 @@ sequenceDiagram
 
 **Responsibilities & Constraints**
 - `instances: 1`(シングルノード運用に合わせる、既存クラスタと同一)
-- `bootstrap.recovery`方式でDR方針に統一
-- Hetzner Object Storageへの`barmanObjectStore`バックアップ、`retentionPolicy`必須設定
+- 新規作成のため`bootstrap.initdb`を使用する(バックアップ未蓄積の新規クラスタで`bootstrap.recovery`を指定すると復元元が存在せず起動不能。`.kiro/steering/dr.md`記載のDirectusの前例——移行初期`initdb`起動→WAL蓄積後`bootstrap.recovery`へ移行——に倣う。requirements.md 2.2を2026-07-13に修正済み)
+- Hetzner Object Storageへの`barmanObjectStore`バックアップ(`backup`ブロック)は初回から設定し、`retentionPolicy`必須設定。バックアップ蓄積後は`bootstrap.recovery`+`externalClusters`自己参照パターン(directus-db同様)へ切り替え可能
 
 **Dependencies**
 - Inbound: Wiki.js Deployment — DB接続 (P0)
@@ -235,7 +239,7 @@ sequenceDiagram
 - Concurrency strategy: 単一インスタンスのためレプリケーション制御は不要
 
 **Implementation Notes**
-- Integration: `gitops/manifests/prod/directus/db-cluster.yaml`をテンプレートとして流用
+- Integration: `gitops/manifests/prod/directus/db-cluster.yaml`をテンプレートとして流用するが、`bootstrap`ブロックのみ`initdb`に変更する(directus-dbは既にWAL蓄積済みで`bootstrap.recovery`だが、wikijs-dbは新規のため`externalClusters`自己参照は組まない。`backup`ブロックはそのまま流用)
 - Integration: `WIKIJS_DB_PASSWORD`のInfisicalへの初期投入時は`openssl rand -base64 32`(このリポジトリの`secrets.tfvars.example`の`cf_tunnel_secret`と同じ慣行)で生成し、辞書的に推測可能な値・使い回しを避ける(要件4.5)
 - Validation: デプロイ後`ScheduledBackup.status.nextScheduleTime`が意図した間隔(daily/weekly)になっているか確認(本セッション中に発見したhourly誤発火バグの再発防止チェック)
 - Risks: バックアップ処理時のメモリスパイクでOOMが発生する可能性(directus-dbの前例)。初期requests/limitsは directus-db と同水準(request 256Mi/limit 512Mi)から開始し、実測に応じて調整する
@@ -268,7 +272,7 @@ sequenceDiagram
 
 ##### Batch / Job Contract
 - Trigger: ArgoCD PostSync hook, sync-wave "0"(Directus `schema-apply-job.yaml`と同一パターン)
-- Input / validation: 環境変数`WIKIJS_OIDC_CLIENT_ID`/`WIKIJS_OIDC_CLIENT_SECRET`/`DISCORD_OPS_WEBHOOK_URL`(ExternalSecret経由)。SQLはpsqlの`-v`変数バインドでインジェクションを防止する。実行前に`information_schema.columns`でスキーマガードを通過する必要がある
+- Input / validation: 環境変数`WIKIJS_OIDC_CLIENT_SECRET`/`DISCORD_OPS_WEBHOOK_URL`(ExternalSecret経由、Infisical)。`WIKIJS_OIDC_CLIENT_ID`は非機密(公開情報)のため、requirements.md 4.3のInfisical登録対象に含めず、Job/ConfigMap内に平文リテラル`"wikijs"`として直接設定する(Terraform`authentik_provider_oauth2`リソースの`client_id`と同一値、2026-07-13修正——design.md初版でExternalSecret経由としていたのは誤りで、対応するInfisicalキー登録がrequirements.mdに存在しない不整合だった)。SQLはpsqlの`-v`変数バインドでインジェクションを防止する。実行前に`information_schema.columns`でスキーマガードを通過する必要がある
 - Output / destination: `authentication`テーブルの`authentik-oidc`キー行、`groups`テーブルの"管理者"/"リーダー"行(存在しない場合のみ作成)。スキーマ不一致時はDiscord Ops Webhookへの通知のみでDB書き込みは行わない
 - Idempotency & recovery: `authentication`は`ON CONFLICT (key) DO UPDATE`、`groups`はINSERT-if-absentにより、いずれも再実行しても同一状態に収束(既存groups行は不変)。`backoffLimit`を設定し、失敗時(スキーマ不一致含む)はHookSucceededを返さないため後続wave 1の`auth-strategy-restart-job`は起動されない(=既存Podは変更されず稼働継続、安全側に倒れる)
 

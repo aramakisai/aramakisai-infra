@@ -27,8 +27,8 @@ Wiki.jsをknowledge base / wikiとして導入する。CNPG Postgresクラスタ
 **Objective:** As an インフラ担当者, I want Wiki.js専用のCNPG Postgresクラスタを既存クラスタ(authentik-db/directus-db等)と同じパターンで新設する, so that DBの障害分離とバックアップ運用が既存の仕組みに統一される
 
 #### Acceptance Criteria
-1. The CNPG Cluster リソース shall `gitops/manifests/prod/wikijs/db-cluster.yaml` に定義され、`instances: 1`(シングルノード運用に合わせる)とする。
-2. The CNPG Cluster リソース shall `bootstrap.recovery` を用いたDR方式に統一する(既存クラスタとの一貫性維持)。
+1. The CNPG Cluster リソース shall `gitops/manifests/prod/wikijs-db/db-cluster.yaml` に定義され、`instances: 1`(シングルノード運用に合わせる)とする。ArgoCD Application分離(2026-07-13 design.md修正、room-presence-db実例に倣う)のためアプリ本体とは別ディレクトリとする。
+2. The CNPG Cluster リソース shall 新規作成時は `bootstrap.initdb` を使用する(バックアップが存在しない新規クラスタで `bootstrap.recovery` を指定すると復元元が存在せず起動不能になるため、`.kiro/steering/dr.md`記載のDirectusの前例——移行初期は`initdb`起動、WALバックアップ蓄積後に`bootstrap.recovery`へ移行——に倣う)。`backup.barmanObjectStore`は初回から設定し、バックアップ蓄積後に`bootstrap.recovery`へ切り替え可能な状態にする。
 3. The CNPG Cluster リソース shall Hetzner Object Storage 上の専用パス(`s3://aramakisai-backups/cnpg/wikijs-db`)へバックアップする `barmanObjectStore` 設定を持つ。
 4. The CNPG Cluster リソース shall `retentionPolicy` を明示的に設定する。
 5. The ScheduledBackup リソース shall `schedule` フィールドに秒付き6フィールドcron形式(例: `0 0 2 * * *`)を使用する。

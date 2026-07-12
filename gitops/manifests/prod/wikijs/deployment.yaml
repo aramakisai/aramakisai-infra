@@ -1,0 +1,54 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wikijs
+  namespace: prod
+  labels:
+    app: wikijs
+spec:
+  replicas: 1
+  revisionHistoryLimit: 2
+  selector:
+    matchLabels:
+      app: wikijs
+  template:
+    metadata:
+      labels:
+        app: wikijs
+    spec:
+      containers:
+        - name: wikijs
+          image: requarks/wiki:2
+          ports:
+            - containerPort: 3000
+          env:
+            - name: DB_TYPE
+              value: postgres
+            - name: DB_HOST
+              value: wikijs-db-rw.prod.svc.cluster.local
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_USER
+              value: wikijs
+            - name: DB_NAME
+              value: wikijs
+            - name: DB_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: wikijs-secrets
+                  key: DB_PASS
+          resources:
+            requests:
+              memory: "192Mi"
+              cpu: "100m"
+            limits:
+              memory: "384Mi"
+              cpu: "500m"
+          volumeMounts:
+            - name: wikijs-volume
+              mountPath: /wiki/data/content
+      volumes:
+        - name: wikijs-volume
+          persistentVolumeClaim:
+            claimName: wikijs-uploads

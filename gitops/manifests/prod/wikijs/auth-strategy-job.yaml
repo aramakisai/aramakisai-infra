@@ -1,0 +1,65 @@
+---
+# Wiki.js 認証ストラテジー適用 PostSync Job (prod)
+# ArgoCD PostSync hook として実行され、gitops/manifests/prod/wikijs/auth-strategy-configmap.yaml
+# から ConfigMap を読み取り、Authentik OIDC 認証ストラテジーとデフォルトグループを
+# 宣言的に UPSERT します。schema-drift guard により authentication テーブルの
+# スキーマが期待値と異なる場合は中断し、Discordに通知します。
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: wikijs-auth-strategy
+  namespace: prod
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: HookSucceeded
+spec:
+  ttlSecondsAfterFinished: 3600
+  backoffLimit: 1
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: auth-strategy
+          image: postgres:16-alpine
+          command: [sh, -c]
+          args:
+            - |
+              set -euo pipefail
+
+              echo "[1/3] Checking authentication table schema..."
+              ACTUAL_COLUMNS=$(PGPASSWORD="$DB_PASS" psql -h wikijs-db-rw.prod.svc.cluster.local -p 5432 -U wikijs -d wikijs -tAc "$(cat /sql/schema-guard-query.sql)" | tr -d '[:space:]')
+              EXPECTED_COLUMNS=$(cat /sql/expected-columns.txt | tr -d '[:space:]')
+
+              if [ "$ACTUAL_COLUMNS" != "$EXPECTED_COLUMNS" ]; then
+                echo "Schema mismatch detected."
+                echo "  expected: $EXPECTED_COLUMNS"
+                echo "  actual:   $ACTUAL_COLUMNS"
+                apk add --no-cache curl >/dev/null 2>&1
+                PAYLOAD=$(printf '{"content":"⚠️ wikijs auth-strategy Job: authenticationテーブルのスキーマ不一致を検知したためUPSERTをスキップしました。\n expected: %s\n actual: %s"}' "$EXPECTED_COLUMNS" "$ACTUAL_COLUMNS")
+                curl -fsS -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "$DISCORD_OPS_WEBHOOK_URL"
+                echo "Aborting: schema does not match expected shape, UPSERT skipped."
+                exit 1
+              fi
+
+              echo "[2/3] Schema OK. Applying UPSERT..."
+              PGPASSWORD="$DB_PASS" psql -h wikijs-db-rw.prod.svc.cluster.local -p 5432 -U wikijs -d wikijs -v ON_ERROR_STOP=1 -v oidc_client_secret="$WIKIJS_OIDC_CLIENT_SECRET" -f /sql/upsert.sql
+
+              echo "[3/3] Done."
+          envFrom:
+            - secretRef:
+                name: wikijs-secrets
+          volumeMounts:
+            - name: wikijs-auth-strategy
+              mountPath: /sql
+              readOnly: true
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+      volumes:
+        - name: wikijs-auth-strategy
+          configMap:
+            name: wikijs-auth-strategy

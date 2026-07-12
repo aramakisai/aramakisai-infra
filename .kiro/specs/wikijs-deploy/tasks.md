@@ -1,28 +1,28 @@
 # Implementation Plan
 
-- [ ] 1. Wiki.js用シークレットをInfisicalへ事前登録する
+- [x] 1. Wiki.js用シークレットをInfisicalへ事前登録する
   - DB接続パスワードとAuthentik OIDCクライアントシークレットを`openssl rand -base64 32`等の暗号論的に安全な方法でそれぞれ生成する
   - 生成した値をInfisicalの`WIKIJS_DB_PASSWORD`/`WIKIJS_OIDC_CLIENT_SECRET`として登録する(値を辞書的に推測可能なものにしない、既存パスワードを使い回さない)
   - Discord Ops Webhook通知用の既存キーが利用可能であること(新規登録不要)を確認する
   - 両キーがInfisicalから取得できることを確認する(取得コマンドの出力は値を画面に表示しない形で実行する)
   - _Requirements: 4.3, 4.5_
 
-- [ ] 2. Wiki.js関連シークレットをKubernetesへ注入する仕組みを構築する
+- [x] 2. Wiki.js関連シークレットをKubernetesへ注入する仕組みを構築する
   - DBパスワード・OIDCクライアントシークレット・Discord Webhook URLの3種をInfisicalからKubernetes Secretへ同期するExternalSecretを定義する
   - 既存サービスと同じClusterSecretStore・リフレッシュ間隔のパターンに従う
   - デプロイ後、対応するKubernetes Secretが生成され3キー全てが含まれることを確認できる状態にする
   - _Requirements: 4.1, 4.2, 4.4_
   - _Depends: 1_
 
-- [ ] 3. 外部公開経路とAuthentik OIDC定義をTerraformで構成する
-- [ ] 3.1 (P) wiki.aramakisai.comへの外部アクセス経路をCloudflare Tunnel経由で構成する
+- [x] 3. 外部公開経路とAuthentik OIDC定義をTerraformで構成する
+- [x] 3.1 (P) wiki.aramakisai.comへの外部アクセス経路をCloudflare Tunnel経由で構成する
   - 既存の他サービスと同じingress_rule追加パターンでWiki.js Serviceへの直接ルーティングを定義する
   - 対応するDNS CNAMEレコードをトンネル向けに追加する
   - `terraform plan`で意図した差分のみが検出される状態にする
   - _Requirements: 5.1, 5.2_
   - _Boundary: Cloudflare Tunnel設定 (Terraform)_
 
-- [ ] 3.2 (P) AuthentikにWiki.js用のOIDC Provider/Applicationを登録する
+- [x] 3.2 (P) AuthentikにWiki.js用のOIDC Provider/Applicationを登録する
   - 既存パターンに準拠した新規Provider/Applicationリソースを定義し、Infisicalに登録済みのクライアントシークレットを入力として使用する
   - 既存の共有groupsスコープマッピング(Authentikグループ名をそのままgroupsクレームへ出力するリソース)をこのProviderに含める(新規カスタムマッピングは作らない)
   - `terraform plan`で意図した差分のみが検出される状態にする
@@ -30,8 +30,8 @@
   - _Boundary: Authentik Terraformリソース_
   - _Depends: 1_
 
-- [ ] 4. Wiki.js専用のCNPG Postgresクラスタを構築する
-- [ ] 4.1 専用データベースクラスタを定義する
+- [x] 4. Wiki.js専用のCNPG Postgresクラスタを構築する
+- [x] 4.1 専用データベースクラスタを定義する
   - 単一インスタンス構成、リカバリベースのDR方式(bootstrap.recovery)、専用オブジェクトストレージパスへのバックアップ設定、明示的な保持ポリシーを持つCNPG Clusterを定義する
   - バックアップ処理時のメモリスパイクでOOMが発生した場合の対応方針をコメントとして残す
   - クラスタリソースがReadyになる状態を作る
@@ -39,27 +39,27 @@
   - _Boundary: wikijs-db Cluster_
   - _Depends: 2_
 
-- [ ] 4.2 日次バックアップスケジュールを構成する
+- [x] 4.2 日次バックアップスケジュールを構成する
   - 秒付き6フィールドcron形式でスケジュールを定義する(5フィールド形式による誤発火を避ける)
   - スケジュールの次回実行予定が意図した間隔になっている状態にする
   - _Requirements: 2.5_
   - _Boundary: wikijs-db Cluster_
   - _Depends: 4.1_
 
-- [ ] 4.3 データベースクラスタをアプリ本体より先に同期させる
+- [x] 4.3 データベースクラスタをアプリ本体より先に同期させる
   - 専用のArgoCD Applicationとして分離し、アプリ本体より優先して同期されるsync-wave設定を行う
   - ArgoCD上でこのApplicationが独立してSynced/Healthyになる状態にする
   - _Requirements: 2.1_
   - _Depends: 4.2_
 
-- [ ] 5. Wiki.js本体を稼働させる
-- [ ] 5.1 アップロードファイル用の永続ストレージを準備する
+- [x] 5. Wiki.js本体を稼働させる
+- [x] 5.1 アップロードファイル用の永続ストレージを準備する
   - 既存サービスと同じStorageClassのPersistentVolumeClaimを定義する
   - PVCがBound状態になる状態にする
   - _Requirements: 1.2_
   - _Boundary: Wiki.js Deployment_
 
-- [ ] 5.2 Wiki.js本体をデプロイする
+- [x] 5.2 Wiki.js本体をデプロイする
   - 固定バージョンタグのイメージを1レプリカで稼働させ、DB接続情報を環境変数経由で受け取る構成にする
   - 実測プロセスメモリを踏まえた明示的なCPU/メモリのrequests・limitsを設定する
   - 着手前に実装対象コンポーネント(DB接続環境変数・config.yml挙動の前提)について公式ドキュメント/ソースコードで前提を再確認し、差異があれば設計を更新してから実装する
@@ -68,8 +68,8 @@
   - _Boundary: Wiki.js Deployment_
   - _Depends: 2, 4.1, 5.1_
 
-- [ ] 6. Authentik OIDCストラテジーの宣言的反映を構築する
-- [ ] 6.1 認証ストラテジーとグループ権限をデータベースへ書き込むロジックを定義する
+- [x] 6. Authentik OIDCストラテジーの宣言的反映を構築する
+- [x] 6.1 認証ストラテジーとグループ権限をデータベースへ書き込むロジックを定義する
   - `authentication`テーブルへの`ON CONFLICT (key) DO UPDATE`によるUPSERTロジックを定義し、OIDC設定一式(client情報・エンドポイント・グループマッピング有効化設定含む)を書き込む
   - `domainWhitelist`/`autoEnrollGroups`を期待される形式でラップする
   - 既存の`local`認証ストラテジー行には触れない
@@ -79,7 +79,7 @@
   - _Boundary: auth-strategy ConfigMap/Job_
   - _Depends: 2_
 
-- [ ] 6.2 認証ストラテジー反映ジョブを安全に実行する
+- [x] 6.2 認証ストラテジー反映ジョブを安全に実行する
   - Infisical経由のシークレットを環境変数として受け取り、UPSERT実行前にデータベースのスキーマ構成が想定と一致するか検証する仕組みを組み込む
   - スキーマ不一致を検知した場合はUPSERTを実行せずDiscord通知の上で失敗終了させる
   - 完了後に自動クリーンアップされる設定を行う
@@ -89,7 +89,7 @@
   - _Boundary: auth-strategy ConfigMap/Job_
   - _Depends: 6.1_
 
-- [ ] 6.3 (P) 認証設定・グループ権限反映のためWiki.jsを自動再起動する仕組みを構築する
+- [x] 6.3 (P) 認証設定・グループ権限反映のためWiki.jsを自動再起動する仕組みを構築する
   - 認証ストラテジー・グループ権限反映ジョブの成功のみをトリガーとしてWiki.js本体を再起動する専用ジョブと、それに必要な最小権限のアクセス制御を定義する
   - 反映ジョブが失敗した場合はこの再起動が実行されない状態にする
   - 再起動トリガー後にWiki.js Podが入れ替わる状態にする
@@ -97,18 +97,18 @@
   - _Boundary: auth-strategy-restart Job/RBAC_
   - _Depends: 5.2_
 
-- [ ] 7. Wiki.js一式をArgoCDのデプロイ対象として登録する
+- [x] 7. Wiki.js一式をArgoCDのデプロイ対象として登録する
   - アプリ本体・認証設定ジョブ群を含むApplicationを定義し、データベースクラスタより後に同期される設定にする
   - ArgoCD上でこのApplicationがSynced/Healthyになる状態にする
   - _Requirements: 1.1_
   - _Depends: 4.3, 5.2, 6.2, 6.3_
 
-- [ ] 8. 導入内容をプロジェクトドキュメントへ反映する
-- [ ] 8.1 (P) デプロイされるサービス一覧にWiki.jsを追加する
+- [x] 8. 導入内容をプロジェクトドキュメントへ反映する
+- [x] 8.1 (P) デプロイされるサービス一覧にWiki.jsを追加する
   - サービス一覧ドキュメントにWiki.jsのエントリを追加する
   - _Requirements: 7.1_
 
-- [ ] 8.2 (P) シークレット一覧ドキュメントを更新する
+- [x] 8.2 (P) シークレット一覧ドキュメントを更新する
   - 新規追加したInfisicalシークレットキーをシークレット一覧ドキュメントに追記する(値は含めない)
   - _Requirements: 7.2_
 

@@ -66,6 +66,7 @@ Terraform でクラウドリソースを定義し、Ansible で K3s クラスタ
 | [ESO](https://external-secrets.io) | `external-secrets` | Kubernetes ↔ Infisical シークレット同期 |
 | [CloudNativePG](https://cloudnative-pg.io) | `cnpg-system` | PostgreSQL Operator |
 | [Vaultwarden](https://github.com/dani-garcia/vaultwarden) | `prod` | パスワードマネージャー (SSO対応) |
+| [Wiki.js](https://js.wiki) | `prod` | 委員会向けナレッジベース/Wiki(Authentik OIDC SSO統合) |
 
 ---
 

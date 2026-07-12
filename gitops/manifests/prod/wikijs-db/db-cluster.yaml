@@ -1,0 +1,65 @@
+---
+# Wiki.js 用 PostgreSQL クラスター (CloudNativePG)
+# 新規クラスタのためバックアップが1つも存在しない。bootstrap.recovery(directus-db等)は
+# 復元元backupが必要なため使えず、bootstrap.initdbで起動する。backupブロックは初回から
+# 設定しWALバックアップを蓄積開始する(.kiro/steering/dr.md記載のDirectusの前例に倣う、
+# 移行初期initdb起動→WAL蓄積後にbootstrap.recoveryへ移行、と同じ経路)。
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: wikijs-db
+  namespace: prod
+  annotations:
+    cnpg.io/skipEmptyWalArchiveCheck: enabled
+spec:
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:16.8
+
+  postgresql:
+    parameters:
+      max_connections: "50"
+      shared_buffers: "32MB"
+      effective_cache_size: "64MB"
+      work_mem: "4MB"
+      wal_compression: "on"
+
+  bootstrap:
+    initdb:
+      database: wikijs
+      owner: wikijs
+      secret:
+        name: wikijs-db-credentials
+
+  backup:
+    barmanObjectStore:
+      destinationPath: "s3://aramakisai-backups/cnpg/wikijs-db"
+      endpointURL: "https://fsn1.your-objectstorage.com"
+      serverName: wikijs-db
+      s3Credentials:
+        accessKeyId:
+          name: hetzner-os-credentials
+          key: ACCESS_KEY_ID
+        secretAccessKey:
+          name: hetzner-os-credentials
+          key: SECRET_ACCESS_KEY
+        region:
+          name: hetzner-os-credentials
+          key: REGION
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+    retentionPolicy: "7d"
+
+  storage:
+    size: 2Gi   # アップロードファイルはPVC側、DBはコンテンツ+設定のみのためroom-presence-db(5Gi)より軽量
+
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "250m"
+    limits:
+      # バックアップ処理時のメモリスパイクでOOMが発生した場合はdirectus-db/room-presence-dbの
+      # 前例(2026-06-19)に倣いlimit引き上げで対応する
+      memory: "512Mi"
+      cpu: "500m"
