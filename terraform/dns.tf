@@ -294,8 +294,14 @@ resource "cloudflare_record" "srv_submission" {
 #       4.x系での正しいリソース名は cloudflare_workers_domain。
 #       Cloudflare側で自動的にDNS/ルーティングを処理するため、同名のcloudflare_record
 #       (CNAME) リソースは別途作成しないこと。
-#       Workers Assets構成との相性問題(environment引数がAssetsデプロイと噛み合わずapply時に
-#       エラーになる既知の懸念事項、cloudflare/terraform-provider-cloudflare#5618)がある。
+#
+#       environment引数について: これはCloudflareのWorkers Services API上の環境名であり、
+#       aramakisai-web側 wrangler.toml の `[env.dev]` (Wranglerが独自にworker名を
+#       aramakisai-web-devへ変えるだけの仕組み)とは無関係な別概念。実際に
+#       `GET /accounts/{id}/workers/services/aramakisai-web-dev` を叩いて確認したところ、
+#       modern wrangler deploy でデプロイされたWorkerは常に "production" という単一の
+#       環境のみを持つ(cloudflare/terraform-provider-cloudflare#5618 が指す既知の懸念と同種)。
+#       そのため environment には "dev" ではなく "production" を指定する。
 #       【代替手順】
 #       もし apply 時に失敗する場合は、一旦このリソースをコメントアウトし、
 #       Cloudflare ダッシュボード (Workers & Pages > 対象Worker > Triggers > Custom Domains)
@@ -308,5 +314,5 @@ resource "cloudflare_workers_domain" "aramakisai_web_dev" {
   zone_id     = var.cloudflare_zone_id
   hostname    = "dev.aramakisai.com"
   service     = "aramakisai-web-dev"
-  environment = "dev"
+  environment = "production"
 }
