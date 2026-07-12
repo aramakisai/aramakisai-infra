@@ -10,7 +10,7 @@ metadata:
   namespace: prod
 spec:
   suspend: true
-  schedule: "0 2 * * *"
+  schedule: "0 0 2 * * *"
   backupOwnerReference: self
   cluster:
     name: vaultwarden-db

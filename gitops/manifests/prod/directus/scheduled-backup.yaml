@@ -6,7 +6,7 @@ metadata:
   name: directus-db-daily
   namespace: prod
 spec:
-  schedule: "0 2 * * *"
+  schedule: "0 0 2 * * *"
   backupOwnerReference: self
   cluster:
     name: directus-db

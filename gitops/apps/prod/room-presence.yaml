@@ -40,6 +40,8 @@ spec:
             repository: ghcr.io/aramakisai/room-presence-tracker-migrate
         migration:
           enabled: false
+        midnightReset:
+          suspend: true
         # chart既定512Miは実使用量(約63Mi)に対し過大。ノードのオーバーコミット解消のため削減。
         resources:
           requests:
