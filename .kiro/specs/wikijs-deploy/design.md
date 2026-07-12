@@ -58,8 +58,8 @@ graph TB
     ExternalSecret[ExternalSecret wikijs-secrets] -->|env vars| AuthJob
     Infisical[Infisical] --> ExternalSecret
 
-    TFAuthentik[Terraform authentik_apps.tf] -->|Provider and Application作成| Authentik
-    TFAuthentik -->|client_secret出力| Infisical
+    Infisical -->|WIKIJS_OIDC_CLIENT_SECRET(事前生成済み)を入力| TFAuthentik[Terraform authentik_apps.tf]
+    TFAuthentik -->|Provider and Application作成| Authentik
     TFTunnel[Terraform tunnel.tf/dns.tf] -->|ingress_rule + CNAME| Tunnel
 
     ArgoCD[ArgoCD Application wikijs] -->|sync| WikiPod
@@ -157,6 +157,7 @@ sequenceDiagram
 | 1.1-1.5 | Wiki.jsデプロイ | Wiki.js Deployment | Deployment/Service/PVC | - |
 | 2.1-2.6 | CNPG Postgresクラスタ | wikijs-db Cluster, ScheduledBackup | CNPG CRD | - |
 | 3.1-3.9 | Authentik OIDC統合 | Terraform Authentik資源, auth-strategy Job/ConfigMap, auth-strategy-restart Job/RBAC | SQL Batch Contract | System Flows |
+| 9.1-9.5 | Authentikグループに基づく管理者権限付与 | auth-strategy Job/ConfigMap(groups provisioning拡張), Authentik Terraformリソース(oauth_scope_groups), auth-strategy-restart Job/RBAC | SQL Batch Contract | System Flows |
 | 4.1-4.5 | シークレット管理 | ExternalSecret wikijs-secrets | ExternalSecret CRD | - |
 | 5.1-5.2 | 外部公開 | Terraform tunnel.tf/dns.tf (Cloudflare Tunnel設定) | HTTP | - |
 | 6.1-6.3 | リソース制約下での安全性 | Wiki.js Deployment, wikijs-db Cluster (resources) | - | - |
@@ -170,7 +171,7 @@ sequenceDiagram
 | wikijs-db Cluster | Data | 専用Postgres永続化 | 2.1-2.6, 6.1 | CloudNativePG Operator (P0), Hetzner Object Storage (P1) | State |
 | auth-strategy ConfigMap/Job | Integration | OIDCストラテジーの宣言的UPSERT | 3.2-3.5, 3.6, 3.8 | wikijs-db (P0), ExternalSecret (P0), ArgoCD PostSync hook wave 0 (P0) | Batch |
 | auth-strategy-restart Job/RBAC | Integration | UPSERT成功後のWiki.js Deployment rollout restart | 3.7 | auth-strategy Job成功 (P0), ArgoCD PostSync hook wave 1 (P0) | Batch |
-| Authentik Terraformリソース | IaC | OIDC Provider/Application発行 | 3.1 | Authentik (P0) | - |
+| Authentik Terraformリソース | IaC | OIDC Provider/Application発行(既存共有groupsスコープマッピングを含める) | 3.1, 9.4 | Authentik (P0), Infisical(`WIKIJS_OIDC_CLIENT_SECRET`事前登録、P0), `authentik_property_mapping_provider_scope.oauth_scope_groups`(既存共有リソース、P0) | - |
 | ExternalSecret wikijs-secrets | Secrets | Infisicalからのシークレット注入 | 4.1-4.5 | Infisical ClusterSecretStore (P0) | State |
 | Cloudflare Tunnel設定 (Terraform) | Networking | 外部公開経路 | 5.1-5.2 | Cloudflare Tunnel (P0) | API |
 
@@ -245,20 +246,22 @@ sequenceDiagram
 
 | Field | Detail |
 |-------|--------|
-| Intent | Authentik OIDCストラテジーをWiki.jsの`authentication`テーブルへ宣言的にUPSERTする。メジャーバージョンアップ等によるスキーマ変更を検知して安全側に停止する |
-| Requirements | 3.2, 3.3, 3.4, 3.5, 3.6, 3.8, 3.9 |
+| Intent | Authentik OIDCストラテジーをWiki.jsの`authentication`テーブルへ宣言的にUPSERTする。あわせて"管理者"/"リーダー"Authentikグループに対応する管理者権限グループを`groups`テーブルへ宣言的に作成する。メジャーバージョンアップ等によるスキーマ変更を検知して安全側に停止する |
+| Requirements | 3.2, 3.3, 3.4, 3.5, 3.6, 3.8, 3.9, 9.1, 9.2, 9.3 |
 
 **Responsibilities & Constraints**
 - SQLテンプレートはConfigMapで保持し、Git管理下に置く(平文シークレットは含めない)
 - Job実行時にExternalSecret由来の環境変数(`client_id`, `client_secret`)をSQL変数として渡す
 - `local`ストラテジーのレコードは削除・無効化しない(3.6)
 - `domainWhitelist`/`autoEnrollGroups`は`{"v": [...]}`形式で書き込む(3.4)
+- `config`列に`mapGroups: true`/`groupsClaim: "groups"`を含める(9.3)。Authentik共有スコープマッピング`oauth_scope_groups`が生のグループ名を`groups`クレームへ出力するため、トップレベルキー`groups`をそのまま指定する
 - `argocd.argoproj.io/sync-wave: "0"`(明示せずデフォルト値)、後続の`auth-strategy-restart-job`(wave "1")より先にHookSucceededとなる必要がある
 - **スキーマガード(3.9)**: SQL UPSERT実行前に`information_schema.columns`から`authentication`テーブルの列名一覧を取得し、ConfigMap内にハードコードされた期待列リスト(`autoEnrollGroups,config,displayName,domainWhitelist,isEnabled,key,order,selfRegistration,strategyKey`をソート済みCSVで比較)と一致するか検証する。不一致ならUPSERTをスキップし、Discord Ops Webhookへ通知の上で非ゼロ終了する
+- **グループ作成(9.1, 9.2)**: `groups`テーブルに`name`列のUNIQUE制約が存在しない(Wiki.js既存スキーマ、本specではスキーマ変更を行わない方針のためALTER TABLEでの制約追加は行わない)ため、`ON CONFLICT`ではなく`INSERT INTO groups (...) SELECT ... WHERE NOT EXISTS (SELECT 1 FROM groups WHERE name = '管理者')`形式のINSERT-if-absentで冪等化する。`permissions: ["manage:system"]`(Wiki.js組み込みAdministratorsグループと同一の全権限)を"管理者"/"リーダー"の2行に設定する。既存行がある場合は一切UPDATEしない(Admin UIでの手動調整を尊重)
 
 **Dependencies**
 - Inbound: ArgoCD PostSync hook (wave 0) — Job起動トリガー (P0)
-- Outbound: wikijs-db Cluster — SQL UPSERT対象・スキーマ検証対象 (P0)
+- Outbound: wikijs-db Cluster — SQL UPSERT対象・スキーマ検証対象(`authentication`テーブル、`groups`テーブル) (P0)
 - External: Infisical (ExternalSecret経由) — client_id/client_secret, DISCORD_OPS_WEBHOOK_URL (P0)
 
 **Contracts**: Service [ ] / API [ ] / Event [ ] / Batch [x] / State [ ]
@@ -266,15 +269,16 @@ sequenceDiagram
 ##### Batch / Job Contract
 - Trigger: ArgoCD PostSync hook, sync-wave "0"(Directus `schema-apply-job.yaml`と同一パターン)
 - Input / validation: 環境変数`WIKIJS_OIDC_CLIENT_ID`/`WIKIJS_OIDC_CLIENT_SECRET`/`DISCORD_OPS_WEBHOOK_URL`(ExternalSecret経由)。SQLはpsqlの`-v`変数バインドでインジェクションを防止する。実行前に`information_schema.columns`でスキーマガードを通過する必要がある
-- Output / destination: `authentication`テーブルの`authentik-oidc`キー行。スキーマ不一致時はDiscord Ops Webhookへの通知のみでDB書き込みは行わない
-- Idempotency & recovery: `ON CONFLICT (key) DO UPDATE`により再実行しても同一状態に収束。`backoffLimit`を設定し、失敗時(スキーマ不一致含む)はHookSucceededを返さないため後続wave 1の`auth-strategy-restart-job`は起動されない(=既存Podは変更されず稼働継続、安全側に倒れる)
+- Output / destination: `authentication`テーブルの`authentik-oidc`キー行、`groups`テーブルの"管理者"/"リーダー"行(存在しない場合のみ作成)。スキーマ不一致時はDiscord Ops Webhookへの通知のみでDB書き込みは行わない
+- Idempotency & recovery: `authentication`は`ON CONFLICT (key) DO UPDATE`、`groups`はINSERT-if-absentにより、いずれも再実行しても同一状態に収束(既存groups行は不変)。`backoffLimit`を設定し、失敗時(スキーマ不一致含む)はHookSucceededを返さないため後続wave 1の`auth-strategy-restart-job`は起動されない(=既存Podは変更されず稼働継続、安全側に倒れる)
 
 **Implementation Notes**
-- Integration: Job成功(HookSucceeded)後、後続の`auth-strategy-restart-job`(sync-wave "1")がArgoCDによって起動される
+- Integration: Job成功(HookSucceeded)後、後続の`auth-strategy-restart-job`(sync-wave "1")がArgoCDによって起動される。`groups`テーブルへの新規行も`WIKI.auth.groups`が起動時に一度だけキャッシュされる(`server/core/auth.js`の`reloadGroups()`)ため、`authentication`と同様にこの再起動が必須(9.5、SQL直接書き込みは`reloadGroups`イベントを発火しない)
 - Integration: スキーマガードは`server/db/migrations/*.js`をJob側で解釈するのではなく、実DBの`information_schema.columns`を直接クエリして期待値と文字列比較する方式とする(Wiki.js側の内部マイグレーション実装に依存しない、宣言的で自己完結した検証)
 - Validation: Job完了後、Wiki.jsログで`Authentication Strategy Authentik: [ OK ]`を確認
 - Validation: スキーマガード発火時はDiscordチャンネルへの通知メッセージを確認し、`auth-strategy-configmap.yaml`の期待列リスト・SQLテンプレートを新スキーマに合わせて手動更新した上で再sync
 - Risks: Wiki.jsのメジャーバージョンアップで`authentication`テーブルスキーマが変わる可能性(`research.md`参照)。既存の`authentik-oidc`行のデータ自体はWiki.js自身のマイグレーション処理で新スキーマへ引き継がれる想定のため(Wiki.js内蔵`server/db/migrations`が担当)、スキーマガードは「新スキーマに合わせたJob側SQL再実装が必要」というシグナル発報が目的であり、データ損失防止が目的ではない
+- Risks: `manage:system`はWiki.js内で最も強い権限(ユーザー管理・システム設定含む全操作)であり、"リーダー"Authentikグループ所属者にも同一の全権限が付与される。要求仕様上の明示的な選定だが、部門リーダー全員がWiki.js全体の管理権限を持つ点は運用上の影響として認識しておくこと
 
 #### auth-strategy-restart Job / RBAC
 
@@ -326,6 +330,18 @@ sequenceDiagram
 
 **Consistency & Integrity**: `key`が主キーのため、UPSERTは`ON CONFLICT (key) DO UPDATE`で冪等に動作する。`local`行は初回セットアップ時にWiki.js自身が作成済みのため、本Jobでは`authentik-oidc`行のみ操作する。上記9列の構成はJob実行前のスキーマガード(3.9)で毎回検証され、Wiki.jsメジャーバージョンアップ等でこの列構成が変化した場合はUPSERT自体が実行されない(Error Handling参照)。
 
+`groups`テーブル(Wiki.js既存スキーマ、`server/db/migrations/2.0.0.js`確認済み。行の追加のみ行い、スキーマ変更(UNIQUE制約追加等)は行わない):
+
+| Column | Type | Description |
+|--------|------|--------------|
+| id | integer (PK, auto increment) | Wiki.js組み込みAdministrators=1, Guests=2で固定(`server/setup.js`確認済み)。本Jobが作成する行のidは自動採番に委ねる |
+| name | varchar | グループ名。本Jobでは`管理者`/`リーダー`の2行を対象とする(UNIQUE制約なし) |
+| permissions | json | 権限文字列の配列。本Jobは`["manage:system"]`(組み込みAdministratorsと同一)を設定する |
+| pageRules | json | ページ単位のアクセス規則。本Jobは空配列`[]`を設定する |
+| isSystem | boolean | 組み込みグループ判定フラグ。本Jobが作成する行は`false`(削除可能な通常グループとして扱う) |
+
+**Consistency & Integrity**: `name`にUNIQUE制約がないため、`ON CONFLICT`は使用できない。`INSERT ... WHERE NOT EXISTS (SELECT 1 FROM groups WHERE name = ...)`によるINSERT-if-absentで冪等化し、既存行(Admin UI経由の手動権限変更を含む)を一切UPDATEしない。Authentikの`groups`クレーム(共有スコープマッピング`oauth_scope_groups`が生成、値はAuthentikグループ名そのまま)とWiki.js `Group.name`の完全一致により、ログイン毎に`server/modules/authentication/oidc/authentication.js`の`mapGroups`ロジックが動的にグループを割り当てる(要件9.3)。
+
 ## Error Handling
 
 ### Error Strategy
@@ -336,6 +352,7 @@ sequenceDiagram
 - **OIDCエンドポイント疎通不可**(Authentik側障害): Wiki.js起動時のログで`Authentication Strategy Authentik: [ FAILED ]`として検知可能(`local`ログインは影響を受けないため委員会メンバーのアクセス自体は維持される)
 - **SQL構文/型不整合**(`domainWhitelist`等のJSON形式ミス): Job実行時にSQLエラーとして即座に失敗し、サイレントな設定不整合を防ぐ
 - **authenticationテーブルのスキーマ不一致**(Wiki.jsメジャーバージョンアップ後の列構成変更): SQL UPSERT実行前のスキーマガードで検知し、UPSERTを実行せずDiscord Ops Webhook(`DISCORD_OPS_WEBHOOK_URL`)へ通知した上で失敗終了。rollout restartはトリガーされず、既存Podは変更前の状態で稼働継続する。データはWiki.js自身のマイグレーションで引き継がれるため損失なし、対応が必要なのはJob側のSQLテンプレート更新のみ
+- **groupsテーブルへの重複作成**(想定しないタイミングでの再実行等): `name`にUNIQUE制約がないためDB側の制約違反エラーには頼れないが、INSERT-if-absent(`WHERE NOT EXISTS`)により再実行時は自動的にno-opとなり重複行は発生しない
 
 ### Monitoring
 既存の監視パターン(Netdata、Falco)に準拠。auth-strategy Jobのスキーマガード発火時のみ、既存の`DISCORD_OPS_WEBHOOK_URL`(Falcosidekick等と共有)を通じて通知する。本specでは他の新規の監視ルール追加は行わない(Non-Goals)。
@@ -348,10 +365,13 @@ sequenceDiagram
 - Job成功後、Wiki.js Podのrollout restartが自動的にトリガーされることを確認
 - ScheduledBackupの`nextScheduleTime`が意図した間隔(daily)になっていることを確認(hourly誤発火バグの回帰防止)
 - スキーマガード: `authentication`テーブルに一時的にダミー列を追加した状態でJobを手動実行し、UPSERTがスキップされDiscord Ops Webhookへ通知が飛び、Jobが失敗終了することを確認(その後ダミー列を削除して原状回復)
+- グループ作成: Job実行後、`groups`テーブルに`管理者`/`リーダー`が`permissions: ["manage:system"]`で存在することを確認。再実行してもUPDATEされない(冪等)ことを確認
+- グループ作成の非破壊性: `管理者`グループの`permissions`をAdmin UIから手動で変更した状態でJobを再実行し、変更後の値が上書きされないことを確認
 
 ### E2E Tests
 - ブラウザから`wiki.aramakisai.com`にアクセスし、Authentikアカウントでログインできることを確認
 - `local`管理者アカウントでのフォールバックログインが引き続き機能することを確認
+- Authentikグループ"管理者"または"リーダー"所属アカウントでログインし、Wiki.js管理者ダッシュボードにアクセスできることを確認(要件9)
 
 ### Performance/Load
 - リソースlimits合計(Wiki.js Deployment 384Mi + wikijs-db 512Mi = 896Mi)がノード実質空きメモリ(~1.6-1.8GB)の範囲内に収まることを設計値として確認済み
@@ -362,6 +382,7 @@ sequenceDiagram
 - auth-strategy Jobは`psql`のバインド変数を使用し、SQLインジェクションを防止する
 - `local`管理者ログインを削除・無効化しないことで、OIDC設定不備時の管理者ロックアウト(Stalwartで過去に発生した`directoryId=OIDC`によるフォールバック認証ロックアウト事象)を構造的に回避する
 - `WIKIJS_DB_PASSWORD`は`openssl rand -base64 32`等の暗号論的に安全な乱数生成コマンドで生成する(要件4.5)。手動で覚えやすい値・既存パスワードの使い回しを行わない
+- `管理者`/`リーダー`Authentikグループへの`manage:system`(Wiki.js最強権限)付与は影響範囲が広い。Authentik側でこの2グループへの参加を厳格に管理すること(本spec範囲外、既存のAuthentikグループ運用に依存)
 
 ## Supporting References
 - OIDCモジュール`config`の全キー定義: `research.md`参照(`server/modules/authentication/oidc/definition.yml`)

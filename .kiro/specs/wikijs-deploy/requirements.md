@@ -87,3 +87,13 @@ Wiki.jsをknowledge base / wikiとして導入する。CNPG Postgresクラスタ
 1. Wiki.jsはCNPG/Directus等の既存統合先と比べ運用実績が浅いソフトウェアであるため、the 実装担当者 shall `auth-strategy-configmap.yaml`のSQL、`deployment.yaml`の環境変数、`db-cluster.yaml`のバックアップ設定等、research.mdで調査済みの前提に依存するコンポーネントを実装する際、着手前に該当する公式ドキュメント/ソースコードを再確認する。
 2. Where 公式ドキュメントサイト(`docs.requarks.io`)がJavaScriptレンダリングのSPAでありコンテンツ取得ツールが本文を取得できない場合, the 実装担当者 shall 代替としてMarkdownソースリポジトリ`github.com/requarks/wiki-docs`(`raw.githubusercontent.com/requarks/wiki-docs/main/<path>.md`)、またはアプリ本体リポジトリ`github.com/requarks/wiki`のソースコードを直接参照する。
 3. If 実装中にresearch.md/design.mdの前提(`authentication`テーブルのスキーマ、config.yml解決タイミング、strategyキャッシュ挙動等)と実際のWiki.js挙動に差異を発見した場合, the 実装担当者 shall design.mdの該当箇所を更新した上で実装を継続する(前提の誤りを実装で黙って回避しない)。
+
+### Requirement 9: Authentikグループに基づく管理者権限付与
+**Objective:** As a 委員会メンバー(Authentikグループ"管理者"または"リーダー"所属), I want AuthentikでSSOログインするだけでWiki.js側の管理者権限を得る, so that Wiki.js側で別途手動の権限設定作業を行わなくて済む
+
+#### Acceptance Criteria
+1. The Wiki.js `groups` テーブル shall Authentikグループ"管理者"/"リーダー"と同名(`管理者`/`リーダー`)の2グループを、宣言的Jobにより`permissions: ["manage:system"]`(Wiki.js組み込みAdministratorsグループと同一の全権限)で作成する。
+2. If 該当名のグループが既にWiki.js `groups` テーブルに存在する場合, the Job shall 既存行を上書きしない(Admin UI経由の手動権限調整を破壊しないINSERT-if-absent方式で冪等に動作する)。
+3. The UPSERT Job が書き込む`authentication`テーブルの`config`列 shall `mapGroups: true` および `groupsClaim: "groups"` を設定し、AuthentikのgroupsクレームとWiki.js `Group.name` の完全一致による動的グループ割り当て(ログイン毎に自動同期)を有効化する。
+4. The Wiki.js用Authentik OIDC Providerの `property_mappings` shall 既存の共有スコープマッピングリソース(`authentik_property_mapping_provider_scope.oauth_scope_groups`、Authentikグループ名をそのまま`groups`クレームへ出力する)を含める(他サービスと同一パターン、Wiki.js専用のカスタムマッピングは新設しない)。
+5. When グループ作成Jobが正常終了する, the 既存のrollout restart機構(`auth-strategy-restart-job`) shall Wiki.js Deploymentを再起動し、新規グループを`WIKI.auth.groups`キャッシュへ反映させる(SQL直接書き込みは内部イベントを発火しないため、`authentication`テーブル同様に再起動が必須)。
