@@ -384,3 +384,37 @@ resource "authentik_application" "directus_stg" {
   open_in_new_tab   = true
   meta_icon         = "fa://fa-solid fa-database"
 }
+
+# ────────────────────────────────────────────────────────────
+# 7. Wiki.js - SSO 連携
+# ────────────────────────────────────────────────────────────
+resource "authentik_provider_oauth2" "wikijs" {
+  name          = "wikijs"
+  client_id     = "wikijs"
+  client_secret = var.wikijs_oidc_client_secret
+  signing_key   = data.authentik_certificate_key_pair.default.id
+
+  authorization_flow = data.authentik_flow.default_authorization.id
+  invalidation_flow  = data.authentik_flow.default_invalidation.id
+
+  allowed_redirect_uris = [{
+    matching_mode     = "strict"
+    url               = "https://wiki.aramakisai.com/login/authentik-oidc/callback"
+    redirect_uri_type = "authorization"
+  }]
+
+  property_mappings = [
+    data.authentik_property_mapping_provider_scope.oauth_scope_openid.id,
+    data.authentik_property_mapping_provider_scope.oauth_scope_profile.id,
+    data.authentik_property_mapping_provider_scope.oauth_scope_email.id,
+    authentik_property_mapping_provider_scope.oauth_scope_groups.id,
+  ]
+}
+
+resource "authentik_application" "wikijs" {
+  name              = "Wiki.js"
+  slug              = "wikijs"
+  protocol_provider = authentik_provider_oauth2.wikijs.id
+  open_in_new_tab   = true
+  meta_icon         = "fa://fa-solid fa-book"
+}
