@@ -15,7 +15,7 @@ jobs:
     timeout-minutes: 90
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # GitHub Actions ランナーを tailnet に参加させる (Ansible SSH 経路の確保)
       # 前提: Tailscale ACL に tag:ci が定義されていること
