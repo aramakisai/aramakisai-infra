@@ -187,6 +187,32 @@ data:
           versioning: false
         schema:
           name: page_home
+      - collection: page_home_live
+        meta:
+          accountability: all
+          archive_app_filter: true
+          archive_field: null
+          archive_value: null
+          autosave_revision_interval: null
+          collapse: open
+          collection: page_home_live
+          color: null
+          display_template: null
+          group: null
+          hidden: false
+          icon: live_tv
+          item_duplication_fields: null
+          note: 直前〜当日・開催後ページシングルトン (id=1固定)
+          preview_url: null
+          singleton: true
+          sort: 16
+          sort_field: null
+          status: active
+          translations: null
+          unarchive_value: null
+          versioning: false
+        schema:
+          name: page_home_live
       - collection: page_privacy
         meta:
           accountability: all
@@ -1006,6 +1032,105 @@ data:
           has_auto_increment: false
           foreign_key_table: directus_files
           foreign_key_column: id
+      - collection: festival_meta
+        field: home_active_variant
+        type: string
+        meta:
+          collection: festival_meta
+          conditions: null
+          display: raw
+          display_options: null
+          field: home_active_variant
+          group: null
+          hidden: false
+          interface: select-dropdown
+          note: Home Page表示フェーズ切替
+          options:
+            choices:
+              - text: 開催前
+                value: pre_event
+              - text: 直前〜当日/開催後
+                value: live
+          readonly: false
+          required: false
+          searchable: true
+          sort: 8
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: home_active_variant
+          table: festival_meta
+          data_type: character varying
+          default_value: pre_event
+          max_length: 255
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: festival_meta
+        field: sns_links
+        type: json
+        meta:
+          collection: festival_meta
+          conditions: null
+          display: raw
+          display_options: null
+          field: sns_links
+          group: null
+          hidden: false
+          interface: list
+          note: SNSリンク一覧
+          options:
+            fields:
+              - field: platform
+                name: プラットフォーム名
+                type: string
+                meta:
+                  interface: input
+                  width: half
+              - field: url
+                name: URL
+                type: string
+                meta:
+                  interface: input
+                  width: half
+          readonly: false
+          required: false
+          searchable: true
+          sort: 9
+          special:
+            - cast-json
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: sns_links
+          table: festival_meta
+          data_type: json
+          default_value: null
+          max_length: null
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
       - collection: map_areas
         field: id
         type: integer
@@ -1451,36 +1576,278 @@ data:
           foreign_key_table: null
           foreign_key_column: null
       - collection: page_home
-        field: blocks
-        type: json
+        field: hero_image
+        type: uuid
+        meta:
+          collection: page_home
+          conditions: null
+          display: image
+          display_options: null
+          field: hero_image
+          group: null
+          hidden: false
+          interface: file-image
+          note: ヒーロー画像
+          options: null
+          readonly: false
+          required: false
+          searchable: true
+          sort: 3
+          special:
+            - file
+          translations: null
+          validation: null
+          validation_message: null
+          width: half
+        schema:
+          name: hero_image
+          table: page_home
+          data_type: uuid
+          default_value: null
+          max_length: null
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: directus_files
+          foreign_key_column: id
+      - collection: page_home
+        field: hero_message
+        type: text
         meta:
           collection: page_home
           conditions: null
           display: raw
           display_options: null
-          field: blocks
+          field: hero_message
           group: null
           hidden: false
-          interface: input-code
-          note: コンテンツブロック (JSON)
-          options:
-            language: json
+          interface: input-rich-text-html
+          note: 開催前トップメッセージ
+          options: null
           readonly: false
           required: false
           searchable: true
-          sort: 2
-          special:
-            - cast-json
+          sort: 4
+          special: null
           translations: null
           validation: null
           validation_message: null
           width: full
         schema:
-          name: blocks
+          name: hero_message
           table: page_home
-          data_type: json
+          data_type: text
           default_value: null
           max_length: null
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: page_home
+        field: embed_url
+        type: string
+        meta:
+          collection: page_home
+          conditions: null
+          display: raw
+          display_options: null
+          field: embed_url
+          group: null
+          hidden: false
+          interface: input
+          note: SNS/動画等の任意埋め込みURL
+          options:
+            placeholder: 'https://...'
+          readonly: false
+          required: false
+          searchable: true
+          sort: 5
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: embed_url
+          table: page_home
+          data_type: character varying
+          default_value: null
+          max_length: 500
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: page_home_live
+        field: id
+        type: integer
+        meta:
+          collection: page_home_live
+          conditions: null
+          display: null
+          display_options: null
+          field: id
+          group: null
+          hidden: true
+          interface: input
+          note: null
+          options: null
+          readonly: true
+          required: false
+          searchable: true
+          sort: 1
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: id
+          table: page_home_live
+          data_type: integer
+          default_value: nextval('page_home_live_id_seq'::regclass)
+          max_length: null
+          numeric_precision: 32
+          numeric_scale: 0
+          is_nullable: false
+          is_unique: true
+          is_indexed: false
+          is_primary_key: true
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: true
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: page_home_live
+        field: hero_image
+        type: uuid
+        meta:
+          collection: page_home_live
+          conditions: null
+          display: image
+          display_options: null
+          field: hero_image
+          group: null
+          hidden: false
+          interface: file-image
+          note: ヒーロー画像
+          options: null
+          readonly: false
+          required: false
+          searchable: true
+          sort: 2
+          special:
+            - file
+          translations: null
+          validation: null
+          validation_message: null
+          width: half
+        schema:
+          name: hero_image
+          table: page_home_live
+          data_type: uuid
+          default_value: null
+          max_length: null
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: directus_files
+          foreign_key_column: id
+      - collection: page_home_live
+        field: hero_message
+        type: text
+        meta:
+          collection: page_home_live
+          conditions: null
+          display: raw
+          display_options: null
+          field: hero_message
+          group: null
+          hidden: false
+          interface: input-rich-text-html
+          note: 開催前トップメッセージ
+          options: null
+          readonly: false
+          required: false
+          searchable: true
+          sort: 3
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: hero_message
+          table: page_home_live
+          data_type: text
+          default_value: null
+          max_length: null
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: page_home_live
+        field: embed_url
+        type: string
+        meta:
+          collection: page_home_live
+          conditions: null
+          display: raw
+          display_options: null
+          field: embed_url
+          group: null
+          hidden: false
+          interface: input
+          note: SNS/動画等の任意埋め込みURL
+          options:
+            placeholder: 'https://...'
+          readonly: false
+          required: false
+          searchable: true
+          sort: 4
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: embed_url
+          table: page_home_live
+          data_type: character varying
+          default_value: null
+          max_length: 500
           numeric_precision: null
           numeric_scale: null
           is_nullable: true
@@ -3807,6 +4174,48 @@ data:
           foreign_key_table: directus_files
           foreign_key_column: id
           constraint_name: festival_meta_parking_map_foreign
+          on_update: NO ACTION
+          on_delete: SET NULL
+      - collection: page_home
+        field: hero_image
+        related_collection: directus_files
+        meta:
+          junction_field: null
+          many_collection: page_home
+          many_field: hero_image
+          one_allowed_collections: null
+          one_collection: directus_files
+          one_collection_field: null
+          one_deselect_action: nullify
+          one_field: null
+          sort_field: null
+        schema:
+          table: page_home
+          column: hero_image
+          foreign_key_table: directus_files
+          foreign_key_column: id
+          constraint_name: page_home_hero_image_foreign
+          on_update: NO ACTION
+          on_delete: SET NULL
+      - collection: page_home_live
+        field: hero_image
+        related_collection: directus_files
+        meta:
+          junction_field: null
+          many_collection: page_home_live
+          many_field: hero_image
+          one_allowed_collections: null
+          one_collection: directus_files
+          one_collection_field: null
+          one_deselect_action: nullify
+          one_field: null
+          sort_field: null
+        schema:
+          table: page_home_live
+          column: hero_image
+          foreign_key_table: directus_files
+          foreign_key_column: id
+          constraint_name: page_home_live_hero_image_foreign
           on_update: NO ACTION
           on_delete: SET NULL
       - collection: performance_slots
