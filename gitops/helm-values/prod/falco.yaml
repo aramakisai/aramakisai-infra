@@ -59,6 +59,8 @@ customRules:
     # upstreamが用意するuser_known_contact_k8s_api_server_activities (既定never_true) を上書きして除外する。
     # CNPGはoperatorだけでなく各postgresポッド自体が持つインスタンスマネージャ(proc.name=manager)も
     # リーダー選出・ステータス同期のためk8s APIへ定常アクセスするため、合わせて除外する。
+    # directus-staging-freeze-sync (CronJob, docker.io/alpine/k8s) はstagingスキーマPR有無を
+    # kubectl get deployment -o jsonpathで定期チェックする正常動作のため、prodと合わせて除外する。
     - macro: user_known_contact_k8s_api_server_activities
       condition: >
         (k8s.ns.name=argocd and container.image.repository=quay.io/argoproj/argocd)
@@ -66,7 +68,7 @@ customRules:
         or (k8s.ns.name=cnpg-system and container.image.repository=ghcr.io/cloudnative-pg/cloudnative-pg)
         or (k8s.ns.name=monitoring and container.image.repository=docker.io/netdata/netdata)
         or (k8s.ns.name=prod and proc.name=manager and container.image.repository=ghcr.io/cloudnative-pg/postgresql)
-        or (k8s.ns.name=prod and container.image.repository=docker.io/alpine/k8s)
+        or (container.image.repository=docker.io/alpine/k8s and k8s.ns.name in (prod, staging))
 
     # authentik server (gunicorn/dumb-init) は worker との内部通信のため dup3 で
     # stdout/stdin をソケットへ張り替える正常動作。upstream の Redirect STDOUT/STDIN to
