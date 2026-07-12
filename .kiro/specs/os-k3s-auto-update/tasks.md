@@ -1,7 +1,7 @@
 # Implementation Plan
 
-- [ ] 1. (P) ホストOS自動更新: Debian標準機能への設定委譲と通知スクリプト実装
-- [ ] 1.1 apt/unattended-upgrades設定テンプレート作成
+- [x] 1. (P) ホストOS自動更新: Debian標準機能への設定委譲と通知スクリプト実装
+- [x] 1.1 apt/unattended-upgrades設定テンプレート作成
   - `/etc/apt/apt.conf.d/50unattended-upgrades` テンプレートで `Unattended-Upgrade::Allowed-Origins` をsecurity originのみに限定し、`Automatic-Reboot "true"` と低トラフィック帯固定時刻の `Automatic-Reboot-Time` を設定する
   - `/etc/apt/apt.conf.d/20auto-upgrades` テンプレートで `APT::Periodic::Unattended-Upgrade "1"` を設定し、Debian標準の `apt-daily-upgrade.timer` を起動させる
   - `needrestart` 設定を `$nrconf{restart} = 'a'` の無人自動再起動モードにする
@@ -9,7 +9,7 @@
   - _Requirements: 1.1, 1.2_
   - _Boundary: HostAutoUpdateAgent_
 
-- [ ] 1.2 通知スクリプトとsystemd timer実装
+- [x] 1.2 通知スクリプトとsystemd timer実装
   - `os-update-notify.sh` が `/var/log/unattended-upgrades/unattended-upgrades.log` を読み取り、当日の適用結果(成功/失敗/適用パッケージ)を判定する
   - `debsecan` の残存脆弱性リストと `/var/run/reboot-required` の有無を通知本文に含める(判定のみで再起動操作は行わない)
   - `os-update-notify.timer` が `apt-daily-upgrade.timer` より後の時刻にオフセットして起動するsystemdユニットを配布する
@@ -18,16 +18,17 @@
   - _Requirements: 1.3, 1.4, 1.5, 8.3_
   - _Boundary: HostAutoUpdateAgent_
 
-- [ ] 1.3 kvm-test.ymlでのロール適用・ドライラン検証
+- [x] 1.3 kvm-test.ymlでのロール適用・ドライラン検証
   - `os-auto-update` ロールを `ansible/inventory/kvm-test.yml` に対して適用する
   - `unattended-upgrade --dry-run -d` を実行し、Allowed-Origins/Automatic-Reboot設定が意図通り解釈されることを確認する
   - 失敗時に再起動が実行されないこと、成功時のみDiscord通知が送られることをテスト環境で確認する
   - observable: kvm-test環境で `unattended-upgrade --dry-run -d` の出力にsecurity origin以外のパッケージが含まれないこと
+  - **実施メモ (2026-07-13)**: kvm-testではなくユーザー承認の上 `prod-node-1` に対して直接検証を実施。実機検証で3件のバグを発見・修正済み: (1) `Unattended-Upgrade::Allowed-Origins` はunattended-upgrades 2.12/trixieで非推奨・クラッシュするため `Origins-Pattern` + `${distro_codename}-security` へ修正、(2) Discord通知が2000文字上限で失敗するためdebsecan出力を要約化+truncateガード追加、(3) `${#MESSAGE}` の `{#` がJinja2コメント開始と誤認識されテンプレート構文エラーとなるため `wc -c` へ置換。修正後、`unattended-upgrade --dry-run -d` はsecurity origin限定で正常完了、`systemctl start os-update-notify.service` でDiscord通知も成功(exit 0)。
   - _Requirements: 1.1, 1.5, 2.1_
   - _Boundary: HostAutoUpdateAgent_
 
 - [ ] 2. (P) K3sバージョン検知ワークフロー実装
-- [ ] 2.1 バージョン比較・分類ロジックとスクリプト単体テスト実装
+- [x] 2.1 バージョン比較・分類ロジックとスクリプト単体テスト実装
   - `.github/scripts/k3s-version-check.sh` が `ansible/inventory/tailscale.yml` の `k3s_version` を読み取り、`update.k3s.io/v1-release/channels`(stableチャンネル)の最新値と比較する
   - semver比較でpatchレベル差分とminor/major差分を分類するロジックを実装する
   - `scripts/test-k3s-version-check-logic.sh` でpatch差分/minor差分/差分なしの3ケースを検証する(`scripts/test-dr-trigger-logic.sh` と同形式)
@@ -69,7 +70,7 @@
   - _Boundary: CloudflaredImagePin_
 
 - [ ] 5. Renovate導入とバージョン追従PR自動化設定
-- [ ] 5.1 renovate.json作成
+- [x] 5.1 renovate.json作成
   - リポジトリルートに `renovate.json` を作成し、`terraform`・`github-actions`・`kubernetes` の3マネージャを有効化する
   - `kubernetes` マネージャの対象ファイルパターンを `gitops/manifests/**/*.yaml` に明示指定する
   - `ansible/inventory/**` を `ignorePaths` に追加し `k3s_version` への干渉を防ぐ
@@ -87,33 +88,34 @@
   - _Boundary: RenovateConfig_
   - _Depends: 4, 5.1_
 
-- [ ] 6. (P) GitHub Dependabot alerts有効化
+- [x] 6. (P) GitHub Dependabot alerts有効化
+  - **実施メモ (2026-07-13)**: `gh api -X PUT repos/aramakisai/aramakisai-infra/vulnerability-alerts` で有効化済み(ユーザー承認済み)
   - リポジトリ管理者がGitHub Web UI(Settings → Code security)または `gh api -X PUT repos/<owner>/<repo>/vulnerability-alerts` でDependabot alertsを有効化する
   - `.github/dependabot.yml`(version updates)は追加しないことを確認し、Renovateとの役割重複を避ける
   - observable: GitHubリポジトリの「Security」タブでDependabot alertsのステータスが有効(Enabled)と表示されること
   - _Requirements: 7.1, 7.2, 7.3_
   - _Boundary: DependabotAlertsBootstrap_
 
-- [ ] 7. Integration: playbook組込みとドキュメント同期
-- [ ] 7.1 os-auto-updateロールをk3s-bootstrap.ymlへ組込み
+- [x] 7. Integration: playbook組込みとドキュメント同期
+- [x] 7.1 os-auto-updateロールをk3s-bootstrap.ymlへ組込み
   - `ansible/playbooks/k3s-bootstrap.yml` のPlay 0(`hosts: all`)に `os-auto-update` ロールを追加し、既存の `swap` ロールと同じタイミングで適用対象に含める
   - observable: `ansible-playbook` の構文チェック(`--syntax-check`)がエラーなく通ること
   - _Requirements: 1.1_
   - _Depends: 1.3_
 
-- [ ] 7.2 dr-runbook.mdへ計画的メンテナンス手順を追記
+- [x] 7.2 dr-runbook.mdへ計画的メンテナンス手順を追記
   - `docs/dr-runbook.md` に、再起動を伴う計画的メンテナンスが `dr-trigger.yml` の猶予期間を超過しそうな場合の、`dr-incident` ラベルIssueへの `abort` コメントによる抑止手順を明記する
   - observable: `docs/dr-runbook.md` に該当セクションが追加されていること
   - _Requirements: 2.3_
   - _Depends: 1.3_
 
-- [ ] 7.3 README.mdへブートストラップ手順を追記
+- [x] 7.3 README.mdへブートストラップ手順を追記
   - README.mdの手動ブートストラップ手順セクションに、Renovate GitHub Appインストールおよび GitHub Dependabot alerts有効化を、既存のGitHub Deploy Key登録等と並ぶ項目として追記する
   - observable: README.mdの該当セクションに2項目が追加されていること
   - _Requirements: 5.2, 7.1_
   - _Depends: 5.2, 6_
 
-- [ ] 7.4 CLAUDE.md/tech.mdへの完了時ドキュメント同期
+- [x] 7.4 CLAUDE.md/tech.mdへの完了時ドキュメント同期
   - `.kiro/steering/tech.md` に本機能で新規導入したコマンド(K3sバージョン確認・アップグレードworkflow起動手順)とシークレット(`DISCORD_OPS_WEBHOOK_URL` の新規利用箇所)を追記する
   - `CLAUDE.md` の該当セクションに、本機能で追加された運用手順があれば反映する
   - すべての変更(ホストOS更新・K3sバージョン変更・provider/Actions/コンテナイメージ更新)がログ・Discord通知履歴・Gitコミット履歴のいずれかで追跡可能であることを最終確認する

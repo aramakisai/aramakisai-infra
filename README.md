@@ -157,6 +157,21 @@ tailscale status
 # または https://login.tailscale.com/admin/machines
 ```
 
+### 5. Renovate & Dependabot alerts の有効化 (一度きり)
+
+依存関係の追従・脆弱性検知を有効化します(リポジトリ管理者権限が必要)。
+
+1. [Renovate GitHub App](https://github.com/apps/renovate) を本リポジトリへインストール
+   - `renovate.json` (リポジトリルート) が Terraform provider・GitHub Actions・GitOps管理下コンテナイメージのバージョン追従PRを自動生成します
+   - 生成されたPRは自動マージされません。必ず人手でレビュー・マージしてください
+2. GitHub Dependabot alerts を有効化
+
+   ```bash
+   gh api -X PUT repos/<owner>/<repo>/vulnerability-alerts
+   ```
+
+   または Settings → Code security → "Dependabot alerts" を Enable
+
 ---
 
 ## Day-2 オペレーション

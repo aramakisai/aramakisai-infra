@@ -1,0 +1,26 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended"
+  ],
+  "automerge": false,
+  "schedule": [
+    "before 6am on monday"
+  ],
+  "ignorePaths": [
+    "ansible/inventory/**"
+  ],
+  "terraform": {
+    "fileMatch": [
+      "terraform/**/*.tf"
+    ]
+  },
+  "github-actions": {
+    "enabled": true
+  },
+  "kubernetes": {
+    "fileMatch": [
+      "gitops/manifests/**/*.yaml"
+    ]
+  }
+}

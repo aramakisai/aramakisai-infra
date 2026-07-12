@@ -35,6 +35,12 @@ infisical run -- ansible-playbook -i ansible/inventory/tailscale.yml ansible/pla
 # ノードの強制再プロビジョニング (シングルノード prod-node-1)
 infisical run -- ansible -i ansible/inventory/tailscale.yml prod-node-1 -m shell -a "/usr/local/bin/k3s-uninstall.sh"
 infisical run -- ansible-playbook -i ansible/inventory/tailscale.yml ansible/playbooks/k3s-bootstrap.yml
+
+# K3sバージョン新規検知の手動確認 (通常は週次cronで自動実行、Discordへ通知)
+gh workflow run k3s-version-check.yml
+
+# K3sアップグレード適用 (mainブランチにコミット済みのk3s_versionを使用、入力パラメータなし)
+gh workflow run k3s-upgrade.yml
 ```
 
 ### 3. K3s 操作・検証

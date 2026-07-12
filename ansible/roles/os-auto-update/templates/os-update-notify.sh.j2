@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+TODAY=$(date "+%Y-%m-%d")
+LOG_FILE="/var/log/unattended-upgrades/unattended-upgrades.log"
+HOSTNAME=$(hostname)
+TIMESTAMP=$(date "+%Y-%m-%d %H:%M:%S")
+
+MESSAGE="[${HOSTNAME}] OS Auto-update Status - ${TIMESTAMP}
+
+"
+
+# 1. Check unattended-upgrades log for today
+if [[ -f "${LOG_FILE}" ]]; then
+    TODAY_LOGS=$(grep "^${TODAY}" "${LOG_FILE}" || true)
+    if [[ -n "${TODAY_LOGS}" ]]; then
+        MESSAGE+="=== Unattended-upgrades Log ===
+"
+        MESSAGE+="${TODAY_LOGS}
+"
+    else
+        MESSAGE+="No updates applied today.
+"
+    fi
+else
+    MESSAGE+="No updates applied today (log not found).
+"
+fi
+
+MESSAGE+="
+"
+
+# 2. Check remaining vulnerabilities with debsecan
+MESSAGE+="=== debsecan Vulnerabilities ===
+"
+if command -v debsecan >/dev/null 2>&1; then
+    if DEBSECAN_OUT=$(debsecan); then
+        COUNT=$(echo "${DEBSECAN_OUT}" | grep -c '[^[:space:]]' || true)
+        if [[ "${COUNT}" -eq 0 ]]; then
+            MESSAGE+="既知の残存脆弱性はありません。
+"
+        else
+            MESSAGE+="${COUNT}件の既知脆弱性が残存しています。詳細はホスト上で debsecan コマンドを実行するか、journalctl -u os-update-notify でログを確認してください。
+"
+        fi
+    else
+        MESSAGE+="debsecan failed to execute.
+"
+    fi
+else
+    MESSAGE+="debsecan not found or failed to execute.
+"
+fi
+
+MESSAGE+="
+"
+
+# 3. Check reboot requirement
+if [[ -f "/var/run/reboot-required" ]]; then
+    MESSAGE+="=== Reboot Status ===
+REBOOT REQUIRED
+"
+fi
+
+# 4. Source env and send to discord
+# shellcheck disable=SC1091
+source /etc/os-update-notify.env
+
+if [[ -z "${DISCORD_OPS_WEBHOOK_URL:-}" ]]; then
+    echo "Error: DISCORD_OPS_WEBHOOK_URL is empty." >&2
+    exit 1
+fi
+
+# Truncate message if it exceeds Discord character limit (2000 characters)
+MESSAGE_LEN=$(printf '%s' "${MESSAGE}" | wc -c)
+if [[ "${MESSAGE_LEN}" -gt 1900 ]]; then
+    MESSAGE="${MESSAGE:0:1900}...(truncated)"
+fi
+
+PAYLOAD=$(jq -n --arg content "${MESSAGE}" '{content: $content}')
+
+curl -sS -X POST -H "Content-Type: application/json" -d "${PAYLOAD}" "${DISCORD_OPS_WEBHOOK_URL}"

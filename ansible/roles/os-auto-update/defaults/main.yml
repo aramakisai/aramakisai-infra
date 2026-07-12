@@ -1,0 +1,10 @@
+---
+# 監視系のDR検知は5分間隔cron+猶予期間10分で最大15分かかって誤検知するため、それより十分離れた深夜早朝の固定時刻にしている
+os_auto_update_reboot_time: "03:30"
+
+# Debian標準のapt-daily-upgrade.timerはデフォルトで毎日06:00頃に起動しランダム遅延も乗るため、それより後の08:00に通知を出す
+os_update_notify_timer_hour: 8
+os_update_notify_timer_minute: 0
+
+# 呼び出し側でInfisical経由の値を渡す前提
+discord_ops_webhook_url: ""
