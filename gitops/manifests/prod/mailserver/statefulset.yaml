@@ -203,6 +203,14 @@ spec:
               mountPath: /tmp/docker-mailserver/opendkim/TrustedHosts
               subPath: opendkim-trustedhosts
               readOnly: true
+            - name: dms-config
+              mountPath: /tmp/docker-mailserver/rspamd/override.d/worker-proxy.inc
+              subPath: rspamd-worker-proxy.inc
+              readOnly: true
+            - name: dms-config
+              mountPath: /tmp/docker-mailserver/rspamd/override.d/worker-controller.inc
+              subPath: rspamd-worker-controller.inc
+              readOnly: true
           livenessProbe:
             tcpSocket:
               port: 25
@@ -239,6 +247,10 @@ spec:
                 path: opendkim-signingtable
               - key: opendkim-trustedhosts
                 path: opendkim-trustedhosts
+              - key: rspamd-worker-proxy.inc
+                path: rspamd-worker-proxy.inc
+              - key: rspamd-worker-controller.inc
+                path: rspamd-worker-controller.inc
         - name: dovecot-oauth2
           secret:
             secretName: dovecot-oauth2-config

@@ -223,3 +223,14 @@ data:
     127.0.0.1
     localhost
     aramakisai.com
+  # rspamd リソース削減:
+  # メール流量がほぼ皆無(0.2 msg/sec)のため、rspamd_proxy worker の並列数を
+  # 既定の2から1へ削減 (プロセスあたり約140MiBのメモリ削減)。
+  # controller worker (管理UI/統計API、port 11334) も未使用のため無効化。
+  # 副作用: Dovecot Sieveのlearn_spam/learn_ham (メールをJunkへ移動した際の
+  # ベイズ学習フィードバック) は内部的にcontrollerのrspamc APIを叩くため、
+  # 無効化に伴い学習フィードバックは効かなくなる (フィルタ自体は動作継続)。
+  rspamd-worker-proxy.inc: |
+    count = 1;
+  rspamd-worker-controller.inc: |
+    enabled = false;
