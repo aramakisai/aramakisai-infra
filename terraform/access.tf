@@ -42,8 +42,11 @@ resource "cloudflare_zero_trust_access_identity_provider" "authentik" {
 # Cloudflare Access Applications
 #
 # 保護対象:
-#   aramakisai-web.aramakisai.workers.dev   Workers.dev 既定URL (本番は aramakisai.com 経由)
-#                                            誤って外部に晒さないよう Authentik OIDC で保護
+#   aramakisai-web.aramakisai.workers.dev       Workers.dev 既定URL (本番は aramakisai.com 経由)
+#                                                誤って外部に晒さないよう Authentik OIDC で保護
+#   aramakisai-web-dev.aramakisai.workers.dev   env.dev worker (aramakisai-web-dev) の
+#                                                Workers.dev 既定URL。dev.aramakisai.com custom
+#                                                domain とは別に自動生成されるため個別に保護要
 #
 # 非保護 (自前認証あり):
 #   webmail.aramakisai.com   Roundcube が Authentik OAuth2 で保護
@@ -74,14 +77,26 @@ resource "cloudflare_zero_trust_access_application" "aramakisai_web_dev" {
   allowed_idps              = local.authentik_configured ? [cloudflare_zero_trust_access_identity_provider.authentik[0].id] : []
 }
 
+resource "cloudflare_zero_trust_access_application" "aramakisai_web_dev_workers_dev" {
+  account_id       = var.cloudflare_account_id
+  name             = "aramakisai-web-dev (workers.dev)"
+  domain           = "aramakisai-web-dev.aramakisai.workers.dev"
+  type             = "self_hosted"
+  session_duration = "24h"
+
+  auto_redirect_to_identity = local.authentik_configured
+  allowed_idps              = local.authentik_configured ? [cloudflare_zero_trust_access_identity_provider.authentik[0].id] : []
+}
+
 # ============================================================
 # Cloudflare Access Policies
 # ============================================================
 
 locals {
   access_applications = {
-    aramakisai_web_workers_dev = cloudflare_zero_trust_access_application.aramakisai_web_workers_dev.id
-    aramakisai_web_dev         = cloudflare_zero_trust_access_application.aramakisai_web_dev.id
+    aramakisai_web_workers_dev     = cloudflare_zero_trust_access_application.aramakisai_web_workers_dev.id
+    aramakisai_web_dev             = cloudflare_zero_trust_access_application.aramakisai_web_dev.id
+    aramakisai_web_dev_workers_dev = cloudflare_zero_trust_access_application.aramakisai_web_dev_workers_dev.id
   }
 }
 
