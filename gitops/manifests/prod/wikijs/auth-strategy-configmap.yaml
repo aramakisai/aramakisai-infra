@@ -50,12 +50,16 @@ data:
     -- Wiki.js "groups" テーブルへ Authentikグループ"管理者"/"リーダー"対応行を非破壊的に作成
     -- name列にUNIQUE制約がないためON CONFLICTは使えず、WHERE NOT EXISTSでINSERT-if-absentにする。
     -- 既存行がある場合は一切UPDATEしない(Admin UI経由の手動権限調整を尊重)。
-    INSERT INTO "groups" (name, permissions, "pageRules", "isSystem")
-    SELECT '管理者', '["manage:system"]'::jsonb, '[]'::jsonb, false
+    INSERT INTO "groups" (name, permissions, "pageRules", "isSystem", "createdAt", "updatedAt")
+    SELECT '管理者', '["manage:system"]'::jsonb, '[]'::jsonb, false,
+      to_char(now() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+      to_char(now() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
     WHERE NOT EXISTS (SELECT 1 FROM "groups" WHERE name = '管理者');
 
-    INSERT INTO "groups" (name, permissions, "pageRules", "isSystem")
-    SELECT 'リーダー', '["manage:system"]'::jsonb, '[]'::jsonb, false
+    INSERT INTO "groups" (name, permissions, "pageRules", "isSystem", "createdAt", "updatedAt")
+    SELECT 'リーダー', '["manage:system"]'::jsonb, '[]'::jsonb, false,
+      to_char(now() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+      to_char(now() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
     WHERE NOT EXISTS (SELECT 1 FROM "groups" WHERE name = 'リーダー');
   schema-guard-query.sql: |
     SELECT string_agg(column_name, ',' ORDER BY column_name) FROM information_schema.columns WHERE table_name = 'authentication';
