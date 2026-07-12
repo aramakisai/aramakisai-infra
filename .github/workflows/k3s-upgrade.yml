@@ -1,0 +1,83 @@
+name: K3s Upgrade
+
+# inputsを一切定義しない。
+# 理由: mainブランチに事前コミット済みの ansible/inventory/tailscale.yml の k3s_version 値をそのまま使うことで
+# 『Git先行コミット→PRマージ→本ワークフロー手動実行』の順序を設計上強制するため。
+on:
+  workflow_dispatch:
+
+# 同時に複数のアップグレードが走るのを防ぐ
+concurrency:
+  group: k3s-upgrade
+  cancel-in-progress: false
+
+jobs:
+  upgrade:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # GitHub Actions ランナーを tailnet に参加させる (Ansible SSH 経路の確保)
+      # 前提: Tailscale ACL に tag:ci が定義されていること
+      - name: Setup Tailscale
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: Install tools
+        run: |
+          # Ansible
+          pip install --quiet ansible
+
+          # kubectl
+          KUBECTL_VERSION=$(curl -Ls https://dl.k8s.io/release/stable.txt)
+          curl -LO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+          chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+
+          # Infisical CLI
+          curl -1sLf 'https://dl.cloudsmith.io/public/infisical/infisical-cli/setup.deb.sh' | sudo -E bash
+          sudo apt-get install -y infisical
+
+      - name: Read version
+        id: read_version
+        run: |
+          # mainブランチにチェックアウト済みのインベントリファイルからk3s_versionを抽出
+          k3s_version=$(grep -E '^\s*k3s_version:' ansible/inventory/tailscale.yml | awk '{print $2}')
+          echo "k3s_version=$k3s_version" >> "$GITHUB_OUTPUT"
+
+      - name: Run upgrade
+        id: run_upgrade
+        env:
+          INFISICAL_CLIENT_ID: ${{ secrets.INFISICAL_CLIENT_ID }}
+          INFISICAL_CLIENT_SECRET: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+          INFISICAL_PROJECT_ID: ${{ secrets.INFISICAL_PROJECT_ID }}
+        run: |
+          # -e オプションは付けず、mainブランチにチェックアウト済みの ansible/inventory/tailscale.yml の
+          # k3s_version値をAnsible自身がインベントリ変数として自然に使う設計とする。
+          infisical run --env=prod -- ansible-playbook -i ansible/inventory/tailscale.yml ansible/playbooks/k3s-bootstrap.yml
+
+          # playbook実行が失敗してもクラスタは診断可能な状態のまま残る
+          # (既存playbookの冪等性に依存、追加のロールバック処理はここでは実装しない)
+
+      - name: Notify failure
+        if: failure()
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_OPS_WEBHOOK_URL }}
+        run: |
+          curl -H "Content-Type: application/json" \
+               -d "{\"content\": \":x: **K3s Upgrade Failed!**\nJob URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" \
+               "$DISCORD_WEBHOOK_URL"
+
+      - name: Notify success
+        if: success()
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_OPS_WEBHOOK_URL }}
+          K3S_VERSION: ${{ steps.read_version.outputs.k3s_version }}
+        run: |
+          curl -H "Content-Type: application/json" \
+               -d "{\"content\": \":white_check_mark: **K3s Upgrade Succeeded!**\nTarget Version: \`${K3S_VERSION}\`\nJob URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" \
+               "$DISCORD_WEBHOOK_URL"

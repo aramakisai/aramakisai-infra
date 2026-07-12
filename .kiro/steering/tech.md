@@ -82,6 +82,13 @@ infisical run -- ansible-playbook k3s-bootstrap.yml
 - **解決**: `gitops/apps/staging/directus-schema-preview-appset.yaml` の ApplicationSet(`pullRequest` generator)が、open な `directus-schema-*` PR ごとに ephemeral Application `directus-schema-preview-<PR番号>` を自動生成し、PR ブランチの `gitops/manifests/staging/directus-schema-preview/`(schema-configmap・migrations-configmap・schema-apply-job のみの kustomize overlay)を実 staging DB に適用する。`kustomize.nameSuffix: "-pr-<PR番号>"` でリソース名をユニーク化し、main を追跡する `directus-staging` Application(Deployment/DB/Service 等を専有管理)とのリソース競合を回避している。PR が閉じられると生成物は自動削除される。
 - **認証**: PR 一覧取得には `aramakisai-infra` への `pull-requests: read-only` のみを持つ専用 GitHub App を使用（`ARGOCD_APPLICATIONSET_GITHUB_APP_*`、既存の書き込み権限を持つ web→infra 用 App とは分離）。
 
+### ホストOS自動更新・K3sバージョン追従の設計判断
+- ホストOSパッケージ更新は Debian 標準機能(`unattended-upgrades` + `apt-daily-upgrade.timer` + `Automatic-Reboot`)に完全委任し、Ansibleロール `os-auto-update` は設定ファイル配布と結果通知のみを担う(独自の適用/再起動ロジックは実装しない)。
+- **既知の落とし穴**: Debian 13 (trixie) の `unattended-upgrades` 2.12 では `Unattended-Upgrade::Allowed-Origins` は非推奨のlegacyキー名で、実機では `get_allowed_origins_legacy()` 内でクラッシュする。正しいキー名は `Unattended-Upgrade::Origins-Pattern` で、security origin行は `"origin=Debian,codename=${distro_codename}-security,label=Debian-Security";` の形式(`-security` サフィックス必須)。実機検証(prod-node-1)で発見・修正済み。
+- **既知の落とし穴**: Ansible `template` モジュール(Jinja2)でbashスクリプトを配布する際、bashのパラメータ展開 `${#変数名}`(文字列長取得)の `{#` がJinja2のコメント開始タグと誤認識され `Missing end of comment tag` エラーになる。文字列長取得は `wc -c` 等で代替する。
+- Discord webhook通知は本文が2000文字を超えると送信が失敗する(`{"content": ["Must be 2000 or fewer in length."]}`)。`debsecan` 等の可変長コマンド出力を含める場合は要約(件数のみ)+最終メッセージのtruncateガードの二重対策が必要。
+- K3sバージョン追従は検知(週次cron)・適用(workflow_dispatch、入力パラメータなし)を分離し、Gitコミット(`ansible/inventory/tailscale.yml` の `k3s_version` 変更PR)を承認の起点とすることで、シングルノード構成でのロールバック手段の限定さに対し人間承認を必須化している。
+
 ## 監視スタック
 
 | コンポーネント | 役割 | 状態 |
@@ -112,6 +119,15 @@ infisical run -- terraform -chdir=terraform apply
 # Ansible 単体実行 / K3s アップデート
 infisical run -- ansible-playbook -i ansible/inventory/tailscale.yml ansible/playbooks/k3s-bootstrap.yml
 infisical run -- ansible-playbook -i ansible/inventory/tailscale.yml ansible/playbooks/k3s-bootstrap.yml -e "k3s_version=v1.33.0+k3s1"
+
+# K3s バージョン差分の手動確認 (通常は週次cronで自動実行)
+# GitHub Actions の k3s-version-check.yml を workflow_dispatch で手動トリガー
+
+# K3s アップグレード適用 (mainブランチの k3s_version を承認後に反映)
+# GitHub Actions の k3s-upgrade.yml を workflow_dispatch で手動トリガー (入力パラメータなし)
+
+# ホストOS自動更新の状態確認 (prod-node-1)
+ssh root@prod-node-1 "systemctl status os-update-notify.timer; cat /var/run/reboot-required 2>/dev/null || echo 'reboot不要'"
 ```
 
 ### Infisical で管理するシークレット一覧
@@ -128,6 +144,7 @@ infisical run -- ansible-playbook -i ansible/inventory/tailscale.yml ansible/pla
   - **Vaultwarden**: `VAULTWARDEN_ADMIN_TOKEN`, `VAULTWARDEN_DB_PASSWORD`, `VAULTWARDEN_ORG_CREATION_USERS`, `VAULTWARDEN_OIDC_CLIENT_ID`, `VAULTWARDEN_OIDC_CLIENT_SECRET`, `VAULTWARDEN_RESTIC_REPOSITORY`, `VAULTWARDEN_RESTIC_PASSWORD`（SMTP は専用キーを持たず、Authentik の `NOREPLY_SMTP_PASSWORD` を再利用）
   - **Directus SSO**: `DIRECTUS_PROD_OIDC_CLIENT_SECRET`（prod 用 Authentik OIDC Client Secret）, `DIRECTUS_STG_OIDC_CLIENT_SECRET`（stg 用）。`DIRECTUS_PROD_OIDC_CLIENT_ID` / `DIRECTUS_STG_OIDC_CLIENT_ID` は `"directus-prod"` / `"directus-stg"` 固定でコードに直書き（変数なし）。
   - **Vaultwarden RBAC Sync**: `VAULTWARDEN_RBAC_SYNC_AUTHENTIK_API_TOKEN`（`PRESENCE_AUTHENTIK_API_TOKEN`と同パターン、`terraform/authentik_vaultwarden_rbac_sync.tf`で発行）, `VAULTWARDEN_RBAC_SYNC_SERVICE_ACCOUNT_CLIENT_ID`, `VAULTWARDEN_RBAC_SYNC_SERVICE_ACCOUNT_CLIENT_SECRET`（Vaultwarden専用サービスアカウントのPersonal API Key、手動ブートストラップ必須）, `TF_VAR_vaultwarden_rbac_sync_trigger_token`（Trigger Receiver共有ベアラートークン）, `DISCORD_OPS_WEBHOOK_URL`（既存キーを再利用、新規作成なし）
+  - **os-k3s-auto-update**: 新規シークレットなし。既存 `DISCORD_OPS_WEBHOOK_URL` を再利用し、`ansible/roles/os-auto-update`(ホストOS更新結果通知)・`.github/workflows/k3s-version-check.yml`・`.github/workflows/k3s-upgrade.yml` の3箇所で新規に利用。
   - **ArgoCD ApplicationSet (directus-schema-preview)**: `ARGOCD_APPLICATIONSET_GITHUB_APP_ID`, `ARGOCD_APPLICATIONSET_GITHUB_APP_INSTALLATION_ID`, `ARGOCD_APPLICATIONSET_GITHUB_APP_PRIVATE_KEY`（aramakisai-infra への `pull-requests: read-only` のみを持つ専用 GitHub App。PR generator が open な `directus-schema-*` PR を検出するために使用）
 
 ### Commit Protection & Coding Standards

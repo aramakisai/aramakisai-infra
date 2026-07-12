@@ -242,6 +242,38 @@ gh api repos/aramakisai/aramakisai-infra/dispatches -f event_type=dr-recovery
 
 ---
 
+## 計画的メンテナンス時のDR誤検知抑止
+
+ホストOSの自動更新（`ansible/roles/os-auto-update/` による毎日03:30の再起動）、手動K3sアップグレード（`.github/workflows/k3s-upgrade.yml`）、または手動メンテナンス全般において、ノードが一時的に応答しなくなることでDR自動復旧（`dr-trigger.yml`）が誤発火するリスクがある。
+
+### 猶予期間中の手動中止手順
+検出（5分）と猶予期間（既定10分）の合計最大15分を超過しそうな場合、ラベル `dr-incident` のGitHub Issueが自動作成される。作業担当者は以下の手順で自動ノード再作成（`dr-recovery.yml`）を防止できる（OWNER/MEMBER/COLLABORATOR権限が必要）。
+
+1. **Issueの特定**:
+   以下のコマンドで `dr-incident` ラベルの付いたオープンなIssueを確認する。
+   ```bash
+   gh issue list --repo aramakisai/aramakisai-infra --label dr-incident --state open
+   ```
+2. **中止コメントの投稿**:
+   対象のIssueへ `abort` または `中止` を含むコメントを投稿する（またはIssueをクローズする）。
+   ```bash
+   gh issue comment <issue番号> --body "abort (計画的メンテナンス中)" --repo aramakisai/aramakisai-infra
+   ```
+
+### ワークフローの一時停止
+事前に長時間のメンテナンスが分かっている場合は、作業開始前に `dr-trigger.yml` のスケジュールを一時停止し、作業完了後に再開する。
+
+- **一時停止**:
+  ```bash
+  gh workflow disable dr-trigger.yml --repo aramakisai/aramakisai-infra
+  ```
+- **再開**:
+  ```bash
+  gh workflow enable dr-trigger.yml --repo aramakisai/aramakisai-infra
+  ```
+
+---
+
 ## GitHub Actions 復旧ワークフローの管理
 
 ```

@@ -1,0 +1,83 @@
+---
+# OSセキュリティパッチ適用設定
+# 目的: Debian 13ホスト(prod-node-1)のOSセキュリティパッチ適用をunattended-upgrades標準機能に完全委任し、適用結果のみDiscordへ通知する。
+# Ansible/自作スクリプトはapt update/upgrade/reboot操作を一切実行しない(すべて設定ファイル配布のみ)。
+
+- name: 必要なパッケージをインストール
+  ansible.builtin.apt:
+    name:
+      - unattended-upgrades
+      - needrestart
+      - debsecan
+      - jq
+    state: present
+    update_cache: true
+
+- name: 50unattended-upgrades の設定を配布
+  ansible.builtin.template:
+    src: 50unattended-upgrades.j2
+    dest: /etc/apt/apt.conf.d/50unattended-upgrades
+    mode: '0644'
+    owner: root
+    group: root
+
+- name: 20auto-upgrades の設定を配布
+  ansible.builtin.template:
+    src: 20auto-upgrades.j2
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    mode: '0644'
+    owner: root
+    group: root
+
+- name: needrestart の設定を配布
+  ansible.builtin.template:
+    src: needrestart.conf.j2
+    dest: /etc/needrestart/conf.d/50-autorestart.conf
+    mode: '0644'
+    owner: root
+    group: root
+
+- name: 通知スクリプトを配布
+  ansible.builtin.template:
+    src: os-update-notify.sh.j2
+    dest: /usr/local/bin/os-update-notify.sh
+    mode: '0755'
+    owner: root
+    group: root
+
+- name: 通知スクリプトの環境変数を配布
+  ansible.builtin.template:
+    src: os-update-notify.env.j2
+    dest: /etc/os-update-notify.env
+    mode: '0600'
+    owner: root
+    group: root
+
+- name: 通知スクリプトの systemd サービスを配布
+  ansible.builtin.template:
+    src: os-update-notify.service.j2
+    dest: /etc/systemd/system/os-update-notify.service
+    mode: '0644'
+    owner: root
+    group: root
+  register: os_update_notify_service
+
+- name: 通知スクリプトの systemd タイマーを配布
+  ansible.builtin.template:
+    src: os-update-notify.timer.j2
+    dest: /etc/systemd/system/os-update-notify.timer
+    mode: '0644'
+    owner: root
+    group: root
+  register: os_update_notify_timer
+
+- name: systemd の設定を再読み込み
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: os_update_notify_service is changed or os_update_notify_timer is changed
+
+- name: 通知スクリプトのタイマーを有効化して開始
+  ansible.builtin.systemd:
+    name: os-update-notify.timer
+    enabled: true
+    state: started

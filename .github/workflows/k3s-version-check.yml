@@ -1,0 +1,28 @@
+name: K3s Version Check
+
+on:
+  schedule:
+    # 毎週月曜09:00 JST = UTC 0:00
+    - cron: "0 0 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: k3s-version-check
+  cancel-in-progress: false
+
+# 読み取り専用。ansible/inventory/tailscale.yml やクラスタへの変更は行わない。
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run K3s version check
+        env:
+          DISCORD_OPS_WEBHOOK_URL: ${{ secrets.DISCORD_OPS_WEBHOOK_URL }}
+        run: bash .github/scripts/k3s-version-check.sh
