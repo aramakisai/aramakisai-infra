@@ -1,0 +1,33 @@
+---
+# schema-apply Job (sync-wave 0) が custom migration で directus_permissions 等を
+# 直接 SQL 更新した場合、稼働中の directus Deployment pod は起動時にロードした
+# permission を in-memory cache したままで新しい権限を認識しない。
+# ConfigMap 変更だけでは Deployment は自動再起動されないため、schema-apply の後続
+# (sync-wave 1) で明示的に rollout restart し、cache を必ず更新する。
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: directus-restart
+  namespace: prod
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: HookSucceeded
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  ttlSecondsAfterFinished: 3600
+  backoffLimit: 2
+  template:
+    spec:
+      serviceAccountName: directus-restart
+      restartPolicy: OnFailure
+      containers:
+        - name: restart
+          image: alpine/k8s:1.32.13
+          command: ["kubectl", "-n", "prod", "rollout", "restart", "deployment/directus"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
