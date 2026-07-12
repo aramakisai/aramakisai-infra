@@ -63,6 +63,17 @@ resource "cloudflare_zero_trust_access_application" "aramakisai_web_workers_dev"
   allowed_idps              = local.authentik_configured ? [cloudflare_zero_trust_access_identity_provider.authentik[0].id] : []
 }
 
+resource "cloudflare_zero_trust_access_application" "aramakisai_web_dev" {
+  account_id       = var.cloudflare_account_id
+  name             = "aramakisai-web (dev)"
+  domain           = "dev.aramakisai.com"
+  type             = "self_hosted"
+  session_duration = "24h"
+
+  auto_redirect_to_identity = local.authentik_configured
+  allowed_idps              = local.authentik_configured ? [cloudflare_zero_trust_access_identity_provider.authentik[0].id] : []
+}
+
 # ============================================================
 # Cloudflare Access Policies
 # ============================================================
@@ -70,6 +81,7 @@ resource "cloudflare_zero_trust_access_application" "aramakisai_web_workers_dev"
 locals {
   access_applications = {
     aramakisai_web_workers_dev = cloudflare_zero_trust_access_application.aramakisai_web_workers_dev.id
+    aramakisai_web_dev         = cloudflare_zero_trust_access_application.aramakisai_web_dev.id
   }
 }
 

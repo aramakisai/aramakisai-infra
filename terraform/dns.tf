@@ -283,3 +283,30 @@ resource "cloudflare_record" "srv_submission" {
   }
   comment = "SMTP Submission SRV (Mailserver)"
 }
+
+# ============================================================
+# Workers Custom Domains
+# ============================================================
+
+# NOTE: このリポジトリがpinしているCloudflareプロバイダ(~> 4.0, 実体4.52.8)には
+#       cloudflare_workers_custom_domain は存在しない(v5系以降のリソース名。
+#       `terraform providers schema -json` で実際にスキーマを確認して判明)。
+#       4.x系での正しいリソース名は cloudflare_workers_domain。
+#       Cloudflare側で自動的にDNS/ルーティングを処理するため、同名のcloudflare_record
+#       (CNAME) リソースは別途作成しないこと。
+#       Workers Assets構成との相性問題(environment引数がAssetsデプロイと噛み合わずapply時に
+#       エラーになる既知の懸念事項、cloudflare/terraform-provider-cloudflare#5618)がある。
+#       【代替手順】
+#       もし apply 時に失敗する場合は、一旦このリソースをコメントアウトし、
+#       Cloudflare ダッシュボード (Workers & Pages > 対象Worker > Triggers > Custom Domains)
+#       から手動で `dev.aramakisai.com` を追加した上で、
+#       `terraform import cloudflare_workers_domain.aramakisai_web_dev <account_id>/dev.aramakisai.com`
+#       を実行して state に取り込むこと。
+
+resource "cloudflare_workers_domain" "aramakisai_web_dev" {
+  account_id  = var.cloudflare_account_id
+  zone_id     = var.cloudflare_zone_id
+  hostname    = "dev.aramakisai.com"
+  service     = "aramakisai-web-dev"
+  environment = "dev"
+}
