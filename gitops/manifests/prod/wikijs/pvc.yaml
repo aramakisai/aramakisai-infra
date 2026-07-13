@@ -1,5 +1,5 @@
 ---
-# Wiki.js アップロードファイル用ストレージ (/wiki/data/uploads マウント, requarks/wiki:2 イメージ)
+# Wiki.js データ用ストレージ (/wiki/data マウント、content/uploads/cache含む, requarks/wiki:2 イメージ)
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
