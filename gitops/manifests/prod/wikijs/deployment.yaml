@@ -47,7 +47,7 @@ spec:
               cpu: "500m"
           volumeMounts:
             - name: wikijs-volume
-              mountPath: /wiki/data/content
+              mountPath: /wiki/data
       volumes:
         - name: wikijs-volume
           persistentVolumeClaim:
