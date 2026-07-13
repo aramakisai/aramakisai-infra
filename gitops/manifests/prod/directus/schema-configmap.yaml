@@ -31,6 +31,32 @@ data:
           versioning: false
         schema:
           name: announcements
+      - collection: announcements_files
+        meta:
+          accountability: all
+          archive_app_filter: true
+          archive_field: null
+          archive_value: null
+          autosave_revision_interval: null
+          collapse: open
+          collection: announcements_files
+          color: null
+          display_template: null
+          group: null
+          hidden: true
+          icon: import_export
+          item_duplication_fields: null
+          note: null
+          preview_url: null
+          singleton: false
+          sort: null
+          sort_field: null
+          status: active
+          translations: null
+          unarchive_value: null
+          versioning: false
+        schema:
+          name: announcements_files
       - collection: faq_items
         meta:
           accountability: all
@@ -421,6 +447,32 @@ data:
           versioning: false
         schema:
           name: topics
+      - collection: topics_files
+        meta:
+          accountability: all
+          archive_app_filter: true
+          archive_field: null
+          archive_value: null
+          autosave_revision_interval: null
+          collapse: open
+          collection: topics_files
+          color: null
+          display_template: null
+          group: null
+          hidden: true
+          icon: import_export
+          item_duplication_fields: null
+          note: null
+          preview_url: null
+          singleton: false
+          sort: null
+          sort_field: null
+          status: active
+          translations: null
+          unarchive_value: null
+          versioning: false
+        schema:
+          name: topics_files
     fields:
       - collection: announcements
         field: id
@@ -574,6 +626,190 @@ data:
           max_length: null
           numeric_precision: null
           numeric_scale: null
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: announcements
+        field: attachments
+        type: alias
+        meta:
+          collection: announcements
+          conditions: null
+          display: null
+          display_options: null
+          field: attachments
+          group: null
+          hidden: false
+          interface: list-m2m
+          note: 複数添付ファイル
+          options: null
+          readonly: false
+          required: false
+          searchable: true
+          sort: 10
+          special:
+            - m2m
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+      - collection: announcements_files
+        field: id
+        type: integer
+        meta:
+          collection: announcements_files
+          conditions: null
+          display: null
+          display_options: null
+          field: id
+          group: null
+          hidden: true
+          interface: input
+          note: null
+          options: null
+          readonly: true
+          required: false
+          searchable: true
+          sort: 1
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: id
+          table: announcements_files
+          data_type: integer
+          default_value: nextval('announcements_files_id_seq'::regclass)
+          max_length: null
+          numeric_precision: 32
+          numeric_scale: 0
+          is_nullable: false
+          is_unique: true
+          is_indexed: false
+          is_primary_key: true
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: true
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: announcements_files
+        field: announcements_id
+        type: integer
+        meta:
+          collection: announcements_files
+          conditions: null
+          display: null
+          display_options: null
+          field: announcements_id
+          group: null
+          hidden: true
+          interface: null
+          note: null
+          options: null
+          readonly: false
+          required: false
+          searchable: true
+          sort: 2
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: announcements_id
+          table: announcements_files
+          data_type: integer
+          default_value: null
+          max_length: null
+          numeric_precision: 32
+          numeric_scale: 0
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: announcements
+          foreign_key_column: id
+      - collection: announcements_files
+        field: directus_files_id
+        type: uuid
+        meta:
+          collection: announcements_files
+          conditions: null
+          display: null
+          display_options: null
+          field: directus_files_id
+          group: null
+          hidden: true
+          interface: null
+          note: null
+          options: null
+          readonly: false
+          required: false
+          searchable: true
+          sort: 3
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: directus_files_id
+          table: announcements_files
+          data_type: uuid
+          default_value: null
+          max_length: null
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: directus_files
+          foreign_key_column: id
+      - collection: announcements_files
+        field: sort
+        type: integer
+        meta:
+          collection: announcements_files
+          conditions: null
+          display: null
+          display_options: null
+          field: sort
+          group: null
+          hidden: true
+          interface: null
+          note: null
+          options: null
+          readonly: false
+          required: false
+          searchable: true
+          sort: 4
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: sort
+          table: announcements_files
+          data_type: integer
+          default_value: null
+          max_length: null
+          numeric_precision: 32
+          numeric_scale: 0
           is_nullable: true
           is_unique: false
           is_indexed: false
@@ -1093,17 +1329,17 @@ data:
           options:
             fields:
               - field: platform
+                meta:
+                  interface: input
+                  width: half
                 name: プラットフォーム名
                 type: string
+              - field: url
                 meta:
                   interface: input
                   width: half
-              - field: url
                 name: URL
                 type: string
-                meta:
-                  interface: input
-                  width: half
           readonly: false
           required: false
           searchable: true
@@ -1131,6 +1367,87 @@ data:
           has_auto_increment: false
           foreign_key_table: null
           foreign_key_column: null
+      - collection: festival_meta
+        field: overview
+        type: text
+        meta:
+          collection: festival_meta
+          conditions: null
+          display: formatted-value
+          display_options: null
+          field: overview
+          group: null
+          hidden: false
+          interface: input-rich-text-html
+          note: 祭概要 (WYSIWYG)
+          options: null
+          readonly: false
+          required: false
+          searchable: true
+          sort: 20
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: overview
+          table: festival_meta
+          data_type: text
+          default_value: null
+          max_length: null
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: festival_meta
+        field: hero_image
+        type: uuid
+        meta:
+          collection: festival_meta
+          conditions: null
+          display: image
+          display_options: null
+          field: hero_image
+          group: null
+          hidden: false
+          interface: file-image
+          note: Aboutページ用ヒーロー画像
+          options: null
+          readonly: false
+          required: false
+          searchable: true
+          sort: 21
+          special:
+            - file
+          translations: null
+          validation: null
+          validation_message: null
+          width: half
+        schema:
+          name: hero_image
+          table: festival_meta
+          data_type: uuid
+          default_value: null
+          max_length: null
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: directus_files
+          foreign_key_column: id
       - collection: map_areas
         field: id
         type: integer
@@ -1670,7 +1987,7 @@ data:
           interface: input
           note: SNS/動画等の任意埋め込みURL
           options:
-            placeholder: 'https://...'
+            placeholder: https://...
           readonly: false
           required: false
           searchable: true
@@ -1832,7 +2149,7 @@ data:
           interface: input
           note: SNS/動画等の任意埋め込みURL
           options:
-            placeholder: 'https://...'
+            placeholder: https://...
           readonly: false
           required: false
           searchable: true
@@ -4153,8 +4470,234 @@ data:
           has_auto_increment: false
           foreign_key_table: null
           foreign_key_column: null
+      - collection: topics
+        field: attachments
+        type: alias
+        meta:
+          collection: topics
+          conditions: null
+          display: null
+          display_options: null
+          field: attachments
+          group: null
+          hidden: false
+          interface: list-m2m
+          note: 複数添付ファイル
+          options: null
+          readonly: false
+          required: false
+          searchable: true
+          sort: 10
+          special:
+            - m2m
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+      - collection: topics_files
+        field: id
+        type: integer
+        meta:
+          collection: topics_files
+          conditions: null
+          display: null
+          display_options: null
+          field: id
+          group: null
+          hidden: true
+          interface: input
+          note: null
+          options: null
+          readonly: true
+          required: false
+          searchable: true
+          sort: 1
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: id
+          table: topics_files
+          data_type: integer
+          default_value: nextval('topics_files_id_seq'::regclass)
+          max_length: null
+          numeric_precision: 32
+          numeric_scale: 0
+          is_nullable: false
+          is_unique: true
+          is_indexed: false
+          is_primary_key: true
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: true
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: topics_files
+        field: topics_id
+        type: integer
+        meta:
+          collection: topics_files
+          conditions: null
+          display: null
+          display_options: null
+          field: topics_id
+          group: null
+          hidden: true
+          interface: null
+          note: null
+          options: null
+          readonly: false
+          required: false
+          searchable: true
+          sort: 2
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: topics_id
+          table: topics_files
+          data_type: integer
+          default_value: null
+          max_length: null
+          numeric_precision: 32
+          numeric_scale: 0
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: topics
+          foreign_key_column: id
+      - collection: topics_files
+        field: directus_files_id
+        type: uuid
+        meta:
+          collection: topics_files
+          conditions: null
+          display: null
+          display_options: null
+          field: directus_files_id
+          group: null
+          hidden: true
+          interface: null
+          note: null
+          options: null
+          readonly: false
+          required: false
+          searchable: true
+          sort: 3
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: directus_files_id
+          table: topics_files
+          data_type: uuid
+          default_value: null
+          max_length: null
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: directus_files
+          foreign_key_column: id
+      - collection: topics_files
+        field: sort
+        type: integer
+        meta:
+          collection: topics_files
+          conditions: null
+          display: null
+          display_options: null
+          field: sort
+          group: null
+          hidden: true
+          interface: null
+          note: null
+          options: null
+          readonly: false
+          required: false
+          searchable: true
+          sort: 4
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: sort
+          table: topics_files
+          data_type: integer
+          default_value: null
+          max_length: null
+          numeric_precision: 32
+          numeric_scale: 0
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
     systemFields: []
     relations:
+      - collection: announcements_files
+        field: announcements_id
+        related_collection: announcements
+        meta:
+          junction_field: directus_files_id
+          many_collection: announcements_files
+          many_field: announcements_id
+          one_allowed_collections: null
+          one_collection: announcements
+          one_collection_field: null
+          one_deselect_action: nullify
+          one_field: attachments
+          sort_field: sort
+        schema:
+          table: announcements_files
+          column: announcements_id
+          foreign_key_table: announcements
+          foreign_key_column: id
+          constraint_name: announcements_files_announcements_id_foreign
+          on_update: NO ACTION
+          on_delete: CASCADE
+      - collection: announcements_files
+        field: directus_files_id
+        related_collection: directus_files
+        meta:
+          junction_field: announcements_id
+          many_collection: announcements_files
+          many_field: directus_files_id
+          one_allowed_collections: null
+          one_collection: directus_files
+          one_collection_field: null
+          one_deselect_action: nullify
+          one_field: null
+          sort_field: null
+        schema:
+          table: announcements_files
+          column: directus_files_id
+          foreign_key_table: directus_files
+          foreign_key_column: id
+          constraint_name: announcements_files_directus_files_id_foreign
+          on_update: NO ACTION
+          on_delete: CASCADE
       - collection: festival_meta
         field: parking_map
         related_collection: directus_files
@@ -4174,6 +4717,27 @@ data:
           foreign_key_table: directus_files
           foreign_key_column: id
           constraint_name: festival_meta_parking_map_foreign
+          on_update: NO ACTION
+          on_delete: SET NULL
+      - collection: festival_meta
+        field: hero_image
+        related_collection: directus_files
+        meta:
+          junction_field: null
+          many_collection: festival_meta
+          many_field: hero_image
+          one_allowed_collections: null
+          one_collection: directus_files
+          one_collection_field: null
+          one_deselect_action: nullify
+          one_field: null
+          sort_field: null
+        schema:
+          table: festival_meta
+          column: hero_image
+          foreign_key_table: directus_files
+          foreign_key_column: id
+          constraint_name: festival_meta_hero_image_foreign
           on_update: NO ACTION
           on_delete: SET NULL
       - collection: page_home
@@ -4449,6 +5013,48 @@ data:
           constraint_name: topics_attachment_foreign
           on_update: NO ACTION
           on_delete: SET NULL
+      - collection: topics_files
+        field: topics_id
+        related_collection: topics
+        meta:
+          junction_field: directus_files_id
+          many_collection: topics_files
+          many_field: topics_id
+          one_allowed_collections: null
+          one_collection: topics
+          one_collection_field: null
+          one_deselect_action: nullify
+          one_field: attachments
+          sort_field: sort
+        schema:
+          table: topics_files
+          column: topics_id
+          foreign_key_table: topics
+          foreign_key_column: id
+          constraint_name: topics_files_topics_id_foreign
+          on_update: NO ACTION
+          on_delete: CASCADE
+      - collection: topics_files
+        field: directus_files_id
+        related_collection: directus_files
+        meta:
+          junction_field: topics_id
+          many_collection: topics_files
+          many_field: directus_files_id
+          one_allowed_collections: null
+          one_collection: directus_files
+          one_collection_field: null
+          one_deselect_action: nullify
+          one_field: null
+          sort_field: null
+        schema:
+          table: topics_files
+          column: directus_files_id
+          foreign_key_table: directus_files
+          foreign_key_column: id
+          constraint_name: topics_files_directus_files_id_foreign
+          on_update: NO ACTION
+          on_delete: CASCADE
 kind: ConfigMap
 metadata:
   name: directus-schema
