@@ -30,7 +30,7 @@ data:
         'mapGroups', true,
         'groupsClaim', 'groups'
       ),
-      false,
+      true,
       '{"v": []}'::jsonb,
       '{"v": []}'::jsonb,
       1,
