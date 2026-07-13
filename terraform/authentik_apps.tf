@@ -392,6 +392,7 @@ resource "authentik_provider_oauth2" "wikijs" {
   name          = "wikijs"
   client_id     = "wikijs"
   client_secret = var.wikijs_oidc_client_secret
+  grant_types   = ["authorization_code", "refresh_token"]
   signing_key   = data.authentik_certificate_key_pair.default.id
 
   authorization_flow = data.authentik_flow.default_authorization.id
