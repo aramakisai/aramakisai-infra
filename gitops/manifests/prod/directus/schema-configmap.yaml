@@ -135,58 +135,6 @@ data:
           versioning: false
         schema:
           name: map_areas
-      - collection: page_access
-        meta:
-          accountability: all
-          archive_app_filter: true
-          archive_field: null
-          archive_value: null
-          autosave_revision_interval: null
-          collapse: open
-          collection: page_access
-          color: null
-          display_template: null
-          group: null
-          hidden: false
-          icon: directions
-          item_duplication_fields: null
-          note: アクセスページシングルトン (id=1固定)
-          preview_url: null
-          singleton: true
-          sort: 12
-          sort_field: null
-          status: active
-          translations: null
-          unarchive_value: null
-          versioning: false
-        schema:
-          name: page_access
-      - collection: page_contact
-        meta:
-          accountability: all
-          archive_app_filter: true
-          archive_field: null
-          archive_value: null
-          autosave_revision_interval: null
-          collapse: open
-          collection: page_contact
-          color: null
-          display_template: null
-          group: null
-          hidden: false
-          icon: contact_support
-          item_duplication_fields: null
-          note: お問い合わせページシングルトン (id=1固定)
-          preview_url: null
-          singleton: true
-          sort: 13
-          sort_field: null
-          status: active
-          translations: null
-          unarchive_value: null
-          versioning: false
-        schema:
-          name: page_contact
       - collection: page_home
         meta:
           accountability: all
@@ -239,7 +187,7 @@ data:
           versioning: false
         schema:
           name: page_home_live
-      - collection: page_privacy
+      - collection: pages
         meta:
           accountability: all
           archive_app_filter: true
@@ -247,50 +195,24 @@ data:
           archive_value: null
           autosave_revision_interval: null
           collapse: open
-          collection: page_privacy
+          collection: pages
           color: null
-          display_template: null
+          display_template: '{{title}}'
           group: null
           hidden: false
-          icon: privacy_tip
+          icon: description
           item_duplication_fields: null
-          note: プライバシーポリシーページシングルトン (id=1固定)
+          note: 汎用固定ページ (slugで識別。既存page_access/page_contact/page_privacy/page_sponsor_guideの統合先)
           preview_url: null
-          singleton: true
-          sort: 14
-          sort_field: null
+          singleton: false
+          sort: 17
+          sort_field: sort
           status: active
           translations: null
           unarchive_value: null
           versioning: false
         schema:
-          name: page_privacy
-      - collection: page_sponsor_guide
-        meta:
-          accountability: all
-          archive_app_filter: true
-          archive_field: null
-          archive_value: null
-          autosave_revision_interval: null
-          collapse: open
-          collection: page_sponsor_guide
-          color: null
-          display_template: null
-          group: null
-          hidden: false
-          icon: handshake
-          item_duplication_fields: null
-          note: 協賛要項ページシングルトン (id=1固定)
-          preview_url: null
-          singleton: true
-          sort: 15
-          sort_field: null
-          status: active
-          translations: null
-          unarchive_value: null
-          versioning: false
-        schema:
-          name: page_sponsor_guide
+          name: pages
       - collection: performance_slots
         meta:
           accountability: all
@@ -1610,248 +1532,6 @@ data:
           has_auto_increment: false
           foreign_key_table: null
           foreign_key_column: null
-      - collection: page_access
-        field: id
-        type: integer
-        meta:
-          collection: page_access
-          conditions: null
-          display: null
-          display_options: null
-          field: id
-          group: null
-          hidden: true
-          interface: input
-          note: null
-          options: null
-          readonly: true
-          required: false
-          searchable: true
-          sort: 1
-          special: null
-          translations: null
-          validation: null
-          validation_message: null
-          width: full
-        schema:
-          name: id
-          table: page_access
-          data_type: integer
-          default_value: nextval('page_access_id_seq'::regclass)
-          max_length: null
-          numeric_precision: 32
-          numeric_scale: 0
-          is_nullable: false
-          is_unique: true
-          is_indexed: false
-          is_primary_key: true
-          is_generated: false
-          generation_expression: null
-          has_auto_increment: true
-          foreign_key_table: null
-          foreign_key_column: null
-      - collection: page_access
-        field: content
-        type: text
-        meta:
-          collection: page_access
-          conditions: null
-          display: raw
-          display_options: null
-          field: content
-          group: null
-          hidden: false
-          interface: input-rich-text-html
-          note: 交通アクセス案内 (バス路線・時刻・徒歩距離・混雑注意)
-          options: null
-          readonly: false
-          required: false
-          searchable: true
-          sort: 2
-          special: null
-          translations: null
-          validation: null
-          validation_message: null
-          width: full
-        schema:
-          name: content
-          table: page_access
-          data_type: text
-          default_value: null
-          max_length: null
-          numeric_precision: null
-          numeric_scale: null
-          is_nullable: true
-          is_unique: false
-          is_indexed: false
-          is_primary_key: false
-          is_generated: false
-          generation_expression: null
-          has_auto_increment: false
-          foreign_key_table: null
-          foreign_key_column: null
-      - collection: page_access
-        field: map_embed_url
-        type: string
-        meta:
-          collection: page_access
-          conditions: null
-          display: raw
-          display_options: null
-          field: map_embed_url
-          group: null
-          hidden: false
-          interface: input
-          note: 地図埋め込みURL
-          options:
-            placeholder: https://maps.google.com/...
-          readonly: false
-          required: false
-          searchable: true
-          sort: 3
-          special: null
-          translations: null
-          validation: null
-          validation_message: null
-          width: full
-        schema:
-          name: map_embed_url
-          table: page_access
-          data_type: character varying
-          default_value: null
-          max_length: 500
-          numeric_precision: null
-          numeric_scale: null
-          is_nullable: true
-          is_unique: false
-          is_indexed: false
-          is_primary_key: false
-          is_generated: false
-          generation_expression: null
-          has_auto_increment: false
-          foreign_key_table: null
-          foreign_key_column: null
-      - collection: page_contact
-        field: id
-        type: integer
-        meta:
-          collection: page_contact
-          conditions: null
-          display: null
-          display_options: null
-          field: id
-          group: null
-          hidden: true
-          interface: input
-          note: null
-          options: null
-          readonly: true
-          required: false
-          searchable: true
-          sort: 1
-          special: null
-          translations: null
-          validation: null
-          validation_message: null
-          width: full
-        schema:
-          name: id
-          table: page_contact
-          data_type: integer
-          default_value: nextval('page_contact_id_seq'::regclass)
-          max_length: null
-          numeric_precision: 32
-          numeric_scale: 0
-          is_nullable: false
-          is_unique: true
-          is_indexed: false
-          is_primary_key: true
-          is_generated: false
-          generation_expression: null
-          has_auto_increment: true
-          foreign_key_table: null
-          foreign_key_column: null
-      - collection: page_contact
-        field: content
-        type: text
-        meta:
-          collection: page_contact
-          conditions: null
-          display: raw
-          display_options: null
-          field: content
-          group: null
-          hidden: false
-          interface: input-rich-text-html
-          note: 問い合わせ案内本文
-          options: null
-          readonly: false
-          required: false
-          searchable: true
-          sort: 2
-          special: null
-          translations: null
-          validation: null
-          validation_message: null
-          width: full
-        schema:
-          name: content
-          table: page_contact
-          data_type: text
-          default_value: null
-          max_length: null
-          numeric_precision: null
-          numeric_scale: null
-          is_nullable: true
-          is_unique: false
-          is_indexed: false
-          is_primary_key: false
-          is_generated: false
-          generation_expression: null
-          has_auto_increment: false
-          foreign_key_table: null
-          foreign_key_column: null
-      - collection: page_contact
-        field: form_embed_url
-        type: string
-        meta:
-          collection: page_contact
-          conditions: null
-          display: raw
-          display_options: null
-          field: form_embed_url
-          group: null
-          hidden: false
-          interface: input
-          note: Google Forms iframe埋め込みURL
-          options:
-            placeholder: https://docs.google.com/forms/...
-          readonly: false
-          required: false
-          searchable: true
-          sort: 3
-          special: null
-          translations: null
-          validation: null
-          validation_message: null
-          width: full
-        schema:
-          name: form_embed_url
-          table: page_contact
-          data_type: character varying
-          default_value: null
-          max_length: 500
-          numeric_precision: null
-          numeric_scale: null
-          is_nullable: true
-          is_unique: false
-          is_indexed: false
-          is_primary_key: false
-          is_generated: false
-          generation_expression: null
-          has_auto_increment: false
-          foreign_key_table: null
-          foreign_key_column: null
       - collection: page_home
         field: id
         type: integer
@@ -2176,11 +1856,11 @@ data:
           has_auto_increment: false
           foreign_key_table: null
           foreign_key_column: null
-      - collection: page_privacy
+      - collection: pages
         field: id
         type: integer
         meta:
-          collection: page_privacy
+          collection: pages
           conditions: null
           display: null
           display_options: null
@@ -2201,9 +1881,9 @@ data:
           width: full
         schema:
           name: id
-          table: page_privacy
+          table: pages
           data_type: integer
-          default_value: nextval('page_privacy_id_seq'::regclass)
+          default_value: nextval('pages_id_seq'::regclass)
           max_length: null
           numeric_precision: 32
           numeric_scale: 0
@@ -2216,158 +1896,241 @@ data:
           has_auto_increment: true
           foreign_key_table: null
           foreign_key_column: null
-      - collection: page_privacy
-        field: content
-        type: text
-        meta:
-          collection: page_privacy
-          conditions: null
-          display: raw
-          display_options: null
-          field: content
-          group: null
-          hidden: false
-          interface: input-rich-text-html
-          note: プライバシーポリシー本文
-          options: null
-          readonly: false
-          required: false
-          searchable: true
-          sort: 2
-          special: null
-          translations: null
-          validation: null
-          validation_message: null
-          width: full
-        schema:
-          name: content
-          table: page_privacy
-          data_type: text
-          default_value: null
-          max_length: null
-          numeric_precision: null
-          numeric_scale: null
-          is_nullable: true
-          is_unique: false
-          is_indexed: false
-          is_primary_key: false
-          is_generated: false
-          generation_expression: null
-          has_auto_increment: false
-          foreign_key_table: null
-          foreign_key_column: null
-      - collection: page_sponsor_guide
-        field: id
-        type: integer
-        meta:
-          collection: page_sponsor_guide
-          conditions: null
-          display: null
-          display_options: null
-          field: id
-          group: null
-          hidden: true
-          interface: input
-          note: null
-          options: null
-          readonly: true
-          required: false
-          searchable: true
-          sort: 1
-          special: null
-          translations: null
-          validation: null
-          validation_message: null
-          width: full
-        schema:
-          name: id
-          table: page_sponsor_guide
-          data_type: integer
-          default_value: nextval('page_sponsor_guide_id_seq'::regclass)
-          max_length: null
-          numeric_precision: 32
-          numeric_scale: 0
-          is_nullable: false
-          is_unique: true
-          is_indexed: false
-          is_primary_key: true
-          is_generated: false
-          generation_expression: null
-          has_auto_increment: true
-          foreign_key_table: null
-          foreign_key_column: null
-      - collection: page_sponsor_guide
-        field: content
-        type: text
-        meta:
-          collection: page_sponsor_guide
-          conditions: null
-          display: raw
-          display_options: null
-          field: content
-          group: null
-          hidden: false
-          interface: input-rich-text-html
-          note: 協賛要項本文
-          options: null
-          readonly: false
-          required: false
-          searchable: true
-          sort: 2
-          special: null
-          translations: null
-          validation: null
-          validation_message: null
-          width: full
-        schema:
-          name: content
-          table: page_sponsor_guide
-          data_type: text
-          default_value: null
-          max_length: null
-          numeric_precision: null
-          numeric_scale: null
-          is_nullable: true
-          is_unique: false
-          is_indexed: false
-          is_primary_key: false
-          is_generated: false
-          generation_expression: null
-          has_auto_increment: false
-          foreign_key_table: null
-          foreign_key_column: null
-      - collection: page_sponsor_guide
-        field: pdf_url
+      - collection: pages
+        field: slug
         type: string
         meta:
-          collection: page_sponsor_guide
+          collection: pages
           conditions: null
           display: raw
           display_options: null
-          field: pdf_url
+          field: slug
           group: null
           hidden: false
           interface: input
-          note: 協賛要項PDF資料URL
+          note: ページ識別子 (URLパス相当, UNIQUE)
           options:
-            placeholder: https://...
+            lowercase: true
+            slug: true
+            trim: true
           readonly: false
-          required: false
+          required: true
+          searchable: true
+          sort: 2
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: half
+        schema:
+          name: slug
+          table: pages
+          data_type: character varying
+          default_value: null
+          max_length: 100
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: false
+          is_unique: true
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: pages
+        field: title
+        type: string
+        meta:
+          collection: pages
+          conditions: null
+          display: raw
+          display_options: null
+          field: title
+          group: null
+          hidden: false
+          interface: input
+          note: ページ見出し(h1)および<title>タグに使用
+          options: null
+          readonly: false
+          required: true
           searchable: true
           sort: 3
           special: null
           translations: null
           validation: null
           validation_message: null
+          width: half
+        schema:
+          name: title
+          table: pages
+          data_type: character varying
+          default_value: null
+          max_length: 255
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: false
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: pages
+        field: content
+        type: text
+        meta:
+          collection: pages
+          conditions: null
+          display: raw
+          display_options: null
+          field: content
+          group: null
+          hidden: false
+          interface: input-rich-text-html
+          note: 本文
+          options: null
+          readonly: false
+          required: false
+          searchable: true
+          sort: 4
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
           width: full
         schema:
-          name: pdf_url
-          table: page_sponsor_guide
+          name: content
+          table: pages
+          data_type: text
+          default_value: null
+          max_length: null
+          numeric_precision: null
+          numeric_scale: null
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: pages
+        field: embed_url
+        type: string
+        meta:
+          collection: pages
+          conditions: null
+          display: raw
+          display_options: null
+          field: embed_url
+          group: null
+          hidden: false
+          interface: input
+          note: 埋め込みURL (地図・フォーム等のiframe embed)
+          options:
+            placeholder: https://...
+          readonly: false
+          required: false
+          searchable: true
+          sort: 5
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: embed_url
+          table: pages
           data_type: character varying
           default_value: null
           max_length: 500
           numeric_precision: null
           numeric_scale: null
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: pages
+        field: embed_height
+        type: integer
+        meta:
+          collection: pages
+          conditions: null
+          display: raw
+          display_options: null
+          field: embed_height
+          group: null
+          hidden: false
+          interface: input
+          note: embed_urlのiframe高さ(px)。未指定時は16:9のデフォルト比率
+          options: null
+          readonly: false
+          required: false
+          searchable: true
+          sort: 6
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: embed_height
+          table: pages
+          data_type: integer
+          default_value: null
+          max_length: null
+          numeric_precision: 32
+          numeric_scale: 0
+          is_nullable: true
+          is_unique: false
+          is_indexed: false
+          is_primary_key: false
+          is_generated: false
+          generation_expression: null
+          has_auto_increment: false
+          foreign_key_table: null
+          foreign_key_column: null
+      - collection: pages
+        field: sort
+        type: integer
+        meta:
+          collection: pages
+          conditions: null
+          display: raw
+          display_options: null
+          field: sort
+          group: null
+          hidden: false
+          interface: input
+          note: 表示順
+          options: null
+          readonly: false
+          required: false
+          searchable: true
+          sort: 7
+          special: null
+          translations: null
+          validation: null
+          validation_message: null
+          width: full
+        schema:
+          name: sort
+          table: pages
+          data_type: integer
+          default_value: null
+          max_length: null
+          numeric_precision: 32
+          numeric_scale: 0
           is_nullable: true
           is_unique: false
           is_indexed: false
