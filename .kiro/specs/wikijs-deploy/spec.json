@@ -18,5 +18,7 @@
       "approved": true
     }
   },
-  "ready_for_implementation": true
+  "ready_for_implementation": true,
+  "status": "deprecated",
+  "status_note": "Notion導入によりWiki.jsは廃止。2026-07-17にGitOps(ArgoCD Application+manifests、CNPG DB含む)・Terraform(DNS/tunnel/Authentik SSO連携)・Infisicalシークレットを全削除、クラスタ側リソースもcascade削除確認済み。本specはNotion移行前の実装記録として残置。実装当時の最新コミット: 51bf737 (fix(wikijs): PVCマウントパスを/wiki/data/contentから/wiki/dataへ修正)"
 }
