@@ -40,8 +40,30 @@ if command -v debsecan >/dev/null 2>&1; then
             MESSAGE+="既知の残存脆弱性はありません。
 "
         else
-            MESSAGE+="${COUNT}件の既知脆弱性が残存しています。詳細はホスト上で debsecan コマンドを実行するか、journalctl -u os-update-notify でログを確認してください。
+            # 修正パッケージが提供されているものだけを抽出し、apt list --upgradable と突き合わせる。
+            # 突き合わせ結果でapt側に候補が出ているものは、security/-updates originが自動更新対象
+            # (50unattended-upgrades.j2) のため本来自動適用されるはず = 未適用なら異常。
+            # apt側に候補が出ていないものはbackports等opt-in由来で、自動更新対象外の任意対応。
+            FIXABLE_OUT=$(debsecan --only-fixed || true)
+            FIXABLE_COUNT=$(echo "${FIXABLE_OUT}" | grep -c '[^[:space:]]' || true)
+            if [[ "${FIXABLE_COUNT}" -eq 0 ]]; then
+                MESSAGE+="${COUNT}件の既知脆弱性が残存 → 全て修正パッケージ未提供(upstream待ち)。対応不要。
 "
+            else
+                FIXABLE_PKGS=$(echo "${FIXABLE_OUT}" | awk '{print $2}' | sort -u)
+                UPGRADABLE_PKGS=$(apt list --upgradable 2>/dev/null | awk -F/ 'NR>1{print $1}' | sort -u)
+                AUTO_PENDING=$(comm -12 <(echo "${FIXABLE_PKGS}") <(echo "${UPGRADABLE_PKGS}") | paste -sd, -)
+                MANUAL_ONLY=$(comm -23 <(echo "${FIXABLE_PKGS}") <(echo "${UPGRADABLE_PKGS}") | paste -sd, -)
+
+                if [[ -n "${AUTO_PENDING}" ]]; then
+                    MESSAGE+="⚠️ 自動更新対象(security/-updates)のはずが未適用: ${AUTO_PENDING} → cron失敗の可能性、要調査。
+"
+                fi
+                if [[ -n "${MANUAL_ONLY}" ]]; then
+                    MESSAGE+="backports等opt-in修正のみ提供(自動対象外、任意対応): ${MANUAL_ONLY}
+"
+                fi
+            fi
         fi
     else
         MESSAGE+="debsecan failed to execute.
