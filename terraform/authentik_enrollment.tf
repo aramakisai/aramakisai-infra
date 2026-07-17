@@ -115,19 +115,6 @@ resource "authentik_stage_user_login" "enrollment_user_login" {
   remember_device          = "days=30"
 }
 
-# Stage 6 (order=60): Discord連携へのリダイレクト (Redirect Stage)
-# Source Stage (フロー内でソース連携を行う) は Authentik Enterprise の有償機能のため、
-# 代わりに Redirect Stage で Discord OAuth ソースのログイン URL に飛ばす。
-# 登録直後はログイン済み状態のため、Discord 認証後は SourceFlowManager が
-# LINK アクションとして処理し、authentik_discord.tf の
-# discord_group_sync_auth_policy (default-source-authentication の
-# UserLoginStage にバインド) によりロール同期・グループ付与が行われる。
-resource "authentik_stage_redirect" "enrollment_discord_redirect" {
-  name          = "discord-link-redirect-stage"
-  mode          = "static"
-  target_static = "/source/oauth/login/discord/"
-}
-
 # Stage 4.5 (order=45): メールアドレス検証 (Email Verification Stage)
 # ユーザーの個人メールに確認コードを送信し、リンククリックでユーザーを有効化する。
 # User Write Stage が create_users_as_inactive=true でユーザーを作成し、
@@ -186,14 +173,6 @@ resource "authentik_flow_stage_binding" "enrollment_user_login_bind" {
   target               = authentik_flow.invitation_enrollment.uuid
   stage                = authentik_stage_user_login.enrollment_user_login.id
   order                = 50
-  evaluate_on_plan     = false
-  re_evaluate_policies = true
-}
-
-resource "authentik_flow_stage_binding" "enrollment_discord_redirect_bind" {
-  target               = authentik_flow.invitation_enrollment.uuid
-  stage                = authentik_stage_redirect.enrollment_discord_redirect.id
-  order                = 60
   evaluate_on_plan     = false
   re_evaluate_policies = true
 }
