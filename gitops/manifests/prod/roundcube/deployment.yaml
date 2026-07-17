@@ -33,7 +33,7 @@ spec:
     spec:
       containers:
         - name: roundcube
-          image: roundcube/roundcubemail:1.7.1-apache
+          image: roundcube/roundcubemail:1.7.2-apache
           ports:
             - name: http
               containerPort: 80
