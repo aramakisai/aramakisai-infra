@@ -69,16 +69,6 @@ resource "cloudflare_record" "vault" {
   comment = "Vaultwarden (Cloudflare Tunnel)"
 }
 
-# Wiki.js (Cloudflare Tunnel)
-resource "cloudflare_record" "wiki" {
-  zone_id = var.cloudflare_zone_id
-  name    = "wiki"
-  value   = local.tunnel_cname
-  type    = "CNAME"
-  proxied = true
-  comment = "Wiki.js (Cloudflare Tunnel)"
-}
-
 # Production API (Directus)
 resource "cloudflare_record" "api" {
   zone_id = var.cloudflare_zone_id

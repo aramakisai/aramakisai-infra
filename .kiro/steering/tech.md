@@ -146,7 +146,6 @@ ssh root@prod-node-1 "systemctl status os-update-notify.timer; cat /var/run/rebo
   - **Vaultwarden RBAC Sync**: `VAULTWARDEN_RBAC_SYNC_AUTHENTIK_API_TOKEN`（`PRESENCE_AUTHENTIK_API_TOKEN`と同パターン、`terraform/authentik_vaultwarden_rbac_sync.tf`で発行）, `VAULTWARDEN_RBAC_SYNC_SERVICE_ACCOUNT_CLIENT_ID`, `VAULTWARDEN_RBAC_SYNC_SERVICE_ACCOUNT_CLIENT_SECRET`（Vaultwarden専用サービスアカウントのPersonal API Key、手動ブートストラップ必須）, `TF_VAR_vaultwarden_rbac_sync_trigger_token`（Trigger Receiver共有ベアラートークン）, `DISCORD_OPS_WEBHOOK_URL`（既存キーを再利用、新規作成なし）
   - **os-k3s-auto-update**: 新規シークレットなし。既存 `DISCORD_OPS_WEBHOOK_URL` を再利用し、`ansible/roles/os-auto-update`(ホストOS更新結果通知)・`.github/workflows/k3s-version-check.yml`・`.github/workflows/k3s-upgrade.yml` の3箇所で新規に利用。
   - **ArgoCD ApplicationSet (directus-schema-preview)**: `ARGOCD_APPLICATIONSET_GITHUB_APP_ID`, `ARGOCD_APPLICATIONSET_GITHUB_APP_INSTALLATION_ID`, `ARGOCD_APPLICATIONSET_GITHUB_APP_PRIVATE_KEY`（aramakisai-infra への `pull-requests: read-only` のみを持つ専用 GitHub App。PR generator が open な `directus-schema-*` PR を検出するために使用）
-  - **Wiki.js**: `WIKIJS_DB_PASSWORD`, `WIKIJS_OIDC_CLIENT_SECRET`
 
 ### Commit Protection & Coding Standards
 - **パス漏洩防止**: pre-commit フック `scripts/check-confidential-info.py` がローカル絶対パスや非許可メールのコミットをブロック。

@@ -188,13 +188,6 @@ variable "directus_stg_oidc_client_secret" {
   default     = ""
 }
 
-variable "wikijs_oidc_client_secret" {
-  description = "Wiki.js OIDC Client Secret (wikijs)"
-  type        = string
-  sensitive   = true
-  default     = ""
-}
-
 
 variable "vaultwarden_rbac_sync_trigger_token" {
   description = "vaultwarden-rbac-sync Trigger Receiver共有ベアラートークン (Authentik側のExpression Policy/Webhookに埋め込む)"

@@ -62,12 +62,6 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "main" {
       service  = "http://vaultwarden.prod.svc.cluster.local:80"
     }
 
-    # Wiki.js (荒牧祭実行委員会向けナレッジベース)
-    ingress_rule {
-      hostname = "wiki.aramakisai.com"
-      service  = "http://wikijs.prod.svc.cluster.local:80"
-    }
-
     # フォールバック (いずれのホスト名にもマッチしない場合)
     ingress_rule {
       service = "http_status:404"
