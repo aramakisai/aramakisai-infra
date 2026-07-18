@@ -65,6 +65,11 @@ spec:
               value: email
             - name: AUTH_AUTHENTIK_ALLOW_PUBLIC_REGISTRATION
               value: "true"
+            # デフォルトscope (openid profile email) には groups が含まれないため、
+            # ROLE_MAPPING を設定していても groups クレーム自体がトークンに乗らず
+            # role 更新処理がスキップされていた (2026-07-18 発覚)。
+            - name: AUTH_AUTHENTIK_SCOPE
+              value: "openid profile email groups"
             # AUTH_AUTHENTIK_ROLE_CLAIM は Directus に存在しない変数名だったため、
             # groups クレームが一切 role に変換されず role=null で全ユーザーが作成される
             # バグを生んでいた (2026-07-18 発覚)。正しくは GROUP_CLAIM_NAME (デフォルト groups) +
