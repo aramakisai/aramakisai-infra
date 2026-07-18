@@ -104,8 +104,10 @@ spec:
             # バグを生んでいた (2026-07-18 発覚)。正しくは GROUP_CLAIM_NAME (デフォルト groups) +
             # ROLE_MAPPING の組み合わせ。role id は migrations-configmap.yaml の
             # EXECUTIVE_ROLE_ID / STUDENT_EXHIBITOR_ROLE_ID と一致させること。
+            # json: プレフィックス必須。無いとカンマ区切り値として配列扱いされ
+            # roleMap が意図通り機能しない (2026-07-18 発覚、二重の設定ミス)。
             - name: AUTH_AUTHENTIK_ROLE_MAPPING
-              value: '{"executive": "65869bf1-6622-4bab-8aec-785d0db2c32a", "student_exhibitor": "49c93d00-c61f-418b-a1db-5118260f4667"}'
+              value: 'json:{"executive": "65869bf1-6622-4bab-8aec-785d0db2c32a", "student_exhibitor": "49c93d00-c61f-418b-a1db-5118260f4667"}'
           resources:
             requests:
               memory: "256Mi"
