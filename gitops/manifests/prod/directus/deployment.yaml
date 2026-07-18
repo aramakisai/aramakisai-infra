@@ -76,6 +76,9 @@ spec:
               value: "true"
             - name: CORS_ORIGIN
               value: "https://aramakisai.com"
+            # OIDC role mapping 未解決障害の原因切り分け用 (2026-07-18 一時追加、解決後に削除)
+            - name: LOG_LEVEL
+              value: debug
             # Authentik OIDC SSO
             - name: AUTH_PROVIDERS
               value: authentik
