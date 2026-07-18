@@ -94,8 +94,13 @@ spec:
               value: email
             - name: AUTH_AUTHENTIK_ALLOW_PUBLIC_REGISTRATION
               value: "true"
-            - name: AUTH_AUTHENTIK_ROLE_CLAIM
-              value: groups
+            # AUTH_AUTHENTIK_ROLE_CLAIM は Directus に存在しない変数名だったため、
+            # groups クレームが一切 role に変換されず role=null で全ユーザーが作成される
+            # バグを生んでいた (2026-07-18 発覚)。正しくは GROUP_CLAIM_NAME (デフォルト groups) +
+            # ROLE_MAPPING の組み合わせ。role id は migrations-configmap.yaml の
+            # EXECUTIVE_ROLE_ID / STUDENT_EXHIBITOR_ROLE_ID と一致させること。
+            - name: AUTH_AUTHENTIK_ROLE_MAPPING
+              value: '{"executive": "65869bf1-6622-4bab-8aec-785d0db2c32a", "student_exhibitor": "49c93d00-c61f-418b-a1db-5118260f4667"}'
           resources:
             requests:
               memory: "256Mi"
