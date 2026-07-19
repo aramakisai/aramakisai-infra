@@ -22,7 +22,7 @@ spec:
           restartPolicy: Never
           containers:
             - name: healthcheck
-              image: alpine/k8s:1.32.13
+              image: alpine/k8s:1.36.2
               env:
                 - name: HEALTHCHECKS_MAILSERVER_BACKUP_PING_URL
                   valueFrom:

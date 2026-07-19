@@ -22,7 +22,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: restart
-          image: alpine/k8s:1.32.13
+          image: alpine/k8s:1.36.2
           command: ["kubectl", "-n", "prod", "rollout", "restart", "deployment/directus"]
           resources:
             requests:
