@@ -26,7 +26,7 @@ spec:
       serviceAccountName: vaultwarden-rbac-sync
       containers:
         - name: trigger-receiver
-          image: alpine/k8s:1.32.13
+          image: alpine/k8s:1.36.2
           command: ["python3", "/scripts/sync.py", "--mode=serve"]
           ports:
             - name: http
