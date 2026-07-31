@@ -135,6 +135,20 @@ def _save_attrs():
     }))
     AkUser.objects.filter(pk=user_pk).update(attributes=attrs)
 
+    # ApplicationViewSet.list() の user_app_cache_key は TTL 24h かつグループ変更で
+    # 自動失効しないため、招待フロー直後(グループ未所属)にホーム画面へ到達すると
+    # その時点の空/不完全な許可アプリ一覧がキャッシュされたまま固定化される
+    # (2026-07-31 実インシデント: 新規登録ユーザーのホームにアプリが一切表示されない
+    # 障害の根本原因)。ここでグループ確定と同じトランザクションでキャッシュを
+    # 明示的に破棄し、次回アクセス時に最新のグループ状態で再計算させる。
+    from authentik.core.api.applications import user_app_cache_key
+    from django.core.cache import cache
+    cache.delete_many([
+        user_app_cache_key(user_pk, page, launch)
+        for page in (None, 1, 2, 3)
+        for launch in (True, False)
+    ])
+
 transaction.on_commit(_save_attrs)
 
 return True
