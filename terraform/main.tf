@@ -21,6 +21,16 @@ resource "hcloud_ssh_key" "default" {
   }
 }
 
+resource "hcloud_ssh_key" "ci" {
+  name       = "ci-deploy-key"
+  public_key = var.ci_ssh_public_key
+
+  labels = {
+    project = "aramakisai"
+    managed = "terraform"
+  }
+}
+
 # ============================================================
 # Hetzner ノード (cx33: 2vCPU/8GB/80GB NVMe)
 # ============================================================
@@ -32,7 +42,7 @@ resource "hcloud_server" "nodes" {
   server_type  = "cx33"
   image        = var.hcloud_image
   location     = var.hcloud_location
-  ssh_keys     = [hcloud_ssh_key.default.id]
+  ssh_keys     = [hcloud_ssh_key.default.id, hcloud_ssh_key.ci.id]
   firewall_ids = [hcloud_firewall.k3s_nodes.id]
 
   # パブリックネットワーク設定を明示する

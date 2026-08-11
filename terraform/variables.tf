@@ -19,6 +19,11 @@ variable "ssh_public_key" {
   type        = string
 }
 
+variable "ci_ssh_public_key" {
+  description = "GitHub Actions CI 専用の SSH 公開鍵 (k3s-upgrade/dr-recovery workflow用)"
+  type        = string
+}
+
 # ============================================================
 # Tailscale
 # ============================================================

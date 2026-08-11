@@ -71,7 +71,14 @@ jobs:
 
           # -e オプションは付けず、mainブランチにチェックアウト済みの ansible/inventory/tailscale.yml の
           # k3s_version値をAnsible自身がインベントリ変数として自然に使う設計とする。
-          infisical run --token="${INFISICAL_TOKEN}" --projectId="${INFISICAL_PROJECT_ID}" --env=prod -- ansible-playbook -i ansible/inventory/tailscale.yml ansible/playbooks/k3s-bootstrap.yml
+          # CI_SSH_PRIVATE_KEY (Infisical prod, CI専用デプロイ鍵) を一時ファイルに書き出しAnsibleへ渡す。
+          infisical run --token="${INFISICAL_TOKEN}" --projectId="${INFISICAL_PROJECT_ID}" --env=prod -- bash -c '
+            mkdir -p ~/.ssh
+            echo "$CI_SSH_PRIVATE_KEY" > ~/.ssh/ci_deploy_key
+            chmod 600 ~/.ssh/ci_deploy_key
+            export ANSIBLE_PRIVATE_KEY_FILE=~/.ssh/ci_deploy_key
+            ansible-playbook -i ansible/inventory/tailscale.yml ansible/playbooks/k3s-bootstrap.yml
+          '
 
           # playbook実行が失敗してもクラスタは診断可能な状態のまま残る
           # (既存playbookの冪等性に依存、追加のロールバック処理はここでは実装しない)
