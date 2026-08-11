@@ -52,13 +52,22 @@ jobs:
       - name: Run upgrade
         id: run_upgrade
         env:
-          INFISICAL_UNIVERSAL_AUTH_CLIENT_ID: ${{ secrets.INFISICAL_CLIENT_ID }}
-          INFISICAL_UNIVERSAL_AUTH_CLIENT_SECRET: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+          INFISICAL_CLIENT_ID: ${{ secrets.INFISICAL_CLIENT_ID }}
+          INFISICAL_CLIENT_SECRET: ${{ secrets.INFISICAL_CLIENT_SECRET }}
           INFISICAL_PROJECT_ID: ${{ secrets.INFISICAL_PROJECT_ID }}
         run: |
+          # infisical run はUniversal Auth環境変数を自動認識しないため、
+          # 明示的にlogin --method=universal-authでトークンを取得し --token で渡す。
+          # トークンはログに出力されうるため ::add-mask:: で確実にマスクする。
+          INFISICAL_TOKEN=$(infisical login --method=universal-auth \
+            --client-id="${INFISICAL_CLIENT_ID}" \
+            --client-secret="${INFISICAL_CLIENT_SECRET}" \
+            --silent --plain)
+          echo "::add-mask::${INFISICAL_TOKEN}"
+
           # -e オプションは付けず、mainブランチにチェックアウト済みの ansible/inventory/tailscale.yml の
           # k3s_version値をAnsible自身がインベントリ変数として自然に使う設計とする。
-          infisical run --env=prod -- ansible-playbook -i ansible/inventory/tailscale.yml ansible/playbooks/k3s-bootstrap.yml
+          infisical run --token="${INFISICAL_TOKEN}" --projectId="${INFISICAL_PROJECT_ID}" --env=prod -- ansible-playbook -i ansible/inventory/tailscale.yml ansible/playbooks/k3s-bootstrap.yml
 
           # playbook実行が失敗してもクラスタは診断可能な状態のまま残る
           # (既存playbookの冪等性に依存、追加のロールバック処理はここでは実装しない)
