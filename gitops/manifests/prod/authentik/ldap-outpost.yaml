@@ -115,7 +115,7 @@ spec:
 # Infisical キー名: AUTHENTIK_LDAP_OUTPOST_TOKEN
 # 取得方法: Authentik WebUI → Admin → Outposts → <outpost名> →
 #           Service account → Token をコピー
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   name: authentik-ldap-outpost-token
