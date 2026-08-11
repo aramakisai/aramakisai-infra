@@ -27,7 +27,7 @@ spec:
         kubernetes.io/hostname: prod-node-1
       containers:
         - name: mailserver
-          image: mailserver/docker-mailserver:14.0.0
+          image: mailserver/docker-mailserver:15.1.0
           imagePullPolicy: IfNotPresent
           ports:
             - name: smtp
