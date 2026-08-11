@@ -55,6 +55,10 @@ jobs:
           INFISICAL_CLIENT_ID: ${{ secrets.INFISICAL_CLIENT_ID }}
           INFISICAL_CLIENT_SECRET: ${{ secrets.INFISICAL_CLIENT_SECRET }}
           INFISICAL_PROJECT_ID: ${{ secrets.INFISICAL_PROJECT_ID }}
+          # ansible.cfg は ansible/ 配下にあるがリポジトリルートから実行するため読み込まれず、
+          # host_key_checking = False が適用されない。CI使い捨てランナーはknown_hostsが
+          # 空のため明示的に無効化する。
+          ANSIBLE_HOST_KEY_CHECKING: "False"
         run: |
           # infisical run はUniversal Auth環境変数を自動認識しないため、
           # 明示的にlogin --method=universal-authでトークンを取得し --token で渡す。
