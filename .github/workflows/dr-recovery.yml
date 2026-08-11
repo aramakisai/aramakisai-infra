@@ -36,8 +36,8 @@ jobs:
           curl -LO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
           chmod +x kubectl && sudo mv kubectl /usr/local/bin/
 
-          # Infisical CLI
-          curl -1sLf 'https://dl.cloudsmith.io/public/infisical/infisical-cli/setup.deb.sh' | sudo -E bash
+          # Infisical CLI (Cloudsmithは2026-09-16でLinux配信終了のためartifacts-cli.infisical.comへ移行済み)
+          curl -1sLf 'https://artifacts-cli.infisical.com/setup.deb.sh' | sudo -E bash
           sudo apt-get install -y infisical
 
       - name: Run recovery
