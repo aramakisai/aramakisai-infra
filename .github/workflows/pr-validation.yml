@@ -43,7 +43,7 @@ jobs:
           ansible-galaxy collection install ansible.posix
 
       - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+        uses: hashicorp/setup-terraform@v4
 
       - name: Install kubeconform
         run: |
