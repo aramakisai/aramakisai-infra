@@ -35,16 +35,20 @@
 # k3s-agent.service をインストールする (agent モード) ため、server モードにならない。
 # join 先の URL は config.yaml の server: キーで指定する。
 - name: K3s をインストール
+  # creates: /usr/local/bin/k3s は使わない。
+  # 既にk3sがインストール済みの場合にタスク自体をスキップしてしまい、
+  # k3s_versionを変更してもバージョンアップグレードが一切適用されなくなるため。
+  # get.k3s.io インストーラ自身がバージョン一致時は "Skipping installation" を出し
+  # 冪等に振る舞うため、changed_when でAnsible側の変化検知だけそれに合わせる。
   ansible.builtin.shell: curl -sfL https://get.k3s.io | sh -
   environment:
     INSTALL_K3S_VERSION: "{{ k3s_version }}"
     K3S_TOKEN: "{{ k3s_token }}"
-  args:
-    creates: /usr/local/bin/k3s
   register: k3s_install_result
   until: k3s_install_result is succeeded
   retries: 3
   delay: 10
+  changed_when: "'Skipping installation' not in k3s_install_result.stdout"
 
 # 5. config.yaml の変更を K3s に反映させる (wait_for より前にハンドラーを実行)
 - name: ハンドラーを即時実行 (config 変更を反映)
