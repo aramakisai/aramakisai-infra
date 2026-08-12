@@ -183,21 +183,31 @@
         KUBECONFIG_CONTENT=$(cat {{ playbook_dir }}/../../kubeconfig)
         # CI環境(INFISICAL_CLIENT_ID/SECRETが設定済み)はUniversal Authで明示的に
         # トークン取得して使う。ローカル実行時は対話ログイン済みセッションをそのまま使う。
+        AUTH=""
         if [ -n "${INFISICAL_CLIENT_ID:-}" ] && [ -n "${INFISICAL_CLIENT_SECRET:-}" ]; then
           INFISICAL_TOKEN=$(infisical login --method=universal-auth \
             --client-id="$INFISICAL_CLIENT_ID" \
             --client-secret="$INFISICAL_CLIENT_SECRET" \
             --silent --plain)
-          infisical secrets set --token="$INFISICAL_TOKEN" --projectId="${INFISICAL_PROJECT_ID}" --env=prod KUBECONFIG="$KUBECONFIG_CONTENT" >/dev/null 2>/tmp/infisical-set.err
-        else
-          infisical secrets set --env=prod KUBECONFIG="$KUBECONFIG_CONTENT" >/dev/null 2>/tmp/infisical-set.err
+          AUTH="--token=$INFISICAL_TOKEN --projectId=${INFISICAL_PROJECT_ID}"
         fi
+        # CI の machine identity は prod シークレットに対し読み取り専用。
+        # k3s アップグレードでは kubeconfig の中身は変わらないため、
+        # 既存値と一致する場合は書き込まずに終える (書き込むと 403 で落ちる)。
+        CURRENT=$(infisical secrets get KUBECONFIG $AUTH --env=prod --plain 2>/dev/null || true)
+        if [ "$CURRENT" = "$KUBECONFIG_CONTENT" ]; then
+          echo "SKIPPED_UNCHANGED"
+          exit 0
+        fi
+        infisical secrets set $AUTH --env=prod KUBECONFIG="$KUBECONFIG_CONTENT" >/dev/null 2>/tmp/infisical-set.err
         rc=$?
         # stderr には usage 表示で引数(=シークレット値)が混じりうるため、
         # 値を含まないと分かっている API エラー行だけを通す。
         grep -a -E -i 'status-code|request-id|message=|unsuccessful|unauthor|forbidden|not found|denied|permission' /tmp/infisical-set.err | head -5 >&2
         rm -f /tmp/infisical-set.err
         exit $rc
+      register: kubeconfig_register
+      changed_when: "'SKIPPED_UNCHANGED' not in kubeconfig_register.stdout"
 
     - name: ローカルの kubeconfig を無効化 (Infisical が Single Source of Truth のため)
       delegate_to: localhost
