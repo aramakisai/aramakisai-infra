@@ -183,6 +183,19 @@
         KUBECONFIG_CONTENT=$(cat {{ playbook_dir }}/../../kubeconfig)
         # CI環境(INFISICAL_CLIENT_ID/SECRETが設定済み)はUniversal Authで明示的に
         # トークン取得して使う。ローカル実行時は対話ログイン済みセッションをそのまま使う。
+        # CI の machine identity は prod シークレットに対し読み取り専用。
+        # k3s アップグレードでは kubeconfig の中身は変わらないため、
+        # 既存値と一致する場合は書き込まずに終える (書き込むと 403 で落ちる)。
+        # このプレイブックは CI・ローカルとも infisical run 配下で動くため、
+        # 登録済みの値は $KUBECONFIG に注入されている。
+        if [ "${KUBECONFIG:-}" = "$KUBECONFIG_CONTENT" ]; then
+          echo "SKIPPED_UNCHANGED"
+          exit 0
+        fi
+        # 差分がある場合のみ書き込む。値そのものは出さず sha256 だけ残す。
+        printf 'kubeconfig changed: stored=%s fetched=%s\n' \
+          "$(printf '%s' "${KUBECONFIG:-}" | sha256sum | cut -c1-12)" \
+          "$(printf '%s' "$KUBECONFIG_CONTENT" | sha256sum | cut -c1-12)"
         AUTH=""
         if [ -n "${INFISICAL_CLIENT_ID:-}" ] && [ -n "${INFISICAL_CLIENT_SECRET:-}" ]; then
           INFISICAL_TOKEN=$(infisical login --method=universal-auth \
@@ -190,14 +203,6 @@
             --client-secret="$INFISICAL_CLIENT_SECRET" \
             --silent --plain)
           AUTH="--token=$INFISICAL_TOKEN --projectId=${INFISICAL_PROJECT_ID}"
-        fi
-        # CI の machine identity は prod シークレットに対し読み取り専用。
-        # k3s アップグレードでは kubeconfig の中身は変わらないため、
-        # 既存値と一致する場合は書き込まずに終える (書き込むと 403 で落ちる)。
-        CURRENT=$(infisical secrets get KUBECONFIG $AUTH --env=prod --plain 2>/dev/null || true)
-        if [ "$CURRENT" = "$KUBECONFIG_CONTENT" ]; then
-          echo "SKIPPED_UNCHANGED"
-          exit 0
         fi
         infisical secrets set $AUTH --env=prod KUBECONFIG="$KUBECONFIG_CONTENT" >/dev/null 2>/tmp/infisical-set.err
         rc=$?
