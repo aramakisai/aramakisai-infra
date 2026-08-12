@@ -181,7 +181,7 @@ tailscale status
 ```bash
 infisical run --env=prod -- ansible-playbook -i ansible/inventory/tailscale.yml \
   ansible/playbooks/k3s-bootstrap.yml \
-  -e "k3s_version=v1.32.3+k3s1"
+  -e "k3s_version=v1.36.3+k3s1"
 # prod-node-1 の K3s を更新
 ```
 

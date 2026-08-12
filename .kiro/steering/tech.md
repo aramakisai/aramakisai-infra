@@ -20,7 +20,7 @@ infisical run -- ansible-playbook k3s-bootstrap.yml
 
 - **IaC**: Terraform >= 1.9、tfstate は Terraform Cloud で管理
 - **構成管理**: Ansible >= 2.14
-- **Kubernetes**: K3s v1.32.3+k3s1 (シングルノード、prod-node-1)
+- **Kubernetes**: K3s v1.36.3+k3s1 (シングルノード、prod-node-1)
 - **CNI**: Cilium (Flannel・NetworkPolicy は無効化)
 - **GitOps**: ArgoCD — App of Apps パターン
 - **シークレット**: Infisical + External Secrets Operator (ESO)
@@ -118,7 +118,7 @@ infisical run -- terraform -chdir=terraform apply
 
 # Ansible 単体実行 / K3s アップデート
 infisical run -- ansible-playbook -i ansible/inventory/tailscale.yml ansible/playbooks/k3s-bootstrap.yml
-infisical run -- ansible-playbook -i ansible/inventory/tailscale.yml ansible/playbooks/k3s-bootstrap.yml -e "k3s_version=v1.33.0+k3s1"
+infisical run -- ansible-playbook -i ansible/inventory/tailscale.yml ansible/playbooks/k3s-bootstrap.yml -e "k3s_version=v1.36.3+k3s1"
 
 # K3s バージョン差分の手動確認 (通常は週次cronで自動実行)
 # GitHub Actions の k3s-version-check.yml を workflow_dispatch で手動トリガー
