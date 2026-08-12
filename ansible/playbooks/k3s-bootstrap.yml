@@ -176,6 +176,9 @@
     - name: kubeconfig を Infisical に登録 (Single Source of Truth)
       delegate_to: localhost
       become: false
+      # no_log は使わない。シークレット値はコマンド文字列ではなく変数経由でしか渡らず、
+      # infisical CLI が値を吐く stdout は捨てているため、タスクを隠す必要がない。
+      # 逆に no_log で全出力を隠すと Infisical 側の API エラーが一切読めず障害調査が不能になる。
       ansible.builtin.shell: |
         KUBECONFIG_CONTENT=$(cat {{ playbook_dir }}/../../kubeconfig)
         # CI環境(INFISICAL_CLIENT_ID/SECRETが設定済み)はUniversal Authで明示的に
@@ -185,11 +188,16 @@
             --client-id="$INFISICAL_CLIENT_ID" \
             --client-secret="$INFISICAL_CLIENT_SECRET" \
             --silent --plain)
-          infisical secrets set --token="$INFISICAL_TOKEN" --projectId="${INFISICAL_PROJECT_ID}" --env=prod KUBECONFIG="$KUBECONFIG_CONTENT"
+          infisical secrets set --token="$INFISICAL_TOKEN" --projectId="${INFISICAL_PROJECT_ID}" --env=prod KUBECONFIG="$KUBECONFIG_CONTENT" >/dev/null 2>/tmp/infisical-set.err
         else
-          infisical secrets set --env=prod KUBECONFIG="$KUBECONFIG_CONTENT"
+          infisical secrets set --env=prod KUBECONFIG="$KUBECONFIG_CONTENT" >/dev/null 2>/tmp/infisical-set.err
         fi
-      no_log: true
+        rc=$?
+        # stderr には usage 表示で引数(=シークレット値)が混じりうるため、
+        # 値を含まないと分かっている API エラー行だけを通す。
+        grep -a -E -i 'status-code|request-id|message=|unsuccessful|unauthor|forbidden|not found|denied|permission' /tmp/infisical-set.err | head -5 >&2
+        rm -f /tmp/infisical-set.err
+        exit $rc
 
     - name: ローカルの kubeconfig を無効化 (Infisical が Single Source of Truth のため)
       delegate_to: localhost
