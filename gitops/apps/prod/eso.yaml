@@ -32,7 +32,5 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
-      # 0.9 系 CRD が持つ conversion.webhookClientConfig が merge 後も残り
-      # "spec.conversion.strategy: Required value" で CRD 更新が弾かれるため置換する。
-      # ServerSideApply とは併用しない (SSA が優先され Replace が効かない)。
-      - Replace=true
+      # ESO の CRD は client-side apply の last-applied annotation 上限を超えるため SSA 必須。
+      - ServerSideApply=true
