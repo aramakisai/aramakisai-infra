@@ -15,10 +15,10 @@ spec:
   source:
     repoURL: https://charts.external-secrets.io
     chart: external-secrets
-    # external-secrets.io/v1 は ESO 0.14.0 で導入された。
-    # 0.9系のCRDは v1alpha1/v1beta1 しか提供せず、v1 を使う manifest を同期できない
+    # external-secrets.io/v1 CRD は ESO 0.16 系から提供される。
+    # 0.15 以前は v1alpha1/v1beta1 のみで、v1 を使う manifest を同期できない
     # (2026-08-12: argocd-config が同期失敗し ArgoCD の OIDC ログインが無効化された)。
-    targetRevision: "0.14.*"
+    targetRevision: "0.16.*"
     helm:
       valuesObject:
         installCRDs: true
