@@ -33,3 +33,6 @@ spec:
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true
+      # 0.9 系 CRD が持つ conversion.webhookClientConfig が merge 後も残り
+      # "spec.conversion.strategy: Required value" で CRD 更新が弾かれるため置換する。
+      - Replace=true
