@@ -178,7 +178,17 @@
       become: false
       ansible.builtin.shell: |
         KUBECONFIG_CONTENT=$(cat {{ playbook_dir }}/../../kubeconfig)
-        infisical secrets set --env=prod KUBECONFIG="$KUBECONFIG_CONTENT"
+        # CI環境(INFISICAL_CLIENT_ID/SECRETが設定済み)はUniversal Authで明示的に
+        # トークン取得して使う。ローカル実行時は対話ログイン済みセッションをそのまま使う。
+        if [ -n "${INFISICAL_CLIENT_ID:-}" ] && [ -n "${INFISICAL_CLIENT_SECRET:-}" ]; then
+          INFISICAL_TOKEN=$(infisical login --method=universal-auth \
+            --client-id="$INFISICAL_CLIENT_ID" \
+            --client-secret="$INFISICAL_CLIENT_SECRET" \
+            --silent --plain)
+          infisical secrets set --token="$INFISICAL_TOKEN" --projectId="${INFISICAL_PROJECT_ID}" --env=prod KUBECONFIG="$KUBECONFIG_CONTENT"
+        else
+          infisical secrets set --env=prod KUBECONFIG="$KUBECONFIG_CONTENT"
+        fi
       no_log: true
 
     - name: ローカルの kubeconfig を無効化 (Infisical が Single Source of Truth のため)
