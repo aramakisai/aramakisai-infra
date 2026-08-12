@@ -25,5 +25,5 @@ all:
   vars:
     ansible_user: root
     ansible_ssh_extra_args: "-o ConnectTimeout=10"
-    k3s_version: v1.33.13+k3s2
+    k3s_version: v1.34.10+k3s1
     k3s_token: "{{ lookup('env', 'K3S_TOKEN') }}"  # Infisical または環境変数から取得
