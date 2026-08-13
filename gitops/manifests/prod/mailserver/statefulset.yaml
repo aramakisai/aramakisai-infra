@@ -29,6 +29,15 @@ spec:
         - name: mailserver
           image: mailserver/docker-mailserver:15.1.0
           imagePullPolicy: IfNotPresent
+          # fail2ban が BAN 実行時に nftables テーブルを操作するため NET_ADMIN/NET_RAW が必要。
+          # 付与なしだと fail2ban-client 上は banned 表示になるが実際は
+          # `Operation not permitted (you must be root)` で iptables/nftables ルールが
+          # 反映されず、無制限にブルートフォース試行を許してしまう。
+          securityContext:
+            capabilities:
+              add:
+                - NET_ADMIN
+                - NET_RAW
           ports:
             - name: smtp
               containerPort: 25
