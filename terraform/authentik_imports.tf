@@ -37,11 +37,6 @@ import {
 }
 
 import {
-  to = authentik_stage_prompt_field.enrollment_username
-  id = "d2f65755-4f7e-41f6-a0f1-f3e36ccef4cd"
-}
-
-import {
   to = authentik_stage_prompt_field.enrollment_displayname
   id = "b745f39b-0a5a-4266-979c-f19101bd976a"
 }

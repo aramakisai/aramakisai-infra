@@ -81,7 +81,11 @@ resource "hcloud_server" "nodes" {
     # user_data (cloud-init) はサーバー初回起動時の1回のみ使用される。
     # Tailscale auth key はコミットのたびに失効・再生成されるため、
     # key の値が変わっても稼働中ノードを再作成しないよう変更を無視する。
-    ignore_changes = [user_data]
+    #
+    # ssh_keys は Hetzner Cloud provider 仕様上 in-place 更新不可
+    # (変更検知時は必ずサーバー再作成)。CI 専用鍵は既に authorized_keys
+    # へ手動反映済みのため、稼働中ノードを再作成しないよう変更を無視する。
+    ignore_changes = [user_data, ssh_keys]
   }
 }
 
