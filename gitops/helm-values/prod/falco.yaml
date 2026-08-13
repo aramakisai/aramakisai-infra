@@ -21,11 +21,14 @@ customRules:
     # /etc/dms-settings・/etc/postfix/* 等へ広範に書き込むため、proc.name 単位の列挙では漏れる。
     # docker-mailserver イメージによる /etc 書き込みは正常な起動処理のため image+namespace 単位で除外する。
     # cert-manager はベースイメージの update-ca-certificates で /etc/ssl/certs を更新する正常処理のため除外する。
+    # k3s-bootstrap.yml (k3sバージョンアップ実行時) は systemd drop-in の k3s.service.env を
+    # touch/tee で書き換える正常動作。host側のためimageを持たずfd.name単位で除外する。
     # ※container.image.repository はレジストリ接頭辞込み (docker.io/...) で一致させる必要がある。
     - macro: known_etc_writer
       condition: >
         ((k8s.ns.name=prod and container.image.repository=docker.io/mailserver/docker-mailserver)
-         or (k8s.ns.name=cert-manager and proc.name in (update-ca-certificates)))
+         or (k8s.ns.name=cert-manager and proc.name in (update-ca-certificates))
+         or (container.id=host and fd.name=/etc/systemd/system/k3s.service.env))
 
     # falco-rules:5 (デフォルトで投入される OCI artifact) には "Write below etc" 系のルールが
     # 含まれていない (falcosecurity/rules の falco-sandbox_rules.yaml にのみ存在し、デフォルトでは pull されない)。
