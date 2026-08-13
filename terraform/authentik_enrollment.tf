@@ -32,15 +32,6 @@ resource "authentik_stage_invitation" "invitation_verification" {
 }
 
 # Stage 2 (order=20): プロフィール入力 (Prompt Stage) で使用するフィールド
-resource "authentik_stage_prompt_field" "enrollment_username" {
-  name        = "username"
-  field_key   = "username"
-  label       = "ユーザー名"
-  type        = "username"
-  required    = true
-  placeholder = "メールアドレスに使用されます"
-}
-
 resource "authentik_stage_prompt_field" "enrollment_displayname" {
   name        = "displayname"
   field_key   = "name"
@@ -73,13 +64,26 @@ resource "authentik_stage_prompt" "enrollment_user_profile" {
 
   fields = [
     local.default_locale_field_id,
-    authentik_stage_prompt_field.enrollment_username.id,
     authentik_stage_prompt_field.enrollment_displayname.id,
     authentik_stage_prompt_field.enrollment_student_id.id,
     authentik_stage_prompt_field.enrollment_email.id,
   ]
 
-  validation_policies = []
+  validation_policies = [
+    authentik_policy_expression.set_username_from_email.id,
+  ]
+}
+
+# 入力されたメールアドレスをそのままユーザー名として使用する
+# (ユーザーにユーザー名を選択させない)。User Write Stage が
+# prompt_data['username'] を参照するため、validation policy として
+# バインドし submit 時に prompt_data を書き換える。
+resource "authentik_policy_expression" "set_username_from_email" {
+  name       = "set-username-from-email"
+  expression = <<-EOT
+request.context["prompt_data"]["username"] = request.context["prompt_data"]["email"]
+return True
+EOT
 }
 
 # Stage 3 (order=30): パスワード入力 (Prompt Stage)
