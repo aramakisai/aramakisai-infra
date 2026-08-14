@@ -23,19 +23,12 @@ resource "cloudflare_record" "idp" {
   comment = "Authentik IdP (Cloudflare Tunnel)"
 }
 
-# Production フロントエンド (Cloudflare Pages)
-# CNAME Flattening により apex でも CNAME が使用可能
-# TODO: フロントエンド移行完了後にコメントアウトを解除して apply する
-# resource "cloudflare_record" "apex" {
-#   zone_id = var.cloudflare_zone_id
-#   name    = "@"
-#   value   = "aramakisai-web.pages.dev"
-#   type    = "CNAME"
-#   proxied = true
-#   comment = "Production frontend (Cloudflare Pages)"
-# }
+# Production フロントエンド (Cloudflare Workers Custom Domain)
+# apex ドメインは cloudflare_workers_domain.aramakisai_web_prod (下部の
+# Workers Custom Domains セクション) が DNS/ルーティングを自動処理するため、
+# ここに CNAME レコードは作成しない。
 
-# Staging フロントエンドは廃止 — Cloudflare Pages PR preview URL (*.pages.dev) を使用
+# Staging フロントエンドは廃止 — PR ごとの wrangler versions upload preview URL (*.workers.dev) を使用
 
 # Staging API
 # api.stg (2階層) は Cloudflare Universal SSL のカバー範囲外 (TLS handshake failure) のため
@@ -314,5 +307,17 @@ resource "cloudflare_workers_domain" "aramakisai_web_dev" {
   zone_id     = var.cloudflare_zone_id
   hostname    = "dev.aramakisai.com"
   service     = "aramakisai-web-dev"
+  environment = "production"
+}
+
+# Production フロントエンド (aramakisai.com apex)
+# apex ドメインは Terraform 管理外のまま旧サイト (レンタルサーバー) へ向いていたが、
+# これにより aramakisai.com を Workers 本番デプロイ (aramakisai-web, main ブランチ
+# push で自動デプロイ) へ切り替える。
+resource "cloudflare_workers_domain" "aramakisai_web_prod" {
+  account_id  = var.cloudflare_account_id
+  zone_id     = var.cloudflare_zone_id
+  hostname    = "aramakisai.com"
+  service     = "aramakisai-web"
   environment = "production"
 }

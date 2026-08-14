@@ -1,11 +1,10 @@
 # ============================================================
-# Cloudflare Pages Project
+# Cloudflare Pages Project (未使用)
 #
-# デプロイは GitHub Actions + wrangler pages deploy が担う。
-# source ブロック (GitHub App 連携) は不要。
-#
-# 既存プロジェクトが Cloudflare 上に存在する場合のインポート:
-#   terraform import cloudflare_pages_project.aramakisai_web <account_id>/aramakisai-web
+# 実際のデプロイは Workers (opennextjs-cloudflare, frontend/wrangler.toml +
+# .github/workflows/frontend-ci.yml) が担っており、このプロジェクトは
+# デプロイパイプラインからは呼ばれていない。aramakisai.com の紐付けは
+# terraform/dns.tf の cloudflare_workers_domain.aramakisai_web_prod で行う。
 # ============================================================
 
 resource "cloudflare_pages_project" "aramakisai_web" {
@@ -32,17 +31,3 @@ resource "cloudflare_pages_project" "aramakisai_web" {
     }
   }
 }
-
-# ============================================================
-# Cloudflare Pages Custom Domain
-#
-# TLS 証明書発行は apply 後に Cloudflare 側で非同期処理（通常数分）。
-# apply 直後に https://aramakisai.com が応答しない場合は数分待機すること。
-# TODO: フロントエンド移行完了後に dns.tf の apex record と同時にコメントアウトを解除して apply する
-# ============================================================
-
-# resource "cloudflare_pages_domain" "aramakisai_web_prod" {
-#   account_id   = var.cloudflare_account_id
-#   project_name = cloudflare_pages_project.aramakisai_web.name
-#   domain       = "aramakisai.com"
-# }

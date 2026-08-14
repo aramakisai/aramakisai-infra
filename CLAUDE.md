@@ -24,6 +24,12 @@ infisical run --env=prod -- terraform plan
 infisical run --env=prod -- terraform apply
 ```
 
+**既知の差分 (異常ではない):** `tailscale_tailnet_key.k3s_nodes` は `expiry = 3600`
+(1時間) の設計により、前回 apply から1時間以上経過していれば `terraform plan` の
+たびに `must be replaced` が出る（tailscale.tf のコメント参照）。これは意図した
+挙動であり、他の変更と無関係に発生する。apply 対象を `-target` で絞る必要はなく、
+他の変更とまとめて apply してよい。
+
 ### 2. Ansible (構成管理)
 ```bash
 # K3s ブートストラップ実行 (Terraform適用後に手動実行)
