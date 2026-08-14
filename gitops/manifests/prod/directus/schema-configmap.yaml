@@ -1225,6 +1225,259 @@ data:
         has_auto_increment: false
         foreign_key_table: directus_files
         foreign_key_column: id
+    - collection: festival_meta
+      field: theme_word
+      type: string
+      meta:
+        collection: festival_meta
+        conditions: null
+        display: null
+        display_options: null
+        field: theme_word
+        group: null
+        hidden: false
+        interface: input
+        note: 'テーマ語 (例: 万彩)'
+        options: null
+        readonly: false
+        required: false
+        searchable: true
+        sort: 22
+        special: null
+        translations:
+        - language: ja-JP
+          translation: テーマ語
+        validation: null
+        validation_message: null
+        width: half
+      schema:
+        name: theme_word
+        table: festival_meta
+        data_type: character varying
+        default_value: null
+        max_length: 255
+        numeric_precision: null
+        numeric_scale: null
+        is_nullable: true
+        is_unique: false
+        is_indexed: false
+        is_primary_key: false
+        is_generated: false
+        generation_expression: null
+        has_auto_increment: false
+        foreign_key_table: null
+        foreign_key_column: null
+    - collection: festival_meta
+      field: theme_description
+      type: text
+      meta:
+        collection: festival_meta
+        conditions: null
+        display: null
+        display_options: null
+        field: theme_description
+        group: null
+        hidden: false
+        interface: input-rich-text-html
+        note: テーマの説明文 (WYSIWYG)
+        options: null
+        readonly: false
+        required: false
+        searchable: true
+        sort: 23
+        special: null
+        translations:
+        - language: ja-JP
+          translation: テーマ説明
+        validation: null
+        validation_message: null
+        width: full
+      schema:
+        name: theme_description
+        table: festival_meta
+        data_type: text
+        default_value: null
+        max_length: null
+        numeric_precision: null
+        numeric_scale: null
+        is_nullable: true
+        is_unique: false
+        is_indexed: false
+        is_primary_key: false
+        is_generated: false
+        generation_expression: null
+        has_auto_increment: false
+        foreign_key_table: null
+        foreign_key_column: null
+    - collection: festival_meta
+      field: venue_name
+      type: string
+      meta:
+        collection: festival_meta
+        conditions: null
+        display: null
+        display_options: null
+        field: venue_name
+        group: null
+        hidden: false
+        interface: input
+        note: 会場名
+        options: null
+        readonly: false
+        required: false
+        searchable: true
+        sort: 24
+        special: null
+        translations:
+        - language: ja-JP
+          translation: 会場名
+        validation: null
+        validation_message: null
+        width: half
+      schema:
+        name: venue_name
+        table: festival_meta
+        data_type: character varying
+        default_value: null
+        max_length: 255
+        numeric_precision: null
+        numeric_scale: null
+        is_nullable: true
+        is_unique: false
+        is_indexed: false
+        is_primary_key: false
+        is_generated: false
+        generation_expression: null
+        has_auto_increment: false
+        foreign_key_table: null
+        foreign_key_column: null
+    - collection: festival_meta
+      field: campus_map_url
+      type: string
+      meta:
+        collection: festival_meta
+        conditions: null
+        display: null
+        display_options: null
+        field: campus_map_url
+        group: null
+        hidden: false
+        interface: input
+        note: Google Maps 埋め込み URL
+        options: null
+        readonly: false
+        required: false
+        searchable: true
+        sort: 25
+        special: null
+        translations:
+        - language: ja-JP
+          translation: キャンパスマップURL
+        validation: null
+        validation_message: null
+        width: full
+      schema:
+        name: campus_map_url
+        table: festival_meta
+        data_type: character varying
+        default_value: null
+        max_length: 255
+        numeric_precision: null
+        numeric_scale: null
+        is_nullable: true
+        is_unique: false
+        is_indexed: false
+        is_primary_key: false
+        is_generated: false
+        generation_expression: null
+        has_auto_increment: false
+        foreign_key_table: null
+        foreign_key_column: null
+    - collection: festival_meta
+      field: contact_form_url
+      type: string
+      meta:
+        collection: festival_meta
+        conditions: null
+        display: null
+        display_options: null
+        field: contact_form_url
+        group: null
+        hidden: false
+        interface: input
+        note: お問い合わせフォーム URL
+        options: null
+        readonly: false
+        required: false
+        searchable: true
+        sort: 26
+        special: null
+        translations:
+        - language: ja-JP
+          translation: お問い合わせフォームURL
+        validation: null
+        validation_message: null
+        width: full
+      schema:
+        name: contact_form_url
+        table: festival_meta
+        data_type: character varying
+        default_value: null
+        max_length: 255
+        numeric_precision: null
+        numeric_scale: null
+        is_nullable: true
+        is_unique: false
+        is_indexed: false
+        is_primary_key: false
+        is_generated: false
+        generation_expression: null
+        has_auto_increment: false
+        foreign_key_table: null
+        foreign_key_column: null
+    - collection: festival_meta
+      field: theme_image
+      type: uuid
+      meta:
+        collection: festival_meta
+        conditions: null
+        display: image
+        display_options: null
+        field: theme_image
+        group: null
+        hidden: false
+        interface: file-image
+        note: テーマのメインビジュアル
+        options: null
+        readonly: false
+        required: false
+        searchable: true
+        sort: 27
+        special:
+        - file
+        translations:
+        - language: ja-JP
+          translation: テーマ画像
+        validation: null
+        validation_message: null
+        width: half
+      schema:
+        name: theme_image
+        table: festival_meta
+        data_type: uuid
+        default_value: null
+        max_length: null
+        numeric_precision: null
+        numeric_scale: null
+        is_nullable: true
+        is_unique: false
+        is_indexed: false
+        is_primary_key: false
+        is_generated: false
+        generation_expression: null
+        has_auto_increment: false
+        foreign_key_table: directus_files
+        foreign_key_column: id
     - collection: map_areas
       field: id
       type: integer
@@ -4650,6 +4903,27 @@ data:
         constraint_name: topics_files_directus_files_id_foreign
         on_update: NO ACTION
         on_delete: CASCADE
+    - collection: festival_meta
+      field: theme_image
+      related_collection: directus_files
+      meta:
+        junction_field: null
+        many_collection: festival_meta
+        many_field: theme_image
+        one_allowed_collections: null
+        one_collection: directus_files
+        one_collection_field: null
+        one_deselect_action: nullify
+        one_field: null
+        sort_field: null
+      schema:
+        table: festival_meta
+        column: theme_image
+        foreign_key_table: directus_files
+        foreign_key_column: id
+        constraint_name: festival_meta_theme_image_foreign
+        on_update: NO ACTION
+        on_delete: SET NULL
 kind: ConfigMap
 metadata:
   name: directus-schema
