@@ -107,7 +107,7 @@ spec:
             # json: プレフィックス必須。無いとカンマ区切り値として配列扱いされ
             # roleMap が意図通り機能しない (2026-07-18 発覚、二重の設定ミス)。
             - name: AUTH_AUTHENTIK_ROLE_MAPPING
-              value: 'json:{"executive": "65869bf1-6622-4bab-8aec-785d0db2c32a", "student_exhibitor": "49c93d00-c61f-418b-a1db-5118260f4667"}'
+              value: 'json:{"管理者": "c9fd678d-ca9f-4f6e-9ed1-9efea4e3d45e", "executive": "65869bf1-6622-4bab-8aec-785d0db2c32a", "student_exhibitor": "49c93d00-c61f-418b-a1db-5118260f4667"}'
           resources:
             requests:
               memory: "256Mi"
