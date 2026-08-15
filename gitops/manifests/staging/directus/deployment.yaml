@@ -24,13 +24,23 @@ spec:
     spec:
       containers:
         - name: directus
-          image: directus/directus:11.17.4
+          image: directus/directus:12.1.1
           ports:
             - containerPort: 8055
           envFrom:
             - secretRef:
                 name: directus-staging-secrets
           env:
+            # v12でIP_TRUST_PROXYのデフォルトがtrue→falseに変更された。
+            # cloudflared→nginx-ingress経由でX-Forwarded-Forに依存するため明示的にtrueへ固定 (v11時点の挙動を維持)。
+            - name: IP_TRUST_PROXY
+              value: "true"
+            # Directus Open Innovation Grant Key (prod と同一キーを使用、5 activations枠を環境間で共有)
+            - name: LICENSE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: directus-staging-secrets
+                  key: LICENSE_KEY
             - name: DB_CLIENT
               value: pg
             - name: DB_HOST
