@@ -37,6 +37,12 @@ assert_eq "Tailscaleオンライン+1エンドポイントダウン -> SingleEnd
   "SingleEndpointDown" "$(classify_state 1 1)"
 assert_eq "Tailscaleオンライン+ダウンなし -> Healthy" \
   "Healthy" "$(classify_state 1 0)"
+assert_eq "Tailscale判定不能+2エンドポイントダウン -> NodeFailureSuspected" \
+  "NodeFailureSuspected" "$(classify_state unknown 2)"
+assert_eq "Tailscale判定不能+1エンドポイントダウン -> SingleEndpointDown" \
+  "SingleEndpointDown" "$(classify_state unknown 1)"
+assert_eq "Tailscale判定不能+ダウンなし -> Healthy" \
+  "Healthy" "$(classify_state unknown 0)"
 
 echo ""
 echo "=== is_abort_comment ユニットテスト (Requirement 1.6, author_association フィルタ) ==="

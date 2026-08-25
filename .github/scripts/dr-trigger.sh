@@ -31,12 +31,14 @@ ENDPOINTS=(
 # 複合検出ロジック (Requirement 1 AC1-3, ネットワークアクセスなしでテスト可能)
 # ============================================================
 
-# 引数: tailscale_online (1=オンライン/0=オフライン), down_count (応答なしエンドポイント数)
+# 引数: tailscale_online (1=オンライン / 0=オフライン / unknown=判定不能), down_count (応答なしエンドポイント数)
 # 出力: NodeFailureSuspected | SingleEndpointDown | Healthy
+# tailscale_online=unknown の場合、Tailscaleシグナルを判定から除外し
+# down_count のみで判定する (API疎通不良を誤ってノード障害扱いしないため)
 classify_state() {
   local tailscale_online="$1" down_count="$2"
 
-  if [[ "${tailscale_online}" -eq 0 ]]; then
+  if [[ "${tailscale_online}" == "0" ]]; then
     echo "NodeFailureSuspected"
   elif [[ "${down_count}" -ge 2 ]]; then
     echo "NodeFailureSuspected"
@@ -68,13 +70,16 @@ is_abort_comment() {
 # 外部 API 呼び出し (Tailscale / 公開エンドポイント)
 # ============================================================
 
-# 出力: 1=オンライン / 0=オフライン・デバイス未検出
+# 出力: 1=オンライン / 0=オフライン・デバイス未検出 / unknown=API呼び出し失敗 (判定不能)
 check_tailscale_online() {
   local response online
-  response=$(curl -sf \
+  if ! response=$(curl -sf \
     -H "Authorization: Bearer ${TAILSCALE_API_KEY}" \
-    "https://api.tailscale.com/api/v2/tailnet/${TAILSCALE_TAILNET}/devices") \
-    || die "Tailscale Devices API の呼び出しに失敗しました"
+    "https://api.tailscale.com/api/v2/tailnet/${TAILSCALE_TAILNET}/devices"); then
+    log "警告: Tailscale Devices API の呼び出しに失敗しました (判定不能として続行します)"
+    echo "unknown"
+    return
+  fi
 
   online=$(echo "${response}" | jq -r --arg h "${TARGET_HOSTNAME}" \
     '[.devices[] | select(.hostname == $h) | .connectedToControl] | first // false')
@@ -115,6 +120,10 @@ notify_discord() {
 notify_discord_single_endpoint_down() {
   local down_list="$1"
   notify_discord "$(printf '⚠️ **DR Trigger**: 単体サービス障害を検知しました (ノード障害ではありません)\n応答なし: %s\nTailscale: オンライン\n人間による確認をお願いします (アプリ再起動など)。' "${down_list}")"
+}
+
+notify_discord_tailscale_degraded() {
+  notify_discord "⚠️ **DR Trigger**: Tailscale Devices API の呼び出しに失敗しています (TAILSCALE_API_KEY の期限切れなどをご確認ください)。判定はエンドポイント疎通のみで継続します。"
 }
 
 notify_discord_node_failure() {
@@ -257,6 +266,12 @@ main() {
 
   local tailscale_online down_count=0 down_list=()
   tailscale_online=$(check_tailscale_online)
+
+  # Tailscale API障害はActionsログにしか残らず気づきにくいため通知する。
+  # cronは5分毎なので毎回通知するとスパムになるため、毎時1回程度に間引く。
+  if [[ "${tailscale_online}" == "unknown" && "$(date -u +%-M)" -lt 5 ]]; then
+    notify_discord_tailscale_degraded
+  fi
 
   local endpoint up
   for endpoint in "${ENDPOINTS[@]}"; do
