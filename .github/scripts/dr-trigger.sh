@@ -70,11 +70,31 @@ is_abort_comment() {
 # 外部 API 呼び出し (Tailscale / 公開エンドポイント)
 # ============================================================
 
+# OAuth Client Credentials (失効しない) から短命 access token (1時間) を取得する。
+# 実行毎に取得し直すため、キャッシュはしない。
+# 出力: access token / 空文字列 (取得失敗)
+fetch_tailscale_access_token() {
+  local response
+  response=$(curl -sf -X POST "https://api.tailscale.com/api/v2/oauth/token" \
+    -d "client_id=${TAILSCALE_OAUTH_CLIENT_ID}" \
+    -d "client_secret=${TAILSCALE_OAUTH_CLIENT_SECRET}") || return 1
+  echo "${response}" | jq -r '.access_token // empty'
+}
+
 # 出力: 1=オンライン / 0=オフライン・デバイス未検出 / unknown=API呼び出し失敗 (判定不能)
 check_tailscale_online() {
-  local response online
+  local token response online
+
+  token=$(fetch_tailscale_access_token)
+  if [[ -z "${token}" ]]; then
+    log "警告: Tailscale OAuth token の取得に失敗しました (判定不能として続行します)"
+    echo "unknown"
+    return
+  fi
+  echo "::add-mask::${token}" >&2
+
   if ! response=$(curl -sf \
-    -H "Authorization: Bearer ${TAILSCALE_API_KEY}" \
+    -H "Authorization: Bearer ${token}" \
     "https://api.tailscale.com/api/v2/tailnet/${TAILSCALE_TAILNET}/devices"); then
     log "警告: Tailscale Devices API の呼び出しに失敗しました (判定不能として続行します)"
     echo "unknown"
@@ -258,7 +278,7 @@ process_existing_incident() {
 # ============================================================
 
 main() {
-  local required_vars=(TAILSCALE_API_KEY TAILSCALE_TAILNET DISCORD_OPS_WEBHOOK_URL GH_TOKEN)
+  local required_vars=(TAILSCALE_OAUTH_CLIENT_ID TAILSCALE_OAUTH_CLIENT_SECRET TAILSCALE_TAILNET DISCORD_OPS_WEBHOOK_URL GH_TOKEN)
   local var
   for var in "${required_vars[@]}"; do
     [[ -n "${!var:-}" ]] || die "必須環境変数が未設定です: ${var}"
