@@ -48,4 +48,5 @@ jobs:
             --silent --plain)
           echo "::add-mask::${INFISICAL_TOKEN}"
 
-          infisical run --token="${INFISICAL_TOKEN}" --projectId="${INFISICAL_PROJECT_ID}" --env=prod -- bash .github/scripts/dr-trigger.sh
+          infisical run --token="${INFISICAL_TOKEN}" --projectId="${INFISICAL_PROJECT_ID}" --env=prod -- \
+            bash -c 'echo "TAILSCALE_API_KEY set: $([ -n "$TAILSCALE_API_KEY" ] && echo yes || echo no)"; echo "TAILSCALE_TAILNET set: $([ -n "$TAILSCALE_TAILNET" ] && echo yes || echo no)"; echo "DISCORD_OPS_WEBHOOK_URL set: $([ -n "$DISCORD_OPS_WEBHOOK_URL" ] && echo yes || echo no)"'
