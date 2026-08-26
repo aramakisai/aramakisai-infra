@@ -52,6 +52,29 @@ resource "authentik_property_mapping_provider_scope" "oauth_scope_email_roundcub
   EOT
 }
 
+# Roundcube 専用 profile scope: avatar (base64 data URI) を除外した軽量版。
+#
+# デフォルトの scope-profile mapping は "picture": request.user.avatar を含む。
+# ユーザーが Authentik にアバター画像を設定すると attributes.avatar に base64 PNG
+# (数百KB規模) が入り、それがそのまま access_token (JWT) に埋め込まれる。
+# Roundcube は OAUTHBEARER で access_token を SASL 初期応答として Dovecot に送るが、
+# Dovecot の SASL 応答サイズには約8KBのハード制限があり (dovecot 側で設定変更不可)、
+# アバター設定済みユーザーは "Authentication response too large" で IMAP ログインが
+# 即座に切断される (2026-08-25 発覚)。Roundcube は picture を利用しないため除外する。
+resource "authentik_property_mapping_provider_scope" "oauth_scope_profile_roundcube" {
+  name       = "Roundcube: OpenID 'profile' without avatar"
+  scope_name = "profile"
+  expression = <<-EOT
+    return delete_none_values({
+        "name": request.user.name,
+        "given_name": ak_obj_attr(request.user, "given_name", "name"),
+        "family_name": ak_obj_attr(request.user, "family_name"),
+        "preferred_username": request.user.username,
+        "nickname": request.user.username,
+    })
+  EOT
+}
+
 # Roundcube 専用 mail_acl_groups scope:
 # ログインユーザーの現在のグループ所属から mailAclSlug を動的に計算して返す。
 # discord-group-sync-policy のキャッシュ値に依存せず常に最新のグループ所属を反映する。
@@ -100,7 +123,7 @@ resource "authentik_provider_oauth2" "roundcube" {
   property_mappings = [
     data.authentik_property_mapping_provider_scope.oauth_scope_openid.id,
     authentik_property_mapping_provider_scope.oauth_scope_email_roundcube.id,
-    data.authentik_property_mapping_provider_scope.oauth_scope_profile.id,
+    authentik_property_mapping_provider_scope.oauth_scope_profile_roundcube.id,
     authentik_property_mapping_provider_scope.oauth_scope_mail_acl_groups.id,
   ]
 }
