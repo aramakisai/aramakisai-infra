@@ -89,6 +89,10 @@ spec:
             # TODO(2026-08-26): Authentik userinfo 400 調査のため一時的にdebugへ変更。調査完了後 info に戻すこと。
             - name: LOG_LEVEL
               value: "debug"
+            # TODO(2026-08-26): 同調査。openid-client (Node組み込みhttp/https使用) の実リクエスト/レスポンスを
+            # stderrへダンプさせる。調査完了後この行を削除すること。
+            - name: NODE_DEBUG
+              value: "http,https"
             # Authentik OIDC SSO
             - name: AUTH_PROVIDERS
               value: authentik
