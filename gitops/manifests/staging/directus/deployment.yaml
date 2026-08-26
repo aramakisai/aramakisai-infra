@@ -57,6 +57,10 @@ spec:
               value: "true"
             - name: CORS_ORIGIN
               value: "*"
+            # directus_permissions.validation の filesize 条件は書込後にしか値が
+            # 確定せず機能しない (issue #177)。実効的な上限強制はこの env のみ。
+            - name: FILES_MAX_UPLOAD_SIZE
+              value: "10mb"
             # Authentik OIDC SSO
             - name: AUTH_PROVIDERS
               value: authentik
@@ -96,6 +100,11 @@ spec:
           volumeMounts:
             - name: uploads
               mountPath: /directus/uploads
+            # 拡張本体は aramakisai-web 側で管理・配信 (issue #177)。
+            # optional: true のため ConfigMap 未生成でも起動を妨げない。
+            - name: extensions
+              mountPath: /directus/extensions/hooks
+              readOnly: true
           resources:
             requests:
               memory: "128Mi"
@@ -106,3 +115,7 @@ spec:
       volumes:
         - name: uploads
           emptyDir: {}   # staging はデータ永続化不要
+        - name: extensions
+          configMap:
+            name: directus-extensions
+            optional: true

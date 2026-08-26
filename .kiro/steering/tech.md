@@ -82,6 +82,13 @@ infisical run -- ansible-playbook k3s-bootstrap.yml
 - **解決**: `gitops/apps/staging/directus-schema-preview-appset.yaml` の ApplicationSet(`pullRequest` generator)が、open な `directus-schema-*` PR ごとに ephemeral Application `directus-schema-preview-<PR番号>` を自動生成し、PR ブランチの `gitops/manifests/staging/directus-schema-preview/`(schema-configmap・migrations-configmap・schema-apply-job のみの kustomize overlay)を実 staging DB に適用する。`kustomize.nameSuffix: "-pr-<PR番号>"` でリソース名をユニーク化し、main を追跡する `directus-staging` Application(Deployment/DB/Service 等を専有管理)とのリソース競合を回避している。PR が閉じられると生成物は自動削除される。
 - **認証**: PR 一覧取得には `aramakisai-infra` への `pull-requests: read-only` のみを持つ専用 GitHub App を使用（`ARGOCD_APPLICATIONSET_GITHUB_APP_*`、既存の書き込み権限を持つ web→infra 用 App とは分離）。
 
+### Directus 画像最適化・アップロード制限・配信 (issue #177)
+- **箱と中身の分担**: Directus コンテナイメージ・K8s マニフェスト・env は `aramakisai-infra` 所有、スキーマ・カスタム migration・拡張 (`/directus/extensions` 配下) は `aramakisai-web` 所有。
+- **アップロードサイズ上限**: `directus_permissions.validation` の `filesize` 条件は「権限評価 → ディスク書込 → `filesize` 更新」の順で処理されるため評価時点で値が未確定で機能しない。実効的な唯一の手段が env `FILES_MAX_UPLOAD_SIZE`（`gitops/manifests/{prod,staging}/directus/deployment.yaml`、全ロール共通で 10mb 固定）。
+- **hook 拡張の配信経路**: Deployment に ConfigMap `directus-extensions`（`aramakisai-web` 側 CI が生成、optional: true）を `/directus/extensions/hooks` にマウントする経路のみ用意している。`migrations` 用の別 ConfigMap（`/directus/extensions/migrations`、schema-apply Job 専用マウント）と衝突しないよう別パスにしている。
+- **配信時変換は使わない**: 用途別サイズ (サムネイル/カード/詳細) の出し分けは Directus の Storage Asset Presets ではなく Cloudflare Image Transformations（zone setting `image_resizing`）+ Cache Rule で行う（`terraform/cloudflare_directus_assets.tf`）。理由は prod が `replicas: 1` / `limits.memory: 512Mi` の単一 pod で、配信時変換の計算をエッジに逃がして origin 負荷をゼロにするため。
+- **Cache Rule が必要な理由**: Directus の asset URL は `/assets/<uuid>` で拡張子を持たず、Cloudflare の既定キャッシュルール（拡張子ベース）の対象外になる。`api.aramakisai.com` / `stg-api.aramakisai.com` の `/assets/*` を明示的にキャッシュ対象にする Cache Rule (`cloudflare_ruleset`, phase `http_request_cache_settings`) が別途必要。
+
 ### ホストOS自動更新・K3sバージョン追従の設計判断
 - ホストOSパッケージ更新は Debian 標準機能(`unattended-upgrades` + `apt-daily-upgrade.timer` + `Automatic-Reboot`)に完全委任し、Ansibleロール `os-auto-update` は設定ファイル配布と結果通知のみを担う(独自の適用/再起動ロジックは実装しない)。
 - **既知の落とし穴**: Debian 13 (trixie) の `unattended-upgrades` 2.12 では `Unattended-Upgrade::Allowed-Origins` は非推奨のlegacyキー名で、実機では `get_allowed_origins_legacy()` 内でクラッシュする。正しいキー名は `Unattended-Upgrade::Origins-Pattern` で、security origin行は `"origin=Debian,codename=${distro_codename}-security,label=Debian-Security";` の形式(`-security` サフィックス必須)。実機検証(prod-node-1)で発見・修正済み。

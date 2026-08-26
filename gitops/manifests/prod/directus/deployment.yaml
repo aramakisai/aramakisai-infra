@@ -86,6 +86,10 @@ spec:
               value: "true"
             - name: CORS_ORIGIN
               value: "https://aramakisai.com"
+            # directus_permissions.validation の filesize 条件は書込後にしか値が
+            # 確定せず機能しない (issue #177)。実効的な上限強制はこの env のみ。
+            - name: FILES_MAX_UPLOAD_SIZE
+              value: "10mb"
             # TODO(2026-08-26): Authentik userinfo 400 調査のため一時的にdebugへ変更。調査完了後 info に戻すこと。
             - name: LOG_LEVEL
               value: "debug"
@@ -134,9 +138,20 @@ spec:
               # (384Miへ削減検討したが、これらの操作はCloudflareキャッシュ対象外でcgroup単位OOMリスクがあるため見送り)
               memory: "512Mi"
               cpu: "500m"
+          # 拡張本体は aramakisai-web 側で管理・配信 (issue #177)。
+          # optional: true のため ConfigMap 未生成でも起動を妨げない。
+          volumeMounts:
+            - name: extensions
+              mountPath: /directus/extensions/hooks
+              readOnly: true
           readinessProbe:
             httpGet:
               path: /server/info
               port: 8055
             initialDelaySeconds: 15
             periodSeconds: 10
+      volumes:
+        - name: extensions
+          configMap:
+            name: directus-extensions
+            optional: true
