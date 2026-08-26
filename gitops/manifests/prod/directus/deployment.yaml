@@ -88,8 +88,12 @@ spec:
               value: "https://aramakisai.com"
             # directus_permissions.validation の filesize 条件は書込後にしか値が
             # 確定せず機能しない (issue #177)。実効的な上限強制はこの env のみ。
+            # 全ロール共通の値のため executive の PDF 添付 (announcements.attachments 等)
+            # が通るサイズにする必要があり、Cloudflare Free プランの上限100MBの内側で
+            # 余裕を持たせた50mbとした。student_exhibitor個別の上限は設けず、
+            # MIME を画像限定した上でアップロード時の縮小・WebP変換で保存サイズを抑える。
             - name: FILES_MAX_UPLOAD_SIZE
-              value: "10mb"
+              value: "50mb"
             # TODO(2026-08-26): Authentik userinfo 400 調査のため一時的にdebugへ変更。調査完了後 info に戻すこと。
             - name: LOG_LEVEL
               value: "debug"

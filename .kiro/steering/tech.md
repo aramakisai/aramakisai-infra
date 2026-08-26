@@ -84,7 +84,7 @@ infisical run -- ansible-playbook k3s-bootstrap.yml
 
 ### Directus 画像最適化・アップロード制限・配信 (issue #177)
 - **箱と中身の分担**: Directus コンテナイメージ・K8s マニフェスト・env は `aramakisai-infra` 所有、スキーマ・カスタム migration・拡張 (`/directus/extensions` 配下) は `aramakisai-web` 所有。
-- **アップロードサイズ上限**: `directus_permissions.validation` の `filesize` 条件は「権限評価 → ディスク書込 → `filesize` 更新」の順で処理されるため評価時点で値が未確定で機能しない。実効的な唯一の手段が env `FILES_MAX_UPLOAD_SIZE`（`gitops/manifests/{prod,staging}/directus/deployment.yaml`、全ロール共通で 10mb 固定）。
+- **アップロードサイズ上限**: `directus_permissions.validation` の `filesize` 条件は「権限評価 → ディスク書込 → `filesize` 更新」の順で処理されるため評価時点で値が未確定で機能しない。実効的な唯一の手段が env `FILES_MAX_UPLOAD_SIZE`（`gitops/manifests/{prod,staging}/directus/deployment.yaml`、全ロール共通で 50mb 固定。executive の PDF 添付が通る値かつ Cloudflare Free プラン上限100MBの内側という基準で決定）。
 - **hook 拡張の配信経路**: Deployment に ConfigMap `directus-extensions`（`aramakisai-web` 側 CI が生成、optional: true）を `/directus/extensions/hooks` にマウントする経路のみ用意している。`migrations` 用の別 ConfigMap（`/directus/extensions/migrations`、schema-apply Job 専用マウント）と衝突しないよう別パスにしている。
 - **配信時変換は使わない**: 用途別サイズ (サムネイル/カード/詳細) の出し分けは Directus の Storage Asset Presets ではなく Cloudflare Image Transformations（zone setting `image_resizing`）+ Cache Rule で行う（`terraform/cloudflare_directus_assets.tf`）。理由は prod が `replicas: 1` / `limits.memory: 512Mi` の単一 pod で、配信時変換の計算をエッジに逃がして origin 負荷をゼロにするため。
 - **Cache Rule が必要な理由**: Directus の asset URL は `/assets/<uuid>` で拡張子を持たず、Cloudflare の既定キャッシュルール（拡張子ベース）の対象外になる。`api.aramakisai.com` / `stg-api.aramakisai.com` の `/assets/*` を明示的にキャッシュ対象にする Cache Rule (`cloudflare_ruleset`, phase `http_request_cache_settings`) が別途必要。
