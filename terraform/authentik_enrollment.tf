@@ -127,7 +127,7 @@ resource "authentik_stage_email" "enrollment_email_verification" {
   name                     = "enrollment-email-verification-stage"
   use_global_settings      = true
   subject                  = "荒牧祭実行委員会SSO メールアドレス確認"
-  template                 = "email/password_reset.html"
+  template                 = "email/account_confirmation.html"
   token_expiry             = null
   activate_user_on_success = true
 }
