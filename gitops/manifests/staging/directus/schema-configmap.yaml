@@ -320,11 +320,37 @@ data:
         status: active
         translations:
         - language: ja-JP
-          translation: 学生団体
+          translation: 学生企画
         unarchive_value: published
         versioning: false
       schema:
         name: student_exhibitions
+    - collection: student_exhibitions_files
+      meta:
+        accountability: all
+        archive_app_filter: true
+        archive_field: null
+        archive_value: null
+        autosave_revision_interval: null
+        collapse: open
+        collection: student_exhibitions_files
+        color: null
+        display_template: null
+        group: null
+        hidden: true
+        icon: import_export
+        item_duplication_fields: null
+        note: null
+        preview_url: null
+        singleton: false
+        sort: null
+        sort_field: null
+        status: active
+        translations: null
+        unarchive_value: null
+        versioning: false
+      schema:
+        name: student_exhibitions_files
     - collection: time_slots
       meta:
         accountability: all
@@ -3457,7 +3483,7 @@ data:
         group: null
         hidden: false
         interface: input
-        note: 団体名
+        note: 企画名。団体名は organization_name を参照
         options: null
         readonly: false
         required: true
@@ -3488,22 +3514,19 @@ data:
         foreign_key_table: null
         foreign_key_column: null
     - collection: student_exhibitions
-      field: slug
+      field: organization_name
       type: string
       meta:
         collection: student_exhibitions
         conditions: null
         display: raw
         display_options: null
-        field: slug
+        field: organization_name
         group: null
         hidden: false
         interface: input
-        note: URLスラッグ (UNIQUE)
-        options:
-          lowercase: true
-          slug: true
-          trim: true
+        note: 学生団体・サークル名
+        options: null
         readonly: false
         required: true
         searchable: true
@@ -3511,67 +3534,16 @@ data:
         special: null
         translations:
         - language: ja-JP
-          translation: スラッグ
+          translation: 団体名
         validation: null
         validation_message: null
         width: full
       schema:
-        name: slug
+        name: organization_name
         table: student_exhibitions
         data_type: character varying
         default_value: null
-        max_length: 100
-        numeric_precision: null
-        numeric_scale: null
-        is_nullable: false
-        is_unique: true
-        is_indexed: false
-        is_primary_key: false
-        is_generated: false
-        generation_expression: null
-        has_auto_increment: false
-        foreign_key_table: null
-        foreign_key_column: null
-    - collection: student_exhibitions
-      field: category
-      type: string
-      meta:
-        collection: student_exhibitions
-        conditions: null
-        display: labels
-        display_options: null
-        field: category
-        group: null
-        hidden: false
-        interface: select-dropdown
-        note: 表示分類 (掲載判定とは独立)
-        options:
-          choices:
-          - text: ステージ
-            value: stage
-          - text: 出展
-            value: exhibit
-          - text: 模擬店
-            value: vendor
-          - text: その他
-            value: other
-        readonly: false
-        required: true
-        searchable: true
-        sort: 9
-        special: null
-        translations:
-        - language: ja-JP
-          translation: カテゴリ
-        validation: null
-        validation_message: null
-        width: half
-      schema:
-        name: category
-        table: student_exhibitions
-        data_type: character varying
-        default_value: other
-        max_length: 50
+        max_length: 255
         numeric_precision: null
         numeric_scale: null
         is_nullable: false
@@ -3584,17 +3556,90 @@ data:
         foreign_key_table: null
         foreign_key_column: null
     - collection: student_exhibitions
+      field: category
+      type: json
+      meta:
+        collection: student_exhibitions
+        conditions: null
+        display: labels
+        display_options: null
+        field: category
+        group: null
+        hidden: false
+        interface: select-multiple-dropdown
+        note: 最大 2 つまで選択する
+        options:
+          choices:
+          - text: ステージ
+            value: stage
+          - text: 展示
+            value: exhibit
+          - text: 出店
+            value: vendor
+          - text: その他
+            value: other
+        readonly: false
+        required: true
+        searchable: true
+        sort: 9
+        special:
+        - cast-json
+        translations:
+        - language: ja-JP
+          translation: カテゴリ
+        validation: null
+        validation_message: null
+        width: half
+      schema:
+        name: category
+        table: student_exhibitions
+        data_type: json
+        default_value:
+        - other
+        max_length: null
+        numeric_precision: null
+        numeric_scale: null
+        is_nullable: false
+        is_unique: false
+        is_indexed: false
+        is_primary_key: false
+        is_generated: false
+        generation_expression: null
+        has_auto_increment: false
+        foreign_key_table: null
+        foreign_key_column: null
+    - collection: student_exhibitions
+      field: performance_slots
+      type: alias
+      meta:
+        collection: student_exhibitions
+        conditions: null
+        display: null
+        display_options: null
+        field: performance_slots
+        group: null
+        hidden: false
+        interface: list-o2m
+        note: ステージ出演枠 (実行委員が割り当てる。閲覧のみ)
+        options: null
+        readonly: true
+        required: false
+        searchable: true
+        sort: 10
+        special:
+        - o2m
+        translations:
+        - language: ja-JP
+          translation: ステージ出演枠
+        validation: null
+        validation_message: null
+        width: full
+    - collection: student_exhibitions
       field: area_id
       type: integer
       meta:
         collection: student_exhibitions
-        conditions:
-        - rule:
-            category:
-              _nin:
-              - exhibit
-              - vendor
-          hidden: true
+        conditions: null
         display: related-values
         display_options:
           template: '{{name}}'
@@ -3602,7 +3647,7 @@ data:
         group: null
         hidden: false
         interface: select-dropdown-m2o
-        note: マップ配置エリア (NULL=マップ非掲載)
+        note: マップ配置エリア (NULL=マップ非掲載)。展示・出店のみ使用
         options:
           template: '{{name}}'
         readonly: false
@@ -3639,20 +3684,14 @@ data:
       type: integer
       meta:
         collection: student_exhibitions
-        conditions:
-        - rule:
-            category:
-              _nin:
-              - exhibit
-              - vendor
-          hidden: true
+        conditions: null
         display: raw
         display_options: null
         field: booth_number
         group: null
         hidden: false
         interface: input
-        note: エリア内ブース番号 (area_id+booth_number UNIQUE)
+        note: エリア内ブース番号 (area_id+booth_number UNIQUE)。展示・出店のみ使用
         options:
           min: 1
         readonly: false
@@ -3688,20 +3727,14 @@ data:
       type: string
       meta:
         collection: student_exhibitions
-        conditions:
-        - rule:
-            category:
-              _nin:
-              - exhibit
-              - vendor
-          hidden: true
+        conditions: null
         display: raw
         display_options: null
         field: booth_label
         group: null
         hidden: false
         interface: input
-        note: マップ表示ラベル
+        note: マップ表示ラベル。展示・出店のみ使用
         options: null
         readonly: false
         required: false
@@ -3774,33 +3807,193 @@ data:
         foreign_key_table: null
         foreign_key_column: null
     - collection: student_exhibitions
-      field: image
-      type: uuid
+      field: links
+      type: json
       meta:
         collection: student_exhibitions
         conditions: null
-        display: image
+        display: raw
         display_options: null
-        field: image
+        field: links
         group: null
         hidden: false
-        interface: file-image
-        note: 画像リスト
+        interface: list
+        note: 公式サイト・SNS 等のリンク
+        options:
+          fields:
+          - field: label
+            meta:
+              interface: input
+              width: half
+            name: ラベル
+            type: string
+          - field: url
+            meta:
+              interface: input
+              width: half
+            name: URL
+            type: string
+        readonly: false
+        required: false
+        searchable: true
+        sort: 15
+        special:
+        - cast-json
+        translations:
+        - language: ja-JP
+          translation: リンク
+        validation: null
+        validation_message: null
+        width: full
+      schema:
+        name: links
+        table: student_exhibitions
+        data_type: json
+        default_value: null
+        max_length: null
+        numeric_precision: null
+        numeric_scale: null
+        is_nullable: true
+        is_unique: false
+        is_indexed: false
+        is_primary_key: false
+        is_generated: false
+        generation_expression: null
+        has_auto_increment: false
+        foreign_key_table: null
+        foreign_key_column: null
+    - collection: student_exhibitions
+      field: images
+      type: alias
+      meta:
+        collection: student_exhibitions
+        conditions: null
+        display: null
+        display_options: null
+        field: images
+        group: null
+        hidden: false
+        interface: files
+        note: 最大 5 枚まで
         options: null
         readonly: false
         required: false
         searchable: true
         sort: 16
-        special: null
+        special:
+        - files
         translations:
         - language: ja-JP
           translation: 画像
         validation: null
         validation_message: null
         width: full
+    - collection: student_exhibitions_files
+      field: id
+      type: integer
+      meta:
+        collection: student_exhibitions_files
+        conditions: null
+        display: null
+        display_options: null
+        field: id
+        group: null
+        hidden: true
+        interface: input
+        note: null
+        options: null
+        readonly: true
+        required: false
+        searchable: true
+        sort: 1
+        special: null
+        translations: null
+        validation: null
+        validation_message: null
+        width: full
       schema:
-        name: image
-        table: student_exhibitions
+        name: id
+        table: student_exhibitions_files
+        data_type: integer
+        default_value: nextval('student_exhibitions_files_id_seq'::regclass)
+        max_length: null
+        numeric_precision: 32
+        numeric_scale: 0
+        is_nullable: false
+        is_unique: true
+        is_indexed: false
+        is_primary_key: true
+        is_generated: false
+        generation_expression: null
+        has_auto_increment: true
+        foreign_key_table: null
+        foreign_key_column: null
+    - collection: student_exhibitions_files
+      field: student_exhibitions_id
+      type: integer
+      meta:
+        collection: student_exhibitions_files
+        conditions: null
+        display: null
+        display_options: null
+        field: student_exhibitions_id
+        group: null
+        hidden: true
+        interface: null
+        note: null
+        options: null
+        readonly: false
+        required: false
+        searchable: true
+        sort: 2
+        special: null
+        translations: null
+        validation: null
+        validation_message: null
+        width: full
+      schema:
+        name: student_exhibitions_id
+        table: student_exhibitions_files
+        data_type: integer
+        default_value: null
+        max_length: null
+        numeric_precision: 32
+        numeric_scale: 0
+        is_nullable: true
+        is_unique: false
+        is_indexed: false
+        is_primary_key: false
+        is_generated: false
+        generation_expression: null
+        has_auto_increment: false
+        foreign_key_table: student_exhibitions
+        foreign_key_column: id
+    - collection: student_exhibitions_files
+      field: directus_files_id
+      type: uuid
+      meta:
+        collection: student_exhibitions_files
+        conditions: null
+        display: null
+        display_options: null
+        field: directus_files_id
+        group: null
+        hidden: true
+        interface: null
+        note: null
+        options: null
+        readonly: false
+        required: false
+        searchable: true
+        sort: 3
+        special: null
+        translations: null
+        validation: null
+        validation_message: null
+        width: full
+      schema:
+        name: directus_files_id
+        table: student_exhibitions_files
         data_type: uuid
         default_value: null
         max_length: null
@@ -3815,6 +4008,46 @@ data:
         has_auto_increment: false
         foreign_key_table: directus_files
         foreign_key_column: id
+    - collection: student_exhibitions_files
+      field: sort
+      type: integer
+      meta:
+        collection: student_exhibitions_files
+        conditions: null
+        display: null
+        display_options: null
+        field: sort
+        group: null
+        hidden: true
+        interface: null
+        note: null
+        options: null
+        readonly: false
+        required: false
+        searchable: true
+        sort: 4
+        special: null
+        translations: null
+        validation: null
+        validation_message: null
+        width: full
+      schema:
+        name: sort
+        table: student_exhibitions_files
+        data_type: integer
+        default_value: null
+        max_length: null
+        numeric_precision: 32
+        numeric_scale: 0
+        is_nullable: true
+        is_unique: false
+        is_indexed: false
+        is_primary_key: false
+        is_generated: false
+        generation_expression: null
+        has_auto_increment: false
+        foreign_key_table: null
+        foreign_key_column: null
     - collection: time_slots
       field: id
       type: integer
@@ -4724,7 +4957,7 @@ data:
         one_collection: student_exhibitions
         one_collection_field: null
         one_deselect_action: nullify
-        one_field: null
+        one_field: performance_slots
         sort_field: null
       schema:
         table: performance_slots
@@ -4860,6 +5093,48 @@ data:
         constraint_name: student_exhibitions_user_updated_foreign
         on_update: NO ACTION
         on_delete: SET NULL
+    - collection: student_exhibitions_files
+      field: student_exhibitions_id
+      related_collection: student_exhibitions
+      meta:
+        junction_field: directus_files_id
+        many_collection: student_exhibitions_files
+        many_field: student_exhibitions_id
+        one_allowed_collections: null
+        one_collection: student_exhibitions
+        one_collection_field: null
+        one_deselect_action: nullify
+        one_field: images
+        sort_field: sort
+      schema:
+        table: student_exhibitions_files
+        column: student_exhibitions_id
+        foreign_key_table: student_exhibitions
+        foreign_key_column: id
+        constraint_name: student_exhibitions_files_student_exhibitions_id_foreign
+        on_update: NO ACTION
+        on_delete: CASCADE
+    - collection: student_exhibitions_files
+      field: directus_files_id
+      related_collection: directus_files
+      meta:
+        junction_field: student_exhibitions_id
+        many_collection: student_exhibitions_files
+        many_field: directus_files_id
+        one_allowed_collections: null
+        one_collection: directus_files
+        one_collection_field: null
+        one_deselect_action: nullify
+        one_field: null
+        sort_field: null
+      schema:
+        table: student_exhibitions_files
+        column: directus_files_id
+        foreign_key_table: directus_files
+        foreign_key_column: id
+        constraint_name: student_exhibitions_files_directus_files_id_foreign
+        on_update: NO ACTION
+        on_delete: CASCADE
     - collection: topics
       field: image
       related_collection: directus_files
