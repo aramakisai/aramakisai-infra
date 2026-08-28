@@ -384,3 +384,51 @@ resource "authentik_application" "directus_stg" {
   open_in_new_tab   = true
   meta_icon         = "fa://fa-solid fa-database"
 }
+
+# ────────────────────────────────────────────────────────────
+# 7. Payload CMS - SSO 連携
+# ────────────────────────────────────────────────────────────
+# ロールは CMS 側のコードが groups クレームから静的に写像する。
+# 参照するグループは 管理者 (authentik_vaultwarden_rbac_sync.tf) /
+# executive (authentik_discord.tf) / student_exhibitor (上記 6.) の 3 つで、
+# いずれも既存のものを再利用する。
+
+resource "authentik_provider_oauth2" "cms_prod" {
+  name          = "cms-prod"
+  client_id     = "cms-prod"
+  client_secret = var.cms_prod_oidc_client_secret
+  signing_key   = data.authentik_certificate_key_pair.default.id
+
+  authorization_flow = data.authentik_flow.default_authorization.id
+  invalidation_flow  = data.authentik_flow.default_invalidation.id
+
+  # localhost は開発者がローカルの CMS で Authentik ログインを試すために同じ
+  # プロバイダへ相乗りさせる。CMS は staging を持たないため prod と分けない
+  allowed_redirect_uris = [
+    {
+      matching_mode     = "strict"
+      url               = "https://cms.aramakisai.com/api/auth/authentik/callback"
+      redirect_uri_type = "authorization"
+    },
+    {
+      matching_mode     = "strict"
+      url               = "http://localhost:3000/api/auth/authentik/callback"
+      redirect_uri_type = "authorization"
+    },
+  ]
+
+  property_mappings = [
+    data.authentik_property_mapping_provider_scope.oauth_scope_openid.id,
+    data.authentik_property_mapping_provider_scope.oauth_scope_profile.id,
+    data.authentik_property_mapping_provider_scope.oauth_scope_email.id,
+    authentik_property_mapping_provider_scope.oauth_scope_groups.id,
+  ]
+}
+
+resource "authentik_application" "cms_prod" {
+  name              = "CMS (prod)"
+  slug              = "cms-prod"
+  protocol_provider = authentik_provider_oauth2.cms_prod.id
+  open_in_new_tab   = true
+  meta_icon         = "fa://fa-solid fa-pen-to-square"
+}

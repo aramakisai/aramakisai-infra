@@ -65,6 +65,19 @@ spec:
         compression: gzip
     retentionPolicy: "3d"
 
+  # Payload CMS 用のロール。CNPG 1.23.3 には Database CRD が無いため、
+  # データベース自体の作成は cms の PreSync Job (cms-db-init) が psql で行う。
+  # そのために必要な CREATEDB をここで宣言的に与える。
+  # directus ロールと directus データベースには触れない。
+  managed:
+    roles:
+      - name: payload
+        ensure: present
+        login: true
+        createdb: true
+        passwordSecret:
+          name: cms-db-credentials
+
   storage:
     size: 10Gi   # Directus はアセットを DB に保存するため authentik より大きめ
 

@@ -1,0 +1,53 @@
+---
+# payload データベースを作る PreSync Job
+# CNPG 1.23.3 には Database CRD が無く、既存クラスタへのデータベース追加を
+# 宣言的に書けないため psql で作る。CREATE DATABASE はトランザクション内で
+# 実行できず DO ブロックで包めないため、存在確認と作成をシェルで分けている。
+# 接続に使う payload ロールは directus-db クラスタの managed.roles が作る
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cms-db-init
+  namespace: prod
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  ttlSecondsAfterFinished: 3600
+  # 初回同期では CNPG が payload ロールを作り終える前にこの Job が走りうるため、
+  # リトライで追いつかせる
+  backoffLimit: 6
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: db-init
+          image: ghcr.io/cloudnative-pg/postgresql:16.8
+          command: [sh, -c]
+          args:
+            - |
+              set -eu
+              export PGPASSWORD="$PAYLOAD_DB_PASSWORD"
+              PGHOST=directus-db-rw.prod.svc.cluster.local
+              if [ "$(psql -h "$PGHOST" -U payload -d postgres -tAc \
+                  "SELECT 1 FROM pg_database WHERE datname='payload'")" = "1" ]; then
+                echo "database payload already exists"
+              else
+                psql -h "$PGHOST" -U payload -d postgres \
+                  -c "CREATE DATABASE payload OWNER payload"
+                echo "database payload created"
+              fi
+          env:
+            - name: PAYLOAD_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: cms-secrets
+                  key: PAYLOAD_DB_PASSWORD
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "128Mi"
+              cpu: "100m"

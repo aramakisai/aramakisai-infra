@@ -1,0 +1,38 @@
+---
+# Payload CMS
+# wave: 1 — payload ロールは directus (wave 0) の CNPG Cluster の managed.roles が作る。
+# PreSync の cms-db-init がそのロールで接続するため、directus の同期後に走らせる
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cms
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:aramakisai/aramakisai-infra.git
+    targetRevision: main
+    path: gitops/manifests/prod/cms
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: prod
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - RespectIgnoreDifferences=true
+  ignoreDifferences:
+    - group: external-secrets.io
+      kind: ExternalSecret
+      jqPathExpressions:
+        - .spec.data[].remoteRef.conversionStrategy
+        - .spec.data[].remoteRef.decodingStrategy
+        - .spec.data[].remoteRef.metadataPolicy
+        - .spec.target.deletionPolicy

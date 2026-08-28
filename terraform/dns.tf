@@ -72,6 +72,16 @@ resource "cloudflare_record" "api" {
   comment = "Directus API (Cloudflare Tunnel)"
 }
 
+# Production CMS (Payload)
+resource "cloudflare_record" "cms" {
+  zone_id = var.cloudflare_zone_id
+  name    = "cms"
+  value   = local.tunnel_cname
+  type    = "CNAME"
+  proxied = true
+  comment = "Payload CMS (Cloudflare Tunnel)"
+}
+
 # ============================================================
 # Stalwart メールサーバー
 # ============================================================
