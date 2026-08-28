@@ -1,0 +1,16 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cms
+  namespace: prod
+  labels:
+    app: cms
+spec:
+  type: ClusterIP
+  selector:
+    app: cms
+  ports:
+    - name: http
+      port: 80
+      targetPort: 3000

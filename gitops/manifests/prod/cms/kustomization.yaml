@@ -1,0 +1,18 @@
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: prod
+
+resources:
+  - db-init-job.yaml
+  - migrate-job.yaml
+  - deployment.yaml
+  - service.yaml
+
+# newTag は aramakisai-web の cms-ci.yml が commit SHA へ書き換える。
+# 実行用とマイグレーション用は同一コミットから作るため常に同じ値を持つ
+images:
+  - name: ghcr.io/aramakisai/aramakisai-cms
+    newTag: main
+  - name: ghcr.io/aramakisai/aramakisai-cms-migrate
+    newTag: main

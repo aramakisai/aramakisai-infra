@@ -37,6 +37,13 @@ locals {
       url  = "https://idp.aramakisai.com"
       port = null
     }
+    cms = {
+      # Payload の管理画面。ログイン画面は未認証でも 200 を返すため素の HTTP 監視で足りる
+      name = "Payload CMS 管理画面"
+      type = "HTTP"
+      url  = "https://cms.aramakisai.com/admin/login"
+      port = null
+    }
     autoconfig = {
       name = "メールクライアント自動設定 (autoconfig)"
       type = "HTTP"

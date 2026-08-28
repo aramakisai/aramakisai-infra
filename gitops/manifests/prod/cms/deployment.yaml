@@ -1,0 +1,68 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cms
+  namespace: prod
+  labels:
+    app: cms
+  annotations:
+    secret.reloader.stakater.com/reload: "cms-secrets"
+spec:
+  replicas: 1
+  revisionHistoryLimit: 2
+  # 単一ノードの空きメモリが 1.2Gi 程度しかなく、更新時に新旧 2 pod を同時に置けない
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: cms
+  template:
+    metadata:
+      labels:
+        app: cms
+    spec:
+      containers:
+        - name: cms
+          image: ghcr.io/aramakisai/aramakisai-cms:main
+          ports:
+            - containerPort: 3000
+          envFrom:
+            - secretRef:
+                name: cms-secrets   # ESO が生成。DATABASE_URL もここから入る
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: CMS_PUBLIC_URL
+              value: https://cms.aramakisai.com
+            - name: CMS_CORS_ORIGINS
+              value: https://aramakisai.com
+            - name: S3_BUCKET
+              value: aramakisai-backups
+            - name: S3_ENDPOINT
+              value: https://fsn1.your-objectstorage.com
+            - name: S3_REGION
+              value: fsn1
+            # Directus が使う directus-uploads と衝突しないキー空間に置く
+            - name: S3_PREFIX
+              value: payload-uploads
+            - name: AUTHENTIK_ISSUER_URL
+              value: https://idp.aramakisai.com/application/o/cms-prod/
+            - name: AUTHENTIK_CLIENT_ID
+              value: cms-prod
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              # 本番相当ビルドのローカル実測 RSS はアイドル 144MiB、
+              # 管理画面 15 回 + REST 30 回のアクセス後で 192MiB。
+              # sharp の画像変換ピークだけ未計測のため Directus と同じ 512Mi から始める
+              memory: "512Mi"
+              cpu: "500m"
+          readinessProbe:
+            httpGet:
+              path: /admin/login
+              port: 3000
+            initialDelaySeconds: 20
+            periodSeconds: 10

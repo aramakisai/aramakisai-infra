@@ -1,0 +1,37 @@
+---
+# マイグレーション適用 PreSync Job
+# Payload は起動時にスキーマの存在を前提とするため、Deployment の更新より前に適用する。
+# Payload の CLI と TypeScript のマイグレーションは Next の standalone 出力に含まれないため、
+# ビルド途中の段階 (migrator) を別タグとして押し出したイメージを使う
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cms-migrate
+  namespace: prod
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  ttlSecondsAfterFinished: 3600
+  backoffLimit: 1
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: migrate
+          image: ghcr.io/aramakisai/aramakisai-cms-migrate:main
+          command: [node_modules/.bin/payload, migrate]
+          envFrom:
+            - secretRef:
+                name: cms-secrets
+          env:
+            - name: NODE_OPTIONS
+              value: --no-deprecation
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "250m"
