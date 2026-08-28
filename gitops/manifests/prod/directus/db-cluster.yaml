@@ -75,6 +75,9 @@ spec:
         ensure: present
         login: true
         createdb: true
+        # CNPG が defaulting で補う値。書いておかないと ArgoCD が常に OutOfSync になる
+        inherit: true
+        connectionLimit: -1
         passwordSecret:
           name: cms-db-credentials
 
