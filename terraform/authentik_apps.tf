@@ -399,6 +399,11 @@ resource "authentik_provider_oauth2" "cms_prod" {
   client_secret = var.cms_prod_oidc_client_secret
   signing_key   = data.authentik_certificate_key_pair.default.id
 
+  # 明示しないと空リストで作られ、認可要求が invalid_request で弾かれる。
+  # UI 作成後に import した既存プロバイダは値を持つため差が出ない。
+  # CMS は認可コードを一度交換したあと自前の JWT を発行するので refresh_token は要らない
+  grant_types = ["authorization_code"]
+
   authorization_flow = data.authentik_flow.default_authorization.id
   invalidation_flow  = data.authentik_flow.default_invalidation.id
 
