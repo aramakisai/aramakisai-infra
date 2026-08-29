@@ -441,9 +441,9 @@ resource "authentik_provider_oauth2" "cms_prod" {
     },
   ]
 
+  # CMS が使うのは sub / email / groups だけ。profile は要求しない
   property_mappings = [
     data.authentik_property_mapping_provider_scope.oauth_scope_openid.id,
-    data.authentik_property_mapping_provider_scope.oauth_scope_profile.id,
     data.authentik_property_mapping_provider_scope.oauth_scope_email.id,
     authentik_property_mapping_provider_scope.oauth_scope_groups.id,
   ]
