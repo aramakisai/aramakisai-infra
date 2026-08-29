@@ -11,6 +11,25 @@ resource "authentik_property_mapping_provider_scope" "oauth_scope_groups" {
   expression = "return {\n    'groups': [g.name for g in request.user.groups.all()]\n}"
 }
 
+# picture claim を除いた profile scope。
+# Authentik のアバターは data URI (base64 PNG, 数十 KB) で保存されるため、
+# デフォルト mapping の picture claim を含めると access token が肥大化し、
+# userinfo リクエストの Authorization ヘッダがサイズ上限を超えて 400 になる。
+resource "authentik_property_mapping_provider_scope" "oauth_scope_profile" {
+  name       = "OpenID 'profile' without avatar"
+  scope_name = "profile"
+  expression = <<-EOT
+    return delete_none_values({
+        "name": request.user.name,
+        "given_name": ak_obj_attr(request.user, "given_name", "name"),
+        "family_name": ak_obj_attr(request.user, "family_name"),
+        "preferred_username": request.user.username,
+        "nickname": request.user.username,
+        "groups": [group.name for group in request.user.groups.all()],
+    })
+  EOT
+}
+
 # ────────────────────────────────────────────────────────────
 # 1. Roundcube (Webmail) - 既存インポート
 # ────────────────────────────────────────────────────────────
@@ -100,7 +119,7 @@ resource "authentik_provider_oauth2" "roundcube" {
   property_mappings = [
     data.authentik_property_mapping_provider_scope.oauth_scope_openid.id,
     authentik_property_mapping_provider_scope.oauth_scope_email_roundcube.id,
-    data.authentik_property_mapping_provider_scope.oauth_scope_profile.id,
+    authentik_property_mapping_provider_scope.oauth_scope_profile.id,
     authentik_property_mapping_provider_scope.oauth_scope_mail_acl_groups.id,
   ]
 }
@@ -135,7 +154,7 @@ resource "authentik_provider_oauth2" "argocd" {
 
   property_mappings = [
     data.authentik_property_mapping_provider_scope.oauth_scope_openid.id,
-    data.authentik_property_mapping_provider_scope.oauth_scope_profile.id,
+    authentik_property_mapping_provider_scope.oauth_scope_profile.id,
     data.authentik_property_mapping_provider_scope.oauth_scope_email.id,
     authentik_property_mapping_provider_scope.oauth_scope_groups.id
   ]
@@ -176,7 +195,7 @@ resource "authentik_provider_oauth2" "cloudflare" {
   property_mappings = [
     data.authentik_property_mapping_provider_scope.oauth_scope_openid.id,
     data.authentik_property_mapping_provider_scope.oauth_scope_email.id,
-    data.authentik_property_mapping_provider_scope.oauth_scope_profile.id
+    authentik_property_mapping_provider_scope.oauth_scope_profile.id
   ]
 }
 
@@ -224,7 +243,7 @@ resource "authentik_provider_oauth2" "vaultwarden" {
   property_mappings = [
     data.authentik_property_mapping_provider_scope.oauth_scope_openid.id,
     authentik_property_mapping_provider_scope.oauth_scope_email_vaultwarden.id,
-    data.authentik_property_mapping_provider_scope.oauth_scope_profile.id,
+    authentik_property_mapping_provider_scope.oauth_scope_profile.id,
     authentik_property_mapping_provider_scope.oauth_scope_groups.id
   ]
 }
@@ -295,7 +314,7 @@ resource "authentik_provider_oauth2" "room_presence" {
   property_mappings = [
     data.authentik_property_mapping_provider_scope.oauth_scope_openid.id,
     data.authentik_property_mapping_provider_scope.oauth_scope_email.id,
-    data.authentik_property_mapping_provider_scope.oauth_scope_profile.id,
+    authentik_property_mapping_provider_scope.oauth_scope_profile.id,
     authentik_property_mapping_provider_scope.oauth_scope_groups.id,
     authentik_property_mapping_provider_scope.oauth_scope_student_id.id,
     authentik_property_mapping_provider_scope.oauth_scope_discord_id.id
@@ -339,7 +358,7 @@ resource "authentik_provider_oauth2" "directus_prod" {
 
   property_mappings = [
     data.authentik_property_mapping_provider_scope.oauth_scope_openid.id,
-    data.authentik_property_mapping_provider_scope.oauth_scope_profile.id,
+    authentik_property_mapping_provider_scope.oauth_scope_profile.id,
     data.authentik_property_mapping_provider_scope.oauth_scope_email.id,
     authentik_property_mapping_provider_scope.oauth_scope_groups.id,
   ]
@@ -371,7 +390,7 @@ resource "authentik_provider_oauth2" "directus_stg" {
 
   property_mappings = [
     data.authentik_property_mapping_provider_scope.oauth_scope_openid.id,
-    data.authentik_property_mapping_provider_scope.oauth_scope_profile.id,
+    authentik_property_mapping_provider_scope.oauth_scope_profile.id,
     data.authentik_property_mapping_provider_scope.oauth_scope_email.id,
     authentik_property_mapping_provider_scope.oauth_scope_groups.id,
   ]
@@ -422,9 +441,9 @@ resource "authentik_provider_oauth2" "cms_prod" {
     },
   ]
 
+  # CMS が使うのは sub / email / groups だけ。profile は要求しない
   property_mappings = [
     data.authentik_property_mapping_provider_scope.oauth_scope_openid.id,
-    data.authentik_property_mapping_provider_scope.oauth_scope_profile.id,
     data.authentik_property_mapping_provider_scope.oauth_scope_email.id,
     authentik_property_mapping_provider_scope.oauth_scope_groups.id,
   ]

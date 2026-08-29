@@ -28,10 +28,6 @@ data "authentik_property_mapping_provider_scope" "oauth_scope_openid" {
   managed = "goauthentik.io/providers/oauth2/scope-openid"
 }
 
-data "authentik_property_mapping_provider_scope" "oauth_scope_profile" {
-  managed = "goauthentik.io/providers/oauth2/scope-profile"
-}
-
 data "authentik_property_mapping_provider_scope" "oauth_scope_email" {
   managed = "goauthentik.io/providers/oauth2/scope-email"
 }
