@@ -94,9 +94,8 @@ spec:
             # MIME を画像限定した上でアップロード時の縮小・WebP変換で保存サイズを抑える。
             - name: FILES_MAX_UPLOAD_SIZE
               value: "50mb"
-            # TODO(2026-08-26): Authentik userinfo 400 調査のため一時的にdebugへ変更。調査完了後 info に戻すこと。
             - name: LOG_LEVEL
-              value: "debug"
+              value: "info"
             # TODO(2026-08-26): 同調査。openid-client (Node組み込みhttp/https使用) の実リクエスト/レスポンスを
             # stderrへダンプさせる。調査完了後この行を削除すること。
             - name: NODE_DEBUG
