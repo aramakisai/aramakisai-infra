@@ -4,6 +4,8 @@ kind: Kustomization
 namespace: prod
 
 resources:
+  - db-cluster.yaml
+  - scheduled-backup.yaml
   - db-init-job.yaml
   - migrate-job.yaml
   - deployment.yaml

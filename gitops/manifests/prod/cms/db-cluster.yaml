@@ -1,5 +1,9 @@
 ---
-# Directus 用 PostgreSQL クラスター (CloudNativePG)
+# PostgreSQL クラスター (CloudNativePG)。名称は directus-db のままだが、
+# 9.1 の Directus 撤去で cms Application 側へ移設した。Payload の payload DB が
+# このクラスタの managed.roles に同居しており、rename は CNPG では再作成
+# (=データ損失) 相当のため名前は変えない。directus データベース自体は
+# 9.5 の最終確認まで残す
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
@@ -7,6 +11,7 @@ metadata:
   namespace: prod
   annotations:
     cnpg.io/skipEmptyWalArchiveCheck: enabled
+    argocd.argoproj.io/sync-wave: "-1"
 spec:
   instances: 1
   imageName: ghcr.io/cloudnative-pg/postgresql:16.8

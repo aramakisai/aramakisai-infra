@@ -1,0 +1,16 @@
+---
+# directus-db クラスタの日次フルバックアップ (毎日 02:00 UTC)。
+# payload DB もこのクラスタに同居するため、Directus 撤去後もこのまま残す
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: directus-db-daily
+  namespace: prod
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  schedule: "0 0 2 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: directus-db
+  target: prefer-standby

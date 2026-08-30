@@ -1,7 +1,8 @@
 ---
 # Payload CMS
-# wave: 1 — payload ロールは directus (wave 0) の CNPG Cluster の managed.roles が作る。
-# PreSync の cms-db-init がそのロールで接続するため、directus の同期後に走らせる
+# wave: 1 — cms-secrets (wave 0) の Secret が揃ってから本体を同期する。
+# payload ロールは本 Application 内の db-cluster.yaml (sync-wave -1) の
+# managed.roles が作るため、PreSync の cms-db-init より必ず先に適用される
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
