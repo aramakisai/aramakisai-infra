@@ -1,0 +1,154 @@
+apiVersion: v1
+data:
+  image-optimize-index.js: |
+    /**
+     * files.upload action の payload
+     * @typedef {Object} FileUploadEvent
+     * @property {string} key
+     * @property {Object} payload
+     * @property {string|null} [payload.type]
+     * @property {string|null} [payload.filename_download]
+     * @property {'directus_files'} [collection]
+     */
+
+    /**
+     * AssetsService.getAsset に渡す変換指定
+     * @typedef {Object} TransformationParams
+     * @property {'webp'} format
+     * @property {number} quality
+     * @property {number} width
+     * @property {number} height
+     * @property {'inside'} fit
+     * @property {true} withoutEnlargement
+     */
+
+    /**
+     * @typedef {Object} OptimizeOutcomeOptimized
+     * @property {'optimized'} status
+     * @property {string} key
+     *
+     * @typedef {Object} OptimizeOutcomeSkipped
+     * @property {'skipped'} status
+     * @property {string} key
+     * @property {'unsupported-type'} reason
+     *
+     * @typedef {Object} OptimizeOutcomeFailed
+     * @property {'failed'} status
+     * @property {string} key
+     * @property {Error} error
+     *
+     * @typedef {OptimizeOutcomeOptimized|OptimizeOutcomeSkipped|OptimizeOutcomeFailed} OptimizeOutcome
+     */
+
+    export const SUPPORTED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+
+    /**
+     * @param {string|null|undefined} type
+     * @returns {boolean}
+     */
+    export function isSupportedType(type) {
+      return typeof type === 'string' && SUPPORTED_TYPES.includes(type);
+    }
+
+    /**
+     * @returns {TransformationParams}
+     */
+    export function buildTransformationParams() {
+      return {
+        format: 'webp',
+        quality: 82,
+        width: 2000,
+        height: 2000,
+        fit: 'inside',
+        withoutEnlargement: true
+      };
+    }
+
+    /**
+     * @param {Object} context
+     * @returns {{ optimize: function(FileUploadEvent): Promise<OptimizeOutcome> }}
+     */
+    export function createOptimizer({ services, getSchema, database, logger }) {
+      const { AssetsService, FilesService } = services;
+
+      /**
+       * @param {FileUploadEvent} event
+       * @returns {Promise<OptimizeOutcome>}
+       */
+      async function optimize(event) {
+        const { key, payload } = event;
+        const type = payload?.type;
+
+        if (!isSupportedType(type)) {
+          return { status: 'skipped', key, reason: 'unsupported-type' };
+        }
+
+        try {
+          const schema = await getSchema();
+          const assetsService = new AssetsService({ accountability: null, schema });
+          const filesService = new FilesService({ accountability: null, schema, knex: database });
+
+          const transformationParams = buildTransformationParams();
+
+          // getAsset は { stream, file, stat } を返す。stream 以外は使わない。
+          const { stream } = await assetsService.getAsset(key, { transformationParams });
+
+          let basename = key;
+          if (payload && payload.filename_download) {
+            const name = payload.filename_download;
+            const lastDot = name.lastIndexOf('.');
+            if (lastDot !== -1) {
+              basename = name.substring(0, lastDot);
+            } else {
+              basename = name;
+            }
+          }
+
+          // uploadOne置換モードの主キー前方一致削除により、変換前の原本と
+          // AssetsServiceが生成したvariantは同時に回収されるため自前での削除処理は行わない。
+          // emitEvents: false により、置換完了時の files.upload 再発火を防ぎ無限ループを回避する。
+          await filesService.uploadOne(
+            stream,
+            {
+              type: 'image/webp',
+              filename_download: `${basename}.webp`
+            },
+            key,
+            { emitEvents: false }
+          );
+
+          logger.info(`Optimized image successfully. key: ${key}`);
+          return { status: 'optimized', key };
+        } catch (error) {
+          // 処理に失敗しても原本を残して完了扱いとするため、例外を捕捉してログに記録する。
+          logger.warn(`Failed to optimize image. key: ${key}. Error: ${error instanceof Error ? error.message : String(error)}`);
+          return { status: 'failed', key, error };
+        }
+      }
+
+      return { optimize };
+    }
+
+    export default ({ action }, context) => {
+      action('files.upload', async (event) => {
+        const optimizer = createOptimizer(context);
+        await optimizer.optimize(event);
+      });
+    };
+  image-optimize-package.json: |
+    {
+      "name": "directus-extension-image-optimize",
+      "version": "1.0.0",
+      "type": "module",
+      "private": true,
+      "directus:extension": {
+        "type": "hook",
+        "path": "index.js",
+        "source": "index.js",
+        "host": "^12.0.0"
+      }
+    }
+kind: ConfigMap
+metadata:
+  name: directus-extensions
+  namespace: prod
