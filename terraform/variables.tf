@@ -179,20 +179,6 @@ variable "mailserver_ldap_bind_password" {
   default     = ""
 }
 
-variable "directus_prod_oidc_client_secret" {
-  description = "Directus prod OIDC Client Secret (directus-prod)"
-  type        = string
-  sensitive   = true
-  default     = ""
-}
-
-variable "directus_stg_oidc_client_secret" {
-  description = "Directus stg OIDC Client Secret (directus-stg)"
-  type        = string
-  sensitive   = true
-  default     = ""
-}
-
 variable "cms_prod_oidc_client_secret" {
   description = "Payload CMS prod OIDC Client Secret (cms-prod)"
   type        = string

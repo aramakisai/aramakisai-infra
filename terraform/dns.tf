@@ -30,18 +30,6 @@ resource "cloudflare_record" "idp" {
 
 # Staging フロントエンドは廃止 — PR ごとの wrangler versions upload preview URL (*.workers.dev) を使用
 
-# Staging API
-# api.stg (2階層) は Cloudflare Universal SSL のカバー範囲外 (TLS handshake failure) のため
-# stg-api (1階層、*.aramakisai.com ワイルドカードでカバー) に変更
-resource "cloudflare_record" "api_stg" {
-  zone_id = var.cloudflare_zone_id
-  name    = "stg-api"
-  value   = local.tunnel_cname
-  type    = "CNAME"
-  proxied = true
-  comment = "Staging API (Cloudflare Tunnel)"
-}
-
 # Room Presence Tracker (実行委員室 在室管理)
 resource "cloudflare_record" "presence" {
   zone_id = var.cloudflare_zone_id
@@ -62,14 +50,17 @@ resource "cloudflare_record" "vault" {
   comment = "Vaultwarden (Cloudflare Tunnel)"
 }
 
-# Production API (Directus)
+# 旧 Directus API。Directus 本体は撤去済みで Tunnel ingress も持たないが、
+# payload-cms-migration 5.4 の旧 URL リダイレクト (cloudflare_cms_media_redirects.tf) が
+# api.aramakisai.com/assets/<uuid> の 9 件を CMS media URL へ転送するために
+# レコード自体は残す
 resource "cloudflare_record" "api" {
   zone_id = var.cloudflare_zone_id
   name    = "api"
   value   = local.tunnel_cname
   type    = "CNAME"
   proxied = true
-  comment = "Directus API (Cloudflare Tunnel)"
+  comment = "旧 Directus API (5.4 の旧 URL リダイレクトのみ、Tunnel ingress は撤去済み)"
 }
 
 # Production CMS (Payload)

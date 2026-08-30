@@ -332,81 +332,14 @@ resource "authentik_application" "room_presence" {
 }
 
 # ────────────────────────────────────────────────────────────
-# 6. Directus CMS - SSO 連携
+# 6. Payload CMS - SSO 連携
 # ────────────────────────────────────────────────────────────
 
-# 学生団体担当者グループ (実行委員は authentik_discord.tf の executive グループを再利用)
+# 学生団体担当者グループ。CMS (Payload) の student_exhibitor ロールに写像される
+# (実行委員は authentik_discord.tf の executive グループを再利用)
 resource "authentik_group" "student_exhibitor" {
   name = "student_exhibitor"
 }
-
-# prod
-resource "authentik_provider_oauth2" "directus_prod" {
-  name          = "directus-prod"
-  client_id     = "directus-prod"
-  client_secret = var.directus_prod_oidc_client_secret
-  signing_key   = data.authentik_certificate_key_pair.default.id
-
-  authorization_flow = data.authentik_flow.default_authorization.id
-  invalidation_flow  = data.authentik_flow.default_invalidation.id
-
-  allowed_redirect_uris = [{
-    matching_mode     = "strict"
-    url               = "https://api.aramakisai.com/auth/login/authentik/callback"
-    redirect_uri_type = "authorization"
-  }]
-
-  property_mappings = [
-    data.authentik_property_mapping_provider_scope.oauth_scope_openid.id,
-    authentik_property_mapping_provider_scope.oauth_scope_profile.id,
-    data.authentik_property_mapping_provider_scope.oauth_scope_email.id,
-    authentik_property_mapping_provider_scope.oauth_scope_groups.id,
-  ]
-}
-
-resource "authentik_application" "directus_prod" {
-  name              = "Directus (prod)"
-  slug              = "directus-prod"
-  protocol_provider = authentik_provider_oauth2.directus_prod.id
-  open_in_new_tab   = true
-  meta_icon         = "fa://fa-solid fa-database"
-}
-
-# stg
-resource "authentik_provider_oauth2" "directus_stg" {
-  name          = "directus-stg"
-  client_id     = "directus-stg"
-  client_secret = var.directus_stg_oidc_client_secret
-  signing_key   = data.authentik_certificate_key_pair.default.id
-
-  authorization_flow = data.authentik_flow.default_authorization.id
-  invalidation_flow  = data.authentik_flow.default_invalidation.id
-
-  allowed_redirect_uris = [{
-    matching_mode     = "strict"
-    url               = "https://stg-api.aramakisai.com/auth/login/authentik/callback"
-    redirect_uri_type = "authorization"
-  }]
-
-  property_mappings = [
-    data.authentik_property_mapping_provider_scope.oauth_scope_openid.id,
-    authentik_property_mapping_provider_scope.oauth_scope_profile.id,
-    data.authentik_property_mapping_provider_scope.oauth_scope_email.id,
-    authentik_property_mapping_provider_scope.oauth_scope_groups.id,
-  ]
-}
-
-resource "authentik_application" "directus_stg" {
-  name              = "Directus (stg)"
-  slug              = "directus-stg"
-  protocol_provider = authentik_provider_oauth2.directus_stg.id
-  open_in_new_tab   = true
-  meta_icon         = "fa://fa-solid fa-database"
-}
-
-# ────────────────────────────────────────────────────────────
-# 7. Payload CMS - SSO 連携
-# ────────────────────────────────────────────────────────────
 # ロールは CMS 側のコードが groups クレームから静的に写像する。
 # 参照するグループは 管理者 (authentik_vaultwarden_rbac_sync.tf) /
 # executive (authentik_discord.tf) / student_exhibitor (上記 6.) の 3 つで、

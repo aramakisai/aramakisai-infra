@@ -38,17 +38,8 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "main" {
       service  = "http://frontend.staging.svc.cluster.local:80"
     }
 
-    # Staging API (Directus)
-    ingress_rule {
-      hostname = "stg-api.aramakisai.com"
-      service  = "http://directus.staging.svc.cluster.local:80"
-    }
-
-    # Production API (Directus)
-    ingress_rule {
-      hostname = "api.aramakisai.com"
-      service  = "http://directus.prod.svc.cluster.local:80"
-    }
+    # api.aramakisai.com への ingress rule は持たない。5.4 の旧 URL リダイレクトで
+    # カバーされないパスは fallback (404) に落ちる想定 (Directus 本体は撤去済み)
 
     # Production CMS (Payload)
     ingress_rule {
