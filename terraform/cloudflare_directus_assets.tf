@@ -46,4 +46,23 @@ resource "cloudflare_ruleset" "directus_assets_cache" {
       }
     }
   }
+
+  # CMS (Payload) のメディア配信。/api/media/serve/:id/:size は id パスの 302 で、
+  # /api/media/file/:filename が実バイトを返す本体。両方 /api/media/ 配下で拡張子の
+  # 有無が一定しないため、既定の拡張子ベースキャッシュに載らない。実バイトの方を
+  # キャッシュしないと切り替え直後に懸念した「全画像が単一 pod を通る」が解消しない
+  rules {
+    description = "CMS media delivery (id パスの 302 と実ファイル本体)"
+    expression  = "(http.host eq \"cms.aramakisai.com\") and starts_with(http.request.uri.path, \"/api/media/\")"
+    action      = "set_cache_settings"
+    enabled     = true
+
+    action_parameters {
+      cache = true
+      edge_ttl {
+        mode    = "override_origin"
+        default = 2592000 # 30日。理由は Directus 側ルールと同じ
+      }
+    }
+  }
 }
