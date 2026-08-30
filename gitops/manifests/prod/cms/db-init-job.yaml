@@ -4,7 +4,12 @@
 # 宣言的に書けないため psql で作る。CREATE DATABASE はトランザクション内で
 # 実行できず DO ブロックで包めないため、存在確認と作成をシェルで分けている。
 # 接続に使う payload ロールは同じ Application 内の directus-db クラスタ (db-cluster.yaml,
-# sync-wave -1) の managed.roles が作る
+# sync-wave -1) の managed.roles が作る。
+#
+# ArgoCD は PreSync フックを sync-wave に関係なく全ての通常 Sync リソースより
+# 先に実行するため、db-cluster.yaml 側の sync-wave -1 はこの Job との順序を
+# 保証しない。Cluster が存在しない状態 (初回作成やバックアップからの災害復旧) から
+# 同期される場合、CNPG のリストア完了まで Job 側で待つ必要がある
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -16,9 +21,8 @@ metadata:
     argocd.argoproj.io/sync-wave: "0"
 spec:
   ttlSecondsAfterFinished: 3600
-  # 初回同期では CNPG が payload ロールを作り終える前にこの Job が走りうるため、
-  # リトライで追いつかせる
   backoffLimit: 6
+  activeDeadlineSeconds: 900
   template:
     spec:
       restartPolicy: OnFailure
@@ -31,6 +35,15 @@ spec:
               set -eu
               export PGPASSWORD="$PAYLOAD_DB_PASSWORD"
               PGHOST=directus-db-rw.prod.svc.cluster.local
+              # Cluster が無/リストア中だと名前解決や接続そのものが失敗するため、
+              # CREATE DATABASE を試みる前に受付可能になるまで待つ
+              for i in $(seq 1 60); do
+                if pg_isready -h "$PGHOST" -U payload -d postgres -q; then
+                  break
+                fi
+                echo "waiting for $PGHOST to accept connections ($i/60)"
+                sleep 10
+              done
               if [ "$(psql -h "$PGHOST" -U payload -d postgres -tAc \
                   "SELECT 1 FROM pg_database WHERE datname='payload'")" = "1" ]; then
                 echo "database payload already exists"
