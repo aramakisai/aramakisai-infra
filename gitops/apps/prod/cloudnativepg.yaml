@@ -1,6 +1,6 @@
 ---
 # CloudNativePG Operator
-# wave: -1 — Authentik/Directus が使う CNPG Cluster CRD を先にインストールする
+# wave: -1 — Authentik/CMS (旧 Directus) が使う CNPG Cluster CRD を先にインストールする
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
