@@ -102,7 +102,20 @@
 6. When 招待コード(invite code)を有効期限切れ後または2回目に使用する, the 新IdP shall 招待の完了(パスワード設定)を拒否する
 7. The 移行手順 shall 上記1〜6の検証をk3d等の使い捨て検証環境で実機テストとして実施し、テストスクリプトと結果を記録として残す
 
+### Requirement 10: 機能検証(正常系動作確認)
+**Objective:** As a インフラ運用担当者, I want 各Requirementで定義した機能が実機で正しく動くことを確認する, so that 本番切替前に「動くはず」ではなく「動くことを確認済み」の状態にできる
+
+#### Acceptance Criteria
+1. When 正しいユーザー名・パスワードでOIDC Authorization Code Flow + PKCEを実行する, the 新IdP shall 認可コード発行・トークン交換・Userinfo取得までEnd-to-Endで成功する
+2. The 移行手順 shall CMS/Vaultwarden/Roundcubeそれぞれについて実際のOIDCログインを実施し、各アプリで正常にセッションが開始されることを確認する
+3. When 一般IMAP/POP3クライアントが正しいパスワードで認証する, the Dovecot認証(LLDAP翻訳層またはlua+Session API委譲のいずれを採用した場合も) shall bind成功しmail属性・ACLグループを正しく返す
+4. When Roundcube経由でOAUTHBEARER/XOAUTH2認証する, the Dovecot oauth2 passdb shall introspection成功後にログインを許可する
+5. When ユーザーのグループ/ロール割り当てを変更する, the vaultwarden-rbac-sync shall Actions v2 webhook経由で変更を検知しVaultwarden Collection権限へ反映する(反映までの実測遅延を記録する)
+6. When 新規ユーザーへ招待コードを発行する, the 移行手順 shall 招待メール受信→リンク遷移→パスワード設定→初回ログインまでEnd-to-Endで成功することを確認する
+7. When ユーザーにロールを付与する, the 新IdP shall OIDC ID Token/UserinfoのクレームにロールがRequirement 8の設計通り反映されることを確認する
+8. The 移行手順 shall 旧authentik構成への切り戻し手順(Requirement 7.2)を実際に実行し、切り戻し後に既存アプリのログインが復旧することを検証する
+
 ## Boundary Context
-- **In scope**: OIDC Provider機能移行、LDAP認証(Dovecot連携)の翻訳層/委譲方式の設計確定、vaultwarden-rbac-syncのイベント駆動化、既存ユーザー・グループデータの招待ベース移行、段階的カットオーバー手順、Discordソーシャルログイン(単純ログインのみ)の対応可否検討、シンプルなフラットロールRBAC設計、OIDC/認証フローのセキュリティ検証(モンキーテスト)
+- **In scope**: OIDC Provider機能移行、LDAP認証(Dovecot連携)の翻訳層/委譲方式の設計確定、vaultwarden-rbac-syncのイベント駆動化、既存ユーザー・グループデータの招待ベース移行、段階的カットオーバー手順、Discordソーシャルログイン(単純ログインのみ)の対応可否検討、シンプルなフラットロールRBAC設計、OIDC/認証フローのセキュリティ検証(モンキーテスト)、各機能の正常系End-to-End動作確認
 - **Out of scope**: Discordロール自動同期・アバター自動取得・ログイン時動的グループ判定の再実装、authentik相当の細粒度permission管理の再現、新規認証機能の追加
 - **Adjacent expectations**: mailserver(DMS)のDovecot認証方式変更、CMS/Roundcube/Vaultwarden等各アプリのOIDC Client設定変更は本specの実施範囲に含むが、各アプリ内部のビジネスロジック変更は含まない。Dovecot認証委譲方式(LLDAP翻訳層 vs lua+Session API)の最終選定は設計フェーズで確定する。
