@@ -90,7 +90,19 @@
 2. The 新IdP基盤 shall ロール名をOIDC ID Token/UserinfoのクレームとしてRPアプリへ配布し、権限の意味づけ(何ができるか)はRPアプリ側で解釈する設計とする
 3. The 移行手順 shall authentikのrbac_role/permission_role相当の細粒度権限管理機能を移行対象から除外する
 
+### Requirement 9: セキュリティ検証(モンキーテスト)
+**Objective:** As a インフラ運用担当者, I want 前spec [[idp-migration-authentik-to-authelia-lldap]] のk3d検証で実施したものと同水準のセキュリティ検証を新IdPに対しても行う, so that 本番切替前にOIDC/認証フローの既知の攻撃パターンへの耐性を確認できる
+
+#### Acceptance Criteria
+1. When 誤ったパスワードで連続ログイン試行する, the 新IdP shall ブルートフォース対策(レート制限またはアカウント一時ロックアウト)を適用する
+2. When 存在しないユーザー名でログイン試行する, the 新IdP shall 実在ユーザーの誤パスワード試行と区別不能なレスポンス(同一ステータスコード・同一応答本文)を返しユーザー列挙を防ぐ
+3. When 発行済みの認可コード(authorization code)を2回目に使用する, the 新IdP shall 2回目のトークン交換を拒否する
+4. When PKCEのcode_verifierがcode_challengeと一致しないトークン交換要求を行う, the 新IdP shall トークン発行を拒否する
+5. When 認可リクエストのredirect_uriを事前登録値から改ざんする, the 新IdP shall 認可コード発行を拒否しエラーを返す
+6. When 招待コード(invite code)を有効期限切れ後または2回目に使用する, the 新IdP shall 招待の完了(パスワード設定)を拒否する
+7. The 移行手順 shall 上記1〜6の検証をk3d等の使い捨て検証環境で実機テストとして実施し、テストスクリプトと結果を記録として残す
+
 ## Boundary Context
-- **In scope**: OIDC Provider機能移行、LDAP認証(Dovecot連携)の翻訳層/委譲方式の設計確定、vaultwarden-rbac-syncのイベント駆動化、既存ユーザー・グループデータの招待ベース移行、段階的カットオーバー手順、Discordソーシャルログイン(単純ログインのみ)の対応可否検討、シンプルなフラットロールRBAC設計
+- **In scope**: OIDC Provider機能移行、LDAP認証(Dovecot連携)の翻訳層/委譲方式の設計確定、vaultwarden-rbac-syncのイベント駆動化、既存ユーザー・グループデータの招待ベース移行、段階的カットオーバー手順、Discordソーシャルログイン(単純ログインのみ)の対応可否検討、シンプルなフラットロールRBAC設計、OIDC/認証フローのセキュリティ検証(モンキーテスト)
 - **Out of scope**: Discordロール自動同期・アバター自動取得・ログイン時動的グループ判定の再実装、authentik相当の細粒度permission管理の再現、新規認証機能の追加
 - **Adjacent expectations**: mailserver(DMS)のDovecot認証方式変更、CMS/Roundcube/Vaultwarden等各アプリのOIDC Client設定変更は本specの実施範囲に含むが、各アプリ内部のビジネスロジック変更は含まない。Dovecot認証委譲方式(LLDAP翻訳層 vs lua+Session API)の最終選定は設計フェーズで確定する。
