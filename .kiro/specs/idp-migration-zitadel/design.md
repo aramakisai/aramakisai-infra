@@ -6,47 +6,48 @@
 
 **Users**: インフラ運用担当者(セットアップ・IaC管理)、実行委員会メンバー(OIDCログイン・メール利用)、Vaultwarden RBAC運用担当者。
 
-**Impact**: authentik(Deployment: server + worker、実測約800Mi)を廃止し、Zitadel(api + login + postgres、実測約367MiB)へ全面置換する。Dovecot(mailserver)のLDAP認証先をLLDAPへ切り替え、vaultwarden-rbac-syncの連携方式をREST poll型からActions v2 webhook型へ変更する。
+**Impact**: authentik(Deployment: server + worker、実測約800Mi)を廃止し、Zitadel(api + login + postgres、実測約367MiB)へ全面置換する。Dovecot(mailserver)の認証をZitadelへ直接委譲する構成に切り替え、LDAP翻訳層(LLDAP)は新設・継続利用しない。vaultwarden-rbac-syncの連携方式をREST poll型からActions v2 webhook型へ変更する。
 
 ### Goals
 - authentik比で明確にメモリを削減しつつ、招待オンボーディング・イベント駆動RBAC同期を実現する
 - 既存OIDC RPアプリ(CMS/Vaultwarden/Roundcube)のログイン機能を維持する
-- Dovecot(IMAP/POP3/Webmail)のメール認証を維持する
+- Dovecot(IMAP/POP3/Webmail)のメール認証をZitadelへの直接委譲で維持する(パスワードの二重管理を発生させない)
 - Discordロール相当のシンプルなフラットロールRBACへ簡素化する
 
 ### Non-Goals
 - Discordロール自動同期・アバター自動取得・ログイン時動的グループ判定の再実装(Requirement 5)
 - authentik相当の細粒度permission管理(view_group/reset_user_password等)の再現(Requirement 8)
-- Dovecot lua+Session API委譲方式の本番導入(初期実装はLLDAP翻訳層を採用し、委譲方式は将来検討として切り出す。研究背景は[[idp-migration-zitadel/research.md]]参照)
+- 前spec [[idp-migration-authentik-to-authelia-lldap]] で構築したLLDAP資産の継続利用・移植(Requirement 3.5)
 
 ## Boundary Commitments
 
 ### This Spec Owns
 - Zitadelインスタンスのデプロイ・設定(project/role/application/action)のIaC定義
 - 既存OIDC RPアプリ(CMS/Vaultwarden/Roundcube)のOIDC Client切り替え
-- LLDAP(Dovecot向けLDAP翻訳層)の存続とZitadelユーザーとの同期の運用手順
-- vaultwarden-rbac-syncのActions v2 webhook対応への書き換え
+- Dovecot lua passdb経由のZitadel Session API認証委譲の実装
+- vaultwarden-rbac-syncのActions v2 webhook対応への書き換え(CronJob方式からの移行含む)
 - 既存ユーザー・グループデータの招待ベース移行手順
 - 段階的カットオーバー・ロールバック手順
+- Terraform provider認証(PAT/Service User)のAnsibleブートストラップ手順
 - セキュリティ検証(モンキーテスト)・機能検証(正常系E2E)の実施
 
 ### Out of Boundary
-- Dovecot lua+Session API委譲方式の実装(Non-Goalとして将来検討へ切り出し)
 - Discordロール自動同期・アバター自動取得・動的グループ判定の再実装
 - authentik相当の細粒度permission管理の再現
+- LLDAP関連資産(前spec由来)の継続利用・移植
 - Zitadel自体のソースコード変更・フォーク
 
 ### Allowed Dependencies
 - 既存GitOps基盤(ArgoCD、ExternalSecrets Operator、Infisical)
-- 前spec [[idp-migration-authentik-to-authelia-lldap]] で構築したLLDAP(gitops/manifests/prod/lldap/)を翻訳層として継続利用
 - Zitadel公式Terraform provider(`zitadel/zitadel`)
 - 既存CNPG(CloudNativePG)によるPostgreSQL Operator(Zitadel用DBクラスタに使用)
+- Ansible(K3sブートストラップと同様の、GitOps外例外的初期化手順として)
 
 ### Revalidation Triggers
-- ZitadelのLDAPサーバ機能が将来実装された場合、LLDAP翻訳層の要否を再検討する
+- ZitadelのLDAPサーバ機能が将来実装された場合、Dovecot認証委譲方式の要否を再検討する
 - Actions v2のペイロード仕様変更(パスワード平文追加等)があった場合、Dovecot認証方式の選定を再評価する
 - vaultwarden-rbac-syncのAPI契約(webhookペイロード形式)が変更された場合、Vaultwarden側実装との整合を再確認する
-- LLDAPのスキーマ(属性名・命名制約)が変更された場合、Zitadel⇔LLDAP間の同期スクリプトを再確認する
+- Zitadel Session APIの認証スコープ要件が変更された場合、PATの権限設定を再確認する
 
 ## Architecture
 
@@ -55,9 +56,9 @@
 現行構成:
 - authentik(server + worker) がOIDC Provider兼LDAP Outpost(Dovecot向け)として稼働
 - Terraform(`terraform/authentik_*.tf`)でOIDC Client/LDAP Outpost/Discord連携/Policyを管理
-- vaultwarden-rbac-syncがauthentik REST APIをポーリングしてVaultwarden Collection権限を同期
+- vaultwarden-rbac-syncはCronJob + Trigger Receiver方式(`docker.io/alpine/k8s`イメージ、cronjob=`sync`)でauthentik REST APIをポーリングしVaultwarden Collection権限を同期。Falcoの誤検知除外ルールがこのCronJob実行パターンを前提に設定済み
 
-維持すべき統合点: OIDC RPアプリのclient_id/secret契約、DovecotのLDAP userdb/passdbクエリ形式(`mail=%u`、`objectClass=inetOrgPerson`複合ANDフィルタ)。
+維持すべき統合点: OIDC RPアプリのclient_id/secret契約、DovecotのIMAP/SMTP/Webmail認証エンドポイント。
 
 ### Architecture Pattern & Boundary Map
 
@@ -68,8 +69,8 @@ graph TB
         ZitadelLogin[Zitadel Login UI]
         ZitadelDB[Zitadel Postgres]
     end
-    subgraph TranslationLayer
-        LLDAP[LLDAP LDAP Translator]
+    subgraph MailAuthBridge
+        LuaAuth[Dovecot Lua Auth Bridge]
     end
     subgraph RPApps
         CMS[CMS]
@@ -80,7 +81,10 @@ graph TB
         Dovecot[Dovecot IMAP POP3]
     end
     subgraph RBACSync
-        VaultwardenRbacSync[vaultwarden rbac sync]
+        VaultwardenRbacSync[vaultwarden rbac sync webhook receiver]
+    end
+    subgraph Bootstrap
+        AnsibleBootstrap[Ansible Zitadel Bootstrap]
     end
 
     ZitadelLogin --> ZitadelAPI
@@ -88,28 +92,33 @@ graph TB
     CMS -->|OIDC| ZitadelAPI
     Vaultwarden -->|OIDC| ZitadelAPI
     Roundcube -->|OAUTHBEARER introspection| ZitadelAPI
-    Dovecot -->|LDAP bind mail query| LLDAP
-    ZitadelAPI -->|invite provisioning sync| LLDAP
-    ZitadelAPI -->|Actions v2 webhook| VaultwardenRbacSync
+    Dovecot -->|lua passdb| LuaAuth
+    LuaAuth -->|POST v2 sessions| ZitadelAPI
+    ZitadelAPI -->|Actions v2 webhook ZITADEL-Signature| VaultwardenRbacSync
     VaultwardenRbacSync --> Vaultwarden
+    AnsibleBootstrap -->|PAT発行 Infisical登録| ZitadelAPI
 ```
 
 **Architecture Integration**:
-- 選択パターン: OIDC Provider(Zitadel)とLDAP翻訳層(LLDAP)を分離するハイブリッド構成。前spec資産(LLDAP)を認証情報の翻訳専用コンポーネントとして継続利用する
-- ドメイン境界: Zitadelがユーザー・ロール・OIDCクライアントの真正情報源(Source of Truth)、LLDAPはDovecot向けのLDAPプロトコル変換のみを担当し独自のユーザーマスタを持たない
-- 既存パターン維持: ExternalSecret経由のシークレット注入、ArgoCD PostSync Hook Jobによるプロビジョニング(前spec [[idp-migration-authentik-to-authelia-lldap]] のservice-accounts-bootstrap-jobパターンを踏襲)
-- 新規コンポーネント根拠: vaultwarden-rbac-syncのwebhook受信エンドポイントは、Actions v2がpush型webhookのみでpull型APIポーリングを代替しないため新規に必要
-- Steering準拠: GitOps原則(`gitops/`配下変更→ArgoCD sync、クラスタへの直接kubectl操作禁止)、Infisicalを唯一のシークレット源とする方針を維持
+- 選択パターン: Zitadelを唯一のユーザー・ロール・パスワード真正情報源(Source of Truth)とし、Dovecotはlua passdb経由でZitadel Session APIへ認証を都度委譲するシンクライアント構成。LLDAP等の翻訳層コンポーネントを設けずパスワードの二重管理を根絶する
+- ドメイン境界: Zitadelがユーザー・ロール・OIDCクライアント・メール認証可否の一元的な真実源泉。Dovecotは認証状態を一切保持しない
+- 既存パターン維持: ExternalSecret経由のシークレット注入、ArgoCD PostSync Hook Jobによるプロビジョニング
+- 新規コンポーネント根拠:
+  - Dovecot Lua Auth Bridge — ZitadelがLDAPサーバとして動作しないため、Dovecot lua passdbからSession APIへ橋渡しする層が必須
+  - vaultwarden-rbac-sync webhook受信エンドポイント — Actions v2がpush型webhookのみでpull型APIポーリングを代替しないため、既存CronJob方式から常駐受信方式への構成変更が必須
+  - Ansible Zitadel Bootstrap — Terraform providerがZitadel管理者PATを要求するため、`infisical-auth`と同様のGitOps外例外的初期化が必須
+- Steering準拠: GitOps原則(`gitops/`配下変更→ArgoCD sync、クラスタへの直接kubectl操作禁止)を維持しつつ、Ansibleブートストラップの例外を`infisical-auth`と同一の位置づけで明示的に記録する
 
 ### Technology Stack
 
 | Layer | Choice / Version | Role in Feature | Notes |
 |-------|------------------|-----------------|-------|
-| IdP Core | Zitadel v4.x (Helm/manifest) | OIDC Provider、ユーザー・ロール管理、招待フロー | login UIはNode.js別プロセス、実測約367MiB(4コンポーネント合計) |
-| LDAP翻訳層 | LLDAP (前spec資産流用) | Dovecot向けLDAP bind/検索の翻訳 | gitops/manifests/prod/lldap/ を継続利用 |
+| IdP Core | Zitadel v4.x (Helm/manifest) | OIDC Provider、ユーザー・ロール管理、招待フロー、メール認証真正情報源 | login UIはNode.js別プロセス、実測約367MiB(4コンポーネント合計、うちTraefik proxyはprod構成では既存Ingress/Cloudflare Tunnelへ置き換え可能) |
+| メール認証委譲 | Dovecot lua auth (Dovecot CE 2.3+) | IMAP/POP3クライアントの認証をZitadel Session APIへ委譲 | 前spec[[idp-migration-authentik-to-authelia-lldap]]のLLDAP実装は再利用しない、新規実装 |
 | IaC | zitadel/zitadel Terraform provider | project/role/application/action(webhook)のコード管理 | `zitadel_project`, `zitadel_project_role`, `zitadel_application_oidc`, `zitadel_action_target`, `zitadel_action_execution_event` 等 |
 | DB | CloudNativePG (PostgreSQL Operator) | ZitadelのバックエンドDB | 既存CNPG Operatorを再利用 |
-| Webhook受信 | vaultwarden-rbac-sync(改修) | Actions v2 webhookの受信・署名検証・Vaultwarden反映 | `ZITADEL-Signature`ヘッダ(HMAC)の検証を追加 |
+| Webhook受信 | vaultwarden-rbac-sync(常駐化) | Actions v2 webhookの受信・署名検証・Vaultwarden反映 | 既存CronJob方式から常駐Podへ構成変更。`ZITADEL-Signature`ヘッダ(HMAC)の検証を追加。Falco誤検知除外ルールの更新が必要 |
+| ブートストラップ | Ansible | Zitadel初回admin/PAT発行・Infisical登録 | `infisical-auth`Secret作成と同一の例外パターン |
 
 ## File Structure Plan
 
@@ -122,6 +131,9 @@ terraform/
 ├── zitadel_actions.tf       # Actions v2 Target/Execution(webhook)定義
 └── zitadel_idp.tf           # Discordソーシャルログイン用OAuth2 IdP設定(該当する場合)
 
+ansible/
+└── roles/zitadel-bootstrap/  # 初回admin/PAT発行、Infisical登録(infisical-authと同じ例外パターン)
+
 gitops/
 ├── apps/prod/zitadel.yaml           # ArgoCD Application定義
 └── manifests/prod/zitadel/
@@ -131,14 +143,17 @@ gitops/
     ├── db-cluster.yaml              # CNPG Cluster定義
     └── external-secret.yaml         # DB接続情報・masterkey等
 
-gitops/manifests/prod/lldap/          # 前spec資産を継続利用(変更なし、または属性同期スクリプト追加)
-gitops/manifests/prod/mailserver/     # Dovecot LDAP接続先をLLDAP向けに維持(既存踏襲)
-gitops/manifests/prod/vaultwarden-rbac-sync/  # webhook受信ハンドラへ書き換え
+gitops/manifests/prod/mailserver/
+└── dovecot-lua-auth-external-secret.yaml  # Zitadel PAT等をluaスクリプトへ注入(新規)
+
+gitops/manifests/prod/vaultwarden-rbac-sync/
+└── (CronJob定義を削除し、常駐Deployment + Service + Ingressへ置換)
 ```
 
 ### Modified Files
-- `gitops/manifests/prod/mailserver/statefulset.yaml` — LDAP接続先を`lldap.prod.svc.cluster.local`へ変更(前spec作業を再利用)
-- `gitops/manifests/prod/vaultwarden-rbac-sync/*` — REST pollingロジックをwebhook受信ハンドラへ置換
+- `gitops/manifests/prod/mailserver/statefulset.yaml` — auth-ldap.conf.extを廃止しlua passdb設定を追加
+- `gitops/manifests/prod/vaultwarden-rbac-sync/*` — CronJob方式を常駐webhook受信Deploymentへ全面書き換え
+- `gitops/helm-values/prod/falco.yaml` — vaultwarden-rbac-syncの新プロセス形態(常駐Deployment)に合わせた誤検知除外ルールの見直し
 
 ## System Flows
 
@@ -167,17 +182,42 @@ sequenceDiagram
     participant Admin as 運用担当者
     participant Zitadel as Zitadel API
     participant NewUser as 新規ユーザー
-    participant LLDAP
 
     Admin->>Zitadel: AddHumanUser + CreateInviteCode
     Zitadel->>NewUser: 招待メール送信
     NewUser->>Zitadel: 招待リンク遷移 VerifyInviteCode
-    NewUser->>Zitadel: パスワード設定
-    Zitadel->>LLDAP: 初期パスワード同期 運用スクリプト経由
+    NewUser->>Zitadel: パスワード設定 Zitadelホスト型UI内で完結
     NewUser->>Zitadel: 初回ログイン
 ```
 
-**Key Decisions**: LLDAPへのパスワード反映は招待完了時の一度きりの同期とする。ユーザーがZitadel側で事後的にパスワードを変更した場合、LLDAP側は追従しない制約を運用手順に明記する(Non-Goalsで示した通り、恒常的な同期はDovecot lua委譲方式の将来検討事項)。
+**Key Decisions**: パスワードはZitadel内で完結して管理され、他コンポーネントへ複製しない。Dovecotは認証都度Session APIへ問い合わせるため、パスワード変更(招待時・事後変更いずれも)は即座にメール認証へ反映される。LLDAP等への同期ステップは不要になった(前バージョンのdesign.mdで想定していた「招待完了時の一度きり同期」は、Zitadel標準の招待UIでは平文パスワードを捕捉できないため技術的に成立しないと判明し、本アプローチへ変更した)。
+
+### 一般IMAP/POP3クライアント認証フロー(Dovecot Lua Auth Bridge)
+
+```mermaid
+sequenceDiagram
+    participant Client as IMAP POP3 Client
+    participant Dovecot
+    participant Lua as Lua Auth Bridge
+    participant Zitadel as Zitadel Session API
+
+    Client->>Dovecot: 平文パスワードで認証
+    Dovecot->>Lua: passdb呼び出し
+    Lua->>Lua: パスワードをJSONへ正規エスケープ
+    Lua->>Zitadel: POST v2 sessions checks.password
+    alt 認証成功
+        Zitadel->>Lua: 200 sessionToken
+        Lua->>Dovecot: PASSDB_RESULT_OK
+    else 認証失敗
+        Zitadel->>Lua: 401
+        Lua->>Dovecot: PASSDB_RESULT_PASSWORD_MISMATCH
+    else Zitadel API障害
+        Zitadel->>Lua: timeout 5xx
+        Lua->>Dovecot: PASSDB_RESULT_INTERNAL_FAILURE 一時エラーとして扱う
+    end
+```
+
+**Key Decisions**: Zitadel API障害時はDovecot標準の一時エラー(temporary failure)として扱い、認証失敗(password mismatch)とは区別する。これによりクライアント側の誤ったパスワード変更試行を誘発しない。PATのスコープはSession API呼び出しに必要な最小権限に絞る(実装時にIAM_OWNER相当が必要かService User権限で足りるか実機検証する、Requirement 3.4)。
 
 ### vaultwarden-rbac-syncイベント駆動フロー
 
@@ -185,12 +225,12 @@ sequenceDiagram
 sequenceDiagram
     participant Admin as 運用担当者
     participant Zitadel as Zitadel API
-    participant Sync as vaultwarden rbac sync
+    participant Sync as vaultwarden rbac sync 常駐Pod
     participant Vaultwarden
 
     Admin->>Zitadel: ユーザーへロール付与変更
     Zitadel->>Sync: Actions v2 webhook ZITADEL-Signature付き
-    Sync->>Sync: 署名検証
+    Sync->>Sync: 署名検証 冪等キーで重複排除
     Sync->>Zitadel: Management API でグループメンバー確認
     Sync->>Vaultwarden: Collection権限反映
 ```
@@ -201,24 +241,25 @@ sequenceDiagram
 |-------------|---------|------------|------------|-------|
 | 1.1-1.4 | メモリ削減 | Zitadel Core | - | - |
 | 2.1-2.3 | OIDC継続 | Zitadel Core, Terraform IaC | OIDC Authorization/Token | OIDCログインフロー |
-| 3.1-3.5 | LDAP認証継続 | LLDAP翻訳層, Dovecot | LDAP bind/search | - |
-| 4.1-4.3 | RBAC同期 | vaultwarden-rbac-sync(webhook版) | Actions v2 webhook | vaultwarden-rbac-syncイベント駆動フロー |
-| 5.1-5.3 | Discord縮小 | Zitadel Core(OIDC IdP設定) | OAuth2 Source | - |
-| 6.1-6.3 | ユーザー移行 | Zitadel Core, LLDAP同期スクリプト | Invite Code API | 招待オンボーディングフロー |
+| 3.1-3.5 | メール認証委譲 | Dovecot Lua Auth Bridge | Session API | 一般IMAP/POP3クライアント認証フロー |
+| 4.1-4.3 | RBAC同期 | vaultwarden-rbac-sync(webhook常駐版) | Actions v2 webhook | vaultwarden-rbac-syncイベント駆動フロー |
+| 5.1-5.3 | Discord縮小・ACL真実源泉 | Zitadel Core(OIDC IdP設定、Project Role) | OAuth2 Source | - |
+| 6.1-6.3 | ユーザー移行 | Zitadel Core | Invite Code API | 招待オンボーディングフロー |
 | 7.1-7.3 | 段階的カットオーバー | Terraform IaC, GitOps | - | - |
 | 8.1-8.3 | フラットRBAC | Zitadel Core(Project Role) | OIDC roles claim | OIDCログインフロー |
 | 9.1-9.7 | セキュリティ検証 | Zitadel Core | Session/OIDC API | - |
 | 10.1-10.8 | 機能検証 | 全コンポーネント | - | 全フロー |
+| 11.1-11.3 | Terraformブートストラップ | Ansible Zitadel Bootstrap | Zitadel Admin API | - |
 
 ## Components and Interfaces
 
 | Component | Domain/Layer | Intent | Req Coverage | Key Dependencies (P0/P1) | Contracts |
 |-----------|--------------|--------|--------------|--------------------------|-----------|
-| Zitadel Core | IdP | OIDC Provider・ユーザー/ロール管理・招待発行 | 1, 2, 5, 6, 8, 9, 10 | CNPG Postgres (P0) | API, State |
-| LLDAP翻訳層 | 認証翻訳 | Dovecot向けLDAP bind/検索の翻訳 | 3, 10 | Zitadel Core (P1、招待完了時のみ同期) | API |
-| Dovecot | メール認証 | IMAP/POP3/Webmail認証 | 3, 10 | LLDAP翻訳層 (P0), Zitadel OAuth2 introspection (P0、Roundcube向け) | API |
-| vaultwarden-rbac-sync | RBAC連携 | ロール変更のイベント駆動反映 | 4, 10 | Zitadel Actions v2 (P0), Vaultwarden API (P0) | Event, API |
-| Zitadel Terraform Provider定義 | IaC | Project/Role/Application/Actionの宣言的管理 | 2, 4, 7, 8 | Terraform Cloud (P1) | - |
+| Zitadel Core | IdP | OIDC Provider・ユーザー/ロール管理・招待発行・メール認証真正情報源 | 1, 2, 5, 6, 8, 9, 10 | CNPG Postgres (P0) | API, State |
+| Dovecot Lua Auth Bridge | メール認証 | IMAP/POP3認証をZitadel Session APIへ委譲 | 3, 10 | Zitadel Core Session API (P0) | API |
+| vaultwarden-rbac-sync(webhook常駐版) | RBAC連携 | ロール変更のイベント駆動反映 | 4, 10 | Zitadel Actions v2 (P0), Vaultwarden API (P0) | Event, API |
+| Zitadel Terraform Provider定義 | IaC | Project/Role/Application/Actionの宣言的管理 | 2, 4, 7, 8 | Terraform Cloud (P1), Ansible Bootstrap発行PAT (P0) | - |
+| Ansible Zitadel Bootstrap | 初期化 | Zitadel初回admin/PAT発行・Infisical登録 | 11 | Zitadel Core (P0) | - |
 
 ### IdP Core
 
@@ -226,17 +267,17 @@ sequenceDiagram
 
 | Field | Detail |
 |-------|--------|
-| Intent | OIDC Providerとしてユーザー認証・トークン発行・ロールクレーム配布・招待コード発行を行う |
-| Requirements | 1.1, 1.2, 1.3, 1.4, 2.1, 2.2, 2.3, 5.2, 6.1, 6.2, 8.1, 8.2, 9.1, 9.2, 9.3, 9.4, 9.5, 9.6, 10.1, 10.2, 10.6, 10.7 |
+| Intent | OIDC Providerとしてユーザー認証・トークン発行・ロールクレーム配布・招待コード発行・メール認証可否判定(Session API)を行う |
+| Requirements | 1.1, 1.2, 1.3, 1.4, 2.1, 2.2, 2.3, 5.2, 5.3, 6.1, 6.2, 8.1, 8.2, 9.1, 9.2, 9.3, 9.4, 9.5, 9.6, 10.1, 10.2, 10.6, 10.7 |
 
 **Responsibilities & Constraints**
-- ユーザー・グループ・プロジェクトロールの真正情報源(Source of Truth)
+- ユーザー・グループ・プロジェクトロール・パスワードの唯一の真正情報源(Source of Truth)
 - OIDC Authorization Code Flow + PKCEの提供、Project単位の「Assert Roles on Authentication」設定によるロールクレーム配布
-- 招待コード発行・検証(初回オンボーディング)
+- 招待コード発行・検証(初回オンボーディング)、Session API経由の都度認証判定(Dovecot向け)
 
 **Dependencies**
 - Outbound: CNPG Postgres — 永続化 (P0)
-- Outbound: LLDAP翻訳層 — 招待完了時のパスワード同期 (P1)
+- Inbound: Dovecot Lua Auth Bridge — Session API呼び出し (P0)
 - External: Zitadel公式Docker image / Helm chart (P0)
 
 **Contracts**: API [x] / Event [x] / State [x]
@@ -250,45 +291,43 @@ sequenceDiagram
 | POST | /v2/sessions | checks.password | sessionId, sessionToken | 401 |
 
 ##### Event Contract
-- Published events: ユーザー作成・ロール変更・パスワード設定完了(Actions v2 Event条件経由でwebhook配信)
+- Published events: ユーザー作成・ロール変更(Actions v2 Event条件経由でwebhook配信)
 - Subscribed events: なし
 - Ordering / delivery guarantees: at-least-once(webhook再送あり、受信側で冪等に処理する必要がある)
 
-### 認証翻訳層
+### メール認証
 
-#### LLDAP翻訳層
+#### Dovecot Lua Auth Bridge
 
 | Field | Detail |
 |-------|--------|
-| Intent | Dovecotが発行するLDAP bind/検索クエリをZitadelユーザー情報の複製データへ変換する |
-| Requirements | 3.1, 3.2, 3.3, 3.4, 3.5, 10.3 |
+| Intent | Dovecotのpassdbからパスワード認証要求を受け取り、Zitadel Session APIへ都度問い合わせて認証可否を判定する |
+| Requirements | 3.1, 3.2, 3.3, 3.4, 10.3 |
 
 **Responsibilities & Constraints**
-- `objectClass=inetOrgPerson`を含む複合ANDフィルタでの検索対応(前spec実装踏襲)
-- 招待完了時のみZitadelから初期パスワードを同期する(継続同期はしない、Non-Goals参照)
-- カスタム属性名はLLDAP命名制約(アンダースコア不可、ハイフンのみ)に適合させる(前spec実装踏襲)
+- パスワードを一切永続化・複製しない(Zitadel API呼び出しの都度検証のみ)
+- パスワードのJSONエンコードは正規のエスケープ処理を用いる(文字列連結禁止)
+- Zitadel API障害時はDovecot標準の一時エラー(temporary failure)として扱い、認証失敗と区別する
 
 **Dependencies**
-- Inbound: Dovecot — LDAP bind/検索クエリ (P0)
-- Inbound: Zitadel Core — 招待完了時の初期パスワード同期 (P1)
+- Inbound: Dovecot — passdb呼び出し (P0)
+- Outbound: Zitadel Session API — パスワード検証 (P0)
 
 **Contracts**: API [x]
 
 ##### API Contract
 | Method | Endpoint | Request | Response | Errors |
 |--------|----------|---------|----------|--------|
-| LDAP Bind | ldap://lldap:3890 | DN + パスワード | Bind成功/失敗 | Invalid Credentials |
-| LDAP Search | ldap://lldap:3890 | 複合ANDフィルタ | ユーザーエントリ | - |
-| GraphQL | /api/graphql | updateUser(password) | ok | 401 |
+| POST | /v2/sessions | checks.password(正規JSONエスケープ), loginName | sessionId, sessionToken | 401(認証失敗), 5xx/timeout(API障害) |
 
 **Implementation Notes**
-- Integration: Dovecotの`auth-ldap.conf.ext`は前spec実装を再利用可能
-- Validation: 招待完了時のパスワード同期スクリプトが正しく1回だけ実行されることを確認する(Requirement 10.6)
-- Risks: ユーザーがZitadel側でパスワードを事後変更すると、LLDAP側とのパスワード不一致が生じ一般IMAPクライアントがログイン不能になる。運用ドキュメントに明記し、パスワード変更時はサポート窓口経由でLLDAP側も再同期する手順を用意する
+- Integration: PATのスコープをSession API呼び出しに必要な最小権限へ絞れるか実装前に実機検証する(Requirement 3.4)
+- Validation: JSON injection耐性(パスワードに`"`/`\`を含むケース)をテストに含める
+- Risks: Zitadel API障害時にメール認証全体が停止する単一障害点が生じる。フェイルモード(一時エラーとして扱う)を明確に実装し、認証失敗と誤認させない
 
 ### RBAC連携
 
-#### vaultwarden-rbac-sync(webhook版)
+#### vaultwarden-rbac-sync(webhook常駐版)
 
 | Field | Detail |
 |-------|--------|
@@ -299,6 +338,7 @@ sequenceDiagram
 - `ZITADEL-Signature`ヘッダ(HMAC)の検証を必須とし、検証失敗リクエストは拒否する
 - webhookのat-least-once配信を前提に、同一イベントの重複処理に対して冪等に振る舞う
 - authentik固有APIへの依存を除去し、Zitadel Management/User APIへ置き換える
+- 既存CronJob + Trigger Receiver方式から常駐Deploymentへ構成変更し、Falco誤検知除外ルール(`gitops/helm-values/prod/falco.yaml`)を新プロセス形態に合わせて更新する
 
 **Dependencies**
 - Inbound: Zitadel Actions v2 — ロール変更イベント通知 (P0)
@@ -312,34 +352,58 @@ sequenceDiagram
 - Ordering / delivery guarantees: at-least-once、冪等処理必須
 
 **Implementation Notes**
-- Integration: 本番投入前にステージング環境でActions v2 Event条件Executionの安定性を検証する(既知のリグレッション事例#12225を踏まえる、Requirement 4.3)
+- Integration: k3d等の使い捨て検証環境でActions v2 Event条件Executionの安定性を検証する(既知のリグレッション事例#12225を踏まえる、Requirement 4.3)。prod-node-1と同一ノードのstaging namespaceへの一時デプロイは行わない
 - Validation: 反映までの実測遅延を記録する(Requirement 10.5)
 - Risks: Actions v2のEvent条件がAPIエラーを誘発した既知の事例があるため、webhook未着時のフォールバック(定期ポーリングでの差分検知等)を検討する
+
+### 初期化
+
+#### Ansible Zitadel Bootstrap
+
+| Field | Detail |
+|-------|--------|
+| Intent | Zitadel初回起動後、組織・管理者・Terraform provider用PAT/Service Userを作成しInfisicalへ登録する |
+| Requirements | 11.1, 11.2, 11.3 |
+
+**Responsibilities & Constraints**
+- `infisical-auth` Secret作成と同様、ArgoCD/Terraformが自己参照できない領域への一度きりの例外的初期化として位置づける
+- 発行したPAT/Service User TokenはInfisicalへ即座に登録し、平文をログに残さない
+
+**Dependencies**
+- Outbound: Zitadel Core Admin API — 組織・PAT発行 (P0)
+- Outbound: Infisical — トークン登録 (P0)
+
+**Contracts**: Batch [x]
+
+##### Batch / Job Contract
+- Trigger: Zitadelデプロイ後の手動Ansible実行(K3sブートストラップ同様)
+- Input / validation: Zitadelインスタンスの起動完了確認後に実行
+- Output / destination: InfisicalへPAT/Service User Token登録
+- Idempotency & recovery: 既発行トークンが存在する場合はスキップまたは再発行の運用手順(Requirement 11.3)に従う
 
 ## Error Handling
 
 ### Error Strategy
-Zitadel API/Session API呼び出し失敗時は、呼び出し元(RPアプリ・Dovecot・vaultwarden-rbac-sync)がそれぞれのエラーカテゴリに応じて処理する。
+Zitadel API/Session API呼び出し失敗時は、呼び出し元(RPアプリ・Dovecot Lua Auth Bridge・vaultwarden-rbac-sync)がそれぞれのエラーカテゴリに応じて処理する。
 
 ### Error Categories and Responses
-**User Errors (4xx)**: 認証失敗 → ログイン画面へエラー表示(ブルートフォース対策はZitadel標準機能に委譲、Requirement 9.1)
-**System Errors (5xx)**: Zitadel API障害時、Dovecot認証(LLDAP翻訳層経由)はLLDAP自体が独立して稼働するため直接の影響を受けない。vaultwarden-rbac-syncはwebhook受信失敗時に定期ポーリングへのフォールバックを検討する
+**User Errors (4xx)**: 認証失敗 → ログイン画面へエラー表示(ブルートフォース対策はZitadel標準機能に委譲、Requirement 9.1)。Dovecot Lua Auth Bridgeでは`PASSDB_RESULT_PASSWORD_MISMATCH`として扱う
+**System Errors (5xx)**: Zitadel API障害時、Dovecot Lua Auth Bridgeは`PASSDB_RESULT_INTERNAL_FAILURE`(一時エラー)として扱い認証失敗と区別する。vaultwarden-rbac-syncはwebhook受信失敗時に定期ポーリングへのフォールバックを検討する
 **Business Logic Errors (422)**: 招待コード期限切れ・再利用 → Zitadel標準のエラーレスポンスをそのままユーザーへ提示する(Requirement 9.6)
 
 ### Monitoring
-既存のGrafana Alloy(ログ収集)・Falco(ランタイム侵入検知)を継続利用する。Zitadel固有の追加監視要件はない。
+既存のGrafana Alloy(ログ収集)・Falco(ランタイム侵入検知)を継続利用する。vaultwarden-rbac-syncの常駐Deployment化に伴いFalco誤検知除外ルールの更新が必要(Components節参照)。
 
 ## Testing Strategy
 
 ### Unit Tests
+- Dovecot Lua Auth BridgeのJSONエスケープ処理(パスワードに`"`/`\`を含むケース)
 - vaultwarden-rbac-syncの`ZITADEL-Signature`検証ロジック
-- LLDAP招待完了時パスワード同期スクリプトの冪等性(同一招待の二重実行防止)
 - OIDCロールクレームのパースロジック(RPアプリ側)
 
 ### Integration Tests
-- Zitadel ⇔ LLDAP 招待完了時パスワード同期のEnd-to-End
+- Dovecot ⇔ Lua Auth Bridge ⇔ Zitadel Session APIの一連の認証フロー(成功・失敗・API障害の3パターン)
 - Zitadel Actions v2 webhook ⇔ vaultwarden-rbac-sync ⇔ Vaultwarden APIの一連の反映
-- Dovecot ⇔ LLDAP のLDAP bind/検索(既存パターン踏襲)
 
 ### E2E/Security Tests(Requirement 9, 10準拠)
 - OIDC Authorization Code Flow + PKCEの正常系End-to-End(Requirement 10.1)
@@ -352,19 +416,20 @@ k3d等の使い捨て検証環境で実施し、テストスクリプトと結�
 ## Security Considerations
 
 - Actions v2 webhook受信時は`ZITADEL-Signature`ヘッダの検証を必須とし、未検証のリクエストは処理しない
-- Dovecot lua委譲方式を将来採用する場合、Zitadel Service User/PATの権限をSession API呼び出しに必要な最小スコープへ絞る(現状はOut of Boundary、将来検討時の必須条件として記録)
+- Zitadel Service User/PATの権限をSession API呼び出しに必要な最小スコープへ絞る(実装前に実機検証、Requirement 3.4)
+- Dovecot Lua Auth Bridgeはパスワードを一切永続化せず、都度Zitadel APIへ検証委譲するため、パスワードの二重管理・不整合リスクを構造的に排除する
 - 招待コードの有効期限・再利用防止はZitadel標準機能に委譲し、独自実装を行わない
-- LLDAP翻訳層のパスワード不一致リスク(Components節参照)は運用ドキュメントで明示し、セキュリティ上の既知の制約として管理する
+- Ansible Zitadel BootstrapのPAT発行は平文をログに残さず即座にInfisicalへ登録する
 
 ## Migration Strategy
 
 ```mermaid
 flowchart TD
-    A[Zitadel IaC構築 Terraform] --> B[Zitadel k3d検証 セキュリティ 機能テスト]
+    A[Zitadel IaC構築 Terraform Ansible Bootstrap] --> B[Zitadel k3d検証 セキュリティ 機能テスト]
     B --> C[本番Zitadelデプロイ 並行稼働開始]
-    C --> D[LLDAP接続先切替 Dovecot]
+    C --> D[Dovecot Lua Auth Bridge切替]
     D --> E[RPアプリ OIDC Client切替 CMS Vaultwarden Roundcube]
-    E --> F[vaultwarden rbac sync webhook切替]
+    E --> F[vaultwarden rbac sync webhook常駐化切替]
     F --> G[既存ユーザー招待ベース移行]
     G --> H[authentik停止 撤去]
     H -->|重大障害時| I[authentik構成へ切り戻し]

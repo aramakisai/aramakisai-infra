@@ -41,14 +41,14 @@
 **Objective:** As a メールサーバー運用者, I want DovecotのIMAP/SMTP認証が新IdP移行後も機能し続ける, so that 既存のメール利用者が移行後も引き続きログインできる
 
 #### Acceptance Criteria
-1. The 新IdP基盤 shall LDAPサーバとして動作しない制約を前提に、Dovecot認証を継続させる構成を設計フェーズで確定する
+1. The 新IdP基盤 shall LDAPサーバとして動作しない制約(公式に非対応)を前提に、Dovecot認証をZitadelへ直接委譲する構成を採用しLLDAP等の翻訳層コンポーネントを新設・存続させない
 2. Where Webmail(Roundcube)経由のOAUTHBEARER/XOAUTH2認証を使う場合, the 新IdP shall Dovecotのoauth2 passdb向けにtoken introspectionエンドポイントを提供する
-3. Where 一般IMAP/POP3クライアントのLDAP simple bind認証を維持する場合, the 移行手順 shall LLDAPを認証情報の翻訳層として残すハイブリッド構成、またはDovecot lua passdb経由でZitadel Session API(`POST /v2/sessions`)へ認証を委譲する構成のいずれかを比較検討し設計に明記する
-4. If Dovecot lua passdb経由の認証委譲を採用する場合, then 設計 shall 以下を満たす実装であること:
+3. Where 一般IMAP/POP3クライアントの認証を維持する場合, the 移行手順 shall Dovecot lua passdb経由でZitadel Session API(`POST /v2/sessions`)へ認証を委譲する構成を採用する
+4. The 設計 shall Dovecot lua passdb実装について以下を満たすこと:
    - パスワードをJSONへ埋め込む際は正規のエスケープ処理(文字列連結禁止)を用いる
-   - ZitadelのService User/PATに割り当てる権限をSession API呼び出しに必要な最小スコープへ絞る
+   - ZitadelのService User/PATに割り当てる権限をSession API呼び出しに必要な最小スコープへ絞る(実装前に実機検証する)
    - Zitadel API障害時のDovecot認証フェイルモード(タイムアウト・フォールバック挙動)を定義する
-5. The 移行手順 shall Zitadel Actions v2のパスワード変更イベントに平文パスワードが含まれない制約を前提とし、LLDAPへのパスワード直接同期に依存しない設計とする
+5. 前spec [[idp-migration-authentik-to-authelia-lldap]] で構築したLLDAP関連資産(gitops/manifests/prod/lldap/)は本specの実装対象から除外し、移行対象としない
 
 ### Requirement 4: Vaultwardenグループ権限同期の継続
 **Objective:** As a Vaultwarden RBAC運用担当者, I want vaultwarden-rbac-syncが新IdPのグループ情報をイベント駆動で取得できる, so that グループ⇔Vaultwarden Collection権限の自動同期を移行後も維持できる
@@ -56,7 +56,7 @@
 #### Acceptance Criteria
 1. When ユーザーのグループ/ロール割り当てが変更される, the 新IdP shall Actions v2 webhookで変更イベントを外部エンドポイントへ通知する
 2. The vaultwarden-rbac-sync shall authentik固有APIへの依存を除去しZitadel API(Actions v2 webhook受信 + Management/User API問い合わせ)に置き換えられている
-3. Before 本番投入する, the 移行手順 shall ステージング環境でActions v2のEvent条件トリガーの安定性を検証する(既知のリグレッション事例: zitadel/zitadel#12225)
+3. Before 本番投入する, the 移行手順 shall k3d等の使い捨て検証環境でActions v2のEvent条件トリガーの安定性を検証する(既知のリグレッション事例: zitadel/zitadel#12225)。prod-node-1と同一ノードのstaging namespaceへZitadelを追加デプロイして検証することはメモリオーバーコミット悪化につながるため行わない
 
 ### Requirement 5: Discord連携のスコープ縮小と手動運用への移行
 **Objective:** As a 実行委員会運営担当者, I want Discordロール同期を廃止しグループ管理を手動運用に切り替える, so that 新IdPへの移行を過度な追加開発なしに実現できる
@@ -64,7 +64,7 @@
 #### Acceptance Criteria
 1. The 新IdP基盤 shall Discordロールの自動同期・アバター自動取得・ログイン時の動的グループ判定を実装しない
 2. Where Discordソーシャルログイン(単純なOAuth2ログインのみ)を提供する場合, the 新IdP shall 標準的なOAuth2/OIDC Identity Provider機能で対応する
-3. The 移行手順 shall `executive`グループおよび`mailAclGroups`相当のメーリングリストACLグループの手動管理手順を運用ドキュメントとして提供する
+3. The 移行手順 shall `executive`グループおよび`mailAclGroups`相当のメーリングリストACLグループについて、Zitadelのproject role割り当てを唯一の真実源泉(Source of Truth)と定め、Dovecot側のACL判定はZitadelロール情報から都度導出する構成とし、Dovecot側に独立した第二のグループ管理台帳を持たせない
 
 ### Requirement 6: 既存ユーザー・グループデータの移行
 **Objective:** As a インフラ運用担当者, I want 既存authentikに登録済みの全ユーザー・グループを新IdPへ移行する, so that 移行後もサービス利用者がアカウント(所属グループ・権限)を失わずログインできる
@@ -108,14 +108,22 @@
 #### Acceptance Criteria
 1. When 正しいユーザー名・パスワードでOIDC Authorization Code Flow + PKCEを実行する, the 新IdP shall 認可コード発行・トークン交換・Userinfo取得までEnd-to-Endで成功する
 2. The 移行手順 shall CMS/Vaultwarden/Roundcubeそれぞれについて実際のOIDCログインを実施し、各アプリで正常にセッションが開始されることを確認する
-3. When 一般IMAP/POP3クライアントが正しいパスワードで認証する, the Dovecot認証(LLDAP翻訳層またはlua+Session API委譲のいずれを採用した場合も) shall bind成功しmail属性・ACLグループを正しく返す
+3. When 一般IMAP/POP3クライアントが正しいパスワードで認証する, the Dovecot lua passdb経由のZitadel Session API委譲 shall 認証成功しmail属性・ACLグループ(Zitadelロールから導出)を正しく返す
 4. When Roundcube経由でOAUTHBEARER/XOAUTH2認証する, the Dovecot oauth2 passdb shall introspection成功後にログインを許可する
 5. When ユーザーのグループ/ロール割り当てを変更する, the vaultwarden-rbac-sync shall Actions v2 webhook経由で変更を検知しVaultwarden Collection権限へ反映する(反映までの実測遅延を記録する)
 6. When 新規ユーザーへ招待コードを発行する, the 移行手順 shall 招待メール受信→リンク遷移→パスワード設定→初回ログインまでEnd-to-Endで成功することを確認する
 7. When ユーザーにロールを付与する, the 新IdP shall OIDC ID Token/UserinfoのクレームにロールがRequirement 8の設計通り反映されることを確認する
 8. The 移行手順 shall 旧authentik構成への切り戻し手順(Requirement 7.2)を実際に実行し、切り戻し後に既存アプリのログインが復旧することを検証する
 
+### Requirement 11: Terraformプロバイダー認証のブートストラップ
+**Objective:** As a インフラ運用担当者, I want ZitadelのTerraform providerが必要とする管理者トークンを安全にブートストラップする, so that project/role/applicationのIaC管理を開始できる
+
+#### Acceptance Criteria
+1. The ブートストラップ手順 shall Zitadelインスタンス初回起動後、Ansibleで組織/管理者ユーザー作成とService User/PAT発行を行いInfisicalへ登録する
+2. The ブートストラップ手順 shall 既存の`infisical-auth` Secret作成と同様に、ArgoCD/GitOpsが管理できない領域(ESO自体を起動する前提条件)への対応として、GitOps原則の明示的な例外に位置づける
+3. If ブートストラップ済みのPAT/Service User Tokenが失効・漏洩した場合, then 運用手順 shall 再発行・Infisical更新の手順を提供する
+
 ## Boundary Context
-- **In scope**: OIDC Provider機能移行、LDAP認証(Dovecot連携)の翻訳層/委譲方式の設計確定、vaultwarden-rbac-syncのイベント駆動化、既存ユーザー・グループデータの招待ベース移行、段階的カットオーバー手順、Discordソーシャルログイン(単純ログインのみ)の対応可否検討、シンプルなフラットロールRBAC設計、OIDC/認証フローのセキュリティ検証(モンキーテスト)、各機能の正常系End-to-End動作確認
-- **Out of scope**: Discordロール自動同期・アバター自動取得・ログイン時動的グループ判定の再実装、authentik相当の細粒度permission管理の再現、新規認証機能の追加
-- **Adjacent expectations**: mailserver(DMS)のDovecot認証方式変更、CMS/Roundcube/Vaultwarden等各アプリのOIDC Client設定変更は本specの実施範囲に含むが、各アプリ内部のビジネスロジック変更は含まない。Dovecot認証委譲方式(LLDAP翻訳層 vs lua+Session API)の最終選定は設計フェーズで確定する。
+- **In scope**: OIDC Provider機能移行、Dovecot lua passdb経由のZitadel Session API認証委譲の実装、vaultwarden-rbac-syncのイベント駆動化、既存ユーザー・グループデータの招待ベース移行、段階的カットオーバー手順、Discordソーシャルログイン(単純ログインのみ)の対応可否検討、シンプルなフラットロールRBAC設計、OIDC/認証フローのセキュリティ検証(モンキーテスト)、各機能の正常系End-to-End動作確認、Terraformプロバイダー認証のブートストラップ
+- **Out of scope**: Discordロール自動同期・アバター自動取得・ログイン時動的グループ判定の再実装、authentik相当の細粒度permission管理の再現、新規認証機能の追加、LLDAP関連資産(前spec由来)の継続利用
+- **Adjacent expectations**: mailserver(DMS)のDovecot認証方式変更、CMS/Roundcube/Vaultwarden等各アプリのOIDC Client設定変更は本specの実施範囲に含むが、各アプリ内部のビジネスロジック変更は含まない。

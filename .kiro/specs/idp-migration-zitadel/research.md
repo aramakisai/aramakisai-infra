@@ -80,20 +80,39 @@
 
 ## Design Decisions
 
-### Decision: Dovecot認証方式は設計フェーズで最終選定する(本research時点では両論併記)
-- **Context**: Requirement 3が翻訳層/委譲方式いずれかの選定を求めている
+### Decision: Dovecot認証方式はlua + Session API委譲を正式採用する
+- **Context**: Requirement 3が翻訳層/委譲方式いずれかの選定を求めていた。validate-design(1回目)およびdig調査で、LLDAP翻訳層案の前提(招待完了時にLLDAPへパスワードを同期する)が技術的に成立しないことが判明した
 - **Alternatives Considered**:
-  1. LLDAP翻訳層として存続 — 実装コスト低いが恒常的なパスワード不整合リスクを抱える
-  2. Dovecot lua + Session API委譲 — パスワード一元管理を実現するが実装・運用コストと可用性リスクが増す
-- **Selected Approach**: 未確定。design.md執筆時に、Roundcube(OAuth2 passdb、既存踏襲)と一般IMAP/POP3クライアント(上記2択)を分けて明記する
-- **Rationale**: 前spec調査時点でも技術的トレードオフが拮抗しており、実機検証(PAT最小権限スコープの確認、lua実装の可用性テスト)なしに断定すべきでない
-- **Trade-offs**: 翻訳層維持は安全側(既存踏襲)、委譲方式はゴールに近いが実装リスクを負う
-- **Follow-up**: 設計フェーズでPAT最小スコープの実機確認、lua auth実装のPoCをタスク化する
+  1. LLDAP翻訳層として存続 — 招待完了時の一度きり同期を想定していたが、招待コード(`CreateInviteCode`/`VerifyInviteCode`)とパスワードリセットコードは別API体系であり、Zitadel標準の招待UIでユーザーがパスワードを設定してもその平文を捕捉するコンポーネントが存在しないため、同期の起点自体がない。加えて通常ログイン画面には`hidePasswordReset`設定があっても実際には消えない既知の不具合報告があり([Password Reset hidden](https://questions.zitadel.com/m/1347316217127374991))、ユーザーの自由なパスワード変更を防ぐ手立てがない
+  2. カスタム招待完了ページを自作しパスワードを両系へpush — Zitadel標準UIを迂回する必要がありスコープ増、事後のパスワードリセット(標準機能)は依然捕捉不可能なため根本解決にならない
+  3. Dovecot lua + Session API委譲 — パスワードをZitadelのみで一元管理し、Dovecotは都度問い合わせる。パスワードの二重管理・不整合リスクを構造的に排除する
+- **Selected Approach**: 3(lua + Session API委譲)を正式採用。LLDAP翻訳層は新設・継続利用しない
+- **Rationale**: 1・2はいずれもZitadel標準のパスワードリセット導線を完全に塞げない限り恒久的な機能不全(パスワード変更後にメール認証不能)を抱える。3は実装・運用コストと可用性リスク(単一障害点化)を伴うが、Requirement 3の目的(メール認証の継続)を構造的に満たせる唯一の選択肢
+- **Trade-offs**: 実装コスト増(lua script保守)、Zitadel API障害がメール認証障害に直結する可用性リスクを受け入れる。フェイルモード設計(一時エラーとして扱う)で影響を限定する
+- **Follow-up**: PAT最小権限スコープの実機確認(IAM_OWNER相当が本当に必要か)をタスクの初期段階で検証する
+
+### Decision: vaultwarden-rbac-syncのActions v2安定性検証はk3dのみで行う
+- **Context**: Requirement 4.3(本番投入前の安定性検証)の実施環境について、staging namespaceがprod-node-1と同一ノード上にあり、Zitadel一時デプロイがメモリオーバーコミット(本移行の目的)を悪化させる矛盾が指摘された(dig調査)
+- **Alternatives Considered**:
+  1. staging Zitadelを一時デプロイし検証後撤去 — 本番同等の信号が得られるが、検証期間中に同一ノードのオーバーコミットが悪化する
+  2. k3d等の使い捨て検証環境のみで検証 — 信号はやや弱いが本番ノードへの影響がない
+- **Selected Approach**: 2(k3dのみ)を採用
+- **Rationale**: 本移行の目的自体がメモリオーバーコミット解消であり、検証のために一時的とはいえ同じ問題を悪化させるのは本末転倒
+- **Trade-offs**: k3d環境はprodと完全同一ではないため、Actions v2の安定性検証としての信号強度はstaging実施よりやや弱い
+
+### Decision: Terraformプロバイダー認証はAnsible例外ブートストラップで対応する
+- **Context**: TerraformでZitadelのproject/role/applicationを宣言的管理するには、Zitadel自体が起動し管理者PAT/Service User Tokenが発行済みである必要がある(鶏と卵問題、dig調査で指摘)
+- **Alternatives Considered**:
+  1. Ansible手順で例外的にブートストラップ(`infisical-auth`と同一パターン) — 既存の運用パターンを踏襲でき理解しやすい
+  2. ArgoCD PostSync Bootstrap Jobで自動化 — GitOps内で完結するが、kubectl exec相当の複雑さを伴う
+- **Selected Approach**: 1(Ansible例外ブートストラップ)を採用
+- **Rationale**: `infisical-auth` Secret作成という既存の前例があり、運用者にとって一貫した理解しやすいパターンになる
 
 ## Risks & Mitigations
-- Actions v2のEvent条件Executionが2026年時点でリグレッション報告あり(#12225) — ステージングでの安定性検証を必須プロセスとして組み込む(Requirement 4.3)
+- Actions v2のEvent条件Executionが2026年時点でリグレッション報告あり(#12225) — k3d検証環境での安定性検証を必須プロセスとして組み込む(Requirement 4.3)
 - Zitadel Session APIのPAT権限が「IAM_OWNER相当」前提でドキュメント化されている — 実際に絞り込める最小スコープを実装前に検証しないと、メール認証コンポーネントが過大な権限を持つリスクがある
 - login UI(Node.js)を含めた実メモリがK3sシングルノードのオーバーコミットに影響する可能性 — 設計フェーズでlimits/requestsを確定し、Requirement 1.3の基準値と照合する
+- Dovecot Lua Auth Bridgeの実装がZitadel API障害時にメール認証の単一障害点になる — フェイルモード(一時エラー扱い)を明確に実装し監視を強化する
 
 ## References
 - [ZITADEL as LDAP Server (未実装)](https://github.com/zitadel/zitadel/discussions/1929) — LDAPサーバ機能非対応の根拠
@@ -104,3 +123,5 @@
 - [Retrieve User Roles in ZITADEL](https://zitadel.com/docs/guides/integrate/retrieve-user-roles) — ロールクレーム配布設定
 - [terraform-provider-zitadel docs/resources](https://github.com/zitadel/terraform-provider-zitadel/tree/main/docs/resources) — 利用可能なTerraform resource一覧
 - [GLAuth Backends](https://glauth.github.io/docs/backends.html) — GLAuth不採用の根拠
+- [Resend an invite code for a user](https://zitadel.com/docs/apis/resources/user_service_v2/user-service-resend-invite-code) — 招待コードが初回セットアップ専用でありパスワードリセットとは別体系である根拠
+- [Password Reset hidden (questions.zitadel.com)](https://questions.zitadel.com/m/1347316217127374991) — `hidePasswordReset`設定の既知の不具合報告、LLDAP翻訳層案不採用の決め手
