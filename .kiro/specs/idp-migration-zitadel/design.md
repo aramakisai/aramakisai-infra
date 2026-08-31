@@ -8,6 +8,8 @@
 
 **Impact**: authentik(Deployment: server + worker、実測約800Mi)を廃止し、Zitadel(api + login + postgres、実測約367MiB)へ全面置換する。Dovecot(mailserver)の認証をZitadelへ直接委譲する構成に切り替え、LDAP翻訳層(LLDAP)は新設・継続利用しない。vaultwarden-rbac-syncの連携方式をREST poll型からActions v2 webhook型へ変更する。
 
+**PoCとしての位置づけ**: 本設計はk3d等の使い捨て検証環境での実現可能性検証(PoC)を対象とする。Migration Strategyに記載する本番カットオーバー・authentik撤去は、本PoCの結果を踏まえて別途承認・着手を判断するものであり、本specの実装範囲(tasks.md)はk3d検証環境での実証に主眼を置く。
+
 ### Goals
 - authentik比で明確にメモリを削減しつつ、招待オンボーディング・イベント駆動RBAC同期を実現する
 - 既存OIDC RPアプリ(CMS/Vaultwarden/Roundcube)のログイン機能を維持する

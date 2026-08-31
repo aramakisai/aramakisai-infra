@@ -3,6 +3,8 @@
 ## Project Description (Input)
 現行IdP(authentik)をZitadelへ置き換える。
 
+**本specの位置づけ(PoC)**: 本specはまずPoC(概念実証)として、k3d等の使い捨て検証環境でZitadelの実現可能性(メモリ効率・招待フロー・RBAC同期・Dovecot認証委譲)を検証することを目的とする。prod-node-1への実際のカットオーバー(段階的移行・authentik撤去)は、本PoCの結果を踏まえて別途承認・着手を判断する。tasks.mdの各タスクもこの前提でk3d検証環境を主対象とする。
+
 背景:
 - prod-node-1(Hetzner シングルノード、RAM容量 約7.7Gi)は現在メモリ81%使用・limits合計112%のオーバーコミット状態。
 - authentikはserver/worker合計で実測約800Mi(server 499Mi + worker 302Mi)を消費しており、既に一度チューニング済みでこれ以上絞れない。

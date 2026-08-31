@@ -1,5 +1,7 @@
 # Implementation Plan
 
+> **PoC(概念実証)としての実装計画**: 本タスク群はk3d等の使い捨て検証環境でのZitadel実現可能性検証を主眼とする。task 7(段階的カットオーバー)・9.7(ロールバック実地検証)を含め、本番prod-node-1への実際のカットオーバーはこのPoCの結果を踏まえて別途承認・着手を判断する。
+
 - [ ] 1. Zitadel基盤のk3d検証環境構築とブートストラップ
 - [ ] 1.1 Zitadelをk3d検証環境へデプロイする
   - namespace・StatefulSet(api/login)・Service・CNPG DBクラスタ・ExternalSecret相当のマニフェストをk3d向けに用意する
