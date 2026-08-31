@@ -30,6 +30,7 @@
 2. The 新IdP基盤 shall Kubernetes上でHelm chartまたは宣言的manifestとしてデプロイ可能である
 3. When 移行完了後にprod-node-1のリソース使用量を確認する, the インフラ shall memory limits合計のオーバーコミット率を移行前(112%)より低い値にする
 4. The 新IdP基盤 shall login UIコンポーネント(Node.jsプロセス)を含めた実測値でRequirement 1.1を満たすことを設計フェーズで検証する
+5. The 新IdP基盤 shall 素のpostgresコンテナではなく本番同等のCNPG(CloudNativePG)構成(既存authentikのdb-cluster.yamlに準じたinstance-manager・barman WALアーカイブ込み)で実測したメモリ使用量をもってRequirement 1.1の判定根拠とする
 
 ### Requirement 2: OIDC Provider機能の継続
 **Objective:** As a 各アプリケーション運用者, I want 既存のOIDC連携アプリ(CMS/Vaultwarden/Roundcube等)が新IdPでも認証できる, so that 業務アプリのログイン機能を移行後も維持できる
@@ -59,6 +60,7 @@
 1. When ユーザーのグループ/ロール割り当てが変更される, the 新IdP shall Actions v2 webhookで変更イベントを外部エンドポイントへ通知する
 2. The vaultwarden-rbac-sync shall authentik固有APIへの依存を除去しZitadel API(Actions v2 webhook受信 + Management/User API問い合わせ)に置き換えられている
 3. Before 本番投入する, the 移行手順 shall k3d等の使い捨て検証環境でActions v2のEvent条件トリガーの安定性を検証する(既知のリグレッション事例: zitadel/zitadel#12225)。prod-node-1と同一ノードのstaging namespaceへZitadelを追加デプロイして検証することはメモリオーバーコミット悪化につながるため行わない
+4. If k3d検証環境でActions v2のEvent条件トリガーが不安定と判明した場合, then vaultwarden-rbac-syncのイベント駆動同期(Requirement 4.1, 4.2)は本specのスコープから除外してよく、Zitadel移行自体は継続する。Vaultwarden Collection権限同期は手動運用または別spec起票の対象とする
 
 ### Requirement 5: Discord連携のスコープ縮小と手動運用への移行
 **Objective:** As a 実行委員会運営担当者, I want Discordロール同期を廃止しグループ管理を手動運用に切り替える, so that 新IdPへの移行を過度な追加開発なしに実現できる
@@ -82,8 +84,8 @@
 #### Acceptance Criteria
 1. The 移行手順 shall prod-node-1上でのauthentik/Zitadel長期並行稼働(段階的カットオーバー)を採用せず、k3d検証環境で構築済みのZitadel設定を本番へ持ち込む一括カットオーバー方式を採用する
 2. The 移行手順 shall Zitadel Terraform管理下のリソース(project/role/application/action)をIaCとして本番で改めてterraform applyし再現する
-3. Where Terraformで管理しきれないインスタンスレベルの設定(masterkey生成物・Assert Roles on Authentication等のUI操作分)が存在する場合, the 移行手順 shall k3d環境のZitadelバックエンドDBをpg_dumpで取得し本番Zitadel用CNPGクラスタへpg_restoreで反映する
-4. The 移行手順 shall pg_restore対象からk3d検証用テストユーザー・検証専用データを除外し、本番環境へ試験データを持ち込まない
+3. Where Terraformで管理しきれないインスタンスレベルの設定(Assert Roles on Authentication等のUI操作分)が存在する場合, the 移行手順 shall Zitadel公式Admin API(`POST /admin/v1/export`/`POST /admin/v1/import`)を用いてk3d環境から本番環境へデータを移行する。pg_dump/pg_restoreによるバックエンドDBの直接移行は、k3d/本番間でmasterkeyが異なり暗号化データが復号できなくなるため採用しない
+4. The 移行手順 shall export対象からk3d検証用テストユーザー・検証専用データを除外し、本番環境へ試験データを持ち込まない
 5. If 新IdPへの切替後に重大な認証障害が発生する, then 移行手順 shall 旧authentik構成への切り戻し手順を含む
 6. The 移行手順 shall GitOps原則(`gitops/`配下のマニフェスト変更→ArgoCD sync)に従い、クラスタへの直接kubectl操作を行わない
 

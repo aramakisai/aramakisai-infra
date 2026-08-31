@@ -16,6 +16,13 @@
   - _Requirements: 11.1, 11.2, 11.3_
   - _Depends: 1.1_
 
+- [ ] 1.3 CNPGベースの実メモリ使用量を実測し移行理由の妥当性を確定する
+  - task 1.1のCNPG DBクラスタについて、instance-manager・barman WALアーカイブのオーバーヘッドを含めた実測値を`docker stats`/`kubectl top`相当で取得する(素のpostgresコンテナでの計測値と区別する)
+  - CNPGベースの合計メモリ使用量がauthentik実測値(約800Mi)より明確に少ないことを確認する
+  - 明確に少なくないと判明した場合、その実測値を記録しRequirement 1の前提(メモリ削減)自体の見直しが必要であることを明示する
+  - _Requirements: 1.5_
+  - _Depends: 1.1_
+
 - [ ] 2. Zitadel Terraform IaC定義
 - [ ] 2.1 (P) Project/Roleとフラットロール配布を定義する
   - プロジェクト単位のフラットロール(キー・表示名のみ)を定義し、permission行列は導入しない
@@ -100,6 +107,12 @@
   - 更新後、正常なwebhook受信動作でFalcoアラートが誤発報しないことを確認する
   - _Requirements: 4.2_
   - _Depends: 4.2_
+
+- [ ] 4.4 Actions v2 Event条件トリガーの安定性を検証し不安定ならスコープ除外を判断する
+  - k3d検証環境でロール/グループ変更イベントを繰り返し発生させ、Actions v2のEvent条件Executionが安定して発火するか検証する(既知のリグレッション事例zitadel/zitadel#12225を踏まえる)
+  - 不安定と判明した場合、vaultwarden-rbac-syncのイベント駆動同期(task 4.1, 4.2)は本specのスコープから除外し、Vaultwarden Collection権限同期は手動運用または別spec起票の対象とする判断を記録する
+  - _Requirements: 4.3, 4.4_
+  - _Depends: 4.1_
 
 - [ ] 5. RPアプリのOIDC Client切替
 - [ ] 5.1 (P) CMSのOIDC Client設定をZitadelへ切り替える
@@ -196,9 +209,9 @@
 
 - [ ] 9. バックアップ移行による本番カットオーバーとロールバック
   - prod-node-1でのauthentik/Zitadel長期並行稼働を避けるため、k3dで検証済みのZitadel設定をバックアップ経由で本番へ持ち込み一括カットオーバーする(Requirement 7、セキュリティ・機能検証完了後に実施)
-- [ ] 9.1 k3d検証用テストデータを削除しpg_dumpを取得する
-  - testuser等の検証専用アカウント・データをk3d Zitadelから削除する
-  - クリーンな状態のk3d Zitadelバックエンドpostgresをpg_dumpで取得する
+- [ ] 9.1 k3d検証用テストデータを除外してZitadel Admin API exportを取得する
+  - testuser等の検証専用組織・ユーザーをexport対象から除外するフィルタ(`excludedOrgIds`等)を確定する
+  - `withPasswords`/`withOtp`を無効化した状態でk3d Zitadelの`POST /admin/v1/export`を実行しデータを取得する
   - _Requirements: 7.4_
   - _Depends: 7, 8_
 
@@ -209,15 +222,16 @@
   - _Requirements: 7.2_
   - _Depends: 9.1_
 
-- [ ] 9.3 Terraform管理外のインスタンス設定をpg_restoreで反映する
-  - masterkey生成物やAssert Roles on Authentication等、Terraformで管理しきれないインスタンス設定の差分を洗い出す
-  - 9.1で取得したpg_dumpから該当設定のみ本番CNPGクラスタへpg_restoreで反映する
-  - pg_restore後にterraform planを実行しdriftがないことを確認する
+- [ ] 9.3 Terraform管理外のインスタンス設定をAdmin API importで反映する
+  - Assert Roles on Authentication等、Terraformで管理しきれないインスタンス設定の差分を洗い出す
+  - 9.1で取得したexportデータを本番Zitadelの`POST /admin/v1/import`で取り込む(masterkeyに依存しないアプリケーションレイヤーの移行であることを確認する)
+  - import後にterraform planを実行しdriftがないことを確認する
   - _Requirements: 7.3_
   - _Depends: 9.2_
 
 - [ ] 9.4 一括カットオーバー順序を実行する
-  - Dovecot Lua Auth Bridge・RPアプリ(CMS/Vaultwarden/Roundcube)OIDC Client・vaultwarden-rbac-sync webhookの順に本番切替を実行する
+  - Dovecot Lua Auth Bridge・RPアプリ(CMS/Vaultwarden/Roundcube)OIDC Clientの順に本番切替を実行する
+  - task 4.4でActions v2が安定と判断された場合のみvaultwarden-rbac-sync webhookを本番切替に含める。スコープ除外と判断された場合はこのステップを省略し手動運用へ引き継ぐ
   - 既存ユーザーへの招待ベース移行(task 6)を本番Zitadelに対して実施する
   - 切替完了後、全RPアプリ・メール認証が本番Zitadel経由で正常に機能することを確認する
   - _Requirements: 7.1_

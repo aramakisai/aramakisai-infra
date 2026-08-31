@@ -116,10 +116,10 @@ graph TB
 
 | Layer | Choice / Version | Role in Feature | Notes |
 |-------|------------------|-----------------|-------|
-| IdP Core | Zitadel v4.x (Helm/manifest) | OIDC Provider、ユーザー・ロール管理、招待フロー、メール認証真正情報源 | login UIはNode.js別プロセス、実測約367MiB(4コンポーネント合計、うちTraefik proxyはprod構成では既存Ingress/Cloudflare Tunnelへ置き換え可能) |
+| IdP Core | Zitadel v4.x (Helm/manifest) | OIDC Provider、ユーザー・ロール管理、招待フロー、メール認証真正情報源 | login UIはNode.js別プロセス。k3d docker-compose実測367MiBは素のpostgresコンテナでの値であり本番CNPG構成とは乖離があるため、Requirement 1.5に基づきCNPGベースで再実測し判定根拠とする |
 | メール認証委譲 | Dovecot lua auth (Dovecot CE 2.3+) | IMAP/POP3クライアントの認証をZitadel Session APIへ委譲 | 前spec[[idp-migration-authentik-to-authelia-lldap]]のLLDAP実装は再利用しない、新規実装 |
 | IaC | zitadel/zitadel Terraform provider | project/role/application/action(webhook)のコード管理 | `zitadel_project`, `zitadel_project_role`, `zitadel_application_oidc`, `zitadel_action_target`, `zitadel_action_execution_event` 等 |
-| DB | CloudNativePG (PostgreSQL Operator) | ZitadelのバックエンドDB | 既存CNPG Operatorを再利用 |
+| DB | CloudNativePG (PostgreSQL Operator) | ZitadelのバックエンドDB | 既存CNPG Operatorを再利用。instance-manager・barman WALアーカイブのオーバーヘッドを含めた実測が必要(既存authentikのdb-cluster.yaml基準で256Mi request/512Mi limit相当) |
 | Webhook受信 | vaultwarden-rbac-sync(常駐化) | Actions v2 webhookの受信・署名検証・Vaultwarden反映 | 既存CronJob方式から常駐Podへ構成変更。`ZITADEL-Signature`ヘッダ(HMAC)の検証を追加。Falco誤検知除外ルールの更新が必要 |
 | ブートストラップ | Ansible | Zitadel初回admin/PAT発行・Infisical登録 | `infisical-auth`Secret作成と同一の例外パターン |
 
@@ -138,7 +138,7 @@ ansible/
 └── roles/zitadel-bootstrap/  # 初回admin/PAT発行、Infisical登録(infisical-authと同じ例外パターン)
 
 scripts/
-└── zitadel-backup-migration.sh  # k3d Zitadel Postgresのpg_dump取得(テストユーザー除外確認込み)・本番CNPGへのpg_restore
+└── zitadel-backup-migration.sh  # k3d Zitadel Admin API export(テストユーザー除外・withPasswords/withOtp無効化)・本番Admin APIへのimport
 
 gitops/
 ├── apps/prod/zitadel.yaml           # ArgoCD Application定義
@@ -245,13 +245,13 @@ sequenceDiagram
 
 | Requirement | Summary | Components | Interfaces | Flows |
 |-------------|---------|------------|------------|-------|
-| 1.1-1.4 | メモリ削減 | Zitadel Core | - | - |
+| 1.1-1.5 | メモリ削減(CNPGベース実測) | Zitadel Core | - | - |
 | 2.1-2.3 | OIDC継続 | Zitadel Core, Terraform IaC | OIDC Authorization/Token | OIDCログインフロー |
 | 3.1-3.5 | メール認証委譲 | Dovecot Lua Auth Bridge | Session API | 一般IMAP/POP3クライアント認証フロー |
-| 4.1-4.3 | RBAC同期 | vaultwarden-rbac-sync(webhook常駐版) | Actions v2 webhook | vaultwarden-rbac-syncイベント駆動フロー |
+| 4.1-4.4 | RBAC同期(不安定時はスコープ除外可) | vaultwarden-rbac-sync(webhook常駐版) | Actions v2 webhook | vaultwarden-rbac-syncイベント駆動フロー |
 | 5.1-5.3 | Discord縮小・ACL真実源泉 | Zitadel Core(OIDC IdP設定、Project Role) | OAuth2 Source | - |
 | 6.1-6.3 | ユーザー移行 | Zitadel Core | Invite Code API | 招待オンボーディングフロー |
-| 7.1-7.6 | バックアップ移行による一括カットオーバー | Terraform IaC, GitOps, Zitadel Backup Migration | pg_dump/pg_restore | Migration Strategy |
+| 7.1-7.6 | バックアップ移行による一括カットオーバー | Terraform IaC, GitOps, Zitadel Backup Migration | Zitadel Admin API export/import | Migration Strategy |
 | 8.1-8.3 | フラットRBAC | Zitadel Core(Project Role) | OIDC roles claim | OIDCログインフロー |
 | 9.1-9.7 | セキュリティ検証 | Zitadel Core | Session/OIDC API | - |
 | 10.1-10.8 | 機能検証 | 全コンポーネント | - | 全フロー |
@@ -266,7 +266,7 @@ sequenceDiagram
 | vaultwarden-rbac-sync(webhook常駐版) | RBAC連携 | ロール変更のイベント駆動反映 | 4, 10 | Zitadel Actions v2 (P0), Vaultwarden API (P0) | Event, API |
 | Zitadel Terraform Provider定義 | IaC | Project/Role/Application/Actionの宣言的管理 | 2, 4, 7, 8 | Terraform Cloud (P1), Ansible Bootstrap発行PAT (P0) | - |
 | Ansible Zitadel Bootstrap | 初期化 | Zitadel初回admin/PAT発行・Infisical登録 | 11 | Zitadel Core (P0) | - |
-| Zitadel Backup Migration | 移行 | k3d検証環境のZitadel設定を本番へバックアップ移行する一括カットオーバー手順 | 7 | k3d Zitadel Postgres (P0), 本番CNPGクラスタ (P0), Zitadel Terraform Provider定義 (P0) | Batch |
+| Zitadel Backup Migration | 移行 | k3d検証環境のZitadel設定を本番へAdmin API export/importで移行する一括カットオーバー手順 | 7 | k3d Zitadel Admin API (P0), 本番Zitadel Admin API (P0), Zitadel Terraform Provider定義 (P0) | Batch |
 
 ### IdP Core
 
@@ -402,27 +402,27 @@ Session成功後、Management APIでuser_grant(ロール)を取得し、Requirem
 | Requirements | 7.1, 7.2, 7.3, 7.4 |
 
 **Responsibilities & Constraints**
-- project/role/application/actionはTerraform管理下のためk3dバックアップに含めず、本番で改めてterraform applyして再現する(Requirement 7.2)
-- Terraformで管理しきれないインスタンスレベルの設定(masterkey生成物・Assert Roles on Authentication等のUI操作分)のみ、k3d ZitadelのPostgresをpg_dumpし本番CNPGクラスタへpg_restoreで反映する(Requirement 7.3)
-- pg_dump取得前にk3d検証用テストユーザー(testuser等)を削除し、本番へ試験データを持ち込まない(Requirement 7.4)
+- project/role/application/actionはTerraform管理下のため移行データに含めず、本番で改めてterraform applyして再現する(Requirement 7.2)
+- Terraformで管理しきれないインスタンスレベルの設定(Assert Roles on Authentication等のUI操作分)は、Zitadel公式Admin API(`POST /admin/v1/export`/`POST /admin/v1/import`)を用いてk3dから本番へ移行する(Requirement 7.3)。pg_dump/pg_restoreによるバックエンドDB直接移行は、k3d/本番間でmasterkeyが異なり暗号化データが復号不能になるため採用しない
+- export実行時は`withPasswords`/`withOtp`オプションを無効化し、認証情報は招待ベース移行(Requirement 6)の経路のみを使う。export対象からk3d検証用テストユーザー・組織(testuser等)を除外し、本番へ試験データを持ち込まない(Requirement 7.4)
 
 **Dependencies**
-- Inbound: k3d Zitadel Postgres — pg_dump取得元 (P0)
-- Outbound: 本番CNPGクラスタ — pg_restore先 (P0)
+- Inbound: k3d Zitadel Admin API — export取得元 (P0)
+- Outbound: 本番Zitadel Admin API — import先 (P0)
 - Outbound: Zitadel Terraform Provider定義 — project/role/application/actionの本番再現 (P0)
 
 **Contracts**: Batch [x]
 
 ##### Batch / Job Contract
 - Trigger: k3d環境でのRequirement 9(セキュリティ検証)・Requirement 10(機能検証)完了後、手動実行
-- Input / validation: pg_dump実行前にk3d検証用テストユーザーが削除済みであることを確認する
-- Output / destination: 本番CNPGクラスタへのpg_restore、および本番Terraform state更新
+- Input / validation: export実行前にk3d検証用テストユーザー・組織を除外対象として特定し、`withPasswords`/`withOtp`が無効化されていることを確認する
+- Output / destination: 本番Zitadelへのimport、および本番Terraform state更新
 - Idempotency & recovery: 移行失敗時はauthentik構成への切り戻し手順(Requirement 7.5)を実行する
 
 **Implementation Notes**
-- Integration: pg_dump/pg_restoreはZitadelのスキーマバージョンが一致する前提で実施する(k3dと本番のZitadelイメージタグを揃える)
-- Validation: pg_restore後、本番Zitadelでterraform planを実行しdriftがないことを確認する
-- Risks: pg_dump対象からテストユーザーを漏れなく除外できないと試験データが本番へ混入するため、除外確認を移行手順のチェックリストに含める
+- Integration: export/importはZitadel公式Admin API(masterkeyに依存しないアプリケーションレイヤーのデータ移行)を用いるため、k3dと本番でmasterkeyが異なっていても安全に移行できる
+- Validation: import後、本番Zitadelでterraform planを実行しdriftがないことを確認する
+- Risks: export対象からテストユーザー・組織を漏れなく除外できないと試験データが本番へ混入するため、除外確認を移行手順のチェックリストに含める
 
 ## Error Handling
 
@@ -471,20 +471,20 @@ prod-node-1はシングルノードでメモリ余裕がなく、authentik/Zitad
 ```mermaid
 flowchart TD
     A[Zitadel IaC構築 Terraform Ansible Bootstrap] --> B[Zitadel k3d検証 セキュリティ 機能テスト]
-    B --> C[k3d Zitadel DBをpg_dump テストユーザー除外]
+    B --> C[k3d Zitadel Admin APIでexport テストユーザー除外 パスワード含めず]
     C --> D[本番Zitadelデプロイ 空DB]
     D --> E[本番でTerraform apply project role application action再現]
-    E --> F[必要なインスタンス設定のみpg_restore反映]
+    E --> F[Admin API importでインスタンス設定反映]
     F --> G[Dovecot Lua Auth Bridge切替]
     G --> H[RPアプリ OIDC Client切替 CMS Vaultwarden Roundcube]
-    H --> I[vaultwarden rbac sync webhook常駐化切替]
+    H --> I[vaultwarden rbac sync webhook常駐化切替 不安定ならスコープ除外]
     I --> J[既存ユーザー招待ベース移行]
     J --> K[authentik停止 撤去]
     K -->|重大障害時| L[authentik構成へ切り戻し]
 ```
 
-- Phase A-B: k3d等の使い捨て環境で構築・検証(本specのRequirement 9, 10を満たす)
-- Phase C: k3d Zitadelのバックエンドpostgresをpg_dumpで取得する前に、testuser等の検証専用データを削除しクリーンな状態にする(Requirement 7.4)
-- Phase D-F: 本番Zitadelは空のDBから起動し、project/role/application/actionはTerraformで改めてapplyして再現する(Requirement 7.2)。Terraformで管理しきれないインスタンス設定のみpg_restoreで補完する(Requirement 7.3)
-- Phase G-J: authentikとZitadelの並行稼働は切替作業中の短期間のみとし、RPアプリ・メール認証・RBAC同期・ユーザー移行を順次切り替える
+- Phase A-B: k3d等の使い捨て環境で構築・検証(本specのRequirement 9, 10を満たす)。CNPGベースでのメモリ実測(Requirement 1.5)もここで確定する
+- Phase C: k3d ZitadelのAdmin API export(`withPasswords`/`withOtp`無効化)を取得する前に、testuser等の検証専用組織・ユーザーを除外対象として特定する(Requirement 7.4)。pg_dump/pg_restoreはmasterkey不一致で復号不能になるため採用しない
+- Phase D-F: 本番Zitadelは空のDBから起動し、project/role/application/actionはTerraformで改めてapplyして再現する(Requirement 7.2)。Terraformで管理しきれないインスタンス設定のみAdmin API importで補完する(Requirement 7.3)
+- Phase G-J: authentikとZitadelの並行稼働は切替作業中の短期間のみとし、RPアプリ・メール認証・RBAC同期・ユーザー移行を順次切り替える。vaultwarden-rbac-syncのイベント駆動化がk3d検証で不安定と判明した場合はこのフェーズからスコープ除外してよい(Requirement 4.4)
 - Phase K直前まで、authentik構成への切り戻し手順(Requirement 7.5)を維持する

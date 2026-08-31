@@ -8,6 +8,8 @@
   - Actions v2はZitadel→外部エンドポイントへのpush型webhookで、`ZITADEL-Signature`ヘッダ(HMAC)による署名検証が可能。vaultwarden-rbac-syncのイベント駆動化はこの機構で実現できる。
   - プロジェクトの「Assert Roles on Authentication」設定により、ロールをOIDC ID Token/Userinfoの`urn:zitadel:iam:org:project:roles`クレームへ配布できる。これがRequirement 8のDiscordロール的フラットRBACの実装手段になる。
   - Zitadel公式Terraform providerは100種類超のresourceを持ち、project/role/application/action(webhook)まで一通りIaC管理可能。
+  - Zitadelは環境間データ移行用の公式Admin API(`POST /admin/v1/export`/`POST /admin/v1/import`)を持つ。pg_dump/pg_restoreによるバックエンドDB直接移行は、masterkeyが環境ごとに異なると復号不能になる問題があるため不採用とし、この公式APIへ切り替えた。
+  - dig調査により、k3d実測(素のpostgresコンテナ)367MiBは本番CNPG構成(instance-manager・barman WALアーカイブ込み)と乖離があると判明。Requirement 1.5でCNPGベースの実測を追加要件化した。
 
 ## Research Log
 
@@ -108,11 +110,23 @@
 - **Selected Approach**: 1(Ansible例外ブートストラップ)を採用
 - **Rationale**: `infisical-auth` Secret作成という既存の前例があり、運用者にとって一貫した理解しやすいパターンになる
 
+### Decision: k3d→本番のデータ移行はZitadel公式Admin API(export/import)を採用しpg_dump/pg_restoreを撤回する
+- **Context**: 前バージョンのdesign.mdはk3d Zitadelのpostgresをpg_dumpし本番CNPGクラスタへpg_restoreする方式を採用していたが、dig調査でmasterkey不一致問題が発覚した。Zitadelのmasterkeyは環境ごとに独立して生成されるべきものであり(公式ドキュメント・コミュニティ回答で明言)、pg_dumpされた暗号化データを別のmasterkeyを持つ環境へpg_restoreすると復号できず、静かに壊れるか壊滅的に失敗する
+- **Alternatives Considered**:
+  1. pg_dump/pg_restoreを維持しmasterkeyをk3d/本番で固定ピン留めする — 復元は保証されるが、masterkeyを`infisical-auth`同様のライフサイクル管理対象にする追加負担が生じる
+  2. pg_dump/pg_restore自体をやめ、Terraform管理外のUI操作設定を本番で手動再現する — masterkeyの罠を回避できるが、UI専用設定の洗い出しと手動再現作業が別途必要
+  3. Zitadel公式Admin API(`POST /admin/v1/export`/`POST /admin/v1/import`)を使う — 組織・ユーザー・プロジェクト・アプリケーション・ロール・IDP設定をアプリケーションレイヤーのデータとして移行するため、DB暗号化キー(masterkey)に依存しない
+- **Selected Approach**: 3(Zitadel公式Export/Import API)を採用
+- **Rationale**: masterkeyの罠を構造的に回避でき、かつUI専用設定も含めて公式にサポートされた手段で一括移行できる。手動再現(案2)より作業量が少なく、masterkey固定(案1)より運用上のシークレット管理負担が少ない
+- **Trade-offs**: export/importの対象範囲(withPasswords/withOtp等)を事前に精査する必要があり、パスワードハッシュを含めるかどうかは招待ベース移行(Requirement 6)の方針と重複しないよう調整が必要
+- **Follow-up**: 実装時にexport対象からk3d検証用テストユーザーを除外する具体的なフィルタ(`excludedOrgIds`等)を確定する
+
 ## Risks & Mitigations
-- Actions v2のEvent条件Executionが2026年時点でリグレッション報告あり(#12225) — k3d検証環境での安定性検証を必須プロセスとして組み込む(Requirement 4.3)
+- Actions v2のEvent条件Executionが2026年時点でリグレッション報告あり(#12225) — k3d検証環境での安定性検証を必須プロセスとして組み込む(Requirement 4.3)。不安定と判明した場合はvaultwarden-rbac-syncのイベント駆動化自体をスコープ除外してよい(Requirement 4.4)
 - Zitadel Session APIのPAT権限が「IAM_OWNER相当」前提でドキュメント化されている — 実際に絞り込める最小スコープを実装前に検証しないと、メール認証コンポーネントが過大な権限を持つリスクがある
-- login UI(Node.js)を含めた実メモリがK3sシングルノードのオーバーコミットに影響する可能性 — 設計フェーズでlimits/requestsを確定し、Requirement 1.3の基準値と照合する
+- login UI(Node.js)を含めた実メモリがK3sシングルノードのオーバーコミットに影響する可能性 — 素のpostgresコンテナでなくCNPGベースで実測し直し、Requirement 1.5の基準値と照合する
 - Dovecot Lua Auth Bridgeの実装がZitadel API障害時にメール認証の単一障害点になる — フェイルモード(一時エラー扱い)を明確に実装し監視を強化する
+- Zitadel Export/Import APIのwithPasswords/withOtpオプションを誤って有効化すると、招待ベース移行(Requirement 6)の設計と矛盾する形で認証情報が持ち込まれるリスクがある — 実装時に明示的にオプションを無効化し、ユーザーは招待コードで移行する方針を維持する
 
 ## References
 - [ZITADEL as LDAP Server (未実装)](https://github.com/zitadel/zitadel/discussions/1929) — LDAPサーバ機能非対応の根拠
@@ -125,3 +139,6 @@
 - [GLAuth Backends](https://glauth.github.io/docs/backends.html) — GLAuth不採用の根拠
 - [Resend an invite code for a user](https://zitadel.com/docs/apis/resources/user_service_v2/user-service-resend-invite-code) — 招待コードが初回セットアップ専用でありパスワードリセットとは別体系である根拠
 - [Password Reset hidden (questions.zitadel.com)](https://questions.zitadel.com/m/1347316217127374991) — `hidePasswordReset`設定の既知の不具合報告、LLDAP翻訳層案不採用の決め手
+- [ExportData | ZITADEL Docs](https://zitadel.com/docs/apis/resources/admin/admin-service-export-data) — 環境間データ移行の公式Export API仕様
+- [ImportData | ZITADEL Docs](https://zitadel.com/docs/reference/api/admin/zitadel.admin.v1.AdminService.ImportData) — 環境間データ移行の公式Import API仕様
+- [Restoring backup DB doesn't work (questions.zitadel.com)](https://questions.zitadel.com/m/1328367071301734492) — pg_dump/pg_restoreとmasterkey不一致問題の実例
