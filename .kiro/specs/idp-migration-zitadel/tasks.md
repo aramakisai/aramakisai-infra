@@ -1,6 +1,6 @@
 # Implementation Plan
 
-> **PoC(概念実証)としての実装計画**: 本タスク群はk3d等の使い捨て検証環境でのZitadel実現可能性検証を主眼とする。task 7(段階的カットオーバー)・9.7(ロールバック実地検証)を含め、本番prod-node-1への実際のカットオーバーはこのPoCの結果を踏まえて別途承認・着手を判断する。
+> **PoC(概念実証)としての実装計画**: 本タスク群はk3d等の使い捨て検証環境でのZitadel実現可能性検証を主眼とする。task 9(バックアップ移行による本番カットオーバー)を含め、本番prod-node-1への実際の移行作業はこのPoCの結果を踏まえて別途承認・着手を判断する。
 
 - [ ] 1. Zitadel基盤のk3d検証環境構築とブートストラップ
 - [ ] 1.1 Zitadelをk3d検証環境へデプロイする
@@ -130,27 +130,15 @@
   - 招待メール受信からユーザーが初回ログインに成功するまでを確認する
   - _Requirements: 6.1, 6.2, 6.3_
 
-- [ ] 7. 段階的カットオーバーとロールバック手順の整備
-- [ ] 7.1 新旧並行稼働可能な切替順序を定義する
-  - authentikとZitadelが並行稼働する期間中のRPアプリ・メール認証の切替順序をGitOps原則(`gitops/`配下変更→ArgoCD sync)に従って定義する
-  - 定義した切替順序通りに1つのRPアプリを切り替えても他のRPアプリ・メール認証に影響がないことを確認する
-  - _Requirements: 7.1, 7.3_
-  - _Depends: 2, 3, 4, 5_
-
-- [ ] 7.2 authentik構成への切り戻し手順を整備する
-  - Zitadel切替後に重大な認証障害が発生した場合の、旧authentik構成への切り戻し手順を作成する
-  - _Requirements: 7.2_
-  - _Depends: 7.1_
-
-- [ ] 8. セキュリティ検証(モンキーテスト)
-- [ ] 8.1 (P) ブルートフォース対策とユーザー列挙耐性を検証する
+- [ ] 7. セキュリティ検証(モンキーテスト)
+- [ ] 7.1 (P) ブルートフォース対策とユーザー列挙耐性を検証する
   - 誤ったパスワードでの連続ログイン試行に対するレート制限/アカウント一時ロックアウトを検証する
   - 存在しないユーザー名でのログイン試行が実在ユーザーの誤パスワード試行と区別不能なレスポンスを返すことを確認する
   - _Requirements: 9.1, 9.2_
   - _Boundary: Zitadel Core_
   - _Depends: 1.1_
 
-- [ ] 8.2 (P) 認可コードreplay・PKCE不一致・redirect_uri改ざんを検証する
+- [ ] 7.2 (P) 認可コードreplay・PKCE不一致・redirect_uri改ざんを検証する
   - 発行済み認可コードの2回目使用が拒否されることを確認する
   - PKCE code_verifier不一致でのトークン交換が拒否されることを確認する
   - redirect_uri改ざんによる認可コード発行が拒否されエラーが返ることを確認する
@@ -158,55 +146,89 @@
   - _Boundary: Zitadel Core_
   - _Depends: 2.2_
 
-- [ ] 8.3 (P) 招待コードの期限切れ・再利用防止を検証する
+- [ ] 7.3 (P) 招待コードの期限切れ・再利用防止を検証する
   - 有効期限切れまたは2回目使用の招待コードで招待完了(パスワード設定)が拒否されることを確認する
   - _Requirements: 9.6_
   - _Boundary: Zitadel Core_
   - _Depends: 6.1_
 
-- [ ] 8.4 セキュリティ検証結果を記録として残す
+- [ ] 7.4 セキュリティ検証結果を記録として残す
   - 上記モンキーテストのテストスクリプトと結果をk3d検証環境の記録として保存する
   - _Requirements: 9.7_
-  - _Depends: 8.1, 8.2, 8.3_
+  - _Depends: 7.1, 7.2, 7.3_
 
-- [ ] 9. 機能検証(正常系動作確認)
-- [ ] 9.1 (P) OIDC Authorization Code Flow + PKCEのE2E成功を確認する
+- [ ] 8. 機能検証(正常系動作確認)
+- [ ] 8.1 (P) OIDC Authorization Code Flow + PKCEのE2E成功を確認する
   - 正しいユーザー名・パスワードで認可コード発行・トークン交換・Userinfo取得までEnd-to-Endで成功することを確認する
   - _Requirements: 10.1_
   - _Boundary: Zitadel Core_
   - _Depends: 2.2_
 
-- [ ] 9.2 (P) 各RPアプリの実ログインを確認する
+- [ ] 8.2 (P) 各RPアプリの実ログインを確認する
   - CMS/Vaultwarden/Roundcubeそれぞれで実際にOIDCログインしセッションが開始されることを確認する
   - _Requirements: 10.2_
   - _Boundary: CMS, Vaultwarden, Roundcube_
   - _Depends: 5.1, 5.2, 5.3_
 
-- [ ] 9.3 (P) Dovecot認証(一般IMAP/POP3・Roundcube)の動作を確認する
+- [ ] 8.3 (P) Dovecot認証(一般IMAP/POP3・Roundcube)の動作を確認する
   - 一般IMAP/POP3クライアントが正しいパスワードで認証しmail属性・ACLグループが正しく返ることを確認する
   - RoundcubeのOAUTHBEARER/XOAUTH2認証がintrospection成功後にログイン許可されることを確認する
   - _Requirements: 10.3, 10.4_
   - _Boundary: Dovecot Lua Auth Bridge_
   - _Depends: 3.2, 3.4_
 
-- [ ] 9.4 (P) vaultwarden-rbac-syncの反映を確認する
+- [ ] 8.4 (P) vaultwarden-rbac-syncの反映を確認する
   - ユーザーのグループ/ロール割り当て変更がActions v2 webhook経由で検知されVaultwarden Collection権限へ反映されることを確認する
   - 反映までの実測遅延を記録する
   - _Requirements: 10.5_
   - _Boundary: vaultwarden-rbac-sync_
   - _Depends: 4.2_
 
-- [ ] 9.5 招待フローのE2E成功を確認する
+- [ ] 8.5 招待フローのE2E成功を確認する
   - 招待メール受信からリンク遷移・パスワード設定・初回ログインまでEnd-to-Endで成功することを確認する
   - _Requirements: 10.6_
   - _Depends: 6.1_
 
-- [ ] 9.6 ロールクレームの反映を確認する
+- [ ] 8.6 ロールクレームの反映を確認する
   - ユーザーにロールを付与した際、OIDC ID Token/Userinfoのクレームへ設計通り反映されることを確認する
   - _Requirements: 10.7_
   - _Depends: 2.1_
 
-- [ ] 9.7 ロールバック手順を実地検証する
+- [ ] 9. バックアップ移行による本番カットオーバーとロールバック
+  - prod-node-1でのauthentik/Zitadel長期並行稼働を避けるため、k3dで検証済みのZitadel設定をバックアップ経由で本番へ持ち込み一括カットオーバーする(Requirement 7、セキュリティ・機能検証完了後に実施)
+- [ ] 9.1 k3d検証用テストデータを削除しpg_dumpを取得する
+  - testuser等の検証専用アカウント・データをk3d Zitadelから削除する
+  - クリーンな状態のk3d Zitadelバックエンドpostgresをpg_dumpで取得する
+  - _Requirements: 7.4_
+  - _Depends: 7, 8_
+
+- [ ] 9.2 本番Zitadelをデプロイしproject/role/application/actionを再現する
+  - 本番用のZitadel manifest(namespace/StatefulSet/Service/CNPG DBクラスタ/ExternalSecret)を空DBの状態でデプロイする
+  - Ansible Zitadelブートストラップを本番で実行しTerraform provider用PATを発行する
+  - 既存のTerraformコード(project/role/application/action)を本番Zitadelへterraform applyし、k3dと同じ設定が再現されることを確認する
+  - _Requirements: 7.2_
+  - _Depends: 9.1_
+
+- [ ] 9.3 Terraform管理外のインスタンス設定をpg_restoreで反映する
+  - masterkey生成物やAssert Roles on Authentication等、Terraformで管理しきれないインスタンス設定の差分を洗い出す
+  - 9.1で取得したpg_dumpから該当設定のみ本番CNPGクラスタへpg_restoreで反映する
+  - pg_restore後にterraform planを実行しdriftがないことを確認する
+  - _Requirements: 7.3_
+  - _Depends: 9.2_
+
+- [ ] 9.4 一括カットオーバー順序を実行する
+  - Dovecot Lua Auth Bridge・RPアプリ(CMS/Vaultwarden/Roundcube)OIDC Client・vaultwarden-rbac-sync webhookの順に本番切替を実行する
+  - 既存ユーザーへの招待ベース移行(task 6)を本番Zitadelに対して実施する
+  - 切替完了後、全RPアプリ・メール認証が本番Zitadel経由で正常に機能することを確認する
+  - _Requirements: 7.1_
+  - _Depends: 9.3_
+
+- [ ] 9.5 authentik構成への切り戻し手順を整備する
+  - Zitadel切替後に重大な認証障害が発生した場合の、旧authentik構成への切り戻し手順を作成する
+  - _Requirements: 7.5, 7.6_
+  - _Depends: 9.4_
+
+- [ ] 9.6 ロールバック手順を実地検証する
   - 旧authentik構成への切り戻し手順を実際に実行し、切り戻し後に既存アプリのログインが復旧することを確認する
   - _Requirements: 10.8_
-  - _Depends: 7.2_
+  - _Depends: 9.5_

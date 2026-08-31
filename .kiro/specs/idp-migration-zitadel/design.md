@@ -29,7 +29,7 @@
 - Dovecot lua passdb経由のZitadel Session API認証委譲の実装
 - vaultwarden-rbac-syncのActions v2 webhook対応への書き換え(CronJob方式からの移行含む)
 - 既存ユーザー・グループデータの招待ベース移行手順
-- 段階的カットオーバー・ロールバック手順
+- バックアップ移行による一括カットオーバー・ロールバック手順
 - Terraform provider認証(PAT/Service User)のAnsibleブートストラップ手順
 - セキュリティ検証(モンキーテスト)・機能検証(正常系E2E)の実施
 
@@ -137,6 +137,9 @@ terraform/
 ansible/
 └── roles/zitadel-bootstrap/  # 初回admin/PAT発行、Infisical登録(infisical-authと同じ例外パターン)
 
+scripts/
+└── zitadel-backup-migration.sh  # k3d Zitadel Postgresのpg_dump取得(テストユーザー除外確認込み)・本番CNPGへのpg_restore
+
 gitops/
 ├── apps/prod/zitadel.yaml           # ArgoCD Application定義
 └── manifests/prod/zitadel/
@@ -150,7 +153,7 @@ gitops/manifests/prod/mailserver/
 └── dovecot-lua-auth-external-secret.yaml  # Zitadel PAT等をluaスクリプトへ注入(新規)
 
 gitops/manifests/prod/vaultwarden-rbac-sync/
-└── (CronJob定義を削除し、常駐Deployment + Service + Ingressへ置換)
+└── (CronJob定義を削除し、常駐Deployment + クラスタ内Serviceへ置換。外部公開なし)
 ```
 
 ### Modified Files
@@ -248,7 +251,7 @@ sequenceDiagram
 | 4.1-4.3 | RBAC同期 | vaultwarden-rbac-sync(webhook常駐版) | Actions v2 webhook | vaultwarden-rbac-syncイベント駆動フロー |
 | 5.1-5.3 | Discord縮小・ACL真実源泉 | Zitadel Core(OIDC IdP設定、Project Role) | OAuth2 Source | - |
 | 6.1-6.3 | ユーザー移行 | Zitadel Core | Invite Code API | 招待オンボーディングフロー |
-| 7.1-7.3 | 段階的カットオーバー | Terraform IaC, GitOps | - | - |
+| 7.1-7.6 | バックアップ移行による一括カットオーバー | Terraform IaC, GitOps, Zitadel Backup Migration | pg_dump/pg_restore | Migration Strategy |
 | 8.1-8.3 | フラットRBAC | Zitadel Core(Project Role) | OIDC roles claim | OIDCログインフロー |
 | 9.1-9.7 | セキュリティ検証 | Zitadel Core | Session/OIDC API | - |
 | 10.1-10.8 | 機能検証 | 全コンポーネント | - | 全フロー |
@@ -263,6 +266,7 @@ sequenceDiagram
 | vaultwarden-rbac-sync(webhook常駐版) | RBAC連携 | ロール変更のイベント駆動反映 | 4, 10 | Zitadel Actions v2 (P0), Vaultwarden API (P0) | Event, API |
 | Zitadel Terraform Provider定義 | IaC | Project/Role/Application/Actionの宣言的管理 | 2, 4, 7, 8 | Terraform Cloud (P1), Ansible Bootstrap発行PAT (P0) | - |
 | Ansible Zitadel Bootstrap | 初期化 | Zitadel初回admin/PAT発行・Infisical登録 | 11 | Zitadel Core (P0) | - |
+| Zitadel Backup Migration | 移行 | k3d検証環境のZitadel設定を本番へバックアップ移行する一括カットオーバー手順 | 7 | k3d Zitadel Postgres (P0), 本番CNPGクラスタ (P0), Zitadel Terraform Provider定義 (P0) | Batch |
 
 ### IdP Core
 
@@ -388,6 +392,38 @@ Session成功後、Management APIでuser_grant(ロール)を取得し、Requirem
 - Output / destination: InfisicalへPAT/Service User Token登録
 - Idempotency & recovery: 既発行トークンが存在する場合はスキップまたは再発行の運用手順(Requirement 11.3)に従う
 
+### 移行
+
+#### Zitadel Backup Migration
+
+| Field | Detail |
+|-------|--------|
+| Intent | k3d検証環境で構築・検証済みのZitadel設定を本番へ移行し、長期並行稼働を避ける一括カットオーバーを実現する |
+| Requirements | 7.1, 7.2, 7.3, 7.4 |
+
+**Responsibilities & Constraints**
+- project/role/application/actionはTerraform管理下のためk3dバックアップに含めず、本番で改めてterraform applyして再現する(Requirement 7.2)
+- Terraformで管理しきれないインスタンスレベルの設定(masterkey生成物・Assert Roles on Authentication等のUI操作分)のみ、k3d ZitadelのPostgresをpg_dumpし本番CNPGクラスタへpg_restoreで反映する(Requirement 7.3)
+- pg_dump取得前にk3d検証用テストユーザー(testuser等)を削除し、本番へ試験データを持ち込まない(Requirement 7.4)
+
+**Dependencies**
+- Inbound: k3d Zitadel Postgres — pg_dump取得元 (P0)
+- Outbound: 本番CNPGクラスタ — pg_restore先 (P0)
+- Outbound: Zitadel Terraform Provider定義 — project/role/application/actionの本番再現 (P0)
+
+**Contracts**: Batch [x]
+
+##### Batch / Job Contract
+- Trigger: k3d環境でのRequirement 9(セキュリティ検証)・Requirement 10(機能検証)完了後、手動実行
+- Input / validation: pg_dump実行前にk3d検証用テストユーザーが削除済みであることを確認する
+- Output / destination: 本番CNPGクラスタへのpg_restore、および本番Terraform state更新
+- Idempotency & recovery: 移行失敗時はauthentik構成への切り戻し手順(Requirement 7.5)を実行する
+
+**Implementation Notes**
+- Integration: pg_dump/pg_restoreはZitadelのスキーマバージョンが一致する前提で実施する(k3dと本番のZitadelイメージタグを揃える)
+- Validation: pg_restore後、本番Zitadelでterraform planを実行しdriftがないことを確認する
+- Risks: pg_dump対象からテストユーザーを漏れなく除外できないと試験データが本番へ混入するため、除外確認を移行手順のチェックリストに含める
+
 ## Error Handling
 
 ### Error Strategy
@@ -430,18 +466,25 @@ k3d等の使い捨て検証環境で実施し、テストスクリプトと結�
 
 ## Migration Strategy
 
+prod-node-1はシングルノードでメモリ余裕がなく、authentik/Zitadelの長期並行稼働(段階的カットオーバー)はオーバーコミットを悪化させるため採用しない。代わりに、k3d検証環境で構築・検証済みのZitadel設定をバックアップ経由で本番へ持ち込み、並行稼働期間を最小化する一括カットオーバー方式を採る(Requirement 7)。
+
 ```mermaid
 flowchart TD
     A[Zitadel IaC構築 Terraform Ansible Bootstrap] --> B[Zitadel k3d検証 セキュリティ 機能テスト]
-    B --> C[本番Zitadelデプロイ 並行稼働開始]
-    C --> D[Dovecot Lua Auth Bridge切替]
-    D --> E[RPアプリ OIDC Client切替 CMS Vaultwarden Roundcube]
-    E --> F[vaultwarden rbac sync webhook常駐化切替]
-    F --> G[既存ユーザー招待ベース移行]
-    G --> H[authentik停止 撤去]
-    H -->|重大障害時| I[authentik構成へ切り戻し]
+    B --> C[k3d Zitadel DBをpg_dump テストユーザー除外]
+    C --> D[本番Zitadelデプロイ 空DB]
+    D --> E[本番でTerraform apply project role application action再現]
+    E --> F[必要なインスタンス設定のみpg_restore反映]
+    F --> G[Dovecot Lua Auth Bridge切替]
+    G --> H[RPアプリ OIDC Client切替 CMS Vaultwarden Roundcube]
+    H --> I[vaultwarden rbac sync webhook常駐化切替]
+    I --> J[既存ユーザー招待ベース移行]
+    J --> K[authentik停止 撤去]
+    K -->|重大障害時| L[authentik構成へ切り戻し]
 ```
 
 - Phase A-B: k3d等の使い捨て環境で構築・検証(本specのRequirement 9, 10を満たす)
-- Phase C-G: 新旧並行稼働を維持しながら段階的に切替(Requirement 7.1)
-- Phase H直前まで、authentik構成への切り戻し手順(Requirement 7.2)を維持する
+- Phase C: k3d Zitadelのバックエンドpostgresをpg_dumpで取得する前に、testuser等の検証専用データを削除しクリーンな状態にする(Requirement 7.4)
+- Phase D-F: 本番Zitadelは空のDBから起動し、project/role/application/actionはTerraformで改めてapplyして再現する(Requirement 7.2)。Terraformで管理しきれないインスタンス設定のみpg_restoreで補完する(Requirement 7.3)
+- Phase G-J: authentikとZitadelの並行稼働は切替作業中の短期間のみとし、RPアプリ・メール認証・RBAC同期・ユーザー移行を順次切り替える
+- Phase K直前まで、authentik構成への切り戻し手順(Requirement 7.5)を維持する

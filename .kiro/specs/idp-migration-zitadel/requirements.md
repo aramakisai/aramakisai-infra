@@ -76,13 +76,16 @@
 2. The 移行手順 shall Zitadelの招待コードAPI(`CreateInviteCode`/`ResendInviteCode`)を用いた招待メール送信フローで初回オンボーディングを行う
 3. If 移行後にあるユーザーが新IdPへログインできない, then 移行手順 shall 原因調査手順とロールバック手順を提供する
 
-### Requirement 7: 段階的カットオーバーとロールバック
-**Objective:** As a インフラ運用担当者, I want IdP切替を安全に実施しリスクを最小化する, so that 実行委員会の業務アプリに障害を起こさず移行できる
+### Requirement 7: バックアップ移行によるカットオーバーとロールバック
+**Objective:** As a インフラ運用担当者, I want prod-node-1(シングルノード)でのauthentik/Zitadel長期並行稼働を避けつつIdP切替を安全に実施する, so that メモリオーバーコミットを悪化させずリスクを最小化して移行できる
 
 #### Acceptance Criteria
-1. While 移行作業中に一部アプリが旧authentikを参照している, the 移行手順 shall 新旧並行稼働可能な切替順序を定義する
-2. If 新IdPへの切替後に重大な認証障害が発生する, then 移行手順 shall 旧authentik構成への切り戻し手順を含む
-3. The 移行手順 shall GitOps原則(`gitops/`配下のマニフェスト変更→ArgoCD sync)に従い、クラスタへの直接kubectl操作を行わない
+1. The 移行手順 shall prod-node-1上でのauthentik/Zitadel長期並行稼働(段階的カットオーバー)を採用せず、k3d検証環境で構築済みのZitadel設定を本番へ持ち込む一括カットオーバー方式を採用する
+2. The 移行手順 shall Zitadel Terraform管理下のリソース(project/role/application/action)をIaCとして本番で改めてterraform applyし再現する
+3. Where Terraformで管理しきれないインスタンスレベルの設定(masterkey生成物・Assert Roles on Authentication等のUI操作分)が存在する場合, the 移行手順 shall k3d環境のZitadelバックエンドDBをpg_dumpで取得し本番Zitadel用CNPGクラスタへpg_restoreで反映する
+4. The 移行手順 shall pg_restore対象からk3d検証用テストユーザー・検証専用データを除外し、本番環境へ試験データを持ち込まない
+5. If 新IdPへの切替後に重大な認証障害が発生する, then 移行手順 shall 旧authentik構成への切り戻し手順を含む
+6. The 移行手順 shall GitOps原則(`gitops/`配下のマニフェスト変更→ArgoCD sync)に従い、クラスタへの直接kubectl操作を行わない
 
 ### Requirement 8: RBAC設計方針(シンプルなロール運用)
 **Objective:** As a 実行委員会運営担当者, I want authentikにあった細粒度permission管理(view_group/reset_user_password等)ではなくDiscordロール相当の単純なロール運用を行う, so that 権限設計の学習・運用コストを最小化できる
@@ -115,7 +118,7 @@
 5. When ユーザーのグループ/ロール割り当てを変更する, the vaultwarden-rbac-sync shall Actions v2 webhook経由で変更を検知しVaultwarden Collection権限へ反映する(反映までの実測遅延を記録する)
 6. When 新規ユーザーへ招待コードを発行する, the 移行手順 shall 招待メール受信→リンク遷移→パスワード設定→初回ログインまでEnd-to-Endで成功することを確認する
 7. When ユーザーにロールを付与する, the 新IdP shall OIDC ID Token/UserinfoのクレームにロールがRequirement 8の設計通り反映されることを確認する
-8. The 移行手順 shall 旧authentik構成への切り戻し手順(Requirement 7.2)を実際に実行し、切り戻し後に既存アプリのログインが復旧することを検証する
+8. The 移行手順 shall 旧authentik構成への切り戻し手順(Requirement 7.5)を実際に実行し、切り戻し後に既存アプリのログインが復旧することを検証する
 
 ### Requirement 11: Terraformプロバイダー認証のブートストラップ
 **Objective:** As a インフラ運用担当者, I want ZitadelのTerraform providerが必要とする管理者トークンを安全にブートストラップする, so that project/role/applicationのIaC管理を開始できる
