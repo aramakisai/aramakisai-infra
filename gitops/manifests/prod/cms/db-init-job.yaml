@@ -28,7 +28,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: db-init
-          image: ghcr.io/cloudnative-pg/postgresql:16.8
+          image: ghcr.io/cloudnative-pg/postgresql:16.15
           command: [sh, -c]
           args:
             - |
