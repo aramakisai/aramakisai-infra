@@ -108,6 +108,7 @@ graph TB
   - vaultwarden-rbac-sync webhook受信エンドポイント — Actions v2がpush型webhookのみでpull型APIポーリングを代替しないため、既存CronJob方式から常駐受信方式への構成変更が必須
   - Ansible Zitadel Bootstrap — Terraform providerがZitadel管理者PATを要求するため、`infisical-auth`と同様のGitOps外例外的初期化が必須
 - Steering準拠: GitOps原則(`gitops/`配下変更→ArgoCD sync、クラスタへの直接kubectl操作禁止)を維持しつつ、Ansibleブートストラップの例外を`infisical-auth`と同一の位置づけで明示的に記録する
+- 適用順序の例外: steering標準のTerraform→Ansible→ArgoCD順とは逆に、`zitadel_*.tf`はArgoCDによるZitadelデプロイ完了+Ansibleブートストラップ完了後に適用する。既存`authentik_main.tf`(ArgoCDでauthentikデプロイ済みであることが前提)と同型の前例を踏襲する
 
 ### Technology Stack
 
@@ -319,6 +320,9 @@ sequenceDiagram
 | Method | Endpoint | Request | Response | Errors |
 |--------|----------|---------|----------|--------|
 | POST | /v2/sessions | checks.password(正規JSONエスケープ), loginName | sessionId, sessionToken | 401(認証失敗), 5xx/timeout(API障害) |
+| GET | Management API user grant一覧 | userId | ロール一覧 | 401, 404 |
+
+Session成功後、Management APIでuser_grant(ロール)を取得し、Requirement 3.3のACLグループ(mail属性含む)へマッピングする。vaultwarden-rbac-syncと同じManagement API問い合わせパターンを踏襲する。
 
 **Implementation Notes**
 - Integration: PATのスコープをSession API呼び出しに必要な最小権限へ絞れるか実装前に実機検証する(Requirement 3.4)
@@ -339,6 +343,7 @@ sequenceDiagram
 - webhookのat-least-once配信を前提に、同一イベントの重複処理に対して冪等に振る舞う
 - authentik固有APIへの依存を除去し、Zitadel Management/User APIへ置き換える
 - 既存CronJob + Trigger Receiver方式から常駐Deploymentへ構成変更し、Falco誤検知除外ルール(`gitops/helm-values/prod/falco.yaml`)を新プロセス形態に合わせて更新する
+- Zitadel・vaultwarden-rbac-syncとも同一クラスタ内Podのため、webhook送受信はクラスタ内Service経由で完結し、Ingress/cloudflared等の外部公開は不要とする
 
 **Dependencies**
 - Inbound: Zitadel Actions v2 — ロール変更イベント通知 (P0)
