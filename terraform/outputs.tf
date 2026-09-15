@@ -54,6 +54,30 @@ output "e2e_service_token_client_secret" {
   sensitive   = true
 }
 
+output "zitadel_cms_client_secret" {
+  description = "Zitadel CMS用OIDC Client Secret (apply後にInfisicalのCMS側SecretへPoC同様手動反映 / 機密情報)"
+  value       = zitadel_application_oidc.cms.client_secret
+  sensitive   = true
+}
+
+output "zitadel_vaultwarden_client_secret" {
+  description = "Zitadel Vaultwarden用OIDC Client Secret (apply後にInfisicalのVaultwarden側Secretへ手動反映 / 機密情報)"
+  value       = zitadel_application_oidc.vaultwarden.client_secret
+  sensitive   = true
+}
+
+output "zitadel_roundcube_client_secret" {
+  description = "Zitadel Roundcube用OIDC Client Secret (apply後にInfisicalのRoundcube側Secretへ手動反映 / 機密情報)"
+  value       = zitadel_application_oidc.roundcube.client_secret
+  sensitive   = true
+}
+
+output "zitadel_vaultwarden_rbac_sync_signing_key" {
+  description = "vaultwarden-rbac-sync Actions v2 webhook検証用signing_key (ZITADEL-Signatureヘッダの検証に使用 / 機密情報)"
+  value       = zitadel_action_target.vaultwarden_rbac_sync.signing_key
+  sensitive   = true
+}
+
 # Hetzner Object Storage は hcloud provider 非対応のため手動管理
 # バケット名: aramakisai-backups
 # output "object_storage_bucket" {
