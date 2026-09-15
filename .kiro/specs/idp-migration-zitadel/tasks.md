@@ -552,6 +552,11 @@
       Infisical `prod`環境に`ZITADEL_MASTERKEY`(32文字)・`ZITADEL_DB_PASSWORD`・`TF_VAR_zitadel_token`
       (有効なPAT)が登録済み。`idp.aramakisai.com`経由でのZitadel Terraform providerのgRPC接続は
       未解決のまま。`.zitadel-poc-secrets/zitadel-admin-sa.pat`に本番用PATが平文で保存されている。
+  - **追記6(2026-09-16、gRPC到達経路の設計解消)**: 上記追記5時点で「未解決のまま」だったgRPC到達性は、
+    design.mdの`Zitadel Provider Access Path`(および要件11.4-11.8)として解決策を確定済み。本タスクの
+    チェックリスト(cert-manager内部CA・TLS終端・`tunnel.tf`のHTTPS origin化・Cloudflareダッシュボードの
+    gRPC設定)が現在の実行順序であり、追記5の「未解決」および「Tailscale Operator案」は採用しなかった
+    過去の検討記録として残すのみ。以降このタスクを再開する場合は上記チェックリストに従うこと。
 
 - [ ] 9.3 Terraform管理外のインスタンス設定をAdmin API importで反映する
   - Assert Roles on Authentication等、Terraformで管理しきれないインスタンス設定の差分を洗い出す
