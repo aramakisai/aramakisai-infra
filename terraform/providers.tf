@@ -38,6 +38,10 @@ terraform {
       source  = "netdata/netdata"
       version = "~> 0.4"
     }
+    zitadel = {
+      source  = "zitadel/zitadel"
+      version = "~> 3.4"
+    }
   }
 
   # Terraform Cloud (HCP Terraform) 無料枠
