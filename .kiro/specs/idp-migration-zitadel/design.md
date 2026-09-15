@@ -17,8 +17,8 @@
 - Discordロール相当のシンプルなフラットロールRBACへ簡素化する
 
 ### Non-Goals
-- Discordロール自動同期・アバター自動取得・ログイン時動的グループ判定の再実装(Requirement 5)
-- authentik相当の細粒度permission管理(view_group/reset_user_password等)の再現(Requirement 8)
+- Discordロール自動同期・アバター自動取得・ログイン時動的グループ判定の再実装(Requirement 5)。`authentik_policies.tf`のDiscord連携必須アクセス動的ブロック機能もこのNon-Goalsと衝突するため廃止する(Requirement 16)
+- authentik相当の細粒度permission管理(view_group/reset_user_password等)の再現(Requirement 8)。ただし招待発行用SA(`authentik_student_exhibitor_recovery_sa.tf`)についてはZitadel組み込みの`ORG_USER_MANAGER`ロールで妥協なく代替できるため、この1件は例外的に「移行対象」であることをRequirement 14で明記する
 - 前spec [[idp-migration-authentik-to-authelia-lldap]] で構築したLLDAP資産の継続利用・移植(Requirement 3.5)
 
 ## Boundary Commitments
@@ -32,12 +32,19 @@
 - バックアップ移行による一括カットオーバー・ロールバック手順
 - Terraform provider認証(PAT/Service User)のAnsibleブートストラップ手順
 - セキュリティ検証(モンキーテスト)・機能検証(正常系E2E)の実施
+- 招待制登録・パスワードリカバリーの整理(`authentik_enrollment.tf`/`authentik_recovery.tf`の廃止、Requirement 12)
+- 出展団体アカウントの一括作成・招待運用の移行(`authentik_student_exhibitor_flow.tf`/`authentik_student_exhibitor_provisioning.tf`、Requirement 13)
+- 招待発行用SAの`ORG_USER_MANAGER`ロールへの移行(`authentik_student_exhibitor_recovery_sa.tf`、Requirement 14)
+- メーリングリストアドレスのDovecot完結化(`authentik_mailing_lists.tf`、Requirement 15)
+- Discord連携アクセス制御の廃止(`authentik_policies.tf`、Requirement 16)
+- Zitadelブランディング設定(Requirement 17)
 
 ### Out of Boundary
-- Discordロール自動同期・アバター自動取得・動的グループ判定の再実装
-- authentik相当の細粒度permission管理の再現
+- Discordロール自動同期・アバター自動取得・動的グループ判定の再実装(Discord連携必須アクセス制御を含む)
+- authentik相当の細粒度permission管理の再現(招待発行用SAの`ORG_USER_MANAGER`移行を除く)
 - LLDAP関連資産(前spec由来)の継続利用・移植
 - Zitadel自体のソースコード変更・フォーク
+- 学籍番号等のカスタム登録項目の再実装(必要な場合はRPアプリ側で別途収集する設計とし、本specの対象外とする)
 
 ### Allowed Dependencies
 - 既存GitOps基盤(ArgoCD、ExternalSecrets Operator、Infisical)
@@ -132,7 +139,10 @@ terraform/
 ├── zitadel_projects.tf      # Project定義(project role含む)
 ├── zitadel_applications.tf  # OIDC Client定義(CMS/Vaultwarden/Roundcube)
 ├── zitadel_actions.tf       # Actions v2 Target/Execution(webhook)定義
-└── zitadel_idp.tf           # Discordソーシャルログイン用OAuth2 IdP設定(該当する場合)
+├── zitadel_idp.tf           # Discordソーシャルログイン用OAuth2 IdP設定(該当する場合)
+├── zitadel_student_exhibitor.tf  # 出展団体の招待型初回パスワード設定+CSV一括zitadel_human_user(Requirement 13)
+├── zitadel_recovery_sa.tf   # 招待発行用Service User + ORG_USER_MANAGERロール割り当て(Requirement 14)
+└── zitadel_branding.tf      # zitadel_label_policy(配色/テーマモード/ウォーターマーク/ログイン名表示)+ロゴ・favicon・フォントアップロード(Requirement 17)
 
 ansible/
 └── roles/zitadel-bootstrap/  # 初回admin/PAT発行、Infisical登録(infisical-authと同じ例外パターン)
@@ -147,19 +157,34 @@ gitops/
     ├── statefulset.yaml             # Zitadel api/login コンテナ
     ├── service.yaml
     ├── db-cluster.yaml              # CNPG Cluster定義
-    └── external-secret.yaml         # DB接続情報・masterkey等
+    ├── external-secret.yaml         # DB接続情報・masterkey等
+    └── branding/                    # 荒牧祭2026公式ブランド素材(実行委員会提供、2026年4月13日制定のロゴ使用ガイドライン準拠)
+        ├── aramakisai.png           # ロゴ(light theme用、カラー版)
+        ├── aramakisai_W.png         # ロゴ(dark theme用、白版)
+        └── favicon.png              # favicon(light/dark共通、荒牧祭公式サイトの既存アイコンを流用)
 
 gitops/manifests/prod/mailserver/
-└── dovecot-lua-auth-external-secret.yaml  # Zitadel PAT等をluaスクリプトへ注入(新規)
+├── dovecot-lua-auth-external-secret.yaml  # Zitadel PAT等をluaスクリプトへ注入(新規)
+└── ml-userdb.conf.ext(仮)                 # メーリングリスト8件のmail属性・エイリアス解決用静的userdb(Requirement 15、authentik_mailing_lists.tf相当をDovecot側で完結)
 
 gitops/manifests/prod/vaultwarden-rbac-sync/
 └── (CronJob定義を削除し、常駐Deployment + クラスタ内Serviceへ置換。外部公開なし)
 ```
 
 ### Modified Files
-- `gitops/manifests/prod/mailserver/statefulset.yaml` — auth-ldap.conf.extを廃止しlua passdb設定を追加
+- `gitops/manifests/prod/mailserver/statefulset.yaml` — auth-ldap.conf.extを廃止しlua passdb設定を追加。ML用静的userdb(Requirement 15)のマウントも追加
 - `gitops/manifests/prod/vaultwarden-rbac-sync/*` — CronJob方式を常駐webhook受信Deploymentへ全面書き換え
 - `gitops/helm-values/prod/falco.yaml` — vaultwarden-rbac-syncの新プロセス形態(常駐Deployment)に合わせた誤検知除外ルールの見直し
+
+### 削除対象ファイル(authentik撤去に伴う、Requirement 12/15/16)
+- `terraform/authentik_enrollment.tf` — Requirement 12。学籍番号等カスタム項目は移行せず廃止
+- `terraform/authentik_recovery.tf` — Requirement 12。実質未使用と判明済み、Zitadel標準リカバリーへ置換
+- `terraform/authentik_mailing_lists.tf` — Requirement 15。Dovecot側userdbへ移行するためZitadel/authentik双方のuser定義が不要になる
+- `terraform/authentik_policies.tf` — Requirement 16。Discord連携必須アクセス動的ブロック機能ごと廃止
+- `terraform/authentik_student_exhibitor_flow.tf`, `terraform/authentik_student_exhibitor_provisioning.tf`, `terraform/authentik_student_exhibitor_recovery_sa.tf` — Requirement 13/14。`zitadel_student_exhibitor.tf`/`zitadel_recovery_sa.tf`へ置換
+- `terraform/authentik_brand.tf` — Requirement 17。`zitadel_branding.tf`へ置換
+
+※上記削除は本番カットオーバー(task9)でauthentikを撤去するタイミングに合わせて実施する。k3d PoC実装(task10、後述)ではZitadel側の新規リソースを作成・検証するのみで、authentik側ファイルの削除は行わない。
 
 ## System Flows
 
@@ -256,17 +281,24 @@ sequenceDiagram
 | 9.1-9.7 | セキュリティ検証 | Zitadel Core | Session/OIDC API | - |
 | 10.1-10.8 | 機能検証 | 全コンポーネント | - | 全フロー |
 | 11.1-11.3 | Terraformブートストラップ | Ansible Zitadel Bootstrap | Zitadel Admin API | - |
+| 12.1-12.2 | 招待制登録整理・パスワードリカバリー標準化 | Zitadel Core | Invite Code API | 招待オンボーディングフロー |
+| 13.1-13.2 | 出展団体アカウント移行 | Zitadel Core, Terraform IaC | Invite Code API, zitadel_human_user | 招待オンボーディングフロー |
+| 14.1-14.3 | 招待発行用SAの最小権限移行 | Zitadel Terraform Provider定義 | ORG_USER_MANAGERロール | - |
+| 15.1-15.2 | メーリングリストDovecot完結化 | Dovecot Lua Auth Bridge(userdb) | Dovecot static/SQL userdb | - |
+| 16.1-16.2 | Discordアクセス制御廃止 | Zitadel Core(OIDC IdP設定) | OAuth2 Source | - |
+| 17.1-17.8 | ブランディング設定 | Zitadel Branding | Label Policy API | - |
 
 ## Components and Interfaces
 
 | Component | Domain/Layer | Intent | Req Coverage | Key Dependencies (P0/P1) | Contracts |
 |-----------|--------------|--------|--------------|--------------------------|-----------|
-| Zitadel Core | IdP | OIDC Provider・ユーザー/ロール管理・招待発行・メール認証真正情報源 | 1, 2, 5, 6, 8, 9, 10 | CNPG Postgres (P0) | API, State |
-| Dovecot Lua Auth Bridge | メール認証 | IMAP/POP3認証をZitadel Session APIへ委譲 | 3, 10 | Zitadel Core Session API (P0) | API |
+| Zitadel Core | IdP | OIDC Provider・ユーザー/ロール管理・招待発行・メール認証真正情報源 | 1, 2, 5, 6, 8, 9, 10, 12, 13, 16 | CNPG Postgres (P0) | API, State |
+| Dovecot Lua Auth Bridge | メール認証 | IMAP/POP3認証をZitadel Session APIへ委譲。ML用静的userdbによるmail属性解決も担う | 3, 10, 15 | Zitadel Core Session API (P0) | API |
 | vaultwarden-rbac-sync(webhook常駐版) | RBAC連携 | ロール変更のイベント駆動反映 | 4, 10 | Zitadel Actions v2 (P0), Vaultwarden API (P0) | Event, API |
-| Zitadel Terraform Provider定義 | IaC | Project/Role/Application/Actionの宣言的管理 | 2, 4, 7, 8 | Terraform Cloud (P1), Ansible Bootstrap発行PAT (P0) | - |
+| Zitadel Terraform Provider定義 | IaC | Project/Role/Application/Action/出展団体アカウント/招待発行SA/ブランディングの宣言的管理 | 2, 4, 7, 8, 13, 14, 17 | Terraform Cloud (P1), Ansible Bootstrap発行PAT (P0) | - |
 | Ansible Zitadel Bootstrap | 初期化 | Zitadel初回admin/PAT発行・Infisical登録 | 11 | Zitadel Core (P0) | - |
 | Zitadel Backup Migration | 移行 | k3d検証環境のZitadel設定を本番へAdmin API export/importで移行する一括カットオーバー手順 | 7 | k3d Zitadel Admin API (P0), 本番Zitadel Admin API (P0), Zitadel Terraform Provider定義 (P0) | Batch |
+| Zitadel Branding | ブランディング | 荒牧祭2026公式ブランド素材(ロゴ/favicon/フォント/配色)のLabel Policy設定 | 17 | Zitadel Core Admin/Management API (P0) | State |
 
 ### IdP Core
 
@@ -424,6 +456,30 @@ Session成功後、Management APIでuser_grant(ロール)を取得し、Requirem
 - Validation: import後、本番Zitadelでterraform planを実行しdriftがないことを確認する
 - Risks: export対象からテストユーザー・組織を漏れなく除外できないと試験データが本番へ混入するため、除外確認を移行手順のチェックリストに含める
 
+### ブランディング
+
+#### Zitadel Branding
+
+| Field | Detail |
+|-------|--------|
+| Intent | 荒牧祭2026公式ブランド素材でZitadelログイン画面を設定し、authentikデフォルトの未カスタマイズ状態を脱する |
+| Requirements | 17.1, 17.2, 17.3, 17.4, 17.5, 17.6, 17.7, 17.8 |
+
+**Responsibilities & Constraints**
+- ロゴ(light: カラー版`aramakisai.png`、dark: 白版`aramakisai_W.png`)・favicon(light/dark共通、`aramakisai-web`の既存アイコン流用)・カスタムフォント(LINE Seed JP)・配色(light: primary #ebb03c / background #ffffff / warn #e86f30 / font #231815、dark: primary #ebb03c / background #231815 / warn #e86f30 / font #ffffff)をLabel Policyへ設定する
+- ウォーターマーク("Powered by ZITADEL")を非表示、テーマモードをauto、ログイン名をドメインサフィックス省略なしのフル表示(user@domain)に設定する(Requirement 17.7: 利用者は各自の私用メールアドレスで認証するため単一ドメイン省略機能は適用しない)
+- 荒牧祭2026公式ロゴ使用ガイドライン(実行委員会制定)を遵守する: ロゴデータの変形・色変更・書体変更・装飾(影・縁等)を禁止し、リサイズ(拡大縮小)のみ許可。ロゴ上下左右に0.25X以上のアイソレーションエリア(Xは「荒」の字の横幅)を確保する
+- ブランド素材の原本は実行委員会から提供された配布物であり、リポジトリには`gitops/manifests/prod/zitadel/branding/`配下へコピーしたファイルのみを配置する。個人環境固有のダウンロード元パス等はコード・ドキュメントいずれにも記載しない
+
+**Dependencies**
+- Outbound: Zitadel Core Admin/Management API — Label Policy設定、ロゴ/アイコン/フォントアップロード (P0)
+
+**Contracts**: State [x]
+
+**Implementation Notes**
+- Integration: ロゴ・favicon・フォントのアップロードがTerraform provider(`zitadel_label_policy`等)で直接対応可能か、Admin/Management APIへの別途アップロードスクリプト(multipart)対応が必要かは未検証。実装時に確認すること
+- Risks: dark配色はaramakisai-web既存リポジトリに定義がなく、light配色を単純反転して決定した値である(ユーザー承認済み)。実際のログイン画面での見え方は実装時に目視確認すること
+
 ## Error Handling
 
 ### Error Strategy
@@ -488,3 +544,4 @@ flowchart TD
 - Phase D-F: 本番Zitadelは空のDBから起動し、project/role/application/actionはTerraformで改めてapplyして再現する(Requirement 7.2)。Terraformで管理しきれないインスタンス設定のみAdmin API importで補完する(Requirement 7.3)
 - Phase G-J: authentikとZitadelの並行稼働は切替作業中の短期間のみとし、RPアプリ・メール認証・RBAC同期・ユーザー移行を順次切り替える。vaultwarden-rbac-syncのイベント駆動化がk3d検証で不安定と判明した場合はこのフェーズからスコープ除外してよい(Requirement 4.4)
 - Phase K直前まで、authentik構成への切り戻し手順(Requirement 7.5)を維持する
+- Requirement 12〜17(招待制登録整理・出展団体アカウント移行・招待発行SA移行・メーリングリストDovecot完結化・Discordアクセス制御廃止・ブランディング設定、tasks.mdのtask10)は、Phase A-B(k3d構築・検証)と並行してk3d環境上で検証する。Phase K(authentik停止・撤去)では、これらに対応する`terraform/authentik_enrollment.tf`/`authentik_recovery.tf`/`authentik_mailing_lists.tf`/`authentik_policies.tf`/`authentik_student_exhibitor_*.tf`/`authentik_brand.tf`もあわせて削除する

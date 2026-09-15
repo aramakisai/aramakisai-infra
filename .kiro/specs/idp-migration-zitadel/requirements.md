@@ -130,7 +130,56 @@
 2. The ブートストラップ手順 shall 既存の`infisical-auth` Secret作成と同様に、ArgoCD/GitOpsが管理できない領域(ESO自体を起動する前提条件)への対応として、GitOps原則の明示的な例外に位置づける
 3. If ブートストラップ済みのPAT/Service User Tokenが失効・漏洩した場合, then 運用手順 shall 再発行・Infisical更新の手順を提供する
 
+### Requirement 12: 招待制登録の整理とパスワードリカバリーの標準化
+**Objective:** As a インフラ運用担当者, I want authentikの`authentik_enrollment.tf`(学籍番号等カスタム項目付き招待制登録)と`authentik_recovery.tf`(実質未使用のパスワードリカバリーflow)を整理する, so that Zitadel標準機能だけで運用でき独自flowの保守コストを負わない
+
+#### Acceptance Criteria
+1. The 移行手順 shall `authentik_enrollment.tf`の学籍番号等カスタム入力項目を廃止し、Requirement 6の招待コード発行手順(`scripts/zitadel-invite-migration.py`)へ一本化する
+2. The 移行手順 shall `authentik_recovery.tf`を削除し、Zitadel標準のセルフサービスパスワードリカバリー機能をそのまま使用する(カスタムflowを構築しない)
+
+### Requirement 13: 出展団体アカウントの一括作成・招待運用の移行
+**Objective:** As a インフラ運用担当者, I want `authentik_student_exhibitor_flow.tf`(出展団体の招待型初回パスワード設定)と`authentik_student_exhibitor_provisioning.tf`(CSV一括ユーザー作成)をZitadelへ移行する, so that 出展団体アカウントの発行運用を継続できる
+
+#### Acceptance Criteria
+1. The 移行手順 shall 出展団体ユーザーの初回パスワード設定をRequirement 6と同一の招待コードパターン(`zitadel_human_user` + 招待コード発行)で実現し、出展団体向けの別グループ/ロールを割り当てる
+2. The 移行手順 shall CSVからの一括ユーザー作成をTerraform `zitadel_human_user`リソース(`for_each`等によるCSV駆動生成)で実現する
+
+### Requirement 14: 招待発行用サービスアカウントの最小権限移行
+**Objective:** As a インフラ運用担当者, I want `authentik_student_exhibitor_recovery_sa.tf`が持つ細粒度permission(view_user/change_user/reset_user_password/view_emailstage/add_user)をZitadelの組み込みロールで移行する, so that instance全体の管理権限(IAM_OWNER)を与えずに招待発行用SAを運用できる
+
+#### Acceptance Criteria
+1. The 移行手順 shall 招待発行用のZitadel Service Userに、org-scopedの組み込みマネージャーロール`ORG_USER_MANAGER`を付与する
+2. The 移行手順 shall `ORG_USER_MANAGER`ロールがユーザーの作成・閲覧・更新・パスワードリセット・招待コード発行を実施できることを実機検証する
+3. The 移行手順 shall 当該Service Userにinstance-wideなロール(IAM_OWNER等)を付与しない
+
+### Requirement 15: メーリングリストアドレスのDovecot完結化
+**Objective:** As a インフラ運用担当者, I want `authentik_mailing_lists.tf`が定義する8件のML共有アドレス(pr@/planning@/accounting@/booth@/stage@/admin@[+5エイリアス]/general-affairs@/noreply@)をZitadelのユーザー管理対象から外す, so that ログイン主体ではない配送専用アドレスをIdPに載せる不整合を解消できる
+
+#### Acceptance Criteria
+1. The 移行手順 shall 上記8件をZitadelのhuman userとして作成しない(これらはIMAP等で認証されるログイン主体ではなく、Dovecotのmail属性解決による配送ルーティング専用のレコードであるため)
+2. The 移行手順 shall Dovecot側の静的userdb(またはSQL userdb)で8件のmail属性・エイリアス(admin@の5エイリアス含む)解決を完結させる
+
+### Requirement 16: Discord連携アクセス制御の廃止
+**Objective:** As a 実行委員会運営担当者, I want `authentik_policies.tf`が実装するDiscord連携必須のアプリアクセス動的ブロック機能を廃止する, so that Requirement 5で定めた「動的グループ判定を実装しない」方針と矛盾しない構成にできる
+
+#### Acceptance Criteria
+1. The 移行手順 shall `authentik_policies.tf`のアクセス動的ブロック機能を移行せず廃止する
+2. The 新IdP基盤 shall Discord連携をRequirement 5.2の単純なOAuth2ログイン手段としてのみ提供し、ログイン成否によるアプリアクセス制御を行わない
+
+### Requirement 17: ブランディング設定
+**Objective:** As a 実行委員会運営担当者, I want Zitadelのログイン画面を荒牧祭2026公式ブランドで設定する, so that authentikデフォルトの未カスタマイズ状態(`authentik_brand.tf`)から脱し利用者に一貫したブランド体験を提供できる
+
+#### Acceptance Criteria
+1. The 移行手順 shall Zitadel Label Policy(または同等機能)にlight/darkテーマそれぞれのロゴ画像を設定する(light: 荒牧祭2026公式ロゴのカラー版、dark: 白版)
+2. The 移行手順 shall light/dark共通のfaviconとして、荒牧祭公式サイト(`aramakisai-web`リポジトリ)で使用中の既存アイコン画像をそのまま流用する
+3. The 移行手順 shall カスタムフォントとしてGoogle Fonts「LINE Seed JP」を設定する
+4. The 移行手順 shall 荒牧祭公式サイトのカラートークンから抽出した配色(light: primary #ebb03c / background #ffffff / warn #e86f30 / font #231815、dark: primary #ebb03c / background #231815 / warn #e86f30 / font #ffffff)を設定する
+5. The 移行手順 shall "Powered by ZITADEL"ウォーターマークを非表示にする
+6. The 移行手順 shall テーマモードをauto(OS/ブラウザ設定に追従)に設定する
+7. The 移行手順 shall ログイン画面のユーザー名をドメインサフィックス省略なしのフル形式(user@domain)で表示する(利用者が個々の私用メールアドレス(ドメイン不統一)で認証するため、単一ドメイン省略機能は適用しない)
+8. The 移行手順 shall 使用するロゴデータについて、荒牧祭2026公式ロゴ使用ガイドライン(変形・色変更・書体変更・装飾の禁止、上下左右0.25X以上のアイソレーションエリア確保、Xは「荒」の字の横幅)を遵守する
+
 ## Boundary Context
-- **In scope**: OIDC Provider機能移行、Dovecot lua passdb経由のZitadel Session API認証委譲の実装、vaultwarden-rbac-syncのイベント駆動化、既存ユーザー・グループデータの招待ベース移行、段階的カットオーバー手順、Discordソーシャルログイン(単純ログインのみ)の対応可否検討、シンプルなフラットロールRBAC設計、OIDC/認証フローのセキュリティ検証(モンキーテスト)、各機能の正常系End-to-End動作確認、Terraformプロバイダー認証のブートストラップ
-- **Out of scope**: Discordロール自動同期・アバター自動取得・ログイン時動的グループ判定の再実装、authentik相当の細粒度permission管理の再現、新規認証機能の追加、LLDAP関連資産(前spec由来)の継続利用
+- **In scope**: OIDC Provider機能移行、Dovecot lua passdb経由のZitadel Session API認証委譲の実装、vaultwarden-rbac-syncのイベント駆動化、既存ユーザー・グループデータの招待ベース移行、段階的カットオーバー手順、Discordソーシャルログイン(単純ログインのみ)の対応可否検討、シンプルなフラットロールRBAC設計、OIDC/認証フローのセキュリティ検証(モンキーテスト)、各機能の正常系End-to-End動作確認、Terraformプロバイダー認証のブートストラップ、招待制登録・パスワードリカバリーの整理、出展団体アカウント運用の移行、招待発行用SAの最小権限移行、メーリングリストアドレスのDovecot完結化、Discord連携アクセス制御の廃止、ブランディング設定
+- **Out of scope**: Discordロール自動同期・アバター自動取得・ログイン時動的グループ判定の再実装(Discord連携必須アクセス制御を含む)、authentik相当の細粒度permission管理の再現、新規認証機能の追加、LLDAP関連資産(前spec由来)の継続利用
 - **Adjacent expectations**: mailserver(DMS)のDovecot認証方式変更、CMS/Roundcube/Vaultwarden等各アプリのOIDC Client設定変更は本specの実施範囲に含むが、各アプリ内部のビジネスロジック変更は含まない。
