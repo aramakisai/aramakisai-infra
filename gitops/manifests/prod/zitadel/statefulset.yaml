@@ -6,9 +6,9 @@
 # (docker-composeのnetwork_mode: service:zitadelに相当する構成が既定で成立する)。
 #
 # ExternalDomainはcloudflaredトンネル経由の公開ホスト名(idp.aramakisai.com)を設定している。
-# ただしTunnel ingressは現状API(8080)のみをidp.aramakisai.comへ振っており、login v2 UI(3000)
-# の外部到達・パス振り分けは未整備(task9.4/task10.7項目8で対応予定)。そのためlogin v2の
-# BASEURI/LoginURL/LogoutURLは引き続きcluster内DNSを指す暫定設定のまま。
+# Tunnel ingress(terraform/tunnel.tf)は/ui/v2/login配下をlogin v2 UI(3000)、それ以外を
+# API(8080)へ振り分ける(Zitadel公式reverse proxy設定例と同じパス分割)。そのためlogin v2の
+# BASEURI/LoginURL/LogoutURLも公開ホスト名(idp.aramakisai.com)を指す。
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -90,11 +90,11 @@ spec:
             - name: ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_REQUIRED
               value: "true"
             - name: ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_BASEURI
-              value: http://zitadel.zitadel.svc.cluster.local:3000/ui/v2/login/
+              value: https://idp.aramakisai.com/ui/v2/login/
             - name: ZITADEL_OIDC_DEFAULTLOGINURLV2
-              value: http://zitadel.zitadel.svc.cluster.local:3000/ui/v2/login/login?authRequest=
+              value: https://idp.aramakisai.com/ui/v2/login/login?authRequest=
             - name: ZITADEL_OIDC_DEFAULTLOGOUTURLV2
-              value: http://zitadel.zitadel.svc.cluster.local:3000/ui/v2/login/logout?post_logout_redirect=
+              value: https://idp.aramakisai.com/ui/v2/login/logout?post_logout_redirect=
             # --- login-client (login v2 UIがZitadel APIを呼ぶためのmachine user PAT) を
             #     初回起動時に自動発行する。IAM_LOGIN_CLIENT roleが自動付与される ---
             - name: ZITADEL_FIRSTINSTANCE_LOGINCLIENTPATPATH
