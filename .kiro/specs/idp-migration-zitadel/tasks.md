@@ -412,6 +412,16 @@
   - 既存のTerraformコード(project/role/application/action)を本番Zitadelへterraform applyし、k3dと同じ設定が再現されることを確認する
   - _Requirements: 7.2_
   - _Depends: 9.1_
+  - **実施結果(実装のみ、マージ・本番適用は未実施)**: `feat/idp-zitadel-prod-core`ブランチでZitadel本体一式
+    (`gitops/manifests/prod/zitadel/`・`terraform/zitadel_*.tf`全9ファイル・`ansible/roles/zitadel-bootstrap`の
+    本番kubeconfig対応)を実装しコミット(`51fa61a`)。936e1d3事故の教訓を踏まえ、RP側(CMS/mailserver/
+    roundcube/vaultwarden-rbac-sync)のOIDC Client切替は一切含めず完全分離。`gitops/apps/prod/zitadel.yaml`は
+    `syncPolicy.automated`を意図的に外し、Zitadel本体のみが手動syncで先行反映される構成にした。
+    terraform fmt/validate、ansible-lint、pre-commit全hook通過済み(いずれも静的チェックのみ、実apply未実施)。
+    **未解決の既知ブロッカー**: 本番`terraform/`はTFCクラウドランナー経由のためZitadel StatefulSetの
+    ExternalDomain(`zitadel.zitadel.svc.cluster.local`、クラスタ内専用)へネットワーク到達できず、
+    現状のままではterraform applyが実行不可(k3d PoCはローカル直接applyだったため未顕在化していた制約)。
+    PR作成・マージ・実際のAnsible/Terraform実行、および上記ブロッカーの解消方法検討はユーザー判断待ち。
 
 - [ ] 9.3 Terraform管理外のインスタンス設定をAdmin API importで反映する
   - Assert Roles on Authentication等、Terraformで管理しきれないインスタンス設定の差分を洗い出す
