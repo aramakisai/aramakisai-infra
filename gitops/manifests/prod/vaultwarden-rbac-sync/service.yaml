@@ -1,7 +1,8 @@
 ---
-# Trigger Receiver用 ClusterIP Service (Requirement 13.1)。
-# prod namespace内のAuthentik (LoginSyncTriggerPolicy/GroupChangeWebhookRule) からのみ到達される。
-# 外部公開はしない (design.md TriggerReceiver Implementation Notes参照)。
+# Actions v2 webhook受信用 ClusterIP Service (Requirement 4.1, 4.2)。
+# prod namespace内のZitadel (terraform/zitadel_actions.tf の action_target.endpoint) から
+# クラスタ内DNS経由でのみ到達される。外部公開はしない (design.md「vaultwarden-rbac-sync
+# (webhook常駐版)」参照)。
 apiVersion: v1
 kind: Service
 metadata:

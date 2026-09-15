@@ -1,10 +1,15 @@
 ---
-# Trigger Receiver (Requirement 13.1, 13.2, 13.3, 13.4)。
-# --mode=serve で sync.py を起動し、Authentikのログイン/グループ変更イベントから
-# POST /trigger (Bearer認証) を受け取りSyncOrchestratorを非同期起動する常駐Deployment。
-# cronjob.yaml と同一の script-configmap.yaml (sync.py) をマウントし、command の --mode 引数のみが異なる。
+# Actions v2 webhook常駐受信Pod (Requirement 4.1, 4.2)。
+# --mode=serve で sync.py を起動し、ZitadelのActions v2 webhook (user.grant イベント群、
+# terraform/zitadel_actions.tf の zitadel_action_target/zitadel_action_execution_event 参照)を
+# POST /webhook で受け取り、ZITADEL-Signature検証・冪等排除を経てSyncOrchestratorを起動する。
+# 旧CronJob (cronjob.yaml、削除済み) + Trigger Receiver (Bearerトークン方式) を置き換える。
+# クラスタ内Service経由でのみ到達可能とし、Ingress/cloudflared等の外部公開は行わない。
 #
-# 凍結中 (2026-07-11): replicas: 0。Vaultwarden本体が停止中のためtrigger受信不要
+# 凍結中 (2026-07-11由来、継続): replicas: 0。
+# Vaultwarden本体が停止中で同期不要な点に加え、ZITADEL_BASE_URL/ZITADEL_API_TOKENが指す
+# 本番Zitadelは.kiro/specs/idp-migration-zitadel/tasks.md task 9(本番カットオーバー)完了まで
+# 存在しない。task 9でZitadel本番デプロイ・カットオーバーと同時にreplicas: 1へ引き上げる。
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -25,15 +30,15 @@ spec:
     spec:
       serviceAccountName: vaultwarden-rbac-sync
       containers:
-        - name: trigger-receiver
+        - name: webhook-receiver
           image: alpine/k8s:1.36.2
           command: ["python3", "/scripts/sync.py", "--mode=serve"]
           ports:
             - name: http
               containerPort: 8080
           env:
-            - name: AUTHENTIK_BASE_URL
-              value: "http://authentik-server.prod.svc.cluster.local"
+            - name: ZITADEL_BASE_URL
+              value: "http://zitadel.prod.svc.cluster.local"
             - name: VAULTWARDEN_BASE_URL
               value: "http://vaultwarden.prod.svc.cluster.local"
           envFrom:

@@ -1,0 +1,9 @@
+---
+# Zitadel初回admin/PATブートストラップ (k3d検証環境限定)。
+# kubectl操作はローカルからAPI経由で行うため、対象ホストはlocalhost。
+- name: Zitadel初回ブートストラップ
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  roles:
+    - role: zitadel-bootstrap

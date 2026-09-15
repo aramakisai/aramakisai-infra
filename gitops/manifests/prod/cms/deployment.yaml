@@ -46,10 +46,17 @@ spec:
             # Directus が使う directus-uploads と衝突しないキー空間に置く
             - name: S3_PREFIX
               value: payload-uploads
+            # 変数名は AUTHENTIK_* のままだが authentik-endpoints.ts は
+            # /.well-known/openid-configuration から動的にエンドポイントを取得する
+            # 汎用OIDC実装のためIdP非依存。値はZitadelを指す (ドメインはPoC時点の
+            # プレースホルダー。本番Zitadelの外部公開ホスト名確定後に更新すること)
             - name: AUTHENTIK_ISSUER_URL
-              value: https://idp.aramakisai.com/application/o/cms-prod/
+              value: https://zitadel.aramakisai.com
             - name: AUTHENTIK_CLIENT_ID
-              value: cms-prod
+              valueFrom:
+                secretKeyRef:
+                  name: cms-secrets
+                  key: AUTHENTIK_CLIENT_ID
           resources:
             requests:
               memory: "256Mi"

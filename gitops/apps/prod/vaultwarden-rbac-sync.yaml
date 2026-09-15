@@ -1,5 +1,6 @@
 ---
-# Vaultwarden RBAC Sync — Authentikグループメンバーシップ → Vaultwarden Collection権限の自動同期
+# Vaultwarden RBAC Sync — Zitadel Project Role(user_grant) → Vaultwarden Collection権限の自動同期
+# (Actions v2 webhook常駐受信、旧authentikポーリング方式は idp-migration-zitadel task 4で置換)
 # wave: 0
 apiVersion: argoproj.io/v1alpha1
 kind: Application

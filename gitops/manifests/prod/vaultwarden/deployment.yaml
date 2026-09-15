@@ -4,8 +4,14 @@
 # image バージョンは https://hub.docker.com/r/vaultwarden/server/tags で確認して固定すること
 # 更新手順: image タグを変更 → GitOps PR → ArgoCD が自動 sync
 #
-# 認証方式: Authentik OIDC SSO (SSO_ONLY=true でパスワードログイン無効化)
+# 認証方式: Zitadel OIDC SSO (SSO_ONLY=true でパスワードログイン無効化)
 #   - SSO_ENABLED=true, SSO_ONLY=true
+#   - SSO_AUDIENCE_TRUSTED: CMS/Vaultwarden/Roundcubeが同一Zitadel Project(aramakisai)を
+#     共有するため、id_tokenのaudにはプロジェクト内の全client_id+project_idが列挙される
+#     (OIDC仕様上はazpで正当化される正常な挙動)。vaultwardenのopenidconnectクレートは
+#     aud配列の最初の要素しか検証せず未知の値を無条件拒否するため(upstream issue
+#     dani-garcia/vaultwarden#6650、2026-08時点未修正)、プロジェクト内IDの形式(18桁数値)を
+#     signaling する正規表現で追加のaudを明示的に信頼させる必要がある
 #   - 新規登録は SIGNUPS_ALLOWED=false で無効化 (管理者招待制)
 #   - 管理者ポータルは ADMIN_TOKEN で保護
 #
@@ -79,10 +85,11 @@ spec:
               value: ""
             - name: SSO_ENABLED
               value: "true"
+            # ドメインはPoC時点のプレースホルダー。本番Zitadelの外部公開ホスト名確定後に更新すること
             - name: SSO_AUTHORITY
-              value: "https://idp.aramakisai.com/application/o/vaultwarden/"
+              value: "https://zitadel.aramakisai.com"
             - name: SSO_SCOPES
-              value: "openid email profile groups"
+              value: "openid email profile"
             - name: SSO_ONLY
               value: "true"
             - name: SSO_SIGNUPS_MATCH_EMAIL
@@ -91,6 +98,8 @@ spec:
               value: "true"
             - name: SSO_ALLOW_UNKNOWN_EMAIL_VERIFICATION
               value: "true"
+            - name: SSO_AUDIENCE_TRUSTED
+              value: '^\d{18}$'
             - name: SMTP_HOST
               value: "mail.aramakisai.com"
             - name: SMTP_PORT

@@ -14,14 +14,43 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import sync
 from sync import (
     K8S_NAMESPACE,
+    EventDedupStore,
     SyncLockManager,
-    TriggerHTTPServer,
-    TriggerReceiver,
+    WebhookHTTPServer,
+    WebhookReceiver,
     build_clients_from_env,
     main,
     run_cron_mode,
     run_serve_mode,
+    verify_zitadel_signature,
 )
+
+
+class TestEventDedupStore:
+    """Requirement 4.1: at-least-once配信に対する冪等処理の重複排除ストア単体テスト"""
+
+    def test_first_seen_key_returns_true(self):
+        store = EventDedupStore()
+        assert store.mark_if_new("a") is True
+
+    def test_repeated_key_returns_false(self):
+        store = EventDedupStore()
+        assert store.mark_if_new("a") is True
+        assert store.mark_if_new("a") is False
+
+    def test_different_keys_both_return_true(self):
+        store = EventDedupStore()
+        assert store.mark_if_new("a") is True
+        assert store.mark_if_new("b") is True
+
+    def test_key_expires_after_ttl(self):
+        """TTLを超えると再送でなく新規イベントとして扱う(長期のPod継続稼働でのメモリ肥大防止)。"""
+        fake_now = [0.0]
+        store = EventDedupStore(ttl_seconds=10.0, clock=lambda: fake_now[0])
+
+        assert store.mark_if_new("a") is True
+        fake_now[0] = 20.0
+        assert store.mark_if_new("a") is True
 
 
 class FakeLockManager:
@@ -119,95 +148,188 @@ class TestRunCronMode:
         assert lock.calls == ["acquire", "release"]
 
 
-class TestTriggerReceiver:
-    """Requirement 13.1, 13.2, 13.3, 13.4"""
+def _sign(payload: bytes, signing_key: str, ts: int | None = None) -> str:
+    """テスト用: verify_zitadel_signatureが受理するZITADEL-Signatureヘッダを生成する。"""
+    import hashlib
+    import hmac as hmac_module
+    import time as time_module
 
-    def test_missing_bearer_returns_401(self):
+    ts = ts if ts is not None else int(time_module.time())
+    mac = hmac_module.new(signing_key.encode("utf-8"), digestmod=hashlib.sha256)
+    mac.update(f"{ts}.".encode("utf-8"))
+    mac.update(payload)
+    return f"t={ts},v1={mac.hexdigest()}"
+
+
+class TestWebhookReceiver:
+    """Requirement 4.1, 4.2: Actions v2 webhook受信の署名検証・冪等化・Lease連携"""
+
+    PAYLOAD = json.dumps(
+        {"instanceID": "inst-1", "aggregateID": "agg-1", "sequence": 42, "event_type": "user.grant.added"}
+    ).encode("utf-8")
+
+    def test_missing_signature_returns_401(self):
         lock = FakeLockManager(acquire_result=True)
-        receiver = TriggerReceiver("secret-token", lock, run_sync=lambda: None, thread_factory=SyncThreadStub)
+        receiver = WebhookReceiver("signing-key", lock, run_sync=lambda: None, thread_factory=SyncThreadStub)
 
-        status = receiver.handle_trigger(None)
+        status = receiver.handle_webhook(self.PAYLOAD, None)
 
         assert status == 401
         assert lock.calls == []
 
-    def test_wrong_bearer_returns_401(self):
+    def test_wrong_signature_returns_401(self):
         lock = FakeLockManager(acquire_result=True)
-        receiver = TriggerReceiver("secret-token", lock, run_sync=lambda: None, thread_factory=SyncThreadStub)
+        receiver = WebhookReceiver("signing-key", lock, run_sync=lambda: None, thread_factory=SyncThreadStub)
 
-        status = receiver.handle_trigger("Bearer wrong-token")
+        status = receiver.handle_webhook(self.PAYLOAD, _sign(self.PAYLOAD, "wrong-key"))
 
         assert status == 401
         assert lock.calls == []
 
-    def test_valid_bearer_acquires_lease_and_runs_sync_async(self):
-        """正しいBearerトークン→202、Lease取得成功時は非同期にsyncが起動する (13.1, 13.2)。"""
+    def test_valid_signature_acquires_lease_and_runs_sync_async(self):
+        """正しい署名 → 200、Lease取得成功時は非同期にsyncが起動する (4.1, 4.2)。"""
         lock = FakeLockManager(acquire_result=True)
         run_log = []
-        receiver = TriggerReceiver(
-            "secret-token", lock, run_sync=lambda: run_log.append("ran"), thread_factory=SyncThreadStub
+        receiver = WebhookReceiver(
+            "signing-key", lock, run_sync=lambda: run_log.append("ran"), thread_factory=SyncThreadStub
         )
 
-        status = receiver.handle_trigger("Bearer secret-token")
+        status = receiver.handle_webhook(self.PAYLOAD, _sign(self.PAYLOAD, "signing-key"))
 
-        assert status == 202
+        assert status == 200
         assert run_log == ["ran"]
         assert lock.calls == ["acquire", "release"]
 
-    def test_valid_bearer_lease_busy_still_returns_202(self):
-        """Lease取得失敗時も202を返し、次回実行での補完をログ記録するのみ (13.4)。"""
+    def test_duplicate_event_is_not_rerun(self):
+        """at-least-once再送(同一イベント)は冪等に処理され、2回目はsyncを起動しない (4.1)。"""
+        lock = FakeLockManager(acquire_result=True)
+        run_log = []
+        receiver = WebhookReceiver(
+            "signing-key", lock, run_sync=lambda: run_log.append("ran"), thread_factory=SyncThreadStub
+        )
+        header = _sign(self.PAYLOAD, "signing-key")
+
+        status1 = receiver.handle_webhook(self.PAYLOAD, header)
+        status2 = receiver.handle_webhook(self.PAYLOAD, header)
+
+        assert status1 == 200
+        assert status2 == 200
+        assert run_log == ["ran"], "重複イベントでsyncが2回起動してはならない"
+        assert lock.calls == ["acquire", "release"], "冪等スキップ時はLease取得すら行わない"
+
+    def test_different_event_still_runs(self):
+        """sequenceが異なる別イベントは冪等排除の対象にならない。"""
+        lock = FakeLockManager(acquire_result=True)
+        run_log = []
+        receiver = WebhookReceiver(
+            "signing-key", lock, run_sync=lambda: run_log.append("ran"), thread_factory=SyncThreadStub
+        )
+        other_payload = json.dumps(
+            {"instanceID": "inst-1", "aggregateID": "agg-1", "sequence": 43, "event_type": "user.grant.added"}
+        ).encode("utf-8")
+
+        receiver.handle_webhook(self.PAYLOAD, _sign(self.PAYLOAD, "signing-key"))
+        receiver.handle_webhook(other_payload, _sign(other_payload, "signing-key"))
+
+        assert run_log == ["ran", "ran"]
+
+    def test_valid_signature_lease_busy_still_returns_200(self):
+        """Lease取得失敗時も200を返し、次回受信での補完をログ記録するのみ。"""
         lock = FakeLockManager(acquire_result=False)
         run_log = []
-        receiver = TriggerReceiver(
-            "secret-token", lock, run_sync=lambda: run_log.append("ran"), thread_factory=SyncThreadStub
+        receiver = WebhookReceiver(
+            "signing-key", lock, run_sync=lambda: run_log.append("ran"), thread_factory=SyncThreadStub
         )
 
-        status = receiver.handle_trigger("Bearer secret-token")
+        status = receiver.handle_webhook(self.PAYLOAD, _sign(self.PAYLOAD, "signing-key"))
 
-        assert status == 202
+        assert status == 200
         assert run_log == []
         assert lock.calls == ["acquire"]
 
     def test_run_sync_exception_still_releases_lease(self):
-        """run_sync が例外を投げてもLeaseは解放される (13.3, 後続実行のブロック防止)。"""
+        """run_sync が例外を投げてもLeaseは解放される (後続実行のブロック防止)。"""
         lock = FakeLockManager(acquire_result=True)
 
         def failing_run_sync():
             raise RuntimeError("sync failed")
 
-        receiver = TriggerReceiver(
-            "secret-token", lock, run_sync=failing_run_sync, thread_factory=SyncThreadStub
+        receiver = WebhookReceiver(
+            "signing-key", lock, run_sync=failing_run_sync, thread_factory=SyncThreadStub
         )
 
         try:
-            receiver.handle_trigger("Bearer secret-token")
+            receiver.handle_webhook(self.PAYLOAD, _sign(self.PAYLOAD, "signing-key"))
         except RuntimeError:
             pass
 
         assert lock.calls == ["acquire", "release"]
 
+    def test_invalid_json_payload_returns_400(self):
+        lock = FakeLockManager(acquire_result=True)
+        receiver = WebhookReceiver("signing-key", lock, run_sync=lambda: None, thread_factory=SyncThreadStub)
+        bad_payload = b"not-json"
 
-class TestTriggerHTTPServer:
-    """Requirement 13.1, 13.2 (http.serverによる実HTTP動作確認)"""
+        status = receiver.handle_webhook(bad_payload, _sign(bad_payload, "signing-key"))
 
-    def _start_server(self, receiver: TriggerReceiver) -> tuple[TriggerHTTPServer, threading.Thread]:
-        server = TriggerHTTPServer(receiver, host="127.0.0.1", port=0)
+        assert status == 400
+        assert lock.calls == []
+
+
+class TestVerifyZitadelSignature:
+    """Requirement 4.1: HMAC検証ロジック単体 (zitadel-go pkg/actions/signing.go互換)"""
+
+    def test_valid_signature_passes(self):
+        payload = b'{"event_type":"user.grant.added"}'
+        header = _sign(payload, "signing-key")
+        verify_zitadel_signature(payload, header, "signing-key")  # raises on failure
+
+    def test_tampered_payload_raises(self):
+        import pytest
+
+        payload = b'{"event_type":"user.grant.added"}'
+        header = _sign(payload, "signing-key")
+        with pytest.raises(sync.WebhookSignatureError):
+            verify_zitadel_signature(b'{"event_type":"tampered"}', header, "signing-key")
+
+    def test_expired_timestamp_raises(self):
+        import pytest
+
+        payload = b'{"event_type":"user.grant.added"}'
+        header = _sign(payload, "signing-key", ts=int(__import__("time").time()) - 1000)
+        with pytest.raises(sync.WebhookSignatureError):
+            verify_zitadel_signature(payload, header, "signing-key")
+
+    def test_malformed_header_raises(self):
+        import pytest
+
+        with pytest.raises(sync.WebhookSignatureError):
+            verify_zitadel_signature(b"payload", "not-a-valid-header", "signing-key")
+
+
+class TestWebhookHTTPServer:
+    """Requirement 4.1, 4.2 (http.serverによる実HTTP動作確認)"""
+
+    def _start_server(self, receiver: WebhookReceiver) -> tuple[WebhookHTTPServer, threading.Thread]:
+        server = WebhookHTTPServer(receiver, host="127.0.0.1", port=0)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         return server, thread
 
-    def test_valid_bearer_request_returns_202(self):
+    def test_valid_signature_request_returns_200(self):
         lock = FakeLockManager(acquire_result=True)
         run_log = []
-        receiver = TriggerReceiver(
-            "secret-token", lock, run_sync=lambda: run_log.append("ran"), thread_factory=SyncThreadStub
+        receiver = WebhookReceiver(
+            "signing-key", lock, run_sync=lambda: run_log.append("ran"), thread_factory=SyncThreadStub
         )
         server, thread = self._start_server(receiver)
         try:
+            payload = json.dumps({"instanceID": "i", "aggregateID": "a", "sequence": 1}).encode()
             req = urllib.request.Request(
-                f"http://127.0.0.1:{server.server_port}/trigger",
+                f"http://127.0.0.1:{server.server_port}/webhook",
+                data=payload,
                 method="POST",
-                headers={"Authorization": "Bearer secret-token"},
+                headers={"ZITADEL-Signature": _sign(payload, "signing-key")},
             )
             with urllib.request.urlopen(req, timeout=5) as resp:
                 status = resp.status
@@ -215,20 +337,20 @@ class TestTriggerHTTPServer:
             server.shutdown()
             thread.join(timeout=5)
 
-        assert status == 202
+        assert status == 200
         assert run_log == ["ran"]
 
-    def test_invalid_bearer_request_returns_401(self):
+    def test_invalid_signature_request_returns_401(self):
         lock = FakeLockManager(acquire_result=True)
-        receiver = TriggerReceiver(
-            "secret-token", lock, run_sync=lambda: None, thread_factory=SyncThreadStub
-        )
+        receiver = WebhookReceiver("signing-key", lock, run_sync=lambda: None, thread_factory=SyncThreadStub)
         server, thread = self._start_server(receiver)
         try:
+            payload = json.dumps({"instanceID": "i", "aggregateID": "a", "sequence": 1}).encode()
             req = urllib.request.Request(
-                f"http://127.0.0.1:{server.server_port}/trigger",
+                f"http://127.0.0.1:{server.server_port}/webhook",
+                data=payload,
                 method="POST",
-                headers={"Authorization": "Bearer nope"},
+                headers={"ZITADEL-Signature": _sign(payload, "wrong-key")},
             )
             try:
                 urllib.request.urlopen(req, timeout=5)
@@ -243,9 +365,7 @@ class TestTriggerHTTPServer:
 
     def test_healthz_returns_200(self):
         lock = FakeLockManager(acquire_result=True)
-        receiver = TriggerReceiver(
-            "secret-token", lock, run_sync=lambda: None, thread_factory=SyncThreadStub
-        )
+        receiver = WebhookReceiver("signing-key", lock, run_sync=lambda: None, thread_factory=SyncThreadStub)
         server, thread = self._start_server(receiver)
         try:
             with urllib.request.urlopen(
@@ -281,18 +401,18 @@ class TestBuildClientsFromEnv:
         )
 
         monkeypatch.setenv("MAPPING_CONFIG_PATH", str(mapping_file))
-        monkeypatch.setenv("AUTHENTIK_BASE_URL", "http://authentik-server.prod.svc.cluster.local")
-        monkeypatch.setenv("AUTHENTIK_API_TOKEN", "ak-token")
+        monkeypatch.setenv("ZITADEL_BASE_URL", "http://zitadel.prod.svc.cluster.local")
+        monkeypatch.setenv("ZITADEL_API_TOKEN", "zt-token")
         monkeypatch.setenv("VAULTWARDEN_BASE_URL", "http://vaultwarden.prod.svc.cluster.local")
         monkeypatch.setenv("VAULTWARDEN_SA_CLIENT_ID", "user.uuid")
         monkeypatch.setenv("VAULTWARDEN_SA_CLIENT_SECRET", "vw-secret")
         monkeypatch.setenv("DISCORD_WEBHOOK_URL", "https://discord.example.com/webhook")
 
-        mappings, authentik_client, vaultwarden_client, discord_notifier, org_key_bytes = build_clients_from_env()
+        mappings, group_client, vaultwarden_client, discord_notifier, org_key_bytes = build_clients_from_env()
 
         assert len(mappings) == 1
         assert mappings[0].authentik_group == "広報"
-        assert authentik_client._base_url == "http://authentik-server.prod.svc.cluster.local"
+        assert group_client._base_url == "http://zitadel.prod.svc.cluster.local"
         assert vaultwarden_client._base_url == "http://vaultwarden.prod.svc.cluster.local"
         assert discord_notifier._webhook_url == "https://discord.example.com/webhook"
 
