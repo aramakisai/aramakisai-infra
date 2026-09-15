@@ -434,10 +434,26 @@
     切替、`ZITADEL_EXTERNALDOMAIN`をクラスタ内DNSから`idp.aramakisai.com`(`EXTERNALPORT=443`・
     `EXTERNALSECURE=true`)へ変更した(`feat/idp-zitadel-external-domain`ブランチ)。これによりTFCランナーが
     `idp.aramakisai.com`経由でZitadel APIへ到達可能になりterraform apply実行が見込める。login v2 UI(3000)
-    のパス振り分けは対象外のまま(task9.4/task10.7項目8で別途対応)。`terraform/access.tf`の
-    Cloudflare Access authentik IdP登録(`idp.aramakisai.com`のauthorize/token/jwksエンドポイント)は
-    このマージ後に機能しなくなる想定、対応要否は別途判断(本specスコープ外)。マージ・実際のterraform
+    のパス振り分けは対象外のまま(task9.4/task10.7項目8で別途対応)。マージ・実際のterraform
     apply/Ansible実行はまだ未実施。
+  - **追記3(Cloudflare Access authentik IdP登録の置き換え)**: 「migration(authentikからZitadelへの完全移行)
+    なのにCloudflare Access IdP登録だけスコープ外扱いは筋が通らない」というユーザー指摘を受け撤回、対応済み。
+    requirements.md/design.md双方にCloudflare Access関連の記載が元々無かったのはspec自体の見落としだった。
+    `terraform/access.tf`の`cloudflare_zero_trust_access_identity_provider.authentik`を`.zitadel`へ置き換え、
+    auth_url/token_url/certs_urlをZitadel標準OIDCエンドポイント(`/oauth/v2/authorize`・`/oauth/v2/token`・
+    `/oauth/v2/keys`)へ変更した。client_id/secretは`terraform/zitadel_applications.tf`に新規追加した
+    `zitadel_application_oidc.cloudflare_access`(CMS/Vaultwarden/Roundcubeと同一パターン、
+    `var.cloudflare_access_redirect_uris`を流用)の計算値を同一terraform run内で直接参照するため、
+    Zitadelでは`authentik_cf_client_id`/`authentik_cf_client_secret`のような変数受け渡しが不要になった
+    (authentikは値を自分で選べる方式だったがZitadelはprovider側が生成するため)。この2変数自体は
+    `authentik_apps.tf`の`authentik_provider_oauth2.cloudflare`(Authentik側のOAuth2 Provider定義、
+    今後は何にも参照されない)がまだ参照しているため削除していない、authentik decommission時に
+    まとめて削除すること。
+    **重大な既知ブロッカー(未解決のままマージ・apply不可)**: Zitadelの`/oauth/v2/authorize`はブラウザを
+    `ZITADEL_OIDC_DEFAULTLOGINURLV2`(現状`http://zitadel.zitadel.svc.cluster.local:3000/ui/v2/login/...`、
+    クラスタ内DNS)へリダイレクトする設計のため、login v2 UI(port 3000)の外部到達が無い現状では
+    Cloudflare Access経由のZitadelログインは実際には失敗する。追記2記載のとおりlogin v2 UIのパス振り分け
+    (task9.4/task10.7項目8)を解決するまで、本変更は絶対にapplyしないこと。
 
 - [ ] 9.3 Terraform管理外のインスタンス設定をAdmin API importで反映する
   - Assert Roles on Authentication等、Terraformで管理しきれないインスタンス設定の差分を洗い出す
