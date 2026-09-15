@@ -45,7 +45,7 @@ Vaultwarden (OSS) は Collection 権限を**ユーザー単位**でのみ設定�
 2. **Vaultwarden Organization へ招待**
    - Vaultwarden Web UI → 対象 Organization → Manage → People → Invite
    - メールアドレスを入力（Authentik で登録されているメールアドレス）
-   - **注意**: SMTP 未設定のため、招待メールは送信されない。ユーザーに「Organization に参加してください」と直接連絡する
+   - SMTP設定済み（`8f65183`）のため招待メールは実際に送信される
 
 3. **Collection 権限付与**
    - Organization → Manage → Collections → 対象 Collection

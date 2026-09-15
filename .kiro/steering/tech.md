@@ -26,18 +26,7 @@ infisical run -- ansible-playbook k3s-bootstrap.yml
 - **シークレット**: Infisical + External Secrets Operator (ESO)
 - **DB**: CloudNativePG (PostgreSQL Operator)
 
-## Key Providers & Versions
-
-| Provider | Source | Version |
-|----------|--------|---------|
-| hcloud | hetznercloud/hcloud | ~> 1.50 |
-| tailscale | tailscale/tailscale | ~> 0.17 |
-| cloudflare | cloudflare/cloudflare | ~> 4.0 |
-| null | hashicorp/null | ~> 3.0 |
-| authentik | goauthentik/authentik | >= 2024.12.0 |
-| uptimerobot | uptimerobot/uptimerobot | ~> 1.8 |
-| healthchecksio | kristofferahl/healthchecksio | ~> 1.6 |
-| netdata | netdata/netdata | ~> 0.4 |
+Provider の一覧・バージョン制約は `terraform/providers.tf` の `required_providers` 参照。
 
 ## Key Technical Decisions
 
@@ -118,21 +107,9 @@ eBPF ランタイム侵入検知（Falco）において、コントロールプ�
 - **Infisical が Single Source of Truth**。`.env` などのローカルファイルは無効化されており、`infisical run --` 経由で環境変数を注入する。
 
 ### Common Commands
+Terraform/Ansible/K3sワークフローの標準コマンドは `CLAUDE.md` の「主要コマンド」参照。
+
 ```bash
-# IaC 差分確認 / 適用
-infisical run -- terraform -chdir=terraform plan
-infisical run -- terraform -chdir=terraform apply
-
-# Ansible 単体実行 / K3s アップデート
-infisical run -- ansible-playbook -i ansible/inventory/tailscale.yml ansible/playbooks/k3s-bootstrap.yml
-infisical run -- ansible-playbook -i ansible/inventory/tailscale.yml ansible/playbooks/k3s-bootstrap.yml -e "k3s_version=v1.36.3+k3s1"
-
-# K3s バージョン差分の手動確認 (通常は週次cronで自動実行)
-# GitHub Actions の k3s-version-check.yml を workflow_dispatch で手動トリガー
-
-# K3s アップグレード適用 (mainブランチの k3s_version を承認後に反映)
-# GitHub Actions の k3s-upgrade.yml を workflow_dispatch で手動トリガー (入力パラメータなし)
-
 # ホストOS自動更新の状態確認 (prod-node-1)
 ssh root@prod-node-1 "systemctl status os-update-notify.timer; cat /var/run/reboot-required 2>/dev/null || echo 'reboot不要'"
 ```
@@ -143,10 +120,10 @@ ssh root@prod-node-1 "systemctl status os-update-notify.timer; cat /var/run/rebo
 - **Cloudflare Access (E2E CI)**: `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET`（`aramakisai-web` の Playwright E2E テストが Cloudflare Access の Authentik ログインを迂回するための Service Token。`terraform/access.tf` の `cloudflare_zero_trust_access_service_token.e2e_ci` が発行元。`aramakisai-web` 側 `staging-e2e-verification` spec が前提としていた secret 名と一致しており乖離なし）
 - **アプリ用シークレット**:
   - **Authentik**: `AUTHENTIK_SECRET_KEY`, `AUTHENTIK_DB_PASSWORD`, `NOREPLY_SMTP_PASSWORD`（`noreply@aramakisai.com` 用 SMTP パスワード。Vaultwarden・Directus の SMTP 設定でも同一キーを再利用） <!-- confidential:allow -->
-  - **DMS**: `MAILSERVER_LDAP_BIND_PASSWORD`, `MAILSERVER_DKIM_KEY`, `MAILSERVER_RESTIC_PASSWORD`, `B2_APPLICATION_KEY_ID`, `B2_APPLICATION_KEY`
+  - **DMS**: `MAILSERVER_LDAP_BIND_PASSWORD`, `MAILSERVER_DKIM_KEY`, `MAILSERVER_RESTIC_PASSWORD`, `B2_APPLICATION_KEY_ID`, `B2_APPLICATION_KEY`, `DOVECOT_ZITADEL_AUTH_PAT`（Dovecot Lua Auth BridgeがZitadel Session API/Management APIを呼ぶ際のPAT。machine user `dovecot-lua-auth`、instance role `IAM_LOGIN_CLIENT` の最小スコープで発行）
   - **Directus**: `DIRECTUS_SECRET`, `DIRECTUS_ADMIN_EMAIL`, `DIRECTUS_ADMIN_PASSWORD`, `DIRECTUS_DB_PASSWORD`, `EMAIL_SMTP_PASSWORD`（Authentik の `NOREPLY_SMTP_PASSWORD` を再利用、新規キーなし）, `DIRECTUS_STAGING_SECRET`, `DIRECTUS_STAGING_ADMIN_EMAIL`, `DIRECTUS_STAGING_ADMIN_PASSWORD`, `DIRECTUS_STAGING_DB_PASSWORD`（staging 用）, `DIRECTUS_LICENSE_KEY`（Open Innovation Grant Key。prod/staging で同一キーを共有し `LICENSE_KEY` env に注入。5 activations枠を消費するため、DB復元先PUBLIC_URL変更時やインスタンス破棄前は要注意）。`directus-db` のメモリ制限は、通常稼働時は約60MiBだが、barman-cloud-backup や wal-archive などのバックアップ処理に伴うメモリスパイクで OOM クラッシュループするのを回避するため、制限を `512Mi` に設定。
   - **Alloy**: `LOKI_URL`, `LOKI_USERNAME`, `LOKI_PASSWORD`, `PROMETHEUS_REMOTE_WRITE_URL`, `PROMETHEUS_USERNAME`, `PROMETHEUS_PASSWORD`
-  - **Roundcube**: `MAIL_OAUTH2_CLIENT_SECRET`, `ROUNDCUBE_DES_KEY`
+  - **Roundcube**: `MAIL_OAUTH2_CLIENT_SECRET`, `ROUNDCUBE_DES_KEY`, `ROUNDCUBE_OIDC_CLIENT_ID`（Zitadel roundcube OIDC Applicationのclient_id。introspection_mode=authでのHTTP Basic認証に使用）
   - **Presence Tracker**: `TF_VAR_authentik_room_presence_client_secret` (TF/ESO共用), `PRESENCE_AUTH_SECRET`, `PRESENCE_AUTHENTIK_API_TOKEN`, `PRESENCE_RESET_SECRET`, `PRESENCE_DISCORD_BOT_TOKEN`
   - **Vaultwarden**: `VAULTWARDEN_ADMIN_TOKEN`, `VAULTWARDEN_DB_PASSWORD`, `VAULTWARDEN_ORG_CREATION_USERS`, `VAULTWARDEN_OIDC_CLIENT_ID`, `VAULTWARDEN_OIDC_CLIENT_SECRET`, `VAULTWARDEN_RESTIC_REPOSITORY`, `VAULTWARDEN_RESTIC_PASSWORD`（SMTP は専用キーを持たず、Authentik の `NOREPLY_SMTP_PASSWORD` を再利用）
   - **Directus SSO**: `DIRECTUS_PROD_OIDC_CLIENT_SECRET`（prod 用 Authentik OIDC Client Secret）, `DIRECTUS_STG_OIDC_CLIENT_SECRET`（stg 用）。`DIRECTUS_PROD_OIDC_CLIENT_ID` / `DIRECTUS_STG_OIDC_CLIENT_ID` は `"directus-prod"` / `"directus-stg"` 固定でコードに直書き（変数なし）。

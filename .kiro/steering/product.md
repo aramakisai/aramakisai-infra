@@ -21,7 +21,7 @@
 
 - **完全自動化されたブートストラップ**: `terraform apply` 一発で VPS 作成 → K3s 構築 → GitOps 起動まで完結
 - **ゼロ秘密漏洩アーキテクチャ**: パブリックリポジトリでも secrets を一切含まない設計
-- **低コスト運用**: CX33 (約¥1200/月) × 1 台でシングルノード K3s を運用。DR は Raspberry Pi コールドスタンバイ + GitHub Actions で自動復旧
+- **低コスト運用**: CX33 (約¥1200/月) × 1 台でシングルノード K3s を運用。DR は GitHub Actions 完結型ワークフローで無人自動復旧
 
 ---
 _Focus on patterns and purpose, not exhaustive feature lists_
