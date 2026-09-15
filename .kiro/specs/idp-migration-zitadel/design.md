@@ -129,6 +129,7 @@ graph TB
 | DB | CloudNativePG (PostgreSQL Operator) | ZitadelのバックエンドDB | 既存CNPG Operatorを再利用。instance-manager・barman WALアーカイブのオーバーヘッドを含めた実測が必要(既存authentikのdb-cluster.yaml基準で256Mi request/512Mi limit相当) |
 | Webhook受信 | vaultwarden-rbac-sync(常駐化) | Actions v2 webhookの受信・署名検証・Vaultwarden反映 | 既存CronJob方式から常駐Podへ構成変更。`ZITADEL-Signature`ヘッダ(HMAC)の検証を追加。Falco誤検知除外ルールの更新が必要 |
 | ブートストラップ | Ansible | Zitadel初回admin/PAT発行・Infisical登録 | `infisical-auth`Secret作成と同一の例外パターン |
+| 管理アクセス経路 | Cloudflare Tunnel(HTTP/2 origin) + cert-manager内部CA | Terraform provider(gRPC)の`idp.aramakisai.com`経由到達 | cloudflared→edgeはHTTP/2必須(QUICはgRPC trailerを中継しない)。zoneのgRPC設定はTerraform管理外 |
 
 ## File Structure Plan
 
@@ -172,6 +173,9 @@ gitops/manifests/prod/vaultwarden-rbac-sync/
 ```
 
 ### Modified Files
+- `terraform/tunnel.tf` — `idp.aramakisai.com`のAPI向けingress ruleをHTTPS origin + HTTP/2 origin + TLS検証スキップへ変更(Requirement 11.6)
+- `gitops/manifests/prod/zitadel/statefulset.yaml` — ZitadelのTLS終端を有効化し内部CA発行の証明書をマウント(Requirement 11.6、11.7)
+- `gitops/manifests/prod/zitadel/` — 内部CA用Issuer・CA Certificate・origin Certificate(SANに`idp.aramakisai.com`と`zitadel.zitadel.svc.cluster.local`)を追加(Requirement 11.7)
 - `gitops/manifests/prod/mailserver/statefulset.yaml` — auth-ldap.conf.extを廃止しlua passdb設定を追加。ML用静的userdb(Requirement 15)のマウントも追加
 - `gitops/manifests/prod/vaultwarden-rbac-sync/*` — CronJob方式を常駐webhook受信Deploymentへ全面書き換え
 - `gitops/helm-values/prod/falco.yaml` — vaultwarden-rbac-syncの新プロセス形態(常駐Deployment)に合わせた誤検知除外ルールの見直し
@@ -297,6 +301,7 @@ sequenceDiagram
 | vaultwarden-rbac-sync(webhook常駐版) | RBAC連携 | ロール変更のイベント駆動反映 | 4, 10 | Zitadel Actions v2 (P0), Vaultwarden API (P0) | Event, API |
 | Zitadel Terraform Provider定義 | IaC | Project/Role/Application/Action/出展団体アカウント/招待発行SA/ブランディングの宣言的管理 | 2, 4, 7, 8, 13, 14, 17 | Terraform Cloud (P1), Ansible Bootstrap発行PAT (P0) | - |
 | Ansible Zitadel Bootstrap | 初期化 | Zitadel初回admin/PAT発行・Infisical登録 | 11 | Zitadel Core (P0) | - |
+| Zitadel Provider Access Path | 初期化 | Terraform provider(gRPC専用)が本番Zitadel APIへ到達する経路とorigin TLS終端の定義 | 7, 11 | Zitadel Core (P0), cert-manager内部CA (P0), cloudflared (P0) | - |
 | Zitadel Backup Migration | 移行 | k3d検証環境のZitadel設定を本番へAdmin API export/importで移行する一括カットオーバー手順 | 7 | k3d Zitadel Admin API (P0), 本番Zitadel Admin API (P0), Zitadel Terraform Provider定義 (P0) | Batch |
 | Zitadel Branding | ブランディング | 荒牧祭2026公式ブランド素材(ロゴ/favicon/フォント/配色)のLabel Policy設定 | 17 | Zitadel Core Admin/Management API (P0) | State |
 
@@ -423,6 +428,28 @@ Session成功後、Management APIでuser_grant(ロール)を取得し、Requirem
 - Input / validation: Zitadelインスタンスの起動完了確認後に実行
 - Output / destination: InfisicalへPAT/Service User Token登録
 - Idempotency & recovery: 既発行トークンが存在する場合はスキップまたは再発行の運用手順(Requirement 11.3)に従う
+
+#### Zitadel Provider Access Path
+
+| Field | Detail |
+|-------|--------|
+| Intent | Terraform provider(gRPC専用)が本番Zitadel APIへ到達する経路を、既存の公開ホスト名とCloudflare Tunnelの範囲内で定義する |
+| Requirements | 7.2, 11.4, 11.5, 11.6, 11.7, 11.8 |
+
+**Responsibilities & Constraints**
+- Zitadel Terraform providerはgRPCのみを使用しREST代替を持たない。到達経路は`idp.aramakisai.com`とCloudflare Tunnelに限定し、新規サブドメイン・NodePort・IPアドレス直接指定・`kubectl port-forward`を用いない
+- cloudflared→Cloudflare edge間のトランスポートはHTTP/2とする。QUICトランスポートはgRPCのtrailerを中継できずストリームが応答なしで終了するため、gRPCが成立しない
+- cloudflaredのingress設定はorigin URLを`https://`とし、HTTP/2 originとTLS検証スキップを併用する。origin側ZitadelはTLS終端を有効化しALPNで`h2`をadvertiseする
+- origin証明書はcert-managerの内部CA(SelfSigned Issuerで発行したCA証明書を元にしたCA Issuer)から発行する。cloudflaredはTLS検証をスキップするため公的CAである必要がなく、公開ホスト名向けの公的証明書はCloudflare edgeが終端するため、この証明書の検証主体はクラスタ内に限られる
+- 証明書のSANには`idp.aramakisai.com`と`zitadel.zitadel.svc.cluster.local`の双方を含める。login v2コンテナがクラスタ内Service名でAPIを呼ぶため、公開ホスト名のみのSANでは検証に失敗する
+- login v2コンテナは内部CA証明書をtrust storeへ取り込み、TLS検証を無効化しない。取り込み手段(Node.jsの`NODE_EXTRA_CA_CERTS`相当)が当該コンテナで機能するかは実機確認が必要
+- Cloudflare zoneのgRPC設定はCloudflare Terraform providerのスキーマに存在せずIaC管理できない。ダッシュボードでの手動設定として運用手順に残す。gRPC無効のzoneはgRPCリクエストを拒否する
+- Cloudflare AccessはCloudflareリバースプロキシ経由のgRPCトラフィックを扱わない。`idp.aramakisai.com`にAccessを適用する構成を採る場合は本経路との競合有無を実機確認する
+
+**Dependencies**
+- Outbound: cert-manager内部CA — origin証明書の発行 (P0)
+- Outbound: cloudflared — gRPCの中継 (P0)
+- Inbound: Zitadel Terraform Provider定義 — 本経路を前提にapplyする (P0)
 
 ### 移行
 

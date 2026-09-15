@@ -122,13 +122,18 @@
 7. When ユーザーにロールを付与する, the 新IdP shall OIDC ID Token/UserinfoのクレームにロールがRequirement 8の設計通り反映されることを確認する
 8. The 移行手順 shall 旧authentik構成への切り戻し手順(Requirement 7.5)を実際に実行し、切り戻し後に既存アプリのログインが復旧することを検証する
 
-### Requirement 11: Terraformプロバイダー認証のブートストラップ
-**Objective:** As a インフラ運用担当者, I want ZitadelのTerraform providerが必要とする管理者トークンを安全にブートストラップする, so that project/role/applicationのIaC管理を開始できる
+### Requirement 11: Terraformプロバイダー認証とAPI到達経路のブートストラップ
+**Objective:** As a インフラ運用担当者, I want ZitadelのTerraform providerが必要とする管理者トークンとAPI到達経路を安全にブートストラップする, so that project/role/applicationのIaC管理を開始できる
 
 #### Acceptance Criteria
 1. The ブートストラップ手順 shall Zitadelインスタンス初回起動後、Ansibleで組織/管理者ユーザー作成とService User/PAT発行を行いInfisicalへ登録する
 2. The ブートストラップ手順 shall 既存の`infisical-auth` Secret作成と同様に、ArgoCD/GitOpsが管理できない領域(ESO自体を起動する前提条件)への対応として、GitOps原則の明示的な例外に位置づける
 3. If ブートストラップ済みのPAT/Service User Tokenが失効・漏洩した場合, then 運用手順 shall 再発行・Infisical更新の手順を提供する
+4. The 到達経路 shall Zitadel Terraform provider(gRPC専用、REST代替なし)のgRPCリクエストが中継される経路を確保する
+5. The 到達経路 shall 既存の公開ホスト名(`idp.aramakisai.com`)とCloudflare Tunnelのみを用い、新規サブドメイン・NodePort・IPアドレス直接指定・`kubectl port-forward`のいずれも用いない
+6. Where Cloudflare Tunnel経由でgRPCを中継する場合, the 到達経路 shall origin側をTLS終端(ALPN `h2`)とし、cloudflared側のingress設定を`https://`・HTTP/2 origin・TLS検証スキップの組み合わせで構成する
+7. The origin証明書 shall クラスタ内で完結する内部CAから発行し、公開ホスト名(`idp.aramakisai.com`)とクラスタ内Service名(`zitadel.zitadel.svc.cluster.local`)の双方をSANに含める
+8. The 設計 shall Cloudflare zoneのgRPC設定がCloudflare Terraform providerのスキーマに存在せずIaC管理対象外である事実を明記し、ダッシュボードでの手動設定として運用手順に残す
 
 ### Requirement 12: 招待制登録の整理とパスワードリカバリーの標準化
 **Objective:** As a インフラ運用担当者, I want authentikの`authentik_enrollment.tf`(学籍番号等カスタム項目付き招待制登録)と`authentik_recovery.tf`(実質未使用のパスワードリカバリーflow)を整理する, so that Zitadel標準機能だけで運用でき独自flowの保守コストを負わない
