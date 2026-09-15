@@ -1,8 +1,0 @@
----
-# Zitadel 専用 namespace
-# authentik等の既存アプリは共有の prod namespace に同居するが、Zitadelは
-# design.md の File Structure Plan で専用 namespace を切る構成としたため分離する
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: zitadel

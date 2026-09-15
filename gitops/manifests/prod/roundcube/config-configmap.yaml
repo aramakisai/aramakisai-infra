@@ -6,18 +6,15 @@
 #
 # 認証フロー:
 #   1. ユーザーが webmail.aramakisai.com にアクセス
-#   2. oauth_login_redirect: true により Zitadel に自動リダイレクト
-#   3. Zitadel で認証 (PKCE付きAuthorization Code Flow) → access_token を取得
+#   2. oauth_login_redirect: true により Authentik に自動リダイレクト
+#   3. Authentik で認証 → access_token を取得
 #   4. Roundcube が IMAP/SMTP に OAUTHBEARER で接続
-#   5. DMS (Dovecot) が Zitadel introspection エンドポイント (/oauth/v2/introspect,
-#      POST + HTTP Basic認証。dovecot-oauth2-external-secret.yaml参照) で token を検証
+#   5. DMS (Dovecot) が Authentik introspection エンドポイントで token を検証
 #
-# Zitadel 側の必須設定 (terraform/zitadel_applications.tf の roundcube Application):
-#   - OIDC App: name=roundcube (client_idはZitadelが払い出すランダムな数値ID)
+# Authentik 側の必須設定:
+#   - OAuth2/OIDC Provider: slug=roundcube, client_id=roundcube
 #   - Redirect URI: https://webmail.aramakisai.com/index.php/login/oauth
 #   - Scopes: openid, email, profile
-#   - Dovecot introspectionと同一のclient_id/secretを共有する (ROUNDCUBE_OIDC_CLIENT_ID /
-#     MAIL_OAUTH2_CLIENT_SECRET, roundcube/external-secret.yaml参照)
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -30,27 +27,21 @@ data:
     // base_url ではなく request_url を使う — resolve_url() がこちらを優先するため
     $config['request_url'] = 'https://webmail.aramakisai.com';
 
-    // Zitadel OAuth2 ログイン (roundcube: Dovecot introspectionと共有するConfidential client)
+    // Authentik OAuth2 ログイン (aramakisai-mail: Roundcube 用 Confidential client)
     $config['oauth_provider'] = 'generic';
-    $config['oauth_provider_name'] = 'Zitadel';
-    // client_idはZitadelが払い出すランダムな数値IDのためauthentik時代のようにハードコードできない
-    $config['oauth_client_id'] = getenv('ROUNDCUBE_OIDC_CLIENT_ID');
+    $config['oauth_provider_name'] = 'Authentik';
+    $config['oauth_client_id'] = 'aramakisai-mail';
     $config['oauth_client_secret'] = getenv('MAIL_OAUTH2_CLIENT_SECRET');
-    // ドメインはPoC時点のプレースホルダー。本番Zitadelの外部公開ホスト名確定後に更新すること
-    $config['oauth_auth_uri'] = 'https://zitadel.aramakisai.com/oauth/v2/authorize';
-    $config['oauth_token_uri'] = 'https://zitadel.aramakisai.com/oauth/v2/token';
-    $config['oauth_identity_uri'] = 'https://zitadel.aramakisai.com/oidc/v1/userinfo';
-    // mail_acl_groupsはauthentik固有のカスタムスコープでZitadelには存在しないため削除。
-    // offline_accessもPoCでは未使用のため削除 (必要になれば復活させる)
-    $config['oauth_scope'] = 'openid email profile';
+    $config['oauth_auth_uri'] = 'https://idp.aramakisai.com/application/o/authorize/';
+    $config['oauth_token_uri'] = 'https://idp.aramakisai.com/application/o/token/';
+    $config['oauth_identity_uri'] = 'https://idp.aramakisai.com/application/o/userinfo/';
+    $config['oauth_scope'] = 'openid email profile offline_access mail_acl_groups';
     $config['oauth_identity_fields'] = ['email'];
     $config['oauth_login_redirect'] = true;
-    // Zitadelのintrospection_endpoint_auth_methods_supportedはclient_secret_basicと
-    // private_key_jwtのみでclient_secret_postを受け付けない (dovecot-oauth2-external-secret.yaml
-    // と同じ制約)
+    // Authentik は HTTP Basic Auth でクライアント認証する (client_secret_post は拒否される)
     $config['oauth_token_endpoint_auth'] = 'client_secret_basic';
 
-    // IMAP/SMTP に OAUTHBEARER を使用 (DMS の Dovecot が Zitadel introspection エンドポイントで token を検証)
+    // IMAP/SMTP に OAUTHBEARER を使用 (DMS の Dovecot が Authentik introspection エンドポイントで token を検証)
     $config['imap_auth_type'] = 'OAUTHBEARER';
     $config['smtp_auth_type'] = 'OAUTHBEARER';
 

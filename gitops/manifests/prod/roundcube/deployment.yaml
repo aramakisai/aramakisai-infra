@@ -4,8 +4,8 @@
 # image バージョンは https://hub.docker.com/r/roundcube/roundcubemail/tags で確認して固定すること
 # 更新手順: image タグを変更 → GitOps PR → ArgoCD が自動 sync
 #
-# 認証方式: Zitadel OAuth2 (oauth_login_redirect: true でログイン時に自動リダイレクト)
-#   - IMAP/SMTP 接続は OAUTHBEARER SASL (DMS の Dovecot が Zitadel introspection エンドポイントで token を検証)
+# 認証方式: Authentik OAuth2 (oauth_login_redirect: true でログイン時に自動リダイレクト)
+#   - IMAP/SMTP 接続は OAUTHBEARER SASL (DMS の Dovecot が Authentik introspection エンドポイントで token を検証)
 #   - カスタムプラグイン不要 (Roundcube 1.6 ネイティブサポート)
 #
 # DB: SQLite (/var/roundcube/db/ に PVC をマウント)
@@ -50,11 +50,6 @@ spec:
               value: "sqlite"
             - name: ROUNDCUBEMAIL_SKIN
               value: "elastic"
-            - name: ROUNDCUBE_OIDC_CLIENT_ID
-              valueFrom:
-                secretKeyRef:
-                  name: roundcube-secrets
-                  key: ROUNDCUBE_OIDC_CLIENT_ID
             - name: MAIL_OAUTH2_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:

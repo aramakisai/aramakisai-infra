@@ -41,7 +41,3 @@ __pycache__/
 
 # Claude
 .claude/projects/
-
-# Zitadel PoC secrets
-.zitadel-poc-secrets/
-*.pat

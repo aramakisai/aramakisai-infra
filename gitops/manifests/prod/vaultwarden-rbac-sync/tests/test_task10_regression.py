@@ -281,43 +281,32 @@ class TestConcurrencyExclusion:
         assert ret2 == 0, "run_cron_mode exits 0 even when skipped"
         assert sync_call_count == 0, "sync must not execute while first process holds Lease"
 
-    def test_webhook_blocked_when_cron_holds_lease(self):
-        """CronJob(またはfollow-up受信)がLease保持中 → WebhookReceiverはLease取得失敗、sync未実行のまま200を返す。"""
-        import hashlib
-        import hmac as hmac_module
-        import time as time_module
-
-        from sync import WebhookReceiver
+    def test_trigger_blocked_when_cron_holds_lease(self):
+        """CronJobがLease保持中 → TriggerReceiverはLease取得失敗、sync未実行のまま202を返す。"""
+        from sync import TriggerReceiver
 
         store = FakeLeaseStore()
         cron_lock = SyncLockManager("prod")
-        webhook_lock = SyncLockManager("prod")
-        webhook_sync_called = False
-
-        payload = b'{"instanceID":"i","aggregateID":"a","sequence":1}'
-        ts = int(time_module.time())
-        mac = hmac_module.new(b"signing-key", digestmod=hashlib.sha256)
-        mac.update(f"{ts}.".encode("utf-8"))
-        mac.update(payload)
-        signature_header = f"t={ts},v1={mac.hexdigest()}"
+        trigger_lock = SyncLockManager("prod")
+        trigger_sync_called = False
 
         with patch("subprocess.run", side_effect=store.run):
             acquired = cron_lock.acquire()
             assert acquired is True
 
             def run_sync():
-                nonlocal webhook_sync_called
-                webhook_sync_called = True
+                nonlocal trigger_sync_called
+                trigger_sync_called = True
 
-            receiver = WebhookReceiver(
-                signing_key="signing-key",
-                lock_manager=webhook_lock,
+            receiver = TriggerReceiver(
+                trigger_token="secret-token",
+                lock_manager=trigger_lock,
                 run_sync=run_sync,
             )
-            status = receiver.handle_webhook(payload, signature_header)
+            status = receiver.handle_trigger("Bearer secret-token")
 
-        assert status == 200
-        assert not webhook_sync_called, "sync must not run when CronJob holds Lease"
+        assert status == 202
+        assert not trigger_sync_called, "sync must not run when CronJob holds Lease"
 
     def test_lease_released_after_cron_completes_allows_next_run(self):
         """先行CronJob完了後にLeaseが解放 → 後続CronJobは取得に成功し実行される。"""
