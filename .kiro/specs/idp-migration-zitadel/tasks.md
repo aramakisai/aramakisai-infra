@@ -429,6 +429,15 @@
     影響なし(`cms-secrets`/`room-presence-db`のDegraded、`vaultwarden`のSuspendedは既存の別要因、
     本マージ由来ではない)。ArgoCD手動sync・Ansible/Terraform実機実行、ExternalDomain到達性ブロッカーの
     解消はまだ未実施でユーザー判断待ち。
+  - **追記2(ExternalDomain到達性ブロッカー解消、マージ前)**: authentik廃止方針に伴い、`idp.aramakisai.com`
+    のcloudflaredトンネルbackendをauthentikからZitadel API(`zitadel.zitadel.svc.cluster.local:8080`)へ
+    切替、`ZITADEL_EXTERNALDOMAIN`をクラスタ内DNSから`idp.aramakisai.com`(`EXTERNALPORT=443`・
+    `EXTERNALSECURE=true`)へ変更した(`feat/idp-zitadel-external-domain`ブランチ)。これによりTFCランナーが
+    `idp.aramakisai.com`経由でZitadel APIへ到達可能になりterraform apply実行が見込める。login v2 UI(3000)
+    のパス振り分けは対象外のまま(task9.4/task10.7項目8で別途対応)。`terraform/access.tf`の
+    Cloudflare Access authentik IdP登録(`idp.aramakisai.com`のauthorize/token/jwksエンドポイント)は
+    このマージ後に機能しなくなる想定、対応要否は別途判断(本specスコープ外)。マージ・実際のterraform
+    apply/Ansible実行はまだ未実施。
 
 - [ ] 9.3 Terraform管理外のインスタンス設定をAdmin API importで反映する
   - Assert Roles on Authentication等、Terraformで管理しきれないインスタンス設定の差分を洗い出す

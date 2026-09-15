@@ -26,10 +26,11 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "main" {
       }
     }
 
-    # Authentik IdP
+    # Zitadel IdP (API)。login v2 UI(3000)のパス振り分けはtask9.4/task10.7項目8で対応予定、
+    # 現状はterraform provider等API利用のみ到達可能にする
     ingress_rule {
       hostname = "idp.aramakisai.com"
-      service  = "http://authentik-server.prod.svc.cluster.local:80"
+      service  = "http://zitadel.zitadel.svc.cluster.local:8080"
     }
 
     # Staging フロントエンド

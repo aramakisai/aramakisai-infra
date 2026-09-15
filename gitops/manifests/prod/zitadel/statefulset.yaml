@@ -5,9 +5,10 @@
 # loginコンテナからzitadelコンテナへは localhost:8080 で到達できる
 # (docker-composeのnetwork_mode: service:zitadelに相当する構成が既定で成立する)。
 #
-# ExternalDomain等はk3d検証環境向けに Service の cluster内DNS を暫定設定している。
-# 本番切替時 (tasks.md task 9.4) には実際のcloudflaredフロントのホスト名・TLS設定へ
-# 更新すること。
+# ExternalDomainはcloudflaredトンネル経由の公開ホスト名(idp.aramakisai.com)を設定している。
+# ただしTunnel ingressは現状API(8080)のみをidp.aramakisai.comへ振っており、login v2 UI(3000)
+# の外部到達・パス振り分けは未整備(task9.4/task10.7項目8で対応予定)。そのためlogin v2の
+# BASEURI/LoginURL/LogoutURLは引き続きcluster内DNSを指す暫定設定のまま。
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -53,11 +54,11 @@ spec:
                   name: zitadel-secrets
                   key: MASTERKEY
             - name: ZITADEL_EXTERNALDOMAIN
-              value: zitadel.zitadel.svc.cluster.local
+              value: idp.aramakisai.com
             - name: ZITADEL_EXTERNALPORT
-              value: "8080"
+              value: "443"
             - name: ZITADEL_EXTERNALSECURE
-              value: "false"
+              value: "true"
             - name: ZITADEL_TLS_ENABLED
               value: "false"
             # --- DB接続 (CNPG zitadel-db) ---
