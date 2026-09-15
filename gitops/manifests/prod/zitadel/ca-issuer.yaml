@@ -1,0 +1,39 @@
+---
+# 内部CA (Zitadel Provider Access Path, design.md Requirement 11.6-11.7)
+#
+# cloudflared→Zitadel間のgRPC中継はorigin側TLS終端(ALPN h2)を要求する。この証明書は
+# 公開ホスト名とクラスタ内Service名の双方をSANに含める必要があり、公的CA(Let's Encrypt)は
+# クラスタ内Service名(*.svc.cluster.local)を発行できないため、クラスタ内で完結する内部CAを
+# 自前で用意する。cloudflared側はTLS検証をスキップする(terraform/tunnel.tfのno_tls_verify)ため、
+# この内部CAが公的に信頼される必要はない。
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: zitadel-selfsigned-issuer
+  namespace: zitadel
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: zitadel-ca
+  namespace: zitadel
+spec:
+  secretName: zitadel-ca-tls
+  isCA: true
+  commonName: zitadel-internal-ca
+  duration: 87600h # 10年
+  renewBefore: 720h # 30日
+  issuerRef:
+    name: zitadel-selfsigned-issuer
+    kind: Issuer
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: zitadel-ca-issuer
+  namespace: zitadel
+spec:
+  ca:
+    secretName: zitadel-ca-tls

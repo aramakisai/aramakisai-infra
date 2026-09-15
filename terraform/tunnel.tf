@@ -34,9 +34,18 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "main" {
       path     = "^/ui/v2/login.*"
       service  = "http://zitadel.zitadel.svc.cluster.local:3000"
     }
+    # API向け(非login v2パス、Terraform providerのgRPCを含む)。gRPCの中継には
+    # origin側TLS終端(ALPN h2)が必須なためhttps originとし、cloudflared→edge間の
+    # トランスポートをHTTP/2に固定する(QUICはgRPCのtrailerを中継できない)。証明書は
+    # クラスタ内の内部CA発行のためTLS検証はスキップする(Zitadel Provider Access Path、
+    # design.md Requirement 11.6)
     ingress_rule {
       hostname = "idp.aramakisai.com"
-      service  = "http://zitadel.zitadel.svc.cluster.local:8080"
+      service  = "https://zitadel.zitadel.svc.cluster.local:8080"
+      origin_request {
+        http2_origin  = true
+        no_tls_verify = true
+      }
     }
 
     # Staging フロントエンド

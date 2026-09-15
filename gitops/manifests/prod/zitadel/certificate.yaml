@@ -1,0 +1,21 @@
+---
+# Zitadel origin証明書 (Zitadel Provider Access Path, design.md Requirement 11.7)
+#
+# SANに公開ホスト名(idp.aramakisai.com)とクラスタ内Service名
+# (zitadel.zitadel.svc.cluster.local)の双方を含める。login v2コンテナは後者の名前で
+# ZitadelのAPIを呼び出すため、公開ホスト名のみのSANでは検証に失敗する。
+# 発行された secretName の Secret には ca.crt (CAの公開鍵) も含まれ、login v2コンテナが
+# 内部CAを信頼するために利用する(statefulset.yamlのNODE_EXTRA_CA_CERTS参照)。
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: zitadel-tls
+  namespace: zitadel
+spec:
+  secretName: zitadel-tls
+  issuerRef:
+    name: zitadel-ca-issuer
+    kind: Issuer
+  dnsNames:
+    - idp.aramakisai.com
+    - zitadel.zitadel.svc.cluster.local
