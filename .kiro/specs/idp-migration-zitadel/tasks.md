@@ -557,6 +557,34 @@
     チェックリスト(cert-manager内部CA・TLS終端・`tunnel.tf`のHTTPS origin化・Cloudflareダッシュボードの
     gRPC設定)が現在の実行順序であり、追記5の「未解決」および「Tailscale Operator案」は採用しなかった
     過去の検討記録として残すのみ。以降このタスクを再開する場合は上記チェックリストに従うこと。
+  - **追記7(gRPC到達経路のコード実装、terraform apply未実施)**: 追記6のチェックリストのうち
+    コードとして実装可能な3項目を実装した。
+    - `gitops/manifests/prod/zitadel/ca-issuer.yaml`(新規): SelfSigned `Issuer`
+      (`zitadel-selfsigned-issuer`) → `isCA: true`の`Certificate`(`zitadel-ca`、Secret
+      `zitadel-ca-tls`) → その Secret を`ca.secretName`に指定する`Issuer`
+      (`zitadel-ca-issuer`)の3段構成。いずれも`zitadel` namespaceに閉じたnamespace-scoped
+      `Issuer`(`ClusterIssuer`は使わない)。
+    - `gitops/manifests/prod/zitadel/certificate.yaml`(新規): `zitadel-ca-issuer`から発行する
+      origin証明書(`zitadel-tls` Secret)。`dnsNames`に`idp.aramakisai.com`と
+      `zitadel.zitadel.svc.cluster.local`の両方を指定(要件11.7)。
+    - `gitops/manifests/prod/zitadel/statefulset.yaml`: zitadelコンテナに`zitadel-tls`
+      Secretをマウントし`ZITADEL_TLS_ENABLED=true`・`ZITADEL_TLS_CERTPATH`/`ZITADEL_TLS_KEYPATH`
+      を設定してTLS終端を有効化(env名は`cmd/defaults.yaml`のZitadel公式定義で確認済み)。
+      loginコンテナは同Secretを読み取り専用でマウントし、`ZITADEL_API_URL`を
+      `https://zitadel.zitadel.svc.cluster.local:8080`へ変更、`NODE_EXTRA_CA_CERTS`に
+      同Secretの`ca.crt`を指定して内部CAを信頼させた(TLS検証の無効化はしていない、要件11.7)。
+    - `terraform/tunnel.tf`: `idp.aramakisai.com`のAPI向け(非login v2パス)ingress ruleを
+      `https://zitadel.zitadel.svc.cluster.local:8080`のhttps originへ変更し、
+      `origin_request { http2_origin = true, no_tls_verify = true }`を追加した
+      (login v2 UI向けingress ruleは変更していない)。`http2_origin`/`no_tls_verify`が
+      Cloudflare provider(`~> 4.0`、実インストールバージョン4.52.9)の
+      `cloudflare_zero_trust_tunnel_cloudflared_config`スキーマに実在することを
+      `terraform providers schema -json`で確認済み。
+    - 未実装・未検証: 要件11.8のCloudflareダッシュボード側gRPC設定(zone単位の手動有効化、
+      Terraform管理対象外と設計で明記済み)はコード変更の対象外。login v2コンテナで
+      `NODE_EXTRA_CA_CERTS`が実際に機能するか(design.mdが「実機確認が必要」と明記している点)は
+      本セッションでは未検証。`terraform apply`・ArgoCD sync・実機でのgRPC疎通確認はいずれも
+      実施していない。
 
 - [ ] 9.3 Terraform管理外のインスタンス設定をAdmin API importで反映する
   - Assert Roles on Authentication等、Terraformで管理しきれないインスタンス設定の差分を洗い出す

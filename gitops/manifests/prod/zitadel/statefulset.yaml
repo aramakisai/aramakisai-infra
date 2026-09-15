@@ -33,6 +33,12 @@ spec:
       volumes:
         - name: zitadel-data
           emptyDir: {}
+        # ca-issuer.yaml/certificate.yamlの内部CAが発行するorigin証明書 (Zitadel Provider
+        # Access Path, Requirement 11.6-11.7)。zitadelコンテナのTLS終端とloginコンテナの
+        # CA trust (ca.crt) の両方で共用する
+        - name: zitadel-tls
+          secret:
+            secretName: zitadel-tls
       containers:
         - name: zitadel
           image: ghcr.io/zitadel/zitadel:v4.12.3
@@ -47,6 +53,9 @@ spec:
           volumeMounts:
             - name: zitadel-data
               mountPath: /zitadel-data
+            - name: zitadel-tls
+              mountPath: /zitadel-tls
+              readOnly: true
           env:
             - name: ZITADEL_MASTERKEY
               valueFrom:
@@ -59,8 +68,15 @@ spec:
               value: "443"
             - name: ZITADEL_EXTERNALSECURE
               value: "true"
+            # cloudflared→Zitadel間のgRPC中継(Terraform provider用)がorigin側TLS終端
+            # (ALPN h2)を要求するため有効化する(Zitadel Provider Access Path、
+            # Requirement 11.6)。証明書はca-issuer.yaml/certificate.yamlの内部CAが発行する
             - name: ZITADEL_TLS_ENABLED
-              value: "false"
+              value: "true"
+            - name: ZITADEL_TLS_CERTPATH
+              value: /zitadel-tls/tls.crt
+            - name: ZITADEL_TLS_KEYPATH
+              value: /zitadel-tls/tls.key
             # --- DB接続 (CNPG zitadel-db) ---
             - name: ZITADEL_DATABASE_POSTGRES_HOST
               value: zitadel-db-rw
@@ -145,12 +161,21 @@ spec:
             - name: zitadel-data
               mountPath: /zitadel-data
               readOnly: true
+            - name: zitadel-tls
+              mountPath: /zitadel-tls
+              readOnly: true
           env:
             # localhost指定だとHostヘッダがExternalDomain(zitadel.zitadel.svc.cluster.local)と
             # 不一致になりinstance解決に失敗する(Errors.Instance.NotFound)ため、
-            # ExternalDomainと同一のService DNS名を指定する
+            # ExternalDomainと同一のService DNS名を指定する。zitadelコンテナのTLS終端に伴い
+            # httpsへ変更 (Zitadel Provider Access Path、Requirement 11.6)
             - name: ZITADEL_API_URL
-              value: http://zitadel.zitadel.svc.cluster.local:8080
+              value: https://zitadel.zitadel.svc.cluster.local:8080
+            # 内部CA(certificate.yamlのzitadel-tls Secretのca.crt)をNode.jsランタイムに
+            # 信頼させる。TLS検証は無効化しない(Requirement 11.7)。このコンテナで実際に
+            # 機能するかは実機確認が必要(design.md Zitadel Provider Access Path参照)
+            - name: NODE_EXTRA_CA_CERTS
+              value: /zitadel-tls/ca.crt
             - name: NEXT_PUBLIC_BASE_PATH
               value: /ui/v2/login
             - name: ZITADEL_SERVICE_USER_TOKEN_FILE
