@@ -1,0 +1,23 @@
+---
+# infisical-auth Secretと同じ位置づけの、ArgoCD/Terraformが自己参照できない
+# 領域への例外的初期化ロール。対象はk3d検証環境限定 (本番prod-node-1には未適用)。
+
+zitadel_bootstrap_namespace: zitadel
+zitadel_bootstrap_pod: zitadel-0
+zitadel_bootstrap_zitadel_container: zitadel
+zitadel_bootstrap_login_container: login   # zitadelコンテナはshellを持たないdistroless系イメージのため、
+                                            # 同一Pod内でshellを持つloginコンテナ経由で共有volumeを読む
+
+# PATの取得元 (StatefulSetのZITADEL_FIRSTINSTANCE_PATPATHと一致させること)
+zitadel_bootstrap_pat_path_in_pod: /zitadel-data/zitadel-admin-sa.pat
+
+# 発行されたPATの保存先 (ローカルファイル、本番Infisicalへは登録しない)
+zitadel_bootstrap_output_dir: "{{ lookup('env', 'ZITADEL_BOOTSTRAP_OUTPUT_DIR') | default(playbook_dir ~ '/../../.zitadel-poc-secrets', true) }}"
+zitadel_bootstrap_pat_output_file: "{{ zitadel_bootstrap_output_dir }}/zitadel-admin-sa.pat"
+
+# k3d検証クラスタ専用のkubeconfig。ambientな `kubectl config current-context` には
+# 絶対に依存しない (誤って別クラスタを操作する事故を防ぐため必須指定)
+zitadel_bootstrap_kubeconfig: "{{ lookup('env', 'ZITADEL_POC_KUBECONFIG') }}"
+
+zitadel_bootstrap_ready_retries: 30
+zitadel_bootstrap_ready_delay: 5
