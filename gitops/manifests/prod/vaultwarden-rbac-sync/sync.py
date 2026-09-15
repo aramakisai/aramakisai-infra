@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Vaultwarden RBAC Sync エンジン。
 
-Authentikグループメンバーシップを正本として、Vaultwarden Organization/Collectionの
-ユーザー単位権限を自動同期する。実行モードは --mode=cron (定期実行) / --mode=serve
-(Trigger Receiver常駐) の2種類。
+Zitadel Project Role(user_grant)のメンバーシップを正本として、Vaultwarden
+Organization/Collectionのユーザー単位権限を自動同期する。実行モードは
+--mode=cron (定期実行、現状CronJobは削除済みで未使用) / --mode=serve
+(Actions v2 webhook受信常駐) の2種類。
 """
 import argparse
 import base64
+import hashlib
 import hmac
 import json
 import logging
@@ -15,11 +17,11 @@ import socket
 import subprocess
 import sys
 import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote as url_quote
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
@@ -98,8 +100,8 @@ def load_mapping(raw_json: str) -> list[MappingEntry]:
     return entries
 
 
-class AuthentikApiError(Exception):
-    """Authentik API呼び出しが認証エラー・タイムアウトで失敗した場合に発生する (Requirement 1.3)。
+class ZitadelApiError(Exception):
+    """Zitadel API呼び出しが認証エラー・タイムアウトで失敗した場合に発生する (Requirement 4.1)。
 
     呼び出し元 (SyncOrchestrator) に伝播し、同期処理全体を中断させる。
     """
@@ -112,10 +114,14 @@ class GroupMembersResult:
     error: str | None
 
 
-class AuthentikGroupClient:
-    """Authentikグループメンバーシップ取得クライアント (Requirement 1.1-1.4)。
+class ZitadelGroupClient:
+    """Zitadel Project Role(フラットロール)のuser_grantメンバー取得クライアント (Requirement 4.1)。
 
-    専用APIトークン (PRESENCE_AUTHENTIK_API_TOKEN パターン踏襲) でBearer認証する。
+    Management API `/management/v1/users/grants/_search` を roleKeyQuery で絞り込み、
+    そのロールを保持するuser_grantのメールアドレス一覧を取得する
+    (Zitadelにはauthentikのグループのような「未存在グループ」概念がなく、
+    ロール未定義・0件付与のいずれも空配列で返るため区別しない)。
+    専用PAT (Ansible Zitadel Bootstrap発行、design.md参照) でBearer認証する。
     """
 
     def __init__(self, base_url: str, api_token: str, timeout: float = 10.0):
@@ -123,42 +129,41 @@ class AuthentikGroupClient:
         self._api_token = api_token
         self._timeout = timeout
 
-    def get_group_members(self, group_name: str) -> GroupMembersResult:
-        """グループ名からメンバーのメールアドレス一覧を取得する (Requirement 1.1)。
+    def get_group_members(self, role_key: str) -> GroupMembersResult:
+        """project roleキーを保持するuser_grantのメールアドレス一覧を取得する (Requirement 4.1)。
 
-        グループが存在しない場合は例外を投げず GroupMembersResult.error に記録する (1.4)。
-        認証エラー・タイムアウトは AuthentikApiError として呼び出し元に伝播させる (1.3)。
+        認証エラー・タイムアウトは ZitadelApiError として呼び出し元に伝播させる。
         """
-        url = (
-            f"{self._base_url}/api/v3/core/groups/"
-            f"?name={url_quote(group_name, safe='')}&include_users=true"
+        url = f"{self._base_url}/management/v1/users/grants/_search"
+        body = json.dumps({"queries": [{"roleKeyQuery": {"roleKey": role_key}}]}).encode("utf-8")
+        request = Request(
+            url,
+            data=body,
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {self._api_token}",
+                "Content-Type": "application/json",
+            },
         )
-        request = Request(url, headers={"Authorization": f"Bearer {self._api_token}"})
         try:
             with urlopen(request, timeout=self._timeout) as response:
                 payload = json.loads(response.read())
         except HTTPError as exc:
-            raise AuthentikApiError(
-                f"Authentik APIエラー (group={group_name}): HTTP {exc.code}"
+            raise ZitadelApiError(
+                f"Zitadel APIエラー (role={role_key}): HTTP {exc.code}"
             ) from exc
         except (URLError, TimeoutError) as exc:
-            raise AuthentikApiError(
-                f"Authentik API呼び出しに失敗しました (group={group_name}): {exc}"
+            raise ZitadelApiError(
+                f"Zitadel API呼び出しに失敗しました (role={role_key}): {exc}"
             ) from exc
 
-        results = payload.get("results", [])
+        results = payload.get("result", [])
         if not results:
-            log_event("authentik_group_not_found", group=group_name)
-            return GroupMembersResult(
-                group_name, [], f"グループ '{group_name}' がAuthentik上に存在しません"
-            )
+            log_event("zitadel_role_no_grants", role=role_key)
+            return GroupMembersResult(role_key, [], None)
 
-        member_emails = [
-            user["email"]
-            for user in (results[0].get("users_obj") or [])
-            if user.get("email")
-        ]
-        return GroupMembersResult(group_name, member_emails, None)
+        member_emails = [grant["email"] for grant in results if grant.get("email")]
+        return GroupMembersResult(role_key, member_emails, None)
 
 
 class VaultwardenApiError(Exception):
@@ -694,7 +699,7 @@ class SyncOrchestrator:
     def __init__(
         self,
         mappings: list[MappingEntry],
-        authentik_client: AuthentikGroupClient,
+        authentik_client: ZitadelGroupClient,
         vaultwarden_client: VaultwardenOrgClient,
         discord_notifier: "DiscordNotifier",
         org_key_bytes: bytes | None = None,
@@ -1096,11 +1101,11 @@ class DiscordNotifier:
 
 
 def build_clients_from_env() -> tuple[
-    list[MappingEntry], AuthentikGroupClient, VaultwardenOrgClient, DiscordNotifier, bytes | None
+    list[MappingEntry], ZitadelGroupClient, VaultwardenOrgClient, DiscordNotifier, bytes | None
 ]:
-    """環境変数とマウント済みmapping.jsonから各クライアントを構築する (Requirement 12.1)。
+    """環境変数とマウント済みmapping.jsonから各クライアントを構築する (Requirement 4.1, 12.1)。
 
-    Authentik/Vaultwardenのbase URLはクラスター内サービスDNS固定値として
+    Zitadel/Vaultwardenのbase URLはクラスター内サービスDNS固定値として
     マニフェストに直接記述される (ldap-outpost等の既存パターン踏襲、シークレットではない)。
     VAULTWARDEN_ORG_KEY が設定されている場合、自動Confirmが有効化される (task 11)。
     """
@@ -1108,9 +1113,9 @@ def build_clients_from_env() -> tuple[
     with open(mapping_path, encoding="utf-8") as f:
         mappings = load_mapping(f.read())
 
-    authentik_client = AuthentikGroupClient(
-        base_url=os.environ["AUTHENTIK_BASE_URL"],
-        api_token=os.environ["AUTHENTIK_API_TOKEN"],
+    group_client = ZitadelGroupClient(
+        base_url=os.environ["ZITADEL_BASE_URL"],
+        api_token=os.environ["ZITADEL_API_TOKEN"],
     )
     vaultwarden_client = VaultwardenOrgClient(
         base_url=os.environ["VAULTWARDEN_BASE_URL"],
@@ -1120,7 +1125,7 @@ def build_clients_from_env() -> tuple[
     discord_notifier = DiscordNotifier(os.environ.get("DISCORD_WEBHOOK_URL", ""))
     org_key_b64 = os.environ.get("VAULTWARDEN_ORG_KEY", "")
     org_key_bytes = base64.b64decode(org_key_b64) if org_key_b64 else None
-    return mappings, authentik_client, vaultwarden_client, discord_notifier, org_key_bytes
+    return mappings, group_client, vaultwarden_client, discord_notifier, org_key_bytes
 
 
 def run_cron_mode(
@@ -1129,9 +1134,10 @@ def run_cron_mode(
 ) -> int:
     """--mode=cron 起動時のエントリポイント (Requirement 10.1, 10.2, 10.3)。
 
+    CronJobマニフェスト自体はtask 4.2で削除済みで現状呼び出し経路はないが、
+    design.md Risksに記載のwebhook未着時ポーリングフォールバック用に関数は温存する。
     Lease取得 → SyncOrchestrator実行 (dry_run=False固定、design.md「本番適用モード固定」) →
-    Lease解放の順に実行する。Lease取得に失敗した場合は実行せず exit 0 で正常終了する
-    (concurrencyPolicy: Forbid と合わせた二重の安全策)。
+    Lease解放の順に実行する。Lease取得に失敗した場合は実行せず exit 0 で正常終了する。
     """
     lock_manager = lock_manager or SyncLockManager(namespace=K8S_NAMESPACE)
 
@@ -1140,9 +1146,9 @@ def run_cron_mode(
         return 0
 
     try:
-        mappings, authentik_client, vaultwarden_client, discord_notifier, org_key_bytes = client_factory()
+        mappings, group_client, vaultwarden_client, discord_notifier, org_key_bytes = client_factory()
         orchestrator = SyncOrchestrator(
-            mappings, authentik_client, vaultwarden_client, discord_notifier,
+            mappings, group_client, vaultwarden_client, discord_notifier,
             org_key_bytes=org_key_bytes,
             notify_state=NotifyStateManager(namespace=K8S_NAMESPACE),
         )
@@ -1153,42 +1159,155 @@ def run_cron_mode(
     return 0
 
 
-class TriggerReceiver:
-    """POST /trigger の認証・Lease取得・バックグラウンド同期起動を担う (Requirement 13.1-13.4)。
+class WebhookSignatureError(Exception):
+    """Actions v2 webhookの `ZITADEL-Signature` 検証に失敗した場合に発生する (Requirement 4.1)。"""
 
-    実ソケット処理 (TriggerHTTPServer) から認証ヘッダのみを受け取りステータスコードを返す、
-    http.serverに依存しない単体テスト可能な層。
+
+def _parse_zitadel_signature_header(header: str) -> tuple[int, list[str]]:
+    """`t=<unix_ts>,v1=<hex>[,v1=<hex>...]` 形式をパースする。
+
+    zitadel-go (pkg/actions/signing.go) の ComputeSignatureHeader が生成する形式と同一。
+    署名鍵ローテーション中は v1 が複数付与されうるため全件収集する。
+    """
+    timestamp: int | None = None
+    signatures: list[str] = []
+    for part in header.split(","):
+        key, sep, value = part.partition("=")
+        if not sep:
+            continue
+        if key == "t":
+            try:
+                timestamp = int(value)
+            except ValueError:
+                raise WebhookSignatureError("ZITADEL-Signatureのtimestampが不正です") from None
+        elif key == "v1":
+            signatures.append(value)
+    if timestamp is None or not signatures:
+        raise WebhookSignatureError("ZITADEL-Signatureヘッダの形式が不正です")
+    return timestamp, signatures
+
+
+def verify_zitadel_signature(
+    payload: bytes, header: str | None, signing_key: str, tolerance_seconds: float = 300.0
+) -> None:
+    """`ZITADEL-Signature` ヘッダのHMAC-SHA256署名を検証する (Requirement 4.1)。
+
+    署名対象は `f"{unix_timestamp}."` + 生payloadバイト列で、zitadel-go
+    (pkg/actions/signing.go computeSignature) と同一構成。tolerance超過は
+    再送攻撃・時計ずれ対策としてデフォルトZitadel SDK同様300秒で拒否する。
+    """
+    if not header:
+        raise WebhookSignatureError("ZITADEL-Signatureヘッダがありません")
+
+    timestamp, signatures = _parse_zitadel_signature_header(header)
+
+    if abs(time.time() - timestamp) > tolerance_seconds:
+        raise WebhookSignatureError("ZITADEL-Signatureのタイムスタンプが許容範囲外です")
+
+    mac = hmac.new(signing_key.encode("utf-8"), digestmod=hashlib.sha256)
+    mac.update(f"{timestamp}.".encode("utf-8"))
+    mac.update(payload)
+    expected = mac.hexdigest()
+
+    if not any(hmac.compare_digest(expected, sig) for sig in signatures):
+        raise WebhookSignatureError("ZITADEL-Signatureが一致しません")
+
+
+class EventDedupStore:
+    """Actions v2 webhookのat-least-once再送に対する冪等性を保証する重複排除ストア (Requirement 4.1)。
+
+    ponytail: プロセス内メモリのみのTTL付きセット。単一レプリカ運用かつ
+    interrupt_on_error=false(design.md zitadel_actions.tf)で再送は短時間のタイムアウト
+    リトライのみを想定するため、Pod再起動で消える簡易実装で十分と判断した。
+    複数レプリカ化する場合はNotifyStateManagerと同様の共有ストア(ConfigMap等)へ切り替える。
+    """
+
+    def __init__(self, ttl_seconds: float = 600.0, clock=time.monotonic):
+        self._ttl_seconds = ttl_seconds
+        self._clock = clock
+        self._seen: dict[str, float] = {}
+        self._lock = threading.Lock()
+
+    def mark_if_new(self, key: str) -> bool:
+        """未処理のkeyなら記録してTrueを、既知のkeyならFalseを返す (実処理は1回のみに抑える)。"""
+        now = self._clock()
+        with self._lock:
+            self._prune(now)
+            if key in self._seen:
+                return False
+            self._seen[key] = now
+            return True
+
+    def _prune(self, now: float) -> None:
+        expired = [k for k, seen_at in self._seen.items() if now - seen_at > self._ttl_seconds]
+        for k in expired:
+            del self._seen[k]
+
+
+def _webhook_event_dedup_key(event: dict) -> str:
+    """webhookイベントの一意キーを (instanceID, aggregateID, sequence) から組み立てる。
+
+    sequenceはZitadel eventstore上でinstance単位に単調増加するため、同一イベントの
+    再送は常に同じキーになり、異なるイベントは常に異なるキーになる。
+    """
+    return "{}:{}:{}".format(
+        event.get("instanceID", ""), event.get("aggregateID", ""), event.get("sequence", "")
+    )
+
+
+class WebhookReceiver:
+    """Actions v2 webhook受信の署名検証・冪等化・Lease取得・バックグラウンド同期起動を担う
+
+    (Requirement 4.1, 4.2)。実ソケット処理 (WebhookHTTPServer) から生のリクエストボディ・
+    署名ヘッダのみを受け取りステータスコードを返す、http.serverに依存しない単体テスト可能な層。
     """
 
     def __init__(
         self,
-        trigger_token: str,
+        signing_key: str,
         lock_manager: SyncLockManager,
         run_sync,
+        dedup_store: "EventDedupStore | None" = None,
         thread_factory=threading.Thread,
     ):
-        self._trigger_token = trigger_token
+        self._signing_key = signing_key
         self._lock_manager = lock_manager
         self._run_sync = run_sync
+        self._dedup = dedup_store if dedup_store is not None else EventDedupStore()
         self._thread_factory = thread_factory
 
-    def handle_trigger(self, authorization_header: str | None) -> int:
-        """Bearerトークンを検証し、成功時はLease取得後に非同期で同期処理を起動する (13.1, 13.2)。
+    def handle_webhook(self, raw_body: bytes, signature_header: str | None) -> int:
+        """署名検証 → 冪等キー判定 → Lease取得後に非同期で同期処理を起動する。
 
-        Lease取得に失敗した場合も202を返し、次回の定期実行での補完をログに記録するのみとする (13.4)。
+        - 署名検証失敗: 401 (未検証リクエストの拒否、Requirement 4.1)
+        - ペイロードのJSON構文不正: 400
+        - 冪等キー既知 (再送): 200を返すのみで再実行はしない (Requirement 4.1)
+        - Lease取得失敗: 200を返し、次回受信での補完に委ねる (旧TriggerReceiver同様の設計)
         """
-        expected = f"Bearer {self._trigger_token}"
-        if not authorization_header or not hmac.compare_digest(authorization_header, expected):
-            log_event("trigger_unauthorized")
+        try:
+            verify_zitadel_signature(raw_body, signature_header, self._signing_key)
+        except WebhookSignatureError as exc:
+            log_event("webhook_signature_invalid", error=str(exc))
             return 401
+
+        try:
+            event = json.loads(raw_body)
+        except json.JSONDecodeError as exc:
+            log_event("webhook_payload_invalid", error=str(exc))
+            return 400
+
+        dedup_key = _webhook_event_dedup_key(event)
+        if not self._dedup.mark_if_new(dedup_key):
+            log_event("webhook_duplicate_skipped", key=dedup_key)
+            return 200
 
         if self._lock_manager.acquire():
             thread = self._thread_factory(target=self._run_locked, daemon=True)
             thread.start()
         else:
-            log_event("trigger_lease_busy")
+            log_event("webhook_lease_busy")
 
-        return 202
+        return 200
 
     def _run_locked(self) -> None:
         try:
@@ -1197,14 +1316,16 @@ class TriggerReceiver:
             self._lock_manager.release()
 
 
-def _build_trigger_handler(receiver: TriggerReceiver):
-    class TriggerHandler(BaseHTTPRequestHandler):
+def _build_webhook_handler(receiver: WebhookReceiver):
+    class WebhookHandler(BaseHTTPRequestHandler):
         def do_POST(self):
-            if self.path != "/trigger":
+            if self.path != "/webhook":
                 self.send_response(404)
                 self.end_headers()
                 return
-            status = receiver.handle_trigger(self.headers.get("Authorization"))
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            raw_body = self.rfile.read(length) if length else b""
+            status = receiver.handle_webhook(raw_body, self.headers.get("ZITADEL-Signature"))
             self.send_response(status)
             self.end_headers()
 
@@ -1219,17 +1340,17 @@ def _build_trigger_handler(receiver: TriggerReceiver):
         def log_message(self, format, *args):
             log_event("http_access", message=format % args)
 
-    return TriggerHandler
+    return WebhookHandler
 
 
-class TriggerHTTPServer:
-    """Trigger Receiver用 http.server 常駐サーバー (Requirement 13.1, 13.2)。
+class WebhookHTTPServer:
+    """Actions v2 webhook受信用 http.server 常駐サーバー (Requirement 4.1, 4.2)。
 
-    POST /trigger をTriggerReceiverへ委譲し、GET /healthzでliveness probeに応答する。
+    POST /webhook をWebhookReceiverへ委譲し、GET /healthzでliveness/readiness probeに応答する。
     """
 
-    def __init__(self, receiver: TriggerReceiver, host: str = "0.0.0.0", port: int = 8080):
-        handler_cls = _build_trigger_handler(receiver)
+    def __init__(self, receiver: WebhookReceiver, host: str = "0.0.0.0", port: int = 8080):
+        handler_cls = _build_webhook_handler(receiver)
         self._httpd = ThreadingHTTPServer((host, port), handler_cls)
 
     @property
@@ -1244,26 +1365,28 @@ class TriggerHTTPServer:
 
 
 def run_serve_mode() -> int:
-    """--mode=serve 起動時のエントリポイント (Requirement 13.1, 13.2)。
+    """--mode=serve 起動時のエントリポイント (Requirement 4.1, 4.2)。
 
-    Trigger Receiverとして常駐し、Authentikからのイベント (ログイン・グループ変更) を
-    POST /trigger で受け付け、SyncLockManagerでの排他制御を介して即時同期を起動する。
+    常駐Podとして、ZitadelのActions v2 webhook (user.grant イベント群、
+    terraform/zitadel_actions.tf参照) をPOST /webhookで受け付け、署名検証・冪等判定を
+    経てSyncLockManagerでの排他制御を介して同期を起動する。外部公開はしない
+    (クラスタ内Service経由のみ、design.md「vaultwarden-rbac-sync(webhook常駐版)」参照)。
     """
     lock_manager = SyncLockManager(namespace=K8S_NAMESPACE)
-    trigger_token = os.environ["TRIGGER_TOKEN"]
+    signing_key = os.environ["ZITADEL_WEBHOOK_SIGNING_KEY"]
     port = int(os.environ.get("PORT", "8080"))
 
     def run_sync() -> None:
-        mappings, authentik_client, vaultwarden_client, discord_notifier, org_key_bytes = build_clients_from_env()
+        mappings, group_client, vaultwarden_client, discord_notifier, org_key_bytes = build_clients_from_env()
         orchestrator = SyncOrchestrator(
-            mappings, authentik_client, vaultwarden_client, discord_notifier,
+            mappings, group_client, vaultwarden_client, discord_notifier,
             org_key_bytes=org_key_bytes,
             notify_state=NotifyStateManager(namespace=K8S_NAMESPACE),
         )
         orchestrator.run(dry_run=False)
 
-    receiver = TriggerReceiver(trigger_token, lock_manager, run_sync)
-    server = TriggerHTTPServer(receiver, port=port)
+    receiver = WebhookReceiver(signing_key, lock_manager, run_sync)
+    server = WebhookHTTPServer(receiver, port=port)
     log_event("serve_started", port=port)
     server.serve_forever()
     return 0
@@ -1288,7 +1411,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--mode",
         choices=("cron", "serve"),
         required=True,
-        help="cron: CronJobからの定期実行 / serve: Trigger Receiverとして常駐",
+        help="cron: 定期実行(現状CronJobは未使用) / serve: Actions v2 webhook受信として常駐",
     )
     return parser
 

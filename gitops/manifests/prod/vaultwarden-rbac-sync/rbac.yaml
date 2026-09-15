@@ -1,6 +1,6 @@
 ---
 # vaultwarden-rbac-sync 専用 ServiceAccount
-# CronJob (--mode=cron) と Trigger Receiver Deployment (--mode=serve) の両方から使う。
+# 常駐Deployment (deployment.yaml, --mode=serve) から使う。
 # Lease (vaultwarden-rbac-sync-lock) の get/create/update/delete のみを許可する最小権限。
 # delete は release() が解放時に呼ぶため必須 (task 8実装時に既存rbac.yamlの不足を発見・追記)。
 apiVersion: v1
