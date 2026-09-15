@@ -7,7 +7,7 @@ metadata:
   labels:
     app: mailserver
   annotations:
-    secret.reloader.stakater.com/reload: "mail-tls,mailserver-secrets,dovecot-oauth2-config"
+    secret.reloader.stakater.com/reload: "mail-tls,mailserver-secrets,dovecot-oauth2-config,dovecot-zitadel-auth"
     configmap.reloader.stakater.com/reload: "mailserver-config"
 spec:
   serviceName: mailserver
@@ -173,8 +173,28 @@ spec:
               subPath: dovecot.cf
               readOnly: true
             - name: dms-config
-              mountPath: /etc/dovecot/conf.d/auth-ldap.conf.ext
-              subPath: auth-ldap.conf.ext
+              mountPath: /etc/dovecot/conf.d/auth-zitadel.conf.ext
+              subPath: auth-zitadel.conf.ext
+              readOnly: true
+            - name: dms-config
+              mountPath: /etc/dovecot/lua/json.lua
+              subPath: json.lua
+              readOnly: true
+            - name: dms-config
+              mountPath: /etc/dovecot/lua/zitadel-auth.lua
+              subPath: zitadel-auth.lua
+              readOnly: true
+            - name: zitadel-pat
+              mountPath: /etc/dovecot/zitadel.pat
+              subPath: zitadel.pat
+              readOnly: true
+            - name: dms-config
+              mountPath: /etc/dovecot/conf.d/auth-ml-userdb.conf.ext
+              subPath: auth-ml-userdb.conf.ext
+              readOnly: true
+            - name: dms-config
+              mountPath: /etc/dovecot/ml-aliases
+              subPath: ml-aliases
               readOnly: true
             - name: dms-config
               mountPath: /etc/dovecot/conf.d/05-acl-plugin.conf
@@ -242,8 +262,16 @@ spec:
                 path: postfix-main.cf
               - key: dovecot.cf
                 path: dovecot.cf
-              - key: auth-ldap.conf.ext
-                path: auth-ldap.conf.ext
+              - key: auth-zitadel.conf.ext
+                path: auth-zitadel.conf.ext
+              - key: json.lua
+                path: json.lua
+              - key: zitadel-auth.lua
+                path: zitadel-auth.lua
+              - key: auth-ml-userdb.conf.ext
+                path: auth-ml-userdb.conf.ext
+              - key: ml-aliases
+                path: ml-aliases
               - key: 05-acl-plugin.conf
                 path: 05-acl-plugin.conf
               - key: ldap-groups.cf
@@ -263,6 +291,12 @@ spec:
         - name: dovecot-oauth2
           secret:
             secretName: dovecot-oauth2-config
+        - name: zitadel-pat
+          secret:
+            secretName: dovecot-zitadel-auth
+            items:
+              - key: zitadel.pat
+                path: zitadel.pat
         - name: tls
           secret:
             secretName: mail-tls
