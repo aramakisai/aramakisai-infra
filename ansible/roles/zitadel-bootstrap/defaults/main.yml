@@ -1,0 +1,28 @@
+---
+# infisical-auth Secretと同じ位置づけの、ArgoCD/Terraformが自己参照できない
+# 領域への例外的初期化ロール。k3d検証環境・本番prod-node-1の両対応。
+
+zitadel_bootstrap_namespace: zitadel
+zitadel_bootstrap_pod: zitadel-0
+zitadel_bootstrap_zitadel_container: zitadel
+zitadel_bootstrap_login_container: login   # zitadelコンテナはshellを持たないdistroless系イメージのため、
+                                            # 同一Pod内でshellを持つloginコンテナ経由で共有volumeを読む
+
+# PATの取得元 (StatefulSetのZITADEL_FIRSTINSTANCE_PATPATHと一致させること)
+zitadel_bootstrap_pat_path_in_pod: /zitadel-data/zitadel-admin-sa.pat
+
+# 発行されたPATの保存先 (ローカルファイル、本番Infisicalへは登録しない)
+zitadel_bootstrap_output_dir: "{{ lookup('env', 'ZITADEL_BOOTSTRAP_OUTPUT_DIR') | default(playbook_dir ~ '/../../.zitadel-poc-secrets', true) }}"
+zitadel_bootstrap_pat_output_file: "{{ zitadel_bootstrap_output_dir }}/zitadel-admin-sa.pat"
+
+# k3d検証クラスタ専用のkubeconfigパスを明示指定した場合はそれを使う (ambientな
+# `kubectl config current-context` には絶対に依存しない、誤って別クラスタを
+# 操作する事故を防ぐため)。未指定時は本番想定とし、`make kubectl`と同じ方式で
+# Infisicalの`KUBECONFIG`シークレット(内容そのもの)をファイルへ書き出して使う
+# (tasks/main.ymlで生成、zitadel_bootstrap_materialized_kubeconfig参照)。
+zitadel_bootstrap_kubeconfig_override: "{{ lookup('env', 'ZITADEL_POC_KUBECONFIG') }}"
+zitadel_bootstrap_materialized_kubeconfig: "{{ zitadel_bootstrap_output_dir }}/kubeconfig"
+zitadel_bootstrap_kubeconfig: "{{ zitadel_bootstrap_kubeconfig_override if zitadel_bootstrap_kubeconfig_override | length > 0 else zitadel_bootstrap_materialized_kubeconfig }}"
+
+zitadel_bootstrap_ready_retries: 30
+zitadel_bootstrap_ready_delay: 5

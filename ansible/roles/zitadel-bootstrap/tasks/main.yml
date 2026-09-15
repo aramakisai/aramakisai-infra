@@ -1,0 +1,132 @@
+---
+# Zitadel初回起動ブートストラップ。
+#
+# 組織・管理者・Terraform provider用machine user(IAM_OWNER)+PATの「作成」自体は
+# StatefulSet(gitops/manifests/prod/zitadel/statefulset.yaml)のZITADEL_FIRSTINSTANCE_*
+# 環境変数によりZitadel自身が初回セットアップ時に一度だけ行う
+# (公式にサポートされたfirst-instanceブートストラップ機構)。
+# 発行されたPATはコンテナ内の一時ファイル(emptyDir)にのみ書き込まれ、二度と再取得できない
+# ため、このロールの役割は「初回セットアップ完了を検知し、失われる前にPATを回収する」こと。
+#
+# 冪等性: PATファイルはインスタンス初期化時の一度きりの成果物であり、
+# 同じZitadelインスタンスに対して再実行しても新しいPATは生成されない。
+# そのため本ロールはローカルに既に保存済みのPATがあれば取得をスキップする。
+
+- name: 出力先ディレクトリを作成
+  ansible.builtin.file:
+    path: "{{ zitadel_bootstrap_output_dir }}"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+
+- name: "本番kubeconfigをInfisical KUBECONFIG(内容そのもの)から生成 (make kubectlと同じ方式)"
+  # k3d検証時はZITADEL_POC_KUBECONFIGで明示上書きされるためスキップする。
+  # `infisical run -- ansible-playbook ...`で実行すること前提 (KUBECONFIG環境変数に
+  # kubeconfig本体のYAMLが展開される、Makefileのkubectlターゲットと同一の仕組み)。
+  ansible.builtin.copy:
+    content: "{{ lookup('env', 'KUBECONFIG') }}"
+    dest: "{{ zitadel_bootstrap_materialized_kubeconfig }}"
+    mode: "0600"
+  no_log: true
+  delegate_to: localhost
+  when: zitadel_bootstrap_kubeconfig_override | length == 0
+
+- name: 必須変数を検証 (誤って別クラスタを操作する事故を防ぐ)
+  ansible.builtin.assert:
+    that:
+      - zitadel_bootstrap_kubeconfig is defined
+      - zitadel_bootstrap_kubeconfig | length > 0
+    fail_msg: >-
+      kubeconfigを決定できませんでした。本番実行時は`infisical run --
+      ansible-playbook ...`(Infisicalの KUBECONFIG シークレットを経由)で実行して
+      ください。k3d検証時はambientなkubectl current-contextに依存しない設計のため、
+      環境変数 ZITADEL_POC_KUBECONFIG でk3d検証クラスタのkubeconfigパスを
+      明示的に指定してください(例: k3d kubeconfig get zitadel-poc > /path/to/kubeconfig)。
+
+- name: "既にPATを取得済みか確認 (冪等性: 取得済みならスキップ)"
+  ansible.builtin.stat:
+    path: "{{ zitadel_bootstrap_pat_output_file }}"
+  register: existing_pat_file
+  delegate_to: localhost
+
+- name: 既存PAT検出時はスキップする旨を表示
+  ansible.builtin.debug:
+    msg: >-
+      {{ zitadel_bootstrap_pat_output_file }} に既にPATが存在するため、
+      Zitadel側での再作成・再取得をスキップします
+      (FirstInstanceのPAT発行はインスタンス初期化時の一度きりの動作のため、
+      再実行しても新しいPATは生成されません)。
+  when: existing_pat_file.stat.exists
+
+- name: Zitadelの初回セットアップ完了・起動をブロック内で待機・PAT回収
+  when: not existing_pat_file.stat.exists
+  block:
+    - name: Zitadelがready状態になるまで待機
+      ansible.builtin.command: >
+        kubectl exec {{ zitadel_bootstrap_pod }}
+        -n {{ zitadel_bootstrap_namespace }}
+        -c {{ zitadel_bootstrap_zitadel_container }}
+        -- /app/zitadel ready
+      environment:
+        KUBECONFIG: "{{ zitadel_bootstrap_kubeconfig }}"
+      register: zitadel_ready_check
+      until: zitadel_ready_check.rc == 0
+      retries: "{{ zitadel_bootstrap_ready_retries }}"
+      delay: "{{ zitadel_bootstrap_ready_delay }}"
+      changed_when: false
+      delegate_to: localhost
+
+    - name: PATファイルがPod内に書き込まれるまで待機
+      # zitadelコンテナがsetup完了直後にPATファイルを書き込む。ready確認の直後は
+      # 書き込みタイミングと競合しうるため、loginコンテナ経由でファイル存在を再確認する
+      ansible.builtin.command: >
+        kubectl exec {{ zitadel_bootstrap_pod }}
+        -n {{ zitadel_bootstrap_namespace }}
+        -c {{ zitadel_bootstrap_login_container }}
+        -- test -s {{ zitadel_bootstrap_pat_path_in_pod }}
+      environment:
+        KUBECONFIG: "{{ zitadel_bootstrap_kubeconfig }}"
+      register: pat_file_check
+      until: pat_file_check.rc == 0
+      retries: "{{ zitadel_bootstrap_ready_retries }}"
+      delay: "{{ zitadel_bootstrap_ready_delay }}"
+      changed_when: false
+      delegate_to: localhost
+
+    - name: PATファイルをPod内から取得 (zitadelコンテナはshellを持たないためloginコンテナ経由)
+      # no_log: PAT平文をAnsibleログに残さない (過去複数回のinfisical CLI出力漏洩実績を踏まえた徹底)
+      ansible.builtin.command: >
+        kubectl exec {{ zitadel_bootstrap_pod }}
+        -n {{ zitadel_bootstrap_namespace }}
+        -c {{ zitadel_bootstrap_login_container }}
+        -- cat {{ zitadel_bootstrap_pat_path_in_pod }}
+      environment:
+        KUBECONFIG: "{{ zitadel_bootstrap_kubeconfig }}"
+      register: pat_content
+      no_log: true
+      changed_when: true
+      delegate_to: localhost
+
+    - name: PATをローカルファイルへ保存 (本番Infisicalへは登録しない、PoC用k3d一時トークンのため)
+      ansible.builtin.copy:
+        content: "{{ pat_content.stdout }}"
+        dest: "{{ zitadel_bootstrap_pat_output_file }}"
+        mode: "0600"
+      no_log: true
+      delegate_to: localhost
+
+    - name: 完了メッセージ (平文トークンは出力しない)
+      ansible.builtin.debug:
+        msg: >-
+          Terraform provider用PAT (machine user: terraform-provider, role: IAM_OWNER) を
+          {{ zitadel_bootstrap_pat_output_file }} へ保存しました。
+
+- name: Infisical登録手順 (このロールは実行しない、コマンド例のみ表示)
+  ansible.builtin.debug:
+    msg: >-
+      このロールはPATファイルへの保存までを行い、Infisicalへの登録は行いません
+      (terraform applyで使うTF_VAR_zitadel_tokenとして手動で登録してください)。
+      登録コマンド例:
+      `infisical secrets set --env=prod TF_VAR_zitadel_token="$(cat {{ zitadel_bootstrap_pat_output_file }})" >/dev/null 2>&1`
+      (infisical CLIは出力に平文シークレットを含みうるため、必ず/dev/nullへ抑制すること。
+      過去に複数回この経路でのシークレット漏洩実績があるため厳守する)
