@@ -70,3 +70,21 @@ resource "zitadel_application_oidc" "roundcube" {
   id_token_role_assertion     = true
   access_token_role_assertion = true
 }
+
+resource "zitadel_application_oidc" "cloudflare_access" {
+  project_id = zitadel_project.aramakisai.id
+  name       = "cloudflare-access"
+
+  app_type         = "OIDC_APP_TYPE_WEB"
+  auth_method_type = "OIDC_AUTH_METHOD_TYPE_BASIC"
+  grant_types      = ["OIDC_GRANT_TYPE_AUTHORIZATION_CODE"]
+  response_types   = ["OIDC_RESPONSE_TYPE_CODE"]
+  version          = "OIDC_VERSION_1_0"
+  dev_mode         = false
+
+  # コールバック先はCloudflare Zero Trust側固定 (var.cloudflare_access_redirect_uris、team domain由来)
+  redirect_uris = var.cloudflare_access_redirect_uris
+
+  id_token_role_assertion     = true
+  access_token_role_assertion = true
+}

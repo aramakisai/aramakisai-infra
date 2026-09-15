@@ -429,6 +429,40 @@
     影響なし(`cms-secrets`/`room-presence-db`のDegraded、`vaultwarden`のSuspendedは既存の別要因、
     本マージ由来ではない)。ArgoCD手動sync・Ansible/Terraform実機実行、ExternalDomain到達性ブロッカーの
     解消はまだ未実施でユーザー判断待ち。
+  - **追記2(ExternalDomain到達性ブロッカー解消、マージ前)**: authentik廃止方針に伴い、`idp.aramakisai.com`
+    のcloudflaredトンネルbackendをauthentikからZitadel API(`zitadel.zitadel.svc.cluster.local:8080`)へ
+    切替、`ZITADEL_EXTERNALDOMAIN`をクラスタ内DNSから`idp.aramakisai.com`(`EXTERNALPORT=443`・
+    `EXTERNALSECURE=true`)へ変更した(`feat/idp-zitadel-external-domain`ブランチ)。これによりTFCランナーが
+    `idp.aramakisai.com`経由でZitadel APIへ到達可能になりterraform apply実行が見込める。login v2 UI(3000)
+    のパス振り分けは追記4で対応済み。マージ・実際のterraform apply/Ansible実行はまだ未実施。
+  - **追記3(Cloudflare Access authentik IdP登録の置き換え)**: 「migration(authentikからZitadelへの完全移行)
+    なのにCloudflare Access IdP登録だけスコープ外扱いは筋が通らない」というユーザー指摘を受け撤回、対応済み。
+    requirements.md/design.md双方にCloudflare Access関連の記載が元々無かったのはspec自体の見落としだった。
+    `terraform/access.tf`の`cloudflare_zero_trust_access_identity_provider.authentik`を`.zitadel`へ置き換え、
+    auth_url/token_url/certs_urlをZitadel標準OIDCエンドポイント(`/oauth/v2/authorize`・`/oauth/v2/token`・
+    `/oauth/v2/keys`)へ変更した。client_id/secretは`terraform/zitadel_applications.tf`に新規追加した
+    `zitadel_application_oidc.cloudflare_access`(CMS/Vaultwarden/Roundcubeと同一パターン、
+    `var.cloudflare_access_redirect_uris`を流用)の計算値を同一terraform run内で直接参照するため、
+    Zitadelでは`authentik_cf_client_id`/`authentik_cf_client_secret`のような変数受け渡しが不要になった
+    (authentikは値を自分で選べる方式だったがZitadelはprovider側が生成するため)。この2変数自体は
+    `authentik_apps.tf`の`authentik_provider_oauth2.cloudflare`(Authentik側のOAuth2 Provider定義、
+    今後は何にも参照されない)がまだ参照しているため削除していない、authentik decommission時に
+    まとめて削除すること。
+    追記4によりlogin v2 UIのパス振り分けが解決したため、Cloudflare Access経由のZitadelログインも
+    成立する見込み(実地未検証)。
+  - **追記4(login v2 UI単一オリジン化、task10.7項目8の解消)**: Zitadel公式reverse proxy設定例
+    (nginx/caddy/traefik共通、[zitadel.com/docs/self-hosting/manage/reverseproxy](https://zitadel.com/docs/self-hosting/manage/reverseproxy/reverse_proxy)
+    参照)通り、`/ui/v2/login`配下のみlogin v2 UIコンテナ(port 3000)、それ以外の全パスはAPI
+    コンテナ(port 8080)という単純な二分割であることを確認した。`terraform/tunnel.tf`の
+    `idp.aramakisai.com` ingress_ruleを、`path = "^/ui/v2/login.*"`を条件とする3000向けルールと、
+    条件無しの8080向けルール(フォールバック)の2本に分割した(path指定ルールを先に置く必要あり、
+    cloudflaredは先勝ち評価のため)。あわせて`gitops/manifests/prod/zitadel/statefulset.yaml`の
+    `ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_BASEURI`/`ZITADEL_OIDC_DEFAULTLOGINURLV2`/
+    `ZITADEL_OIDC_DEFAULTLOGOUTURLV2`をクラスタ内DNSから`https://idp.aramakisai.com/ui/v2/login/...`へ
+    変更した(login v2 UIコンテナ側の`ZITADEL_API_URL`はPod内部呼び出しのため変更不要)。
+    これによりtask10.7で確認されたブランディングアセット404(`/assets/v1/...`がlogin UI自身の
+    オリジンから解決できない問題)も、単一オリジン化の副産物として解消される見込み(実地未検証)。
+    マージ・実際のterraform apply/Ansible実行・実機でのログインフロー確認はまだ未実施。
 
 - [ ] 9.3 Terraform管理外のインスタンス設定をAdmin API importで反映する
   - Assert Roles on Authentication等、Terraformで管理しきれないインスタンス設定の差分を洗い出す

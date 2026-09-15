@@ -1,38 +1,25 @@
 # ============================================================
-# Cloudflare Access: Authentik OIDC IdP 登録
+# Cloudflare Access: Zitadel OIDC IdP 登録
 #
-# 【注意】Authentik はクラスター上で動くため、初回 terraform apply 時は
-#         authentik_cf_client_id / authentik_cf_client_secret が空で構わない。
-#         Authentik セットアップ後に HCP Terraform ワークスペースで変数を設定し、
-#         再度 terraform apply することで IdP が登録される。
+# client_id/client_secretはzitadel_application_oidc.cloudflare_accessの計算値を直接参照する
+# (authentik時代と異なりZitadelはclient_id/secretを発行側が生成するため、Cloudflare
+# Workspace変数での事前受け渡しは不要)。他のzitadel_*リソース同様、本番Zitadel
+# ブートストラップ・providerのPAT設定が先に完了している前提で適用される。
 # ============================================================
 
-locals {
-  # nonsensitive(): 比較結果は true/false のみで秘密値を露出しないため安全
-  authentik_configured = nonsensitive(
-    var.authentik_cf_client_id != "" &&
-    var.authentik_cf_client_secret != ""
-  )
-}
-
-resource "cloudflare_zero_trust_access_identity_provider" "authentik" {
-  count = local.authentik_configured ? 1 : 0
-
+resource "cloudflare_zero_trust_access_identity_provider" "zitadel" {
   account_id = var.cloudflare_account_id
-  name       = "Authentik"
+  name       = "Zitadel"
   type       = "oidc"
 
   config {
-    client_id     = var.authentik_cf_client_id
-    client_secret = var.authentik_cf_client_secret
+    client_id     = zitadel_application_oidc.cloudflare_access.client_id
+    client_secret = zitadel_application_oidc.cloudflare_access.client_secret
 
-    # Authentik 標準エンドポイント
-    # Provider slug は Authentik 管理画面で "cloudflare" に設定すること
-    # 注意: authorize/token は slug 非スコープの共通エンドポイント (Authentik側の仕様)。
-    #       jwks のみ slug スコープ。/.well-known/openid-configuration で要確認。
-    auth_url  = "https://idp.aramakisai.com/application/o/authorize/"
-    token_url = "https://idp.aramakisai.com/application/o/token/"
-    certs_url = "https://idp.aramakisai.com/application/o/cloudflare/jwks/"
+    # Zitadel標準OIDCエンドポイント (v2 API、instance固定パス)
+    auth_url  = "https://idp.aramakisai.com/oauth/v2/authorize"
+    token_url = "https://idp.aramakisai.com/oauth/v2/token"
+    certs_url = "https://idp.aramakisai.com/oauth/v2/keys"
 
     scopes = ["openid", "email", "profile"]
   }
@@ -43,15 +30,15 @@ resource "cloudflare_zero_trust_access_identity_provider" "authentik" {
 #
 # 保護対象:
 #   aramakisai-web.aramakisai.workers.dev       Workers.dev 既定URL (本番は aramakisai.com 経由)
-#                                                誤って外部に晒さないよう Authentik OIDC で保護
+#                                                誤って外部に晒さないよう Zitadel OIDC で保護
 #   aramakisai-web-dev.aramakisai.workers.dev   env.dev worker (aramakisai-web-dev) の
 #                                                Workers.dev 既定URL。dev.aramakisai.com custom
 #                                                domain とは別に自動生成されるため個別に保護要
 #
 # 非保護 (自前認証あり):
-#   webmail.aramakisai.com   Roundcube が Authentik OAuth2 で保護
+#   webmail.aramakisai.com   Roundcube が IdP OAuth2 で保護 (本番切替はtask9.4、現状はauthentik)
 #                            CF Access を重ねると二重認証になるため除外
-#   argocd.aramakisai.com    ArgoCD 自前認証 (admin / Authentik SSO) で保護
+#   argocd.aramakisai.com    ArgoCD 自前認証 (admin / IdP SSO) で保護
 # ============================================================
 
 resource "cloudflare_zero_trust_access_application" "aramakisai_web_workers_dev" {
@@ -61,9 +48,8 @@ resource "cloudflare_zero_trust_access_application" "aramakisai_web_workers_dev"
   type             = "self_hosted"
   session_duration = "24h"
 
-  # auto_redirect_to_identity requires allowed_idps with exactly one IdP
-  auto_redirect_to_identity = local.authentik_configured
-  allowed_idps              = local.authentik_configured ? [cloudflare_zero_trust_access_identity_provider.authentik[0].id] : []
+  auto_redirect_to_identity = true
+  allowed_idps              = [cloudflare_zero_trust_access_identity_provider.zitadel.id]
 }
 
 resource "cloudflare_zero_trust_access_application" "aramakisai_web_dev" {
@@ -73,8 +59,8 @@ resource "cloudflare_zero_trust_access_application" "aramakisai_web_dev" {
   type             = "self_hosted"
   session_duration = "24h"
 
-  auto_redirect_to_identity = local.authentik_configured
-  allowed_idps              = local.authentik_configured ? [cloudflare_zero_trust_access_identity_provider.authentik[0].id] : []
+  auto_redirect_to_identity = true
+  allowed_idps              = [cloudflare_zero_trust_access_identity_provider.zitadel.id]
 }
 
 resource "cloudflare_zero_trust_access_application" "aramakisai_web_dev_workers_dev" {
@@ -84,8 +70,8 @@ resource "cloudflare_zero_trust_access_application" "aramakisai_web_dev_workers_
   type             = "self_hosted"
   session_duration = "24h"
 
-  auto_redirect_to_identity = local.authentik_configured
-  allowed_idps              = local.authentik_configured ? [cloudflare_zero_trust_access_identity_provider.authentik[0].id] : []
+  auto_redirect_to_identity = true
+  allowed_idps              = [cloudflare_zero_trust_access_identity_provider.zitadel.id]
 }
 
 # ============================================================
@@ -100,17 +86,17 @@ locals {
   }
 }
 
-resource "cloudflare_zero_trust_access_policy" "allow_authentik" {
+resource "cloudflare_zero_trust_access_policy" "allow_zitadel" {
   for_each = local.access_applications
 
   account_id     = var.cloudflare_account_id
   application_id = each.value
-  name           = "Allow via Authentik"
+  name           = "Allow via Zitadel"
   precedence     = 1
   decision       = "allow"
 
   include {
-    login_method = [cloudflare_zero_trust_access_identity_provider.authentik[0].id]
+    login_method = [cloudflare_zero_trust_access_identity_provider.zitadel.id]
   }
 }
 
@@ -138,7 +124,7 @@ resource "cloudflare_zero_trust_access_service_token" "e2e_ci" {
 # ============================================================
 # Cloudflare Access: E2E Service Token 用 non_identity Policy
 #
-# decision = "non_identity" は既存の allow_authentik (decision = "allow")
+# decision = "non_identity" は既存の allow_zitadel (decision = "allow")
 # と共存できないため独立リソースとして追加。
 # local.access_applications の for_each には相乗りさせず、
 # aramakisai_web_workers_dev application_id を直接参照する

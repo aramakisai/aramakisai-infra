@@ -5,9 +5,10 @@
 # loginコンテナからzitadelコンテナへは localhost:8080 で到達できる
 # (docker-composeのnetwork_mode: service:zitadelに相当する構成が既定で成立する)。
 #
-# ExternalDomain等はk3d検証環境向けに Service の cluster内DNS を暫定設定している。
-# 本番切替時 (tasks.md task 9.4) には実際のcloudflaredフロントのホスト名・TLS設定へ
-# 更新すること。
+# ExternalDomainはcloudflaredトンネル経由の公開ホスト名(idp.aramakisai.com)を設定している。
+# Tunnel ingress(terraform/tunnel.tf)は/ui/v2/login配下をlogin v2 UI(3000)、それ以外を
+# API(8080)へ振り分ける(Zitadel公式reverse proxy設定例と同じパス分割)。そのためlogin v2の
+# BASEURI/LoginURL/LogoutURLも公開ホスト名(idp.aramakisai.com)を指す。
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -53,11 +54,11 @@ spec:
                   name: zitadel-secrets
                   key: MASTERKEY
             - name: ZITADEL_EXTERNALDOMAIN
-              value: zitadel.zitadel.svc.cluster.local
+              value: idp.aramakisai.com
             - name: ZITADEL_EXTERNALPORT
-              value: "8080"
+              value: "443"
             - name: ZITADEL_EXTERNALSECURE
-              value: "false"
+              value: "true"
             - name: ZITADEL_TLS_ENABLED
               value: "false"
             # --- DB接続 (CNPG zitadel-db) ---
@@ -89,11 +90,11 @@ spec:
             - name: ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_REQUIRED
               value: "true"
             - name: ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_BASEURI
-              value: http://zitadel.zitadel.svc.cluster.local:3000/ui/v2/login/
+              value: https://idp.aramakisai.com/ui/v2/login/
             - name: ZITADEL_OIDC_DEFAULTLOGINURLV2
-              value: http://zitadel.zitadel.svc.cluster.local:3000/ui/v2/login/login?authRequest=
+              value: https://idp.aramakisai.com/ui/v2/login/login?authRequest=
             - name: ZITADEL_OIDC_DEFAULTLOGOUTURLV2
-              value: http://zitadel.zitadel.svc.cluster.local:3000/ui/v2/login/logout?post_logout_redirect=
+              value: https://idp.aramakisai.com/ui/v2/login/logout?post_logout_redirect=
             # --- login-client (login v2 UIがZitadel APIを呼ぶためのmachine user PAT) を
             #     初回起動時に自動発行する。IAM_LOGIN_CLIENT roleが自動付与される ---
             - name: ZITADEL_FIRSTINSTANCE_LOGINCLIENTPATPATH

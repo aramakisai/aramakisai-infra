@@ -26,10 +26,17 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "main" {
       }
     }
 
-    # Authentik IdP
+    # Zitadel IdP: login v2 UIはZitadel公式ドキュメント(reverse proxy設定例)通り
+    # /ui/v2/login配下のみ別コンテナ(login, port 3000)、それ以外は全てAPI(port 8080)。
+    # path指定ルールは先勝ちのため、より具体的な/ui/v2/loginを先に置く必要がある
     ingress_rule {
       hostname = "idp.aramakisai.com"
-      service  = "http://authentik-server.prod.svc.cluster.local:80"
+      path     = "^/ui/v2/login.*"
+      service  = "http://zitadel.zitadel.svc.cluster.local:3000"
+    }
+    ingress_rule {
+      hostname = "idp.aramakisai.com"
+      service  = "http://zitadel.zitadel.svc.cluster.local:8080"
     }
 
     # Staging フロントエンド
