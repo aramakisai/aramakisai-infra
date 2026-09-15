@@ -62,8 +62,13 @@ customRules:
     # upstreamが用意するuser_known_contact_k8s_api_server_activities (既定never_true) を上書きして除外する。
     # CNPGはoperatorだけでなく各postgresポッド自体が持つインスタンスマネージャ(proc.name=manager)も
     # リーダー選出・ステータス同期のためk8s APIへ定常アクセスするため、合わせて除外する。
-    # mailserver-backup-healthcheck / vaultwarden-rbac-sync (docker.io/alpine/k8s) は
-    # prod 内で kubectl get/patch を定期実行する正常動作のため除外する。
+    # mailserver-backup-healthcheck (定期実行) / vaultwarden-rbac-sync (docker.io/alpine/k8s) は
+    # prod 内で kubectl get/create/replace/delete (Lease排他制御) を実行する正常動作のため除外する。
+    # vaultwarden-rbac-syncはidp-migration-zitadel task 4でCronJobから常駐Deploymentへ変更したが、
+    # 同一イメージ・同一proc.name (python3 /scripts/sync.py) のままkubectlをサブプロセス実行する
+    # 処理内容自体は変わらないため、image+namespace単位の本除外条件はそのまま適用できる
+    # (プロセス起動契機がcron定期実行→webhook受信イベント駆動に変わっただけで、
+    # Falco側から見える挙動シグネチャに差分はない)。
     - macro: user_known_contact_k8s_api_server_activities
       condition: >
         (k8s.ns.name=argocd and container.image.repository=quay.io/argoproj/argocd)
