@@ -651,7 +651,20 @@
       (`vars/resources.yml`)を`https://rbac-sync.aramakisai.com/webhook/zitadel`へ変更、
       `_action_target.yml`のDeniedURLスキップ分岐は削除して通常の作成失敗時assertに戻した。
       k3dはクラスタ外DNS/Tunnelへ到達できないためこの経路自体の実機検証は不可(k3d実機検証は
-      引き続きAction Target作成以外の項目のみ)。
+      引き続きAction Target作成以外の項目のみ)。実際にk3d上で`https://rbac-sync.aramakisai.com/...`
+      へのAction Target更新(POST /v2/actions/targets/{id})を試行したところ、`terraform apply`が
+      未実施でDNSレコードが存在しないため名前解決自体が失敗し、`Errors.Target.DeniedURL`(400)に
+      なることを実機確認した(対照実験として`http://example.com/...`(実在し解決できる
+      ホスト)は同様の呼び出しで過去に成功していたtargetが1件k3dクラスタに残存していることを
+      確認済み)。したがって本番でもterraform applyによるDNS反映が完了するまでは
+      action_targetの作成/更新自体が失敗し続ける(実害はない。Ansible role側は作成/更新の
+      失敗時に通常通りassertで停止する設計のため、本番投入時はterraform apply完了後に
+      Ansible roleを実行する順序を守ること)。既存targetのendpointが設定値と異なる場合に
+      更新する分岐の追加も試したが、k3d環境では上記の理由で更新呼び出し自体が
+      DeniedURLになり検証が完結しないため、本コミットの範囲では追加しなかった
+      (現状のrole実装は既存target再利用時にendpoint不一致があっても更新しない。
+      本番でendpoint変更が必要になった場合は既存targetを手動削除してからrole実行する
+      か、更新ロジックをDNS到達可能な環境で別途追加検証すること)。
     - **`/webhook/zitadel`エンドポイント自体は現状未実装(要修正)**: `zitadel_action_target_endpoint`
       が指す`/webhook/zitadel`パスおよびtask4.1/4.2が実装したはずの署名検証(`ZITADEL-Signature`、
       `WebhookReceiver`/`verify_zitadel_signature`)は、`gitops/manifests/prod/vaultwarden-rbac-sync/sync.py`

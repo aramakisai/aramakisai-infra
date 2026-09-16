@@ -5,10 +5,18 @@
 # いない場合、instanceのデフォルトpolicyをisDefault:trueで返す。この状態のorgに
 # PUT(update)を投げると404 (Errors.Label.NotFound)になることをtask9.3で実機確認済み
 # (updateはorg専用policyの存在を前提とするため)。そのためisDefaultならPOST(add)、
-# 既にorg専用policyがあるならPUT(update)、という分岐が必須。ロゴ/アイコンの
-# 再アップロードは同一内容なら再実行してもchangeDate/sequenceが変化しないこと
-# (=冪等)をk3d実機で確認済み。フォント(Requirement 17.3)はtask10.7の実機検証で
-# 512KB上限に阻まれ適用見送り済みのため対象外(zitadel_branding.tf削除時のコメントを踏襲)。
+# 既にorg専用policyがあるならPUT(update)、という分岐が必須。
+#
+# isDefaultの判定はfalse側を明示的にdefault指定すること。ZitadelのAPIはprotobuf
+# JSON(proto3のデフォルト値省略規則)を返すため、isDefault:falseの場合はフィールド
+# 自体がレスポンスに存在しない(true時のみキーが出現する)。default(true)にすると
+# 既にorg専用policyがあるorgでも「未作成」と誤判定してPOSTしてしまい、
+# Errors.Label.AlreadyExists(409)になる(k3d実機で発生・確認済み)。
+#
+# ロゴ/アイコンの再アップロードは同一内容なら再実行してもchangeDate/sequenceが
+# 変化しないこと(=冪等)をk3d実機で確認済み。フォント(Requirement 17.3)は
+# task10.7の実機検証で512KB上限に阻まれ適用見送り済みのため対象外
+# (zitadel_branding.tf削除時のコメントを踏襲)。
 - name: Label Policyを取得
   ansible.builtin.include_tasks: _api_call.yml
   vars:
@@ -19,7 +27,7 @@
 - name: Label Policy取得結果を退避
   ansible.builtin.set_fact:
     _zitadel_label_policy: "{{ zitadel_api_result.body.policy | default({}) }}"
-    _zitadel_label_policy_is_default: "{{ zitadel_api_result.body.policy.isDefault | default(true) }}"
+    _zitadel_label_policy_is_default: "{{ zitadel_api_result.body.policy.isDefault | default(false) }}"
   no_log: true
 
 - name: Label Policyを新規作成 (org専用policyが未作成の場合)
