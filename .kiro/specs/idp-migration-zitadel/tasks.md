@@ -1053,6 +1053,14 @@
       目視確認、本番Infisical環境に対する`backup-secrets`/`restore-secrets`
       の実行。いずれもユーザー承認と実際の本番カットオーバー実施タイミングを
       待つ。
+  - **追記(スクリプト方式の廃止)**: 上記で判明した`revert`サブコマンドの
+    ガード粒度の粗さ(カットオーバーパス配下の無関係なコミットも通過させて
+    しまう)を踏まえ、ユーザー判断により`scripts/zitadel-rollback.sh`・
+    `scripts/test-zitadel-rollback.sh`を削除し、`docs/zitadel-rollback-runbook.md`を
+    手動コマンドのみの手順書に書き直した。あわせて、Infisicalキーの命名を
+    authentik時代のキーを上書きしない別名(`_ZITADEL`サフィックス)方式へ変更した
+    ことで(9.2参照)、`backup-secrets`/`restore-secrets`が担っていたシークレット
+    退避・復元の手順自体が原理上不要になった。
 
 - [ ] 10. 追加移行スコープ(既存authentik付随機能6件)のk3d PoC実装
   - task1〜8完了後にセッション内の追加検討で判明した、旧spec(idp-migration-zitadel初版)ではスコープ外だった`terraform/authentik_*.tf`6ファイル相当の移行。PoCとしてk3d環境で検証する(本番反映はtask9の一括カットオーバーに含める)。task9とは独立して着手可能(依存はtask1/2/6のみ)
