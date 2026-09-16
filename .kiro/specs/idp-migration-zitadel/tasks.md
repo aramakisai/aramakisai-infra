@@ -1118,6 +1118,85 @@
       (`47aab29`)、`docker-mailserver`公式サポートの永続化機構で解消した(詳細は
       task9.2追記9参照)。既存ユーザーへの招待コード発行・メール送信(Step3)は
       実ユーザーリスト未準備のため未実施。
+  - **追記2(2026-09-17、Step1/Step2の再検証とidp.aramakisai.com routing障害の発見・修正、
+      Step3ブロッカーの確定)**:
+    - **Step1再検証(合格)**: `mailserver-0` 1/1 Running、直近ログにlua/error行なし、
+      `mailq`でキュー空、`doveadm auth test`(存在しないユーザーで実行)が
+      クラッシュせず`auth failed`を正常応答することを確認した。障害復旧後も
+      継続して正常機能していることを確認済み。
+    - **重大な発見: idp.aramakisai.comが本番で依然authentikを返していた**:
+      Step2検証のため`https://idp.aramakisai.com/.well-known/openid-configuration`を
+      確認したところ、Zitadelではなくauthentikのログイン画面(HTML)が返ってきた。
+      `terraform/tunnel.tf`(9.2追記4で実装済み・mainマージ済み)には
+      `idp.aramakisai.com`をZitadel(login v2 UI:3000/API:8080の2ルール分割)へ
+      向ける設定が既に存在するが、本番へ一度も`terraform apply`されていなかった
+      ことが原因だった(9.2の本番反映作業では`terraform/access.tf`のみ
+      `-target`で個別applyし、`tunnel.tf`はapply対象に含めていなかった)。
+      RPアプリ側(CMS/Roundcube)のissuer/redirect設定は`idp.aramakisai.com`を
+      指すよう正しく実装済みだったが、この経路上のtunnel routingが未反映だった
+      ため、実際にはブラウザ経由のOIDCログインが機能しない状態だった
+      (task9.4のStep2検証チェックリスト未達)。
+    - **`terraform plan`で判明した広範な未適用差分**: 上記の調査で`terraform plan`を
+      実行したところ、`idp.aramakisai.com`以外にも、Directus撤去(`cms`への統合)・
+      Cloudflare Access IdP(authentik→zitadel)切替・room-presence-tracker連携等、
+      複数の過去にマージ済みのPRのterraform変更が本番へ一度もapplyされずに
+      蓄積している状態(`4 to add, 6 to change, 12 to destroy`)であることが判明した。
+      これは本specのスコープを超える既存の技術的負債であり、本タスクでは
+      対応しない(ユーザー判断が必要な別件として切り出す)。
+    - **`idp.aramakisai.com`のみを対象にした限定的なterraform apply**:
+      `cloudflare_zero_trust_tunnel_cloudflared_config.main`は全ホスト名の
+      ingress_ruleを1つのリスト(1リソース)として保持するため、上記の広範な差分と
+      同一リソース内で不可分だが、実際の差分内容を精査した結果、`idp.aramakisai.com`
+      以外の`cms.aramakisai.com`/`presence.aramakisai.com`/`vault.aramakisai.com`/
+      `stg.aramakisai.com`向けルールは新旧で実質的に同一内容(リストの位置ズレによる
+      表示上の差分のみ)であり、実際に変わるのは(1)`idp.aramakisai.com`のZitadel
+      ルーティング化、(2)撤去済みDirectus宛の死んだルール(`stg-api`/`api`)の削除、
+      の2点のみと判断した。`terraform apply -target=
+      cloudflare_zero_trust_tunnel_cloudflared_config.main`(他のリソースは対象外)を
+      実行し、`Apply complete! Resources: 0 added, 1 changed, 0 destroyed`を確認した。
+      適用後、`idp.aramakisai.com`の`/.well-known/openid-configuration`・
+      `/ui/v2/login/loginname`がZitadelから正常応答することを確認した。
+      `cms.aramakisai.com`(200)・`webmail.aramakisai.com`(302)は適用後も
+      正常応答を維持し、`presence.aramakisai.com`/`vault.aramakisai.com`の502は
+      `make kubectl ARGS="get deploy -n prod room-presence"`で`0/0`
+      (無関係な既存の凍結判断、task9.4本文のVaultwarden`replicas: 0`と同様)である
+      ことを確認し、本applyによる新規の悪化ではないことを確認した。
+    - **Step2再検証(合格)**: `https://webmail.aramakisai.com/`への未認証アクセスが
+      `https://idp.aramakisai.com/oauth/v2/authorize?...client_id=390990032955047964&
+      ...code_challenge_method=S256&...`へ302リダイレクトすることを実機確認した
+      (実際のRoundcube Zitadel Applicationのclient_idとPKCEパラメータを伴う、
+      正当なOIDC Authorization Code + PKCEフローの開始)。CMSは
+      `gitops/manifests/prod/cms/deployment.yaml`の`AUTHENTIK_ISSUER_URL`が
+      `https://idp.aramakisai.com`(今回のrouting修正後は正しくZitadelに到達する)を
+      指しており、`cms-6b86f8bf45-hbt27` 1/1 Runningであることを確認した。
+      Vaultwardenは`replicas: 0`のまま(スコープ外、既知)。
+    - **Step3ブロッカーの確定(未実施)**: 本番Zitadelに対しAdmin API
+      `GET /admin/v1/smtp`をread-onlyで実行したところ`404 SMTP configuration
+      not found`(QUERY-fwofw)が返り、**ZitadelインスタンスにSMTP設定が
+      一切存在しない**ことを確認した(gitops/Infisicalにも`ZITADEL_SMTP_*`相当の
+      キーは存在しないことを事前に確認済み)。本specのrequirements.md/design.md/
+      tasks.mdのいずれにもZitadel自身のSMTP設定を投入するタスクは存在せず、
+      「本番SMTP設定が完了していることを確認すること」(runbook記載)は前提条件と
+      してのみ言及され実装対象になっていなかったための欠落と判断した。
+      SMTPが未設定の状態では`scripts/zitadel-invite-migration.py --send-email`の
+      `CreateInviteCode`(`sendCode`)は招待メールを配送できないため、実ユーザーへの
+      招待コード発行は実行しなかった。加えて招待対象の実ユーザーCSV
+      (`email,given_name,family_name,role_keys`、既存authentikからの抽出)も
+      本タスクの時点で用意されていない。招待コード発行はユーザーに対する
+      不可逆な操作であり、送信基盤が機能しないままの実行(returnCodeモードでの
+      代用や未検証のワークアラウンド)は行わないと判断した。
+    - **未達事項(次のアクションが必要)**: (1) Zitadel自身のSMTP設定
+      (`ZITADEL_SMTP_*`相当、送信元アドレス・リレー方式含む)をどう投入するかは
+      本specで未設計のため、方針決定とgitops/Infisical実装が必要。(2) 既存
+      authentikユーザーの実CSV抽出手順の確定。(3) 上記2点が揃った時点で
+      Step3(招待コード発行)を実行する。(4) 追記で判明した`tunnel.tf`以外の
+      広範なterraform未適用差分(Directus撤去・Cloudflare Access IdP切替等)は
+      本タスクと無関係の既存負債であり、対応要否をユーザーへ別途確認すること。
+    - **結論**: Step1・Step2は本番で正常に機能することを実機確認した
+      (Step2はidp.aramakisai.com routing障害を本タスクで発見・修正した上での
+      確認)。Step3(招待コード発行)はSMTP未設定・実ユーザーCSV未準備という
+      具体的なブロッカーを確認したため実行せず、チェックボックスは未完了のまま
+      残す。
 
 - [x] 9.5 authentik構成への切り戻し手順を整備する
   - Zitadel切替後に重大な認証障害が発生した場合の、旧authentik構成への切り戻し手順を作成する
