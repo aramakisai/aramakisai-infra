@@ -1,0 +1,93 @@
+---
+# zitadel_app_item: {name, redirect_uris, post_logout_redirect_uris, infisical_hint}
+#
+# client_secretはZitadelが作成時に一度だけ返す(以降GETでも取得不可)。そのため
+# 既存アプリが見つかった場合は絶対に再作成しない(再作成するとsecretが変わり
+# 稼働中のRPアプリのログインが即座に壊れる)。更新はredirect_uris等の非機密項目のみ。
+- name: "OIDC Appを検索: {{ zitadel_app_item.name }}"
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    zitadel_api_method: POST
+    zitadel_api_path: "/management/v1/projects/{{ zitadel_project_id }}/apps/_search"
+    zitadel_api_body:
+      query: { offset: "0", limit: 100 }
+      queries:
+        - nameQuery: { name: "{{ zitadel_app_item.name }}", method: TEXT_QUERY_METHOD_EQUALS }
+    zitadel_api_label: "search app {{ zitadel_app_item.name }}"
+
+- name: "OIDC App検索結果を退避: {{ zitadel_app_item.name }}"
+  ansible.builtin.set_fact:
+    _zitadel_app_search: "{{ zitadel_api_result }}"
+  no_log: true
+
+- name: "OIDC Appを新規作成: {{ zitadel_app_item.name }}"
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    zitadel_api_method: POST
+    zitadel_api_path: "/management/v1/projects/{{ zitadel_project_id }}/apps/oidc"
+    zitadel_api_body:
+      name: "{{ zitadel_app_item.name }}"
+      redirectUris: "{{ zitadel_app_item.redirect_uris }}"
+      postLogoutRedirectUris: "{{ zitadel_app_item.post_logout_redirect_uris }}"
+      responseTypes: ["OIDC_RESPONSE_TYPE_CODE"]
+      grantTypes: ["OIDC_GRANT_TYPE_AUTHORIZATION_CODE"]
+      appType: OIDC_APP_TYPE_WEB
+      authMethodType: OIDC_AUTH_METHOD_TYPE_BASIC
+      version: OIDC_VERSION_1_0
+      devMode: false
+      idTokenRoleAssertion: true
+      accessTokenRoleAssertion: true
+    zitadel_api_label: "create app {{ zitadel_app_item.name }}"
+  when: (_zitadel_app_search.body.result | default([])) | length == 0
+
+- name: "新規発行されたclient_id/secretを一時ファイルへ保存 (Infisical未登録、手動登録が必要): {{ zitadel_app_item.name }}"
+  ansible.builtin.copy:
+    content: |
+      # {{ zitadel_app_item.name }} (新規作成)
+      # 登録先Infisicalキー(想定): {{ zitadel_app_item.infisical_hint }}
+      client_id={{ zitadel_api_result.body.clientId }}
+      client_secret={{ zitadel_api_result.body.clientSecret }}
+    dest: "{{ zitadel_resources_output_dir }}/oidc-app-{{ zitadel_app_item.name }}.env"
+    mode: "0600"
+  when: (_zitadel_app_search.body.result | default([])) | length == 0
+  no_log: true
+  delegate_to: localhost
+
+- name: "OIDC Appを更新 (redirect_uris等の差分検知時): {{ zitadel_app_item.name }}"
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    zitadel_api_method: PUT
+    zitadel_api_path: "/management/v1/projects/{{ zitadel_project_id }}/apps/{{ _zitadel_app_search.body.result[0].id }}/oidc_config"
+    zitadel_api_body:
+      redirectUris: "{{ zitadel_app_item.redirect_uris }}"
+      postLogoutRedirectUris: "{{ zitadel_app_item.post_logout_redirect_uris }}"
+      responseTypes: ["OIDC_RESPONSE_TYPE_CODE"]
+      grantTypes: ["OIDC_GRANT_TYPE_AUTHORIZATION_CODE"]
+      appType: OIDC_APP_TYPE_WEB
+      authMethodType: OIDC_AUTH_METHOD_TYPE_BASIC
+      version: OIDC_VERSION_1_0
+      devMode: false
+      idTokenRoleAssertion: true
+      accessTokenRoleAssertion: true
+    zitadel_api_label: "update app {{ zitadel_app_item.name }}"
+  when: >-
+    (_zitadel_app_search.body.result | default([])) | length > 0
+    and (
+      (_zitadel_app_search.body.result[0].oidcConfig.redirectUris | default([])) != zitadel_app_item.redirect_uris
+      or (_zitadel_app_search.body.result[0].oidcConfig.postLogoutRedirectUris | default([])) != zitadel_app_item.post_logout_redirect_uris
+    )
+
+# UpdateOIDCAppConfigは変更なしの場合HTTP 400 code=9 "No changes"を返す(実機確認済み、
+# 差分検知ロジックのタイミング差等で呼ばれてしまった場合でも許容する)。
+- name: "OIDC App更新結果を確認: {{ zitadel_app_item.name }}"
+  ansible.builtin.assert:
+    that:
+      - zitadel_api_result.status == 200 or zitadel_api_result.body.code | default(0) == 9
+    fail_msg: "app {{ zitadel_app_item.name }} の更新に失敗しました: {{ zitadel_api_result.status }}"
+  when: >-
+    (_zitadel_app_search.body.result | default([])) | length > 0
+    and (
+      (_zitadel_app_search.body.result[0].oidcConfig.redirectUris | default([])) != zitadel_app_item.redirect_uris
+      or (_zitadel_app_search.body.result[0].oidcConfig.postLogoutRedirectUris | default([])) != zitadel_app_item.post_logout_redirect_uris
+    )
+  no_log: true

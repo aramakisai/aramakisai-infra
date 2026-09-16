@@ -1,0 +1,121 @@
+---
+# zitadel_mu_item: {user_name, name, description, member_scope(instance|org), roles, infisical_hint}
+# 旧terraform/zitadel_dovecot_auth.tf・terraform/zitadel_recovery_sa.tfに対応。
+
+- name: "Machine Userを検索: {{ zitadel_mu_item.user_name }}"
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    zitadel_api_method: POST
+    zitadel_api_path: /management/v1/users/_search
+    zitadel_api_body:
+      queries:
+        - userNameQuery: { userName: "{{ zitadel_mu_item.user_name }}", method: TEXT_QUERY_METHOD_EQUALS }
+    zitadel_api_label: "search machine user {{ zitadel_mu_item.user_name }}"
+
+- name: "Machine User検索結果を退避: {{ zitadel_mu_item.user_name }}"
+  ansible.builtin.set_fact:
+    _zitadel_mu_search: "{{ zitadel_api_result }}"
+  no_log: true
+
+- name: "Machine Userを新規作成: {{ zitadel_mu_item.user_name }}"
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    zitadel_api_method: POST
+    zitadel_api_path: /management/v1/users/machine
+    zitadel_api_body:
+      userName: "{{ zitadel_mu_item.user_name }}"
+      name: "{{ zitadel_mu_item.name }}"
+      description: "{{ zitadel_mu_item.description }}"
+    zitadel_api_label: "create machine user {{ zitadel_mu_item.user_name }}"
+  when: (_zitadel_mu_search.body.result | default([])) | length == 0
+
+- name: "Machine User IDを確定: {{ zitadel_mu_item.user_name }}"
+  ansible.builtin.set_fact:
+    zitadel_mu_id: >-
+      {{ (zitadel_api_result.body.userId)
+         if ((_zitadel_mu_search.body.result | default([])) | length == 0)
+         else (_zitadel_mu_search.body.result[0].id) }}
+  no_log: true
+
+# --- org_member もしくは instance_member ---
+- name: "既存org memberを確認: {{ zitadel_mu_item.user_name }}"
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    zitadel_api_method: POST
+    zitadel_api_path: /management/v1/orgs/me/members/_search
+    zitadel_api_body:
+      query: { offset: "0", limit: 200 }
+    zitadel_api_label: "search org members"
+  when: zitadel_mu_item.member_scope == 'org'
+
+- name: "org memberを付与: {{ zitadel_mu_item.user_name }}"
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    zitadel_api_method: POST
+    zitadel_api_path: /management/v1/orgs/me/members
+    zitadel_api_body:
+      userId: "{{ zitadel_mu_id }}"
+      roles: "{{ zitadel_mu_item.roles }}"
+    zitadel_api_label: "add org member {{ zitadel_mu_item.user_name }}"
+  when: >-
+    zitadel_mu_item.member_scope == 'org'
+    and (zitadel_api_result.body.result | default([]) | selectattr('userId', 'equalto', zitadel_mu_id) | list | length) == 0
+
+- name: "既存instance memberを確認: {{ zitadel_mu_item.user_name }}"
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    zitadel_api_method: POST
+    zitadel_api_path: /admin/v1/members/_search
+    zitadel_api_body:
+      query: { offset: "0", limit: 200 }
+    zitadel_api_label: "search instance members"
+  when: zitadel_mu_item.member_scope == 'instance'
+
+- name: "instance memberを付与: {{ zitadel_mu_item.user_name }}"
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    zitadel_api_method: POST
+    zitadel_api_path: /admin/v1/members
+    zitadel_api_body:
+      userId: "{{ zitadel_mu_id }}"
+      roles: "{{ zitadel_mu_item.roles }}"
+    zitadel_api_label: "add instance member {{ zitadel_mu_item.user_name }}"
+  when: >-
+    zitadel_mu_item.member_scope == 'instance'
+    and (zitadel_api_result.body.result | default([]) | selectattr('userId', 'equalto', zitadel_mu_id) | list | length) == 0
+
+# --- Personal Access Token (secretはZitadelが作成時に一度だけ返す。既存確認できたら絶対に再発行しない) ---
+- name: "既存PATを確認: {{ zitadel_mu_item.user_name }}"
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    zitadel_api_method: POST
+    zitadel_api_path: "/management/v1/users/{{ zitadel_mu_id }}/pats/_search"
+    zitadel_api_body: {}
+    zitadel_api_label: "search pat {{ zitadel_mu_item.user_name }}"
+
+- name: "既存PAT検索結果を退避: {{ zitadel_mu_item.user_name }}"
+  ansible.builtin.set_fact:
+    _zitadel_pat_search: "{{ zitadel_api_result }}"
+  no_log: true
+
+- name: "PATを新規発行: {{ zitadel_mu_item.user_name }}"
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    zitadel_api_method: POST
+    zitadel_api_path: "/management/v1/users/{{ zitadel_mu_id }}/pats"
+    zitadel_api_body:
+      expirationDate: "2029-01-01T00:00:00Z"
+    zitadel_api_label: "create pat {{ zitadel_mu_item.user_name }}"
+  when: (_zitadel_pat_search.body.result | default([])) | length == 0
+
+- name: "新規発行されたPATを一時ファイルへ保存 (Infisical未登録、手動登録が必要): {{ zitadel_mu_item.user_name }}"
+  ansible.builtin.copy:
+    content: |
+      # {{ zitadel_mu_item.user_name }} (新規発行)
+      # 登録先Infisicalキー(想定): {{ zitadel_mu_item.infisical_hint }}
+      {{ zitadel_api_result.body.token }}
+    dest: "{{ zitadel_resources_output_dir }}/pat-{{ zitadel_mu_item.user_name }}.txt"
+    mode: "0600"
+  when: (_zitadel_pat_search.body.result | default([])) | length == 0
+  no_log: true
+  delegate_to: localhost

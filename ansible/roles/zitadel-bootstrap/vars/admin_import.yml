@@ -1,0 +1,14 @@
+---
+# Terraform/Ansible(resources.yml)のいずれでも管理されないインスタンス設定の
+# 目標値 (task 9.3)。値そのものを変更する場合はこのファイルを正とする。
+#
+# 洗い出し結果: design.mdは例として「Assert Roles on Authentication」を挙げているが、
+# これはProject.projectRoleAssertionでありresources.ymlの1.Project(task9.2)が
+# 既にAnsible管理下に置いているため、本ファイルの対象ではない。
+# 実際にTerraform/Ansible管理外のまま残っているのはインスタンス直下のポリシー系のみで、
+# このうちtask7.1のセキュリティ検証で明示的にギャップと判定されたLockout Policyのみを
+# 対象とする(login/password_complexity/privacy/domain policyは他タスクで
+# 変更が必要と判定された実績がなく、Zitadelデフォルトのままで問題ない)。
+zitadel_admin_import_lockout_policy:
+  max_password_attempts: 10
+  max_otp_attempts: 10

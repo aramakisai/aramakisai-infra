@@ -1,0 +1,3 @@
+email,given_name,family_name,role_keys
+cutover-poc-user1@aramakisai.invalid,Cutover,PocOne,planning
+cutover-poc-user2@aramakisai.invalid,Cutover,PocTwo,accounting;leader

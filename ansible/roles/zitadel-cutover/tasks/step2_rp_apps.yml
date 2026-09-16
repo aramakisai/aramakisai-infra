@@ -1,0 +1,168 @@
+---
+# Step2: RPアプリ(CMS/Vaultwarden/Roundcube) OIDC Client切替。
+#
+# prod: gitops/manifests/prod/{cms,cms-secrets,vaultwarden,roundcube}/ の変更は
+# 本タスクで既にコミット済み。実際の反映はPRマージ後のArgoCD syncであり、
+# このroleはprodのkubectl/argocdを一切実行しない。client_id/secretの実値は
+# task9.2 (zitadel-resources.yml) の本番実行で発行され、Infisical prod環境へ
+# 登録する必要がある(未実施、tasks.md task9.2の実施結果参照)。
+- name: "[prod] 適用手順を提示する (このroleはprodへ一切のkubectl/argocdを実行しない)"
+  ansible.builtin.debug:
+    msg:
+      - "前提: task9.2 (zitadel-resources.yml)を本番Zitadelに対して実行し、CMS_PROD_OIDC_CLIENT_ID/SECRET・VAULTWARDEN_OIDC_CLIENT_ID/SECRET・ROUNDCUBE_OIDC_CLIENT_ID/MAIL_OAUTH2_CLIENT_SECRETをInfisical prod環境へ登録済みであること。"
+      - "gitops/manifests/prod/{cms,cms-secrets,vaultwarden,roundcube}/ のPRをレビュー・マージすること。"
+      - "ArgoCD Application 'cms' 'vaultwarden' 'roundcube' をsyncすること。"
+      - "検証: docs/zitadel-cutover-runbook.md の Step2チェックリストを実施すること。"
+  when: zitadel_cutover_target_env == 'prod'
+
+# --- k3d: 検証用の一時OIDC Applicationで実際のOIDCログインフローが通ることを確認する ---
+# CMS/Vaultwarden/Roundcube本体をk3dへデプロイするのは各アプリのイメージ取得・
+# DB・依存関係の再構築が必要で過剰なため(task5.1が同じ理由でCMSを curl 検証に
+# 留めた判断を踏襲)、同一Zitadel Project内に一時Confidential OIDC Applicationを
+# 作成し、Authorization Code + PKCEの全経路(Session API→authorize→
+# CreateCallback→token交換→userinfo)が実際に成功することを確認する。
+# task9.2で実際に発行されたcms-prod/vaultwarden/roundcube自身のclient_secretは
+# 発行時一度しか取得できずこのセッションには残っていないため、同一メカニズムを
+# 代表する一時Applicationで検証する(実アプリの資格情報そのものではない点に注意)。
+- name: "[k3d] aramakisai projectを検索する"
+  ansible.builtin.include_role:
+    name: zitadel-bootstrap
+    tasks_from: _api_call
+  vars:
+    zitadel_api_method: POST
+    zitadel_api_path: /management/v1/projects/_search
+    zitadel_api_body: {}
+    zitadel_api_label: "search aramakisai project"
+  when: zitadel_cutover_target_env == 'k3d'
+
+- name: "[k3d] project idを変数化する"
+  ansible.builtin.set_fact:
+    _cutover_project_id: "{{ (zitadel_api_result.body.result | selectattr('name', 'equalto', 'aramakisai') | first).id }}"
+  when: zitadel_cutover_target_env == 'k3d'
+
+- name: "[k3d] 検証用の一時Confidential OIDC Applicationを作成する"
+  ansible.builtin.include_role:
+    name: zitadel-bootstrap
+    tasks_from: _api_call
+  vars:
+    zitadel_api_method: POST
+    zitadel_api_path: "/management/v1/projects/{{ _cutover_project_id }}/apps/oidc"
+    zitadel_api_body:
+      name: cutover-verify-app
+      redirectUris: ["http://localhost/cb"]
+      responseTypes: ["OIDC_RESPONSE_TYPE_CODE"]
+      grantTypes: ["OIDC_GRANT_TYPE_AUTHORIZATION_CODE"]
+      appType: OIDC_APP_TYPE_WEB
+      authMethodType: OIDC_AUTH_METHOD_TYPE_BASIC
+      postLogoutRedirectUris: []
+    zitadel_api_label: "create temp verify OIDC app"
+  no_log: true
+  when: zitadel_cutover_target_env == 'k3d'
+
+- name: "[k3d] 一時Applicationのclient_id/secret/appIdを変数化する (no_log)"
+  ansible.builtin.set_fact:
+    _cutover_verify_app_id: "{{ zitadel_api_result.body.appId }}"
+    _cutover_verify_client_id: "{{ zitadel_api_result.body.clientId }}"
+    _cutover_verify_client_secret: "{{ zitadel_api_result.body.clientSecret }}"
+  no_log: true
+  when: zitadel_cutover_target_env == 'k3d'
+
+- name: "[k3d] 検証用ユーザーを作成する"
+  ansible.builtin.include_role:
+    name: zitadel-bootstrap
+    tasks_from: _api_call
+  vars:
+    zitadel_api_method: POST
+    zitadel_api_path: /v2/users/human
+    zitadel_api_body:
+      username: cutover-oidc-test@aramakisai.invalid
+      profile: { givenName: Cutover, familyName: OidcTest }
+      email: { email: cutover-oidc-test@aramakisai.invalid, isVerified: true }
+      password: { password: "CutoverTest1!", changeRequired: false }
+    zitadel_api_label: "create oidc e2e test user"
+  when: zitadel_cutover_target_env == 'k3d'
+
+- name: "[k3d] ansible実行ホストからZitadel APIへport-forwardする"
+  ansible.builtin.shell:
+    cmd: >
+      nohup kubectl port-forward -n {{ zitadel_bootstrap_namespace }} svc/zitadel 18080:8080
+      --kubeconfig {{ zitadel_bootstrap_kubeconfig }}
+      > {{ zitadel_bootstrap_output_dir }}/port-forward.log 2>&1 &
+      echo $! > {{ zitadel_bootstrap_output_dir }}/port-forward.pid
+  changed_when: true
+  when: zitadel_cutover_target_env == 'k3d'
+
+- name: "[k3d] port-forwardの確立を待つ"
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: 18080
+    timeout: 15
+  when: zitadel_cutover_target_env == 'k3d'
+
+- name: "[k3d] OIDC E2Eフローを検証する"
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ role_path }}/../../../scripts/zitadel-cutover-verify.py"
+      - oidc-e2e
+      - --base-url={{ zitadel_cutover_host_reachable_url }}
+      - "--external-domain={{ zitadel_external_domain }}"
+      - "--login-pat={{ lookup('file', zitadel_bootstrap_output_dir + '/login-client.pat') }}"
+      - "--client-id={{ _cutover_verify_client_id }}"
+      - "--client-secret={{ _cutover_verify_client_secret }}"
+      - --redirect-uri=http://localhost/cb
+      - --username=cutover-oidc-test@aramakisai.invalid
+      - --password=CutoverTest1!
+  register: _cutover_oidc_e2e
+  changed_when: false
+  no_log: true
+  when: zitadel_cutover_target_env == 'k3d'
+
+- name: Step2検証結果
+  ansible.builtin.assert:
+    that:
+      - "'oidc_e2e_pass' in _cutover_oidc_e2e.stdout"
+    fail_msg: "OIDC E2E検証失敗。詳細: {{ _cutover_oidc_e2e.stdout }}"
+    success_msg: "OIDC Authorization Code + PKCE + userinfoまでEnd-to-Endで成功を確認した"
+  when: zitadel_cutover_target_env == 'k3d'
+
+- name: "[k3d] port-forwardを終了する"
+  ansible.builtin.shell:
+    cmd: "kill $(cat {{ zitadel_bootstrap_output_dir }}/port-forward.pid) 2>/dev/null || true"
+  changed_when: false
+  when: zitadel_cutover_target_env == 'k3d'
+
+- name: "[k3d] 一時リソースを削除する (後片付け)"
+  ansible.builtin.include_role:
+    name: zitadel-bootstrap
+    tasks_from: _api_call
+  vars:
+    zitadel_api_method: DELETE
+    zitadel_api_path: "/management/v1/projects/{{ _cutover_project_id }}/apps/{{ _cutover_verify_app_id }}"
+    zitadel_api_label: "delete temp verify OIDC app"
+  when: zitadel_cutover_target_env == 'k3d'
+  ignore_errors: true
+
+- name: "[k3d] 検証用ユーザーを削除する (後片付け)"
+  ansible.builtin.include_role:
+    name: zitadel-bootstrap
+    tasks_from: _api_call
+  vars:
+    zitadel_api_method: POST
+    zitadel_api_path: /v2/users
+    zitadel_api_body:
+      queries: [{ loginNameQuery: { loginName: cutover-oidc-test@aramakisai.invalid } }]
+    zitadel_api_label: "find oidc e2e test user for cleanup"
+  when: zitadel_cutover_target_env == 'k3d'
+  ignore_errors: true
+
+- name: "[k3d] 検証用ユーザーを削除する (後片付け、実削除)"
+  ansible.builtin.include_role:
+    name: zitadel-bootstrap
+    tasks_from: _api_call
+  vars:
+    zitadel_api_method: DELETE
+    zitadel_api_path: "/v2/users/{{ zitadel_api_result.body.result[0].userId | default('') }}"
+    zitadel_api_label: "delete oidc e2e test user"
+  when: zitadel_cutover_target_env == 'k3d'
+  ignore_errors: true

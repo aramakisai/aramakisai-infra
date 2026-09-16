@@ -1,0 +1,50 @@
+---
+# 汎用Zitadel v2 Management API呼び出し。呼び出し元でこれらの変数をセットしてから
+# include_tasksすること:
+#   zitadel_api_method: GET/POST/PUT/DELETE
+#   zitadel_api_path:   例 /management/v1/projects
+#   zitadel_api_body:   JSONに直列化するdict (省略可)
+#   zitadel_api_file:   {base64, name, type} multipart upload用 (省略可、bodyと排他)
+#   zitadel_api_label:  ログ表示名 (省略可)
+#
+# 結果はzitadel_api_result ({status, body}) にセットされる。
+# レスポンスにclient_secret/PAT等の機密情報が含まれうるため常にno_logとする。
+
+- name: "Zitadel API呼び出し: {{ zitadel_api_label | default(zitadel_api_method ~ ' ' ~ zitadel_api_path) }}"
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - exec
+      - -i
+      - "{{ zitadel_bootstrap_pod }}"
+      - -n
+      - "{{ zitadel_bootstrap_namespace }}"
+      - -c
+      - "{{ zitadel_bootstrap_login_container }}"
+      - --
+      - node
+      - -e
+      - "{{ lookup('file', role_path + '/files/zitadel_api.js') }}"
+    stdin: "{{ _zitadel_api_payload }}"
+  vars:
+    _zitadel_api_payload: "{{ _zitadel_api_payload_dict | to_json }}"
+    _zitadel_api_payload_dict:
+      method: "{{ zitadel_api_method }}"
+      path: "{{ zitadel_api_path }}"
+      token: "{{ zitadel_admin_pat }}"
+      host: "{{ zitadel_external_domain }}"
+      body: "{{ zitadel_api_body | default(none) }}"
+      fileBase64: "{{ zitadel_api_file.base64 | default(none) }}"
+      fileName: "{{ zitadel_api_file.name | default(none) }}"
+      fileType: "{{ zitadel_api_file.type | default(none) }}"
+  environment:
+    KUBECONFIG: "{{ zitadel_bootstrap_kubeconfig }}"
+  register: zitadel_api_raw
+  changed_when: false
+  no_log: true
+  delegate_to: localhost
+
+- name: API応答をパース (no_log、機密情報を含みうるため)
+  ansible.builtin.set_fact:
+    zitadel_api_result: "{{ zitadel_api_raw.stdout | from_json }}"
+  no_log: true

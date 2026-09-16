@@ -1,0 +1,93 @@
+---
+# project/role/application/action等の投入先リソース定義 (非機密のみ)。
+# 移行元terraform/zitadel_*.tfの定義値をそのまま転記している。値そのものを変更する
+# 場合は移行元ではなくこのファイルを正とすること (terraform/zitadel_*.tfは削除済み)。
+
+zitadel_project_name: aramakisai
+
+# role_key => display_name (旧terraform/zitadel_projects.tfのaramakisai_project_roles
+# + terraform/zitadel_student_exhibitor.tfのexhibitorロールを統合)
+zitadel_project_roles:
+  admin: 管理者
+  executive: 実行委員
+  leader: リーダー
+  planning: 企画
+  accounting: 会計
+  vendors: 出店
+  performers: 出演
+  pr: 広報
+  general_affairs: 総務
+  exhibitor: 出展団体
+
+zitadel_oidc_apps:
+  - name: cms-prod
+    redirect_uris:
+      - https://cms.aramakisai.com/api/auth/authentik/callback
+      - http://localhost:3000/api/auth/authentik/callback
+    post_logout_redirect_uris:
+      - https://cms.aramakisai.com/
+    infisical_hint: "CMS_PROD_OIDC_CLIENT_ID / CMS_PROD_OIDC_CLIENT_SECRET (要新設)"
+  - name: vaultwarden
+    redirect_uris:
+      - https://vault.aramakisai.com/identity/connect/oidc-signin
+    post_logout_redirect_uris:
+      - https://vault.aramakisai.com/
+    # VAULTWARDEN_OIDC_CLIENT_ID/SECRETはauthentik時代の値をそのまま使っている既存キーのため、
+    # 上書きせず別名の新規キーに保存する(切り戻し時にauthentikの値を失わないため)。
+    infisical_hint: "VAULTWARDEN_OIDC_CLIENT_ID_ZITADEL / VAULTWARDEN_OIDC_CLIENT_SECRET_ZITADEL (新設、旧VAULTWARDEN_OIDC_CLIENT_ID/SECRETは上書きしない)"
+  - name: roundcube
+    redirect_uris:
+      - https://webmail.aramakisai.com/index.php/login/oauth
+    post_logout_redirect_uris:
+      - https://webmail.aramakisai.com/
+    # MAIL_OAUTH2_CLIENT_SECRETはauthentik時代からroundcube/mailserver両方が参照する既存キーのため、
+    # 上書きせず別名の新規キーに保存する。
+    infisical_hint: "ROUNDCUBE_OIDC_CLIENT_ID / MAIL_OAUTH2_CLIENT_SECRET_ZITADEL (新設、旧MAIL_OAUTH2_CLIENT_SECRETは上書きしない)"
+  - name: cloudflare-access
+    # コールバック先はCloudflare Zero Trust側固定。terraform/access.tfのCloudflare Access
+    # IdP登録(zitadel_cf_access_client_id/secret変数)がこのアプリのclient_id/secretを
+    # 消費するため、新規発行時は必ずその2キーをInfisicalへ登録しterraform側を再applyする。
+    redirect_uris:
+      - https://summer-smoke-c298.cloudflareaccess.com/cdn-cgi/access/callback
+    post_logout_redirect_uris: []
+    infisical_hint: "TF_VAR_zitadel_cf_access_client_id / TF_VAR_zitadel_cf_access_client_secret (要新設、terraform/access.tf参照)"
+
+zitadel_discord_idp_name: Discord
+# client_id/secretは非機密のダミー値のみdefaults化 (実値はInfisicalのTF_VAR_discord_client_id/
+# TF_VAR_discord_client_secretを読む。terraform/zitadel_idp.tfの未設定時フォールバックと同一)
+zitadel_discord_client_id: "{{ lookup('env', 'TF_VAR_discord_client_id') | default('dummy_discord_client_id', true) }}"
+zitadel_discord_client_secret: "{{ lookup('env', 'TF_VAR_discord_client_secret') | default('dummy_discord_client_secret', true) }}"
+
+zitadel_label_policy:
+  primary_color: "#ebb03c"
+  background_color: "#ffffff"
+  warn_color: "#e86f30"
+  font_color: "#231815"
+  primary_color_dark: "#ebb03c"
+  background_color_dark: "#231815"
+  warn_color_dark: "#e86f30"
+  font_color_dark: "#ffffff"
+  theme_mode: THEME_MODE_AUTO
+  disable_watermark: true
+  hide_login_name_suffix: false
+
+zitadel_branding_dir: "{{ playbook_dir }}/../../gitops/manifests/prod/zitadel/branding"
+zitadel_branding_logo_light: "{{ zitadel_branding_dir }}/aramakisai.png"
+zitadel_branding_logo_dark: "{{ zitadel_branding_dir }}/aramakisai_W.png"
+zitadel_branding_favicon: "{{ zitadel_branding_dir }}/favicon.png"
+
+# machine_user + PAT + (org_member|instance_member) の組。旧
+# terraform/zitadel_dovecot_auth.tf・terraform/zitadel_recovery_sa.tfに対応。
+zitadel_machine_users:
+  - user_name: dovecot-lua-auth
+    name: Dovecot Lua Auth Bridge
+    description: "Session API(認証委譲) + Management API user grant read only"
+    member_scope: instance # zitadel_instance_member (Admin API)
+    roles: ["IAM_LOGIN_CLIENT"]
+    infisical_hint: "DOVECOT_ZITADEL_AUTH_PAT (要新設)"
+  - user_name: invite-recovery-sa
+    name: Invite Recovery Service Account
+    description: "招待発行用SA: ユーザー作成・閲覧・更新・パスワードリセット・招待コード発行 (ORG_USER_MANAGERのみ、IAM_OWNER不要)"
+    member_scope: org # zitadel_org_member (Management API)
+    roles: ["ORG_USER_MANAGER"]
+    infisical_hint: "ZITADEL_INVITE_RECOVERY_SA_PAT (要新設)"

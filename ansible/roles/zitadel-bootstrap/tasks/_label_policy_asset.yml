@@ -1,0 +1,27 @@
+---
+# zitadel_asset_item: {path, api} (ループ変数、_label_policy.ymlから呼ばれる)
+#
+# 同一内容の再アップロードはchangeDate/sequenceが変化しない(冪等)ことをk3d実機で
+# 確認済みのため、存在確認をせず毎回アップロードする。
+- name: "アセットをbase64化: {{ zitadel_asset_item.api }}"
+  ansible.builtin.set_fact:
+    _zitadel_asset_b64: "{{ lookup('pipe', 'base64 -w0 ' ~ zitadel_asset_item.path) }}"
+  no_log: true
+
+- name: "アセットをアップロード: {{ zitadel_asset_item.api }}"
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    zitadel_api_method: POST
+    zitadel_api_path: "{{ zitadel_asset_item.api }}"
+    zitadel_api_file:
+      base64: "{{ _zitadel_asset_b64 }}"
+      name: "{{ zitadel_asset_item.path | basename }}"
+      type: image/png
+    zitadel_api_label: "upload {{ zitadel_asset_item.api }}"
+
+- name: "アセットアップロード結果を確認: {{ zitadel_asset_item.api }}"
+  ansible.builtin.assert:
+    that:
+      - zitadel_api_result.status == 200
+    fail_msg: "アセットのアップロードに失敗しました ({{ zitadel_asset_item.api }}): {{ zitadel_api_result.status }}"
+  no_log: true

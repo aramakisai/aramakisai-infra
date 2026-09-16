@@ -1,0 +1,49 @@
+---
+# zitadel_role_item: {key: role_key, value: display_name} (dict2itemsのループ変数)
+- name: "Project Roleを検索: {{ zitadel_role_item.key }}"
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    zitadel_api_method: POST
+    zitadel_api_path: "/management/v1/projects/{{ zitadel_project_id }}/roles/_search"
+    zitadel_api_body:
+      queries:
+        - keyQuery: { key: "{{ zitadel_role_item.key }}", method: TEXT_QUERY_METHOD_EQUALS }
+    zitadel_api_label: "search role {{ zitadel_role_item.key }}"
+
+- name: "Project Role検索結果を退避: {{ zitadel_role_item.key }}"
+  ansible.builtin.set_fact:
+    _zitadel_role_search: "{{ zitadel_api_result }}"
+  no_log: true
+
+- name: "Project Roleを新規作成: {{ zitadel_role_item.key }}"
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    zitadel_api_method: POST
+    zitadel_api_path: "/management/v1/projects/{{ zitadel_project_id }}/roles"
+    zitadel_api_body:
+      roleKey: "{{ zitadel_role_item.key }}"
+      displayName: "{{ zitadel_role_item.value }}"
+    zitadel_api_label: "create role {{ zitadel_role_item.key }}"
+  when: (_zitadel_role_search.body.result | default([])) | length == 0
+
+- name: "Project Roleを更新 (表示名変更検知時): {{ zitadel_role_item.key }}"
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    zitadel_api_method: PUT
+    zitadel_api_path: "/management/v1/projects/{{ zitadel_project_id }}/roles/{{ zitadel_role_item.key }}"
+    zitadel_api_body:
+      displayName: "{{ zitadel_role_item.value }}"
+    zitadel_api_label: "update role {{ zitadel_role_item.key }}"
+  when: >-
+    (_zitadel_role_search.body.result | default([])) | length > 0
+    and (_zitadel_role_search.body.result[0].displayName | default('')) != zitadel_role_item.value
+
+- name: "Project Role結果を確認: {{ zitadel_role_item.key }}"
+  ansible.builtin.assert:
+    that:
+      - zitadel_api_result.status == 200 or zitadel_api_result.body.code | default(0) == 9
+    fail_msg: "role {{ zitadel_role_item.key }} の投入に失敗しました: {{ zitadel_api_result.status }}"
+  when: >-
+    (_zitadel_role_search.body.result | default([])) | length == 0
+    or (_zitadel_role_search.body.result[0].displayName | default('')) != zitadel_role_item.value
+  no_log: true

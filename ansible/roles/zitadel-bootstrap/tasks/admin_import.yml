@@ -1,0 +1,92 @@
+---
+# Terraform/Ansible(resources.yml)いずれの管理下にもないインスタンス設定を
+# `POST /admin/v1/import`で反映する (task 9.3)。到達経路はresources.yml(task9.2)と
+# 同じ_api_call.yml経由のkubectl exec方式を踏襲する。
+#
+# 対象host/クラスタは常にzitadel_external_domain/zitadel_bootstrap_kubeconfig
+# (defaults/main.yml)で決まり、いずれもk3d値がデフォルト・本番はENV変数上書きの
+# みで指定する方式のため、このファイル自体に本番エンドポイントのハードコードはない。
+#
+# `POST /admin/v1/import`はTerraformのapplyのような差分適用ではなく、指定した
+# サブリソース(ここではlockoutPolicyのみ)を常に新規追加しようとする一括ロード用
+# APIのため、既に同一のカスタムポリシーが存在する状態で再実行すると失敗する
+# (「1回成功すればよい」設計、tasks.md task9.3参照)。誤って複数回実行しても
+# 実害が出ないよう、実行前にisDefaultを確認し、既にカスタムポリシーが存在する
+# 場合はスキップする。
+
+- name: 必須変数を検証 (project/role/application投入 (resources.yml) と同じPATを流用)
+  ansible.builtin.assert:
+    that:
+      - zitadel_admin_pat is defined
+      - zitadel_admin_pat | length > 0
+    fail_msg: >-
+      zitadel_admin_pat を解決できませんでした。resources.ymlと同様、本番実行時は
+      `infisical run --env=prod -- ansible-playbook ...`(TF_VAR_zitadel_token経由)、
+      k3d検証時は{{ zitadel_bootstrap_pat_output_file }}にPATを配置してください。
+
+- name: importターゲット設定を読み込み
+  ansible.builtin.include_vars: admin_import.yml
+
+- name: 対象organizationを取得 (単一org構成前提、design.md参照)
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    zitadel_api_method: GET
+    zitadel_api_path: /management/v1/orgs/me
+    zitadel_api_label: "get current org"
+
+- name: organization IDを退避
+  ansible.builtin.set_fact:
+    zitadel_admin_import_org_id: "{{ zitadel_api_result.body.org.id }}"
+
+- name: 現在のLockout Policyを取得
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    zitadel_api_method: GET
+    zitadel_api_path: /management/v1/policies/lockout
+    zitadel_api_label: "get lockout policy"
+
+- name: Lockout Policyがカスタム化済みか判定
+  ansible.builtin.set_fact:
+    _zitadel_lockout_is_default: "{{ zitadel_api_result.body.isDefault | default(true) }}"
+
+- name: Admin API importを実行 (Lockout Policyのカスタム化、未カスタム時のみ)
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    zitadel_api_method: POST
+    zitadel_api_path: /admin/v1/import
+    zitadel_api_body:
+      dataOrgs:
+        orgs:
+          - orgId: "{{ zitadel_admin_import_org_id }}"
+            lockoutPolicy:
+              maxPasswordAttempts: "{{ zitadel_admin_import_lockout_policy.max_password_attempts }}"
+              maxOtpAttempts: "{{ zitadel_admin_import_lockout_policy.max_otp_attempts }}"
+      timeout: 5m
+    zitadel_api_label: "admin import (lockout policy)"
+  when: _zitadel_lockout_is_default | bool
+
+- name: import結果からエラーを退避 (既存org宛のimportは常にorg再作成を試みるため許容対象を除外)
+  ansible.builtin.set_fact:
+    # DataOrg.org(AddOrgRequest)はimport実行のたびに常に含まれ、既存org(自己import)
+    # 宛の場合は必ずErrors.Org.AlreadyExistingになる(k3d実機確認済み、正常系)。
+    # このエラー1件はorgId自体の再作成失敗であってlockoutPolicy等の他サブリソースの
+    # 適用結果とは独立のため、これのみ許容し他のエラーは全て失敗として扱う。
+    _zitadel_import_unexpected_errors: >-
+      {{ (zitadel_api_result.body.errors | default([]))
+         | rejectattr('type', 'equalto', 'org')
+         | list }}
+  when: _zitadel_lockout_is_default | bool
+
+- name: import結果を確認 (実行した場合のみ)
+  ansible.builtin.assert:
+    that:
+      - zitadel_api_result.status == 200
+      - _zitadel_import_unexpected_errors | length == 0
+    fail_msg: "Admin API importに失敗しました: {{ zitadel_api_result.status }} {{ zitadel_api_result.body }}"
+  when: _zitadel_lockout_is_default | bool
+
+- name: 実行結果
+  ansible.builtin.debug:
+    msg: >-
+      {{ 'lockout policyをimportで新規作成しました' if _zitadel_lockout_is_default | bool
+         else 'lockout policyは既にカスタム化済みのためimportをスキップしました' }}

@@ -1,0 +1,157 @@
+---
+# project → role → application → action の依存順でZitadelリソースを投入する
+# (design.md「Zitadel Provider Access Path」、旧terraform/zitadel_*.tf 9ファイル19ブロック
+# の後継)。各リソースは「検索して存在確認→なければ作成、あれば必要なら更新」を
+# ansible.builtin.uriではなくkubectl exec経由のnode script(_api_call.yml)で行う
+# (到達経路は design.md 候補(a): 既存zitadel-bootstrapロールと同じPod内実行方式を採用。
+# 理由はtasks.md task9.2追記参照)。
+
+- name: リソース定義を読み込み
+  ansible.builtin.include_vars: resources.yml
+
+- name: 必須変数を検証 (project/role/application/action投入前)
+  ansible.builtin.assert:
+    that:
+      - zitadel_admin_pat is defined
+      - zitadel_admin_pat | length > 0
+    fail_msg: >-
+      zitadel_admin_pat (Terraform provider用PATの流用)を解決できませんでした。
+      本番実行時は `infisical run --env=prod -- ansible-playbook ...`
+      (TF_VAR_zitadel_tokenを経由)、k3d検証時は
+      {{ zitadel_bootstrap_pat_output_file }} にPATを配置してください。
+
+- name: 出力先ディレクトリを作成 (新規発行時のclient_secret/PAT平文の一時退避先)
+  ansible.builtin.file:
+    path: "{{ zitadel_resources_output_dir }}"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+
+# ------------------------------------------------------------
+# 1. Project
+# ------------------------------------------------------------
+- name: Projectを検索
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    zitadel_api_method: POST
+    zitadel_api_path: /management/v1/projects/_search
+    zitadel_api_body:
+      query: { offset: "0", limit: 100 }
+      queries:
+        - nameQuery: { name: "{{ zitadel_project_name }}", method: TEXT_QUERY_METHOD_EQUALS }
+    zitadel_api_label: "search project {{ zitadel_project_name }}"
+
+- name: Project検索結果を退避
+  ansible.builtin.set_fact:
+    _zitadel_project_search: "{{ zitadel_api_result }}"
+  no_log: true
+
+- name: Projectを新規作成
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    zitadel_api_method: POST
+    zitadel_api_path: /management/v1/projects
+    zitadel_api_body:
+      name: "{{ zitadel_project_name }}"
+      projectRoleAssertion: true
+      projectRoleCheck: false
+      hasProjectCheck: false
+    zitadel_api_label: "create project {{ zitadel_project_name }}"
+  when: (_zitadel_project_search.body.result | default([])) | length == 0
+
+- name: Project作成結果を退避
+  ansible.builtin.set_fact:
+    zitadel_project_id: >-
+      {{ (zitadel_api_result.body.id)
+         if ((_zitadel_project_search.body.result | default([])) | length == 0)
+         else (_zitadel_project_search.body.result[0].id) }}
+  no_log: true
+
+- name: Projectの設定値を最新化 (既存の場合のみ。作成直後は既に最新のためスキップ)
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    zitadel_api_method: PUT
+    zitadel_api_path: "/management/v1/projects/{{ zitadel_project_id }}"
+    zitadel_api_body:
+      name: "{{ zitadel_project_name }}"
+      projectRoleAssertion: true
+      projectRoleCheck: false
+      hasProjectCheck: false
+    zitadel_api_label: "update project {{ zitadel_project_name }}"
+  when: (_zitadel_project_search.body.result | default([])) | length > 0
+
+# HTTP 400 code=9 "No changes" は差分なしの正常系 (実機確認済み)。それ以外の失敗のみ
+# エラーとして扱う。
+- name: Project更新結果を確認 (No Changesは許容)
+  ansible.builtin.assert:
+    that:
+      - zitadel_api_result.status == 200 or zitadel_api_result.body.code | default(0) == 9
+    fail_msg: "Project更新に失敗しました: {{ zitadel_api_result.status }}"
+  when: (_zitadel_project_search.body.result | default([])) | length > 0
+  no_log: true
+
+- name: Project ID
+  ansible.builtin.debug:
+    msg: "project {{ zitadel_project_name }} -> {{ zitadel_project_id }}"
+
+# ------------------------------------------------------------
+# 2. Project Role (フラットロール、for_each相当)
+# ------------------------------------------------------------
+- name: Project Roleを投入
+  ansible.builtin.include_tasks: _project_role.yml
+  loop: "{{ zitadel_project_roles | dict2items }}"
+  loop_control:
+    loop_var: zitadel_role_item
+    label: "{{ zitadel_role_item.key }}"
+
+# ------------------------------------------------------------
+# 3. OIDC Application
+# ------------------------------------------------------------
+- name: OIDC Applicationを投入
+  ansible.builtin.include_tasks: _oidc_app.yml
+  loop: "{{ zitadel_oidc_apps }}"
+  loop_control:
+    loop_var: zitadel_app_item
+    label: "{{ zitadel_app_item.name }}"
+
+# ------------------------------------------------------------
+# 4. Discord OAuth2 IdP
+# ------------------------------------------------------------
+- name: Discord OAuth2 IdPを投入
+  ansible.builtin.include_tasks: _org_idp_oauth.yml
+
+# ------------------------------------------------------------
+# 5. Label Policy (ブランディング)
+# ------------------------------------------------------------
+- name: Label Policyを投入
+  ansible.builtin.include_tasks: _label_policy.yml
+
+# ------------------------------------------------------------
+# 6. Machine User + PAT + org_member/instance_member
+# ------------------------------------------------------------
+- name: Machine User (Dovecot / Invite Recovery SA)を投入
+  ansible.builtin.include_tasks: _machine_user_pat.yml
+  loop: "{{ zitadel_machine_users }}"
+  loop_control:
+    loop_var: zitadel_mu_item
+    label: "{{ zitadel_mu_item.user_name }}"
+
+# ------------------------------------------------------------
+# 7. 出展団体 Human User + User Grant (CSV駆動)
+# ------------------------------------------------------------
+- name: 出展団体CSVを読み込み
+  community.general.read_csv:
+    path: "{{ zitadel_student_exhibitor_csv }}"
+  register: _zitadel_csv
+  delegate_to: localhost
+
+- name: 出展団体一覧を確定
+  ansible.builtin.set_fact:
+    zitadel_student_exhibitors: "{{ _zitadel_csv.list }}"
+
+- name: 出展団体を投入
+  ansible.builtin.include_tasks: _exhibitor_user.yml
+  loop: "{{ zitadel_student_exhibitors }}"
+  loop_control:
+    loop_var: zitadel_exhibitor_item
+    label: "{{ zitadel_exhibitor_item.email }}"

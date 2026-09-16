@@ -1,0 +1,41 @@
+---
+# 一括カットオーバー順序 (task9.4):
+#   1. Dovecot Lua Auth Bridge切替
+#   2. RPアプリ(CMS/Vaultwarden/Roundcube)OIDC Client切替
+#   3. vaultwarden-rbac-sync webhook切替 (task4.4で安定と判断された場合のみ)
+#   4. 既存ユーザーへの招待ベース移行 (task6.1のスクリプトを呼ぶ)
+#
+# target_env: k3d | prod。本番向けの実際のGitOps適用(kubectl/argocd)はこの
+# roleが直接行わない(GitOps原則、CLAUDE.md参照)。prod向けの「切替」は
+# 「該当のgitops/manifests/prod/*.yamlは既にこのPRでコミット済み → PR
+# レビュー・マージ → ArgoCD sync」という人間の操作が本体であり、このroleは
+# 各ステップの事前条件チェックと事後検証のみを担当する。k3dはArgoCDが存在
+# しないため、roleが直接kubectl applyで検証用リソースを展開する。
+zitadel_cutover_target_env: "{{ lookup('env', 'ZITADEL_CUTOVER_TARGET_ENV') | default('k3d', true) }}"
+
+zitadel_cutover_namespace: "{{ 'prod' if zitadel_cutover_target_env == 'prod' else 'poc-apps' }}"
+
+# k3d検証用の一時Dovecotテストリソース (namespace/Pod名)。実際のmailserver
+# StatefulSetとは別物(mailserverイメージ自体はDebianベースでk3dに持ち込むには
+# 重すぎるため、dovecot-lua-2.3.21.1 + lua5.3-socket + lua5.3-cjsonをAlpineへ
+# 都度インストールした軽量Podで代替する。実機検証済みの構成)。
+zitadel_cutover_k3d_dovecot_namespace: default
+zitadel_cutover_k3d_dovecot_pod: dovecot-lua-bridge-test
+
+# Zitadel到達経路。zitadel_cutover_api_base_urlはPod間のクラスタ内DNS(prod/k3d
+# 共通、mailserver PodからZitadel Podへの接続に使う値をLuaスクリプトへ焼き込む
+# 際に使用)。zitadel_cutover_host_reachable_urlはAnsible実行ホスト自身から
+# 到達する際の値(prodはidp.aramakisai.comへ直接到達可、k3dはport-forward
+# 経由でのみ到達可能なためstep2/step4が個別にport-forwardを張る)。
+zitadel_cutover_api_base_url: "http://zitadel.zitadel.svc.cluster.local:8080"
+zitadel_cutover_external_domain: "{{ lookup('env', 'ZITADEL_EXTERNAL_DOMAIN') | default('zitadel.zitadel.svc.cluster.local', true) }}"
+zitadel_cutover_host_reachable_url: "{{ 'http://127.0.0.1:18080' if zitadel_cutover_target_env == 'k3d' else 'https://' + zitadel_cutover_external_domain }}"
+zitadel_cutover_dovecot_pat_file: /run/secrets/zitadel-dovecot-pat
+zitadel_cutover_lua_http_timeout: 5
+
+# 招待ベース移行の対象CSV。scripts/zitadel-invite-migration.py (task6.1) を
+# そのまま呼ぶ (このroleは招待発行ロジックを持たない、呼び出しのみ)。
+# prod向けは実際の既存ユーザー一覧CSVを別途用意して上書きすること
+# (このデフォルト値はk3d検証用ダミーデータ)。
+zitadel_cutover_invite_csv: "{{ role_path }}/files/invite-migration-poc-users.csv"
+zitadel_cutover_invite_script: "{{ role_path }}/../../../scripts/zitadel-invite-migration.py"

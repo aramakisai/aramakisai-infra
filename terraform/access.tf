@@ -1,10 +1,11 @@
 # ============================================================
 # Cloudflare Access: Zitadel OIDC IdP 登録
 #
-# client_id/client_secretはzitadel_application_oidc.cloudflare_accessの計算値を直接参照する
-# (authentik時代と異なりZitadelはclient_id/secretを発行側が生成するため、Cloudflare
-# Workspace変数での事前受け渡しは不要)。他のzitadel_*リソース同様、本番Zitadel
-# ブートストラップ・providerのPAT設定が先に完了している前提で適用される。
+# client_id/client_secretはvar.zitadel_cf_access_client_id/secretを参照する
+# (ansible/roles/zitadel-bootstrap が cloudflare-access OIDC Applicationを作成し、
+# 発行されたclient_id/secretをInfisicalへ登録する。project/role/application管理が
+# Ansible側へ移ったため、authentik時代のauthentik_cf_client_id/secretと同じ
+# チキンエッグ回避パターンに戻った。variables.tf参照)。
 # ============================================================
 
 resource "cloudflare_zero_trust_access_identity_provider" "zitadel" {
@@ -13,8 +14,8 @@ resource "cloudflare_zero_trust_access_identity_provider" "zitadel" {
   type       = "oidc"
 
   config {
-    client_id     = zitadel_application_oidc.cloudflare_access.client_id
-    client_secret = zitadel_application_oidc.cloudflare_access.client_secret
+    client_id     = var.zitadel_cf_access_client_id
+    client_secret = var.zitadel_cf_access_client_secret
 
     # Zitadel標準OIDCエンドポイント (v2 API、instance固定パス)
     auth_url  = "https://idp.aramakisai.com/oauth/v2/authorize"

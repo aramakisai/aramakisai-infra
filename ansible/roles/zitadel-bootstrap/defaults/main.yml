@@ -26,3 +26,29 @@ zitadel_bootstrap_kubeconfig: "{{ zitadel_bootstrap_kubeconfig_override if zitad
 
 zitadel_bootstrap_ready_retries: 30
 zitadel_bootstrap_ready_delay: 5
+
+# ============================================================
+# project/role/application/action等のリソース投入 (tasks/resources.yml)
+# ============================================================
+#
+# v2 Management API(HTTP/JSON)へのkubectl exec経由アクセス。design.md
+# 「Zitadel Provider Access Path」の到達経路(a)(既存PAT回収と同じPod内実行方式)。
+#
+# ZITADEL_EXTERNALDOMAINと一致させること(k3d: zitadel.zitadel.svc.cluster.local、
+# 本番: idp.aramakisai.com)。Pod自身への接続は常にloopback(127.0.0.1:8080)だが、
+# ZitadelはHostヘッダでインスタンスを解決するためこの値のみが実質的な切替対象になる。
+zitadel_external_domain: "{{ lookup('env', 'ZITADEL_EXTERNAL_DOMAIN') | default('zitadel.zitadel.svc.cluster.local', true) }}"
+
+# admin machine user(terraform-provider, IAM_OWNER)のPAT。本番は
+# `infisical run --env=prod -- ansible-playbook ...`実行時にTF_VAR_zitadel_tokenとして
+# 注入される値を再利用する(Terraform provider向けに発行済みのPATをAnsible用に
+# 新規発行し直さない)。k3d検証時はzitadel_bootstrap_pat_output_fileから読む。
+zitadel_admin_pat: "{{ lookup('env', 'TF_VAR_zitadel_token') | default(lookup('file', zitadel_bootstrap_pat_output_file), true) }}"
+
+# 出展団体CSV (旧terraform/zitadel_student_exhibitor.tfのcsvdecode元と同一内容。
+# Terraform管理から外れたためrole内files/へ移設した)
+zitadel_student_exhibitor_csv: "{{ role_path }}/files/zitadel_student_exhibitors.csv"
+
+# 新規作成時のみ発行されるclient_secret/PAT平文の保存先 (本番Infisical登録前の一時退避、
+# .gitignore対象。既存リソースの更新時はここに何も書き込まれない)
+zitadel_resources_output_dir: "{{ zitadel_bootstrap_output_dir }}/resources"

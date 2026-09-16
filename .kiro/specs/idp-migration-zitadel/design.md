@@ -386,7 +386,7 @@ Session成功後、Management APIでuser_grant(ロール)を取得し、Requirem
 - webhookのat-least-once配信を前提に、同一イベントの重複処理に対して冪等に振る舞う
 - authentik固有APIへの依存を除去し、Zitadel Management/User APIへ置き換える
 - 既存CronJob + Trigger Receiver方式から常駐Deploymentへ構成変更し、Falco誤検知除外ルール(`gitops/helm-values/prod/falco.yaml`)を新プロセス形態に合わせて更新する
-- Zitadel・vaultwarden-rbac-syncとも同一クラスタ内Podのため、webhook送受信はクラスタ内Service経由で完結し、Ingress/cloudflared等の外部公開は不要とする
+- Zitadelの`HTTPClient.DenyList`(SSRF対策)がRFC1918/`.cluster.local`宛先へのAction Target作成を拒否するため、webhookエンドポイントはCloudflare Tunnel経由で外部公開する。新規サブドメインは増やさず(「サブドメインを冗長に増やさない」方針、`.kiro/steering/tech.md`)、Zitadel自身の外部到達に既に使っている`idp.aramakisai.com`にpath(`/webhook/rbac-sync`)で相乗りさせる。認証はエンドポイント自体の実装(`ZITADEL-Signature`検証等)に委ね、Cloudflare Access等の追加認証は掛けない(Zitadelからのサーバー間呼び出しのため)
 
 **Dependencies**
 - Inbound: Zitadel Actions v2 — ロール変更イベント通知 (P0)

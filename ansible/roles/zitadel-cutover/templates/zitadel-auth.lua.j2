@@ -1,0 +1,161 @@
+-- Dovecot Lua Auth Bridge: passdb/userdb driver for Zitadel Session API
+--
+-- passdb は auth_passdb_lookup (lookup方式) を使う。Zitadel Session API側で
+-- 平文パスワードの検証が完結するため、Dovecotには独自のパスワードスキーム比較を
+-- させない ("nopassword=y" を返す。付けないとDovecotがpassword=フィールドを
+-- 要求しPASSDB_RESULT_SCHEME_NOT_AVAILABLEで失敗する。dovecot-lua-2.3.21.1 +
+-- luasocket + lua5.3-cjsonの組み合わせでk3d実機検証済み)。
+--
+-- この設定はDovecot自身のIMAP/POP3クライアント認証のみを対象とする。
+-- Postfixのメールボックス存在確認・ML展開(LDAP_QUERY_FILTER_*)は本ブリッジの
+-- スコープ外で、引き続きLDAPを使用する(design.md Requirement 15、別タスク)。
+
+local http = require("socket.http")
+local ltn12 = require("ltn12")
+local cjson = require("cjson.safe")
+
+-- 環境ごとの値はJinja2レンダリング時に固定する(Dovecotにはenv_設定機構が
+-- 存在せず、import_environmentはDMSの既定env一覧を破壊するリスクがあるため
+-- 採用しなかった。k3d実機でこの2点を確認済み)。
+local ZITADEL_API_BASE_URL = "{{ zitadel_cutover_api_base_url }}"
+local ZITADEL_EXTERNAL_DOMAIN = "{{ zitadel_cutover_external_domain }}"
+local PAT_FILE = "{{ zitadel_cutover_dovecot_pat_file }}"
+local HTTP_TIMEOUT_SECONDS = {{ zitadel_cutover_lua_http_timeout | default(5) }}
+
+http.TIMEOUT = HTTP_TIMEOUT_SECONDS
+
+local function read_file(path)
+  local f = io.open(path, "r")
+  if not f then
+    return nil
+  end
+  local content = f:read("*a")
+  f:close()
+  if content == nil then
+    return nil
+  end
+  return (content:gsub("%s+$", ""))
+end
+
+-- auth-workerプロセスは複数リクエストにわたって存続するため、ファイル読み取りは
+-- プロセス起動後1回のみで良い(PATローテーション時はauth-workerの再起動が必要)。
+local cached_pat = nil
+local function get_pat()
+  if cached_pat == nil then
+    cached_pat = read_file(PAT_FILE)
+  end
+  return cached_pat
+end
+
+-- 戻り値: ok(bool), status_code_or_nil, decoded_body_or_error_string
+local function zitadel_api(method, path, body_table)
+  local pat = get_pat()
+  if pat == nil then
+    return false, nil, "pat_unavailable"
+  end
+
+  local body = nil
+  local headers = {
+    ["Host"] = ZITADEL_EXTERNAL_DOMAIN,
+    ["Authorization"] = "Bearer " .. pat,
+  }
+  if body_table ~= nil then
+    body = cjson.encode(body_table)
+    headers["Content-Type"] = "application/json"
+    headers["Content-Length"] = tostring(#body)
+  end
+
+  local response_chunks = {}
+  local ok, status_or_err = http.request({
+    url = ZITADEL_API_BASE_URL .. path,
+    method = method,
+    headers = headers,
+    source = body and ltn12.source.string(body) or nil,
+    sink = ltn12.sink.table(response_chunks),
+  })
+
+  if ok == nil then
+    -- luasocketはネットワーク層の失敗(timeout含む)時に第1戻り値nil、第2戻り値へ
+    -- エラー文字列("timeout"等)を返す。HTTPステータスコードとは別系統のため
+    -- ここで明確に分岐する(task3.3のフェイルモード要件)。
+    return false, nil, tostring(status_or_err)
+  end
+
+  local response_body = table.concat(response_chunks)
+  local parsed = cjson.decode(response_body)
+  return true, status_or_err, parsed
+end
+
+-- ロール割り当てをacl_groupsへ変換する。project role_keyがそのまま部署名
+-- (dovecot.cfのnamespace prefix、例: planning/accounting/booth/stage/pr/admin/
+-- general_affairs)と一致する設計のため、値の変換テーブルを持たない
+-- (ansible/roles/zitadel-bootstrap/vars/resources.ymlのrole定義と同期させること)。
+local function fetch_acl_groups(user_id)
+  local ok, status, parsed = zitadel_api(
+    "POST",
+    "/management/v1/users/grants/_search",
+    { queries = { { userIdQuery = { userId = user_id } } } }
+  )
+  if not ok or status ~= 200 or parsed == nil or parsed.result == nil then
+    return nil
+  end
+  local groups = {}
+  for _, grant in ipairs(parsed.result) do
+    for _, role_key in ipairs(grant.roleKeys or {}) do
+      table.insert(groups, role_key)
+    end
+  end
+  if #groups == 0 then
+    return nil
+  end
+  return table.concat(groups, ",")
+end
+
+function auth_passdb_lookup(req)
+  local ok, status, parsed = zitadel_api("POST", "/v2/sessions", {
+    checks = {
+      user = { loginName = req.user },
+      password = { password = req.password },
+    },
+  })
+
+  if not ok then
+    req:log_error("zitadel session api unreachable: " .. tostring(parsed))
+    return dovecot.auth.PASSDB_RESULT_INTERNAL_FAILURE, "zitadel api unreachable"
+  end
+
+  if status == 201 then
+    return dovecot.auth.PASSDB_RESULT_OK, "nopassword=y"
+  elseif status == 400 then
+    -- code=3 "Password is invalid" が実機で確認済みの応答(task7.1参照)
+    return dovecot.auth.PASSDB_RESULT_PASSWORD_MISMATCH, "password mismatch"
+  elseif status == 404 then
+    -- code=5 "User could not be found"。存在しないユーザー名でも誤パスワードと
+    -- 同一のPASSWORD_MISMATCHへ正規化し、Dovecotから見て区別不能にする
+    -- (task7.1が指摘したユーザー列挙耐性の緩和策を踏襲)。
+    return dovecot.auth.PASSDB_RESULT_PASSWORD_MISMATCH, "password mismatch"
+  else
+    req:log_error("zitadel session api unexpected status " .. tostring(status))
+    return dovecot.auth.PASSDB_RESULT_INTERNAL_FAILURE, "unexpected status " .. tostring(status)
+  end
+end
+
+function auth_userdb_lookup(req)
+  local ok, status, parsed = zitadel_api(
+    "POST",
+    "/v2/users",
+    { queries = { { loginNameQuery = { loginName = req.user } } } }
+  )
+  if not ok or status ~= 200 or parsed == nil or parsed.result == nil or #parsed.result == 0 then
+    return dovecot.auth.USERDB_RESULT_USER_UNKNOWN, "no such user"
+  end
+
+  local user_id = parsed.result[1].userId
+  local acl_groups = fetch_acl_groups(user_id)
+
+  local fields = { "uid=5000", "gid=5000", "mail=" .. req.user }
+  if acl_groups ~= nil then
+    table.insert(fields, "acl_groups=" .. acl_groups)
+  end
+  return dovecot.auth.USERDB_RESULT_OK, table.concat(fields, " ")
+end
