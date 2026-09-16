@@ -301,7 +301,7 @@ sequenceDiagram
 | vaultwarden-rbac-sync(webhook常駐版) | RBAC連携 | ロール変更のイベント駆動反映 | 4, 10 | Zitadel Actions v2 (P0), Vaultwarden API (P0) | Event, API |
 | Zitadel Terraform Provider定義 | IaC | Project/Role/Application/Action/出展団体アカウント/招待発行SA/ブランディングの宣言的管理 | 2, 4, 7, 8, 13, 14, 17 | Terraform Cloud (P1), Ansible Bootstrap発行PAT (P0) | - |
 | Ansible Zitadel Bootstrap | 初期化 | Zitadel初回admin/PAT発行・Infisical登録 | 11 | Zitadel Core (P0) | - |
-| Zitadel Provider Access Path | 初期化 | Terraform provider(gRPC専用)が本番Zitadel APIへ到達する経路とorigin TLS終端の定義 | 7, 11 | Zitadel Core (P0), cert-manager内部CA (P0), cloudflared (P0) | - |
+| Zitadel Provider Access Path | 初期化 | project/role/application/action等のZitadelリソース管理をgRPC専用Terraform providerからAnsible経由のHTTP/JSON API(v2 Management API)へ移行する | 7, 11 | Zitadel Core (P0), Ansible Zitadel Bootstrap (P0) | - |
 | Zitadel Backup Migration | 移行 | k3d検証環境のZitadel設定を本番へAdmin API export/importで移行する一括カットオーバー手順 | 7 | k3d Zitadel Admin API (P0), 本番Zitadel Admin API (P0), Zitadel Terraform Provider定義 (P0) | Batch |
 | Zitadel Branding | ブランディング | 荒牧祭2026公式ブランド素材(ロゴ/favicon/フォント/配色)のLabel Policy設定 | 17 | Zitadel Core Admin/Management API (P0) | State |
 
@@ -433,23 +433,34 @@ Session成功後、Management APIでuser_grant(ロール)を取得し、Requirem
 
 | Field | Detail |
 |-------|--------|
-| Intent | Terraform provider(gRPC専用)が本番Zitadel APIへ到達する経路を、既存の公開ホスト名とCloudflare Tunnelの範囲内で定義する |
+| Intent | project/role/application/action等のZitadelリソース管理を、gRPC専用のTerraform providerからAnsible経由のHTTP/JSON API(v2 Management API)へ移行し、Cloudflare Tunnelのpublic hostname経由gRPC非サポート制約を回避する |
 | Requirements | 7.2, 11.4, 11.5, 11.6, 11.7, 11.8 |
 
-**Responsibilities & Constraints**
-- Zitadel Terraform providerはgRPCのみを使用しREST代替を持たない。到達経路は`idp.aramakisai.com`とCloudflare Tunnelに限定し、新規サブドメイン・NodePort・IPアドレス直接指定・`kubectl port-forward`を用いない
-- cloudflared→Cloudflare edge間のトランスポートはHTTP/2とする。QUICトランスポートはgRPCのtrailerを中継できずストリームが応答なしで終了するため、gRPCが成立しない
-- cloudflaredのingress設定はorigin URLを`https://`とし、HTTP/2 originとTLS検証スキップを併用する。origin側ZitadelはTLS終端を有効化しALPNで`h2`をadvertiseする
-- origin証明書はcert-managerの内部CA(SelfSigned Issuerで発行したCA証明書を元にしたCA Issuer)から発行する。cloudflaredはTLS検証をスキップするため公的CAである必要がなく、公開ホスト名向けの公的証明書はCloudflare edgeが終端するため、この証明書の検証主体はクラスタ内に限られる
-- 証明書のSANには`idp.aramakisai.com`と`zitadel.zitadel.svc.cluster.local`の双方を含める。login v2コンテナがクラスタ内Service名でAPIを呼ぶため、公開ホスト名のみのSANでは検証に失敗する
-- login v2コンテナは内部CA証明書をtrust storeへ取り込み、TLS検証を無効化しない。取り込み手段(Node.jsの`NODE_EXTRA_CA_CERTS`相当)が当該コンテナで機能するかは実機確認が必要
-- Cloudflare zoneのgRPC設定はCloudflare Terraform providerのスキーマに存在せずIaC管理できない。ダッシュボードでの手動設定として運用手順に残す。gRPC無効のzoneはgRPCリクエストを拒否する
-- Cloudflare AccessはCloudflareリバースプロキシ経由のgRPCトラフィックを扱わない。`idp.aramakisai.com`にAccessを適用する構成を採る場合は本経路との競合有無を実機確認する
+**検討の経緯(却下した案)**
+
+当初、Terraform provider(gRPC専用)を維持したまま到達経路を確保する方針を検討し、以下の設計を一度確定させていた(cloudflared→edge間をHTTP/2トランスポートとし、origin URLを`https://`化、cert-manager内部CA発行のorigin証明書でTLS終端、SANに`idp.aramakisai.com`と`zitadel.zitadel.svc.cluster.local`を含め、login v2コンテナが内部CAをtrust storeへ取り込む構成)。しかしCloudflare公式ドキュメント(`developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/use-cases/grpc/`)に「gRPCはprivate subnet routing経由でのみサポートされ、public hostname配信は非サポート」と明記されており、TLS設定をどう変更してもこの制約は解消しないことが判明した。
+
+この判明を受け、以下の代替案を検討したが、いずれも採用しなかった:
+- **WARP Client(Cloudflare One Client)導入によるprivate subnet routing**: 公式にサポートされた経路だが、TFC実行環境(ローカルマシン)へのOS常駐アプリ手動インストールが必須であり、「terraform applyだけで完結する変更のみ」という運用方針と相容れず却下
+- **Tailscale Kubernetes Operator導入**: 新規コンポーネント。公式デフォルトのリソースrequestsは名目値(Proxy Pod: `cpu: 1m, memory: 1Mi`)のみで実消費量の目安が公式に示されておらず、prod-node-1のリソース逼迫状況(既にswap 4GB追加が必須な環境)を踏まえ採用を見送った
+- **NodePort + 既存ノードのTailscale IP経由**: 新規コンポーネント不要で最小変更だったが、IPアドレスを直接指定する経路になるため、既存のIaC原則(`.kiro/steering/tech.md`: 「IPアドレスを直接指定しない、接続先はホスト名で表現する」)およびユーザー方針(IPの公開を行わない)と抵触し採用しなかった
+- **TFC Agent(自己ホストランナー)のクラスタ内配置**: `ZITADEL_EXTERNALDOMAIN`をクラスタ内DNSへ戻せる点で構成上最も筋が良かったが、公式最小要件(メモリ2GB以上・ディスク4GB以上の空き)をprod-node-1が満たせず却下
+- **Zitadelのinstance custom domain機構によるマルチドメイン化**: `zitadel_instance_custom_domain`(terraform-provider-zitadel)でCloudflare Tunnel非対応経路と別経路を併存させる案。ただしこのリソースの適用自体に`system.domain.write`というsystem-levelパーミッション(通常のIAM_OWNERでは付与不可、別途SystemAPIUsers認証が必要)が要求され、かつ「そもそも到達できないと登録できない」という循環構造になるため採用しなかった
+- **`FirstInstance`設定(ConfigMap経由の起動時初期化)によるリソース投入**: Zitadel公式ソース(`cmd/setup/steps.yaml`)を確認した結果、`FirstInstance`で定義できるのはorg・管理者ユーザー(human/machine)・LoginClientのみで、project/role/application/action等は対象外であり、この経路自体が利用できないことが判明した
+
+**Responsibilities & Constraints(新方針)**
+- 対象: `terraform/zitadel_*.tf`(9ファイル、リソースブロック19個: project 1, role 2, application_oidc 4, action_target 1, action_execution_event 1, org_idp_oauth 1, label_policy 1, machine_user 2, personal_access_token 2, org_member 1, instance_member 1, human_user 1, user_grant 1)が管理するリソースを、Ansible role(既存`ansible/roles/zitadel-bootstrap`の拡張、または新規role)によるv2 Management API(HTTP/JSON、gRPCではない)呼び出しへ置き換える
+- gRPCとの切り分け: Zitadel API自体はgRPCとHTTP/JSON(Connect protocol)の双方に対応しており、gRPC限定なのはterraform-provider-zitadel(クライアント実装)側の制約である。本リポジトリでも task6.1/9.1/10.2/10.3 で v2 Management APIをHTTP/JSON(curl)で直接呼び出し成功した実機実績が複数ある
+- 冪等性: Terraformのstate管理に相当する仕組みがないため、各リソースについて「GET等で存在確認→存在すればPUT等で更新、なければPOST等で作成」というパターンを`ansible.builtin.uri`等で実装する
+- 認証: 既存のIAM_OWNER machine user(`terraform-provider`)が保有するPATをBearerトークンとしてそのまま流用できる見込み(task9.1/10.2/10.3で同種のPATによるAPI呼び出し成功実績あり)
+- 依存順序: project→role→application→actionという既存Terraformのリソース依存順を、Ansible taskの実行順で表現する
+- 到達経路(未確定、要検討): Ansible実行環境からZitadel自身のHTTP APIへどう到達するかは本改訂時点では確定していない。候補は2つ: (a) 既存`ansible/roles/zitadel-bootstrap`が用いている`kubectl exec`パターンを踏襲し、Pod内から`curl`等でAPIを呼ぶ方式、(b) Ansible実行ホストから`idp.aramakisai.com`経由でHTTP到達する方式(gRPCではなくHTTP/JSONのため、Cloudflare Tunnelのpublic hostname gRPC非サポート制約の対象外になる見込み)。実装着手前にいずれかへ確定させること
+- 影響範囲: task9.2/9.3/10.2/10.3等が明記する"_Boundary: Zitadel Terraform Provider定義_"という設計境界の見直しが必要になる。project/role/application/action相当のリソース管理主体がTerraformからAnsibleへ移るため、tasks.md側の該当タスクの境界表記・実施内容の改訂が別途必要(本design.md改訂の範囲外)
+- PR #211(`feat/idp-zitadel-grpc-tls-termination`、cert-manager内部CA・TLS終端・`tunnel.tf`のHTTPS origin化)は、上記「検討の経緯」冒頭に記した旧方針(public hostname経由gRPC疎通)を実現する目的で実装されたが、新方針では不要になる見込みである。PRの実際のクローズ・取り下げは別途判断する
 
 **Dependencies**
-- Outbound: cert-manager内部CA — origin証明書の発行 (P0)
-- Outbound: cloudflared — gRPCの中継 (P0)
-- Inbound: Zitadel Terraform Provider定義 — 本経路を前提にapplyする (P0)
+- Outbound: Ansible Zitadel Bootstrap — 既存roleを拡張しv2 Management API呼び出しを実装する (P0)
+- Inbound: Zitadel Terraform Provider定義 — project/role/application/action相当部分の管理主体を本方針へ移管する (P0)
 
 ### 移行
 
