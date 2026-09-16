@@ -37,3 +37,23 @@ ansible-playbook ansible/playbooks/zitadel-bootstrap.yml
 ```bash
 infisical secrets set --env=prod TF_VAR_zitadel_token="$(cat <取得したPATファイル>)" >/dev/null 2>&1
 ```
+
+## project/role/application/action等の投入 (task 9.2)
+
+```bash
+ansible-playbook ansible/playbooks/zitadel-resources.yml
+```
+
+## Terraform/Ansible管理外のインスタンス設定のimport (task 9.3)
+
+Lockout Policy等、`resources.yml`が管理しないインスタンス設定を
+`POST /admin/v1/import`で反映する。対象は`vars/admin_import.yml`参照。
+importは一括ロード用APIで再実行に強くない(既にカスタム化済みの場合は
+自動でスキップする)ため、通常はk3d検証環境で一度だけ実行する。
+
+```bash
+ansible-playbook ansible/playbooks/zitadel-admin-import.yml
+```
+
+`ZITADEL_EXTERNAL_DOMAIN`/`ZITADEL_POC_KUBECONFIG`未指定時はk3d検証環境が
+対象になる(本番エンドポイントはハードコードされていない)。

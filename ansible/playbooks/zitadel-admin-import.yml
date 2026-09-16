@@ -1,0 +1,12 @@
+---
+# Terraform/Ansible管理外のインスタンス設定をAdmin API importで反映 (task 9.3)。
+# 前提: zitadel-bootstrap.ymlで初回admin/PATブートストラップが完了していること。
+- name: Zitadelインスタンス設定のAdmin API import
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: zitadel-bootstrapロールのadmin_importタスクを実行
+      ansible.builtin.include_role:
+        name: zitadel-bootstrap
+        tasks_from: admin_import

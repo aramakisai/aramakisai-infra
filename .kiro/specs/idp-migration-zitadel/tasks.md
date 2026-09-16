@@ -688,6 +688,97 @@
   - import後、9.2でAnsible管理化されたproject/role/application/action等に意図しない副作用が発生していないことを確認する(旧方針の`terraform plan`によるdrift確認に相当する手段は9.2の方針転換に伴い別途定める)
   - _Requirements: 7.3_
   - _Depends: 9.2_
+  - **実施結果(実装のみ、k3d検証済み、本番import未実施)**: `admin.proto`/`management.proto`
+    (zitadel/zitadel本家、2026-09-16時点main)を実機確認し、`ImportDataRequest`/`DataOrg`の
+    スキーマがorg単位のカスタムポリシー(`domain_policy`/`label_policy`/`lockout_policy`/
+    `login_policy`/`password_complexity_policy`/`privacy_policy`)のみを対象とし、
+    instance全体のデフォルトポリシー(orgが一度もオーバーライドしていない状態の値)は
+    export/importの対象に含まれないことを確認した。
+    - **差分の洗い出し**: design.mdが例示する「Assert Roles on Authentication」は実体が
+      `Project.projectRoleAssertion`であり、task9.2の`resources.yml`が既にAnsible管理下に
+      置いている(1.Projectのcreate/update処理でprojectRoleAssertion: trueを設定済み)ため、
+      本タスクの対象外と判断した(design.mdの例示は方針転換前の記述が残存したもの)。
+      改めてtasks.md全体をgrepした結果、Terraform/Ansibleいずれの管理下にもないインスタンス
+      設定として実際にギャップと判定されていたのはtask7.1(セキュリティ検証)が発見した
+      Lockout Policyのみ(`GET /admin/v1/policies/lockout`が`maxPasswordAttempts`未設定の
+      デフォルトポリシーを返し、ブルートフォース対策が無効だった)であり、「本番カットオーバー
+      前にlockout policyの明示的な有効化を推奨する」という未対応の推奨事項が残っていた。
+      login/password_complexity/privacy/domain policyについては、他タスクで変更が必要と
+      判定された実績がなくZitadelデフォルトのままで問題ないと判断し対象外とした。
+    - **実装**: `ansible/roles/zitadel-bootstrap/tasks/admin_import.yml`(新規、
+      `POST /admin/v1/import`本体)・`vars/admin_import.yml`(新規、
+      `max_password_attempts: 10`/`max_otp_attempts: 10`という目標値)・
+      `ansible/playbooks/zitadel-admin-import.yml`(新規エントリポイント)を追加した。
+      到達経路はtask9.2の`_api_call.yml`(kubectl exec経由のkubectl execパターン)を
+      そのまま再利用し、呼び出し先のhost/kubeconfigもtask9.2で確立済みの
+      `zitadel_external_domain`/`zitadel_bootstrap_kubeconfig`変数(いずれもデフォルト値は
+      k3d、本番は`ZITADEL_EXTERNAL_DOMAIN`等のENV変数上書きのみで指定)をそのまま使うため、
+      本タスクで新規のホスト変数は追加していない(本番エンドポイントのハードコードなし)。
+      importのbodyは対象org(単一org構成、`GET /management/v1/orgs/me`で解決)の
+      `orgId`+`lockoutPolicy`のみを含み、project/role/application/action/human_user等
+      (task9.2が別途管理する項目)は一切含めていない。
+    - **importの一括ロードAPIとしての性質(実機確認)**: `POST /admin/v1/import`の
+      `DataOrg.org`(`AddOrgRequest`)フィールドは、対象org(k3dへの自己import)が既存の
+      場合、常に`Errors.Org.AlreadyExisting`を返すことをk3d実機で確認した(応答ステータス
+      自体は200、`body.errors`に1件含まれる形)。これはorg再作成という無関係な
+      サブリソースの失敗であり、`lockoutPolicy`等の他サブリソースの適用結果とは独立のため、
+      `type == "org"`のエラーのみ許容し、それ以外のエラーが1件でもあれば失敗として扱う
+      ようにした(1度目の実行では素朴に`errors`が空であることを要求する実装にしており、
+      この`AlreadyExisting`で誤って失敗していたことをk3d実機で発見し修正した)。
+      再実行時は`GET /management/v1/policies/lockout`の`isDefault`を確認し、既にカスタム
+      ポリシーが存在する場合はimport自体をスキップする(importは一括ロード用APIで
+      再実行に強くなく、同一カスタムポリシーへの再importはエラーになるため。
+      「idempotencyの確認までは不要、1回成功すればよい」という前提通り、
+      再実行時に失敗させないためのスキップに留めている)。
+    - **k3d実機検証(2026-09-16、`zitadel-poc`クラスタ)**: `GET /management/v1/policies/lockout`
+      で`isDefault: true`(未カスタム化)であることを確認 → `admin_import.yml`実行 →
+      `status: 200`、`errors`は`type: org`の`AlreadyExisting`1件のみ(許容対象) →
+      再度`GET`で`maxPasswordAttempts: "10"`, `maxOtpAttempts: "10"`のカスタムポリシーが
+      作成されたことを確認した。検証のため`DELETE /management/v1/policies/lockout`で
+      リセットしてから再実行する形で2回実行し、いずれも成功することを確認した
+      (最終的にk3d環境にはカスタムLockout Policyが適用された状態を意図的に残置している)。
+    - **副作用確認(task9.2管理リソースへの影響)**: 同一k3dクラスタに対し
+      `ansible/playbooks/zitadel-resources.yml`を実行したところ、Label Policyの更新のみ
+      `404`で失敗した。`GET /management/v1/policies/label`で`isDefault: true`(このorgの
+      Label Policyが一度もカスタム化されていない状態)であることを確認し、9.1の実施結果が
+      既に記録している「ホスト再起動に伴うZitadel core再構築」がこのセッションでも再度
+      発生し、k3d環境のorg状態がtask9.2検証時点よりリセットされていたと判明した。
+      `_label_policy.yml`(task9.2実装)がUpdate(PUT)のみを行いAdd(POST)の分岐を
+      持たない(project/lockout policyとは異なり「未カスタム時は作成」のパスがない)ことが
+      原因であり、Admin API importとは無関係の、task9.2側の既存コードに残る潜在バグと
+      判断した(本タスクでは変更していない`_label_policy.yml`の挙動であり、原因箇所を
+      `GET /management/v1/policies/label`のレスポンスで直接確認済み)。project/role/
+      application/action/org_idp(Discord)は同一実行内で正常に作成された(この時点でこの
+      orgにこれらのリソースが1つも存在しなかったこと自体もcore再構築を裏付ける)。
+      Label Policy以降の手順(machine_user/出展団体human_user+user_grant)は、この
+      k3d実行が該当タスクの手前で停止したため、resources.ymlの該当タスクファイル
+      (`_machine_user_pat.yml`/`_exhibitor_user.yml`)を検証用の一時playbookから直接
+      呼び出す形で個別に実行し、machine_user 2件・出展団体human_user 4件+user_grant
+      4件がいずれも正常に作成されることを確認した(一時playbookは検証用のみでコミット
+      対象外)。以上により、Admin API importの実行がtask9.2管理リソースに意図しない
+      副作用を与えていないことを確認した(Label Policyの404は本タスクの変更に起因しない
+      別件の既知バグとして切り分け済み)。
+    - **静的チェック**: `ansible-lint ansible/roles/zitadel-bootstrap ansible/playbooks/zitadel-admin-import.yml`
+      (0 failure/warning)、`pre-commit run --files <新規3ファイル+README.md>`
+      (trailing-whitespace/check-yaml/yamllint/ansible-lint/check-confidential-info/
+      gitleaks含む全hook)いずれも通過した。
+    - **本番適用について(未実施)**: 本タスクでは本番Zitadelに対する`POST /admin/v1/import`
+      実行を一切行っていない(k3d PoCクラスタのみを対象とした)。本番へ適用する場合は
+      `infisical run --env=prod -- ansible-playbook ansible/playbooks/zitadel-admin-import.yml`
+      (`ZITADEL_EXTERNAL_DOMAIN`は本番用に上書き)を、task9.2の本番反映(project/role/
+      application/action等の投入)より前後どちらのタイミングでも実行可能(依存関係なし、
+      対象がlockoutPolicyのみで排他しないため)。ただし本番Zitadelの`org_id`は
+      `GET /management/v1/orgs/me`で本番環境から都度動的に解決するため
+      (k3dのorg_idをハードコードしていない)、実行環境が正しく本番kubeconfig/PATを
+      指している必要がある。
+    - **既知の環境ドリフト(参考情報)**: 本タスクの検証時点で`zitadel-poc`クラスタの
+      `ZITADEL_EXTERNALDOMAIN`は`idp.aramakisai.com`になっており、
+      `defaults/main.yml`のコメントが説明するk3dのデフォルト想定値
+      (`zitadel.zitadel.svc.cluster.local`)とは異なっていた。9.2の追記2
+      (ExternalDomain到達性ブロッカー解消)の検証時にk3d側も合わせて変更された
+      ものと推測される。本タスクの実行時は`ZITADEL_EXTERNAL_DOMAIN=idp.aramakisai.com`を
+      明示的に指定した。`defaults/main.yml`のコメント更新自体は本タスクのスコープ外
+      として変更していない。
 
 - [ ] 9.4 一括カットオーバー順序を実行する
   - Dovecot Lua Auth Bridge・RPアプリ(CMS/Vaultwarden/Roundcube)OIDC Clientの順に本番切替を実行する
