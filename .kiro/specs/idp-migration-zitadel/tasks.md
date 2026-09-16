@@ -1336,6 +1336,66 @@
     authentik時代のキーを上書きしない別名(`_ZITADEL`サフィックス)方式へ変更した
     ことで(9.2参照)、`backup-secrets`/`restore-secrets`が担っていたシークレット
     退避・復元の手順自体が原理上不要になった。
+  - **追記2(2026-09-17、本番反映後の再検証とランブック不備の修正、本番実行は見送り)**:
+    - **前提状況の確認**: 着手時点で`origin/main`を確認したところ、直前に別セッションで
+      task9.4のStep1(mailserver Dovecot Lua Auth Bridge)・Step2(CMS/Roundcube
+      OIDC切替)が実際に本番へ適用され、`make kubectl`で`cms`/`roundcube`
+      ArgoCD Applicationが`Synced`/`Healthy`、`mailserver-0`Podが1/1 Runningで
+      稼働していることを確認した。つまり本番のCMS/Roundcubeログインは本タスク
+      着手時点で実際にZitadel経由に切り替わっている状態だった。
+    - **本タスクの判断(実プロダクション切り戻しの見送り)**: 受け入れ基準
+      (Requirement 10.8)が要求する「実際に切り戻しを実行しログイン復旧を確認する」は
+      本番でのみ意味を持つが、上記の通り本番認証は現に稼働中であり、かつ
+      `mailserver`ArgoCD Applicationが`dovecot-oauth2-config`ExternalSecretの
+      更新失敗(`could not update secret`)により`OutOfSync`/`Degraded`という
+      本タスクと無関係な進行中の問題を抱えていることも`make kubectl`で確認した
+      (原因未特定、mailserver Podそのものは1/1 Running。task9.4系の別課題として
+      切り出し、本タスクでは修正していない)。この状況で確認目的だけに実際の
+      認証切り戻し→再カットオーバーの往復を本番に対して行うことは、
+      「本番の可用性を損なわない形で」という制約に反すると判断し、実行しなかった。
+    - **発見: ランブックの重大な不備(2件)を発見・修正した**:
+      1. **`terraform/tunnel.tf`の切り戻し手順が完全に欠落していた**。
+         `idp.aramakisai.com`はgitopsではなく`cloudflare_zero_trust_tunnel_
+         cloudflared_config.main`(Terraform)が管理しており、カットオーバー時に
+         `authentik-server.prod.svc.cluster.local`→`zitadel.zitadel.svc.cluster.local`
+         へ切り替えられていた(該当コミット`5f5193d`ほかの実履歴で確認)。
+         この事実は本ランブックにも`docs/zitadel-cutover-runbook.md`にも記載が
+         なく、Step2のgitops revertだけを行うと、RPアプリのissuer URLは
+         authentikを指す設定に戻ってもブラウザは実際には`idp.aramakisai.com`
+         経由でZitadelへリダイレクトされ続け、**切り戻しが機能しない**ことが
+         判明した。`docs/zitadel-rollback-runbook.md`に新規Step3として
+         terraform切り戻し手順(対象リソースへの`-target`指定必須、素の
+         `terraform apply`は本specと無関係な既存未適用差分`4 to add, 6 to
+         change, 12 to destroy`を巻き込むため厳禁、という注意を含む)を追加した。
+      2. **対象パスから`gitops/manifests/prod/cms`自体が漏れていた**。
+         CMSの`AUTHENTIK_ISSUER_URL`/`AUTHENTIK_CLIENT_ID`は`cms-secrets`ではなく
+         `cms/deployment.yaml`に直書きされており(実diffで確認)、旧手順の
+         対象パスリスト(`mailserver`/`cms-secrets`/`vaultwarden`/`roundcube`)
+         では戻らなかった。Step1/Step2の対象パスに`cms`を追加した。
+    - **Step2手順そのものの実地検証(使い捨てクローンで実行、リポジトリ本体は
+      無変更)**: `git clone`した使い捨てクローンに対し、`git revert
+      <カットオーバーコミット>`方式では`gitops/`以外のファイル
+      (`tasks.md`・`docs/zitadel-cutover-runbook.md`等、後続コミットが同じ
+      ファイルを更に変更したため)で無関係なコンフリクトが実際に発生することを
+      確認した。代替として、対象パスのみを良好コミットの内容へ`git checkout
+      <SHA> -- <paths>`で戻し、カットオーバーで新規追加されたファイル
+      (`dovecot-lua-auth-external-secret.yaml`)を明示的に`git rm`する方式を
+      実行し、`git diff <良好コミットのSHA> -- <対象5パス>`の出力が完全に
+      空になる(＝良好コミットの内容と1バイトも違わない)ことを実機で確認した。
+      ランブックのStep1/Step2をこの検証済み手順に書き換えた。使い捨てクローンは
+      検証後に削除済み。
+    - **未実施・本番承認待ち(受け入れ基準Requirement 10.8は未達のまま)**:
+      本番のgitops manifestへのrevertコミット・push・PR作成、`terraform apply`
+      (tunnel.tf)、`argocd app sync`、実アプリでのログイン復旧の目視確認は
+      いずれも実行していない。次に本番で切り戻し基準に該当する障害が発生した
+      とき、またはユーザーが切り戻しリハーサルの実施を明示的に承認したときに
+      実行すること。
+    - **副次的に発見した別課題(本タスクのスコープ外、要フォローアップ)**:
+      `mailserver`ArgoCD Applicationが`dovecot-oauth2-config`ExternalSecretの
+      `could not update secret`エラーで`OutOfSync`/`Degraded`のまま
+      (`status.health.lastTransitionTime`は2026-09-16T15:22:45Z、自動sync再試行
+      ループ中)。mailserver Pod自体は1/1 Runningで即座の障害ではないが、
+      task9.4系の未解決課題として別途調査が必要。
 
 - [ ] 10. 追加移行スコープ(既存authentik付随機能6件)のk3d PoC実装
   - task1〜8完了後にセッション内の追加検討で判明した、旧spec(idp-migration-zitadel初版)ではスコープ外だった`terraform/authentik_*.tf`6ファイル相当の移行。PoCとしてk3d環境で検証する(本番反映はtask9の一括カットオーバーに含める)。task9とは独立して着手可能(依存はtask1/2/6のみ)

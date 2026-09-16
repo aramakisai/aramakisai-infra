@@ -52,36 +52,108 @@ authentik時代のキー(`VAULTWARDEN_OIDC_CLIENT_ID`・`VAULTWARDEN_OIDC_CLIENT
 
 ## 切り戻し手順
 
-### Step1: 切り戻し対象コミットを特定する
+### Step1: 切り戻し対象パスと直前の既知良好コミットを特定する
 
 ```bash
 git log --oneline -- \
   gitops/manifests/prod/mailserver \
   gitops/manifests/prod/cms-secrets \
+  gitops/manifests/prod/cms \
   gitops/manifests/prod/vaultwarden \
   gitops/manifests/prod/roundcube
 ```
 
-カットオーバーで実際にマージされたコミット(通常はtask9.4のPRのマージコミット
-1件)のSHAを確認する。
+**対象パスは`cms-secrets`だけでなく`cms`自身も含める**(CMSの
+`AUTHENTIK_ISSUER_URL`/`AUTHENTIK_CLIENT_ID`は`cms/deployment.yaml`に直書きされて
+おり、`cms-secrets`だけでは戻らない。2026-09-17のtask9.6実地検証で本ランブック
+自身にこの漏れがあったことを発見・修正した)。
 
-### Step2: GitOpsマニフェストをrevertする
+上記のログで、カットオーバー関連コミット(2026-09-17本番カットオーバーでは
+`dfcaca4`本体+`47aab29`mailserver修正の2コミット)の直前にある、認証障害が
+起きていなかった最後のコミット(以下「良好コミット」)のSHAを控える。
+
+### Step2: GitOpsマニフェストを良好コミットの内容へ戻す
+
+カットオーバーコミットは`gitops/`以外(ansible role・ドキュメント等)も同時に
+変更していることが多く、`git revert <カットオーバーコミットのSHA>`をそのまま
+使うと対象外ファイルまで巻き込んで無関係なコンフリクトを起こす
+(2026-09-17のtask9.6実地検証で実際に`.kiro/specs/.../tasks.md`・
+`docs/zitadel-cutover-runbook.md`等で発生することを確認済み)。そのため、対象
+パスだけを良好コミットの内容へ戻す方式を使う。
 
 ```bash
-git revert --no-commit <カットオーバーコミットのSHA>
-git diff --cached   # authentik構成(remoteRef.keyが旧キー名)に戻っていることを目視確認
+# 1. 対象パスのみを良好コミットの内容へ戻す(cmsを含む5パス)
+git checkout <良好コミットのSHA> -- \
+  gitops/manifests/prod/mailserver \
+  gitops/manifests/prod/cms-secrets \
+  gitops/manifests/prod/cms \
+  gitops/manifests/prod/vaultwarden \
+  gitops/manifests/prod/roundcube
+
+# 2. カットオーバーで新規追加されたファイル(良好コミットの時点で存在しなかったもの)は
+#    checkoutだけでは削除されないため、明示的に洗い出してgit rmする
+git diff --name-status <良好コミットのSHA> HEAD -- \
+  gitops/manifests/prod/mailserver gitops/manifests/prod/cms-secrets \
+  gitops/manifests/prod/cms gitops/manifests/prod/vaultwarden \
+  gitops/manifests/prod/roundcube
+# ステータス "A"(新規追加)の行に出たパスを git rm する
+# (2026-09-17カットオーバーでは gitops/manifests/prod/mailserver/
+#  dovecot-lua-auth-external-secret.yaml が該当)
+git rm gitops/manifests/prod/mailserver/dovecot-lua-auth-external-secret.yaml
+
+# 3. 良好コミットの内容と完全一致することを確認する(出力が空であること)
+git diff <良好コミットのSHA> -- \
+  gitops/manifests/prod/mailserver gitops/manifests/prod/cms-secrets \
+  gitops/manifests/prod/cms gitops/manifests/prod/vaultwarden \
+  gitops/manifests/prod/roundcube
+
 git commit -m "revert(idp): Zitadel認証障害により旧authentik構成へ切り戻す"
 git push
 # PRを作成しレビュー・マージする(通常のGitOpsフローと同じ)
 ```
 
-対象コミットがカットオーバー用のマージコミットの場合、`--no-commit`のままでは
-親が2つある(`-m 1`が必要)ため、実際には
-`git revert --no-commit -m 1 <SHA>`となる場合がある。`git diff --cached`で
-`gitops/manifests/prod/{mailserver,cms-secrets,vaultwarden,roundcube}/`以外に
-意図しない差分が含まれていないことを必ず確認する。
+手順3の`git diff`が空でない場合、良好コミットの選定が誤っているか、対象外の
+差分が混入している。空になるまでStep1からやり直すこと。
 
-### Step3: ArgoCD syncを実行する
+### Step3: Cloudflare Tunnelのidp.aramakisai.comルーティングをterraformで切り戻す
+
+**重要**: `idp.aramakisai.com`は`gitops/`ではなく`terraform/tunnel.tf`の
+`cloudflare_zero_trust_tunnel_cloudflared_config.main`が管理しており、Step2の
+GitOps revertだけでは戻らない。この手順を飛ばすと、Step2でRPアプリのOIDC設定を
+authentik構成に戻しても、ブラウザは実際には`idp.aramakisai.com`経由でZitadelへ
+リダイレクトされ続け、切り戻しが機能しない(2026-09-17のtask9.6実地検証で
+本番の実設定から判明した既知のギャップ)。
+
+`terraform/tunnel.tf`の`idp.aramakisai.com`向けingress_ruleを、Zitadel向けの
+2ルール(login v2 UI:3000 / API:8080)から、切り戻し前の単一ルールへ戻す。
+
+```hcl
+    ingress_rule {
+      hostname = "idp.aramakisai.com"
+      service  = "http://authentik-server.prod.svc.cluster.local:80"
+    }
+```
+
+適用は必ず対象リソースへ`-target`を付けて実行すること。**素の`terraform apply`は
+実行しないこと。** 2026-09-17時点で本specと無関係な既存の未適用差分
+(Directus撤去・Cloudflare Access IdP切替等、`4 to add, 6 to change, 12 to destroy`)が
+蓄積しており、素の`apply`はこれらを巻き込んで意図しない破壊的変更を本番に
+適用してしまう。
+
+```bash
+cd terraform
+infisical run --env=prod -- terraform apply \
+  -target=cloudflare_zero_trust_tunnel_cloudflared_config.main
+# 出力が "Apply complete! Resources: 0 added, 1 changed, 0 destroyed" であることを確認する
+# (カットオーバー時の適用(865364a)と同じ対象・同じ変更点数になるはず)
+```
+
+Dovecot Lua Auth Bridge(mail/IMAP・POP3)はこの公開ホスト名を経由せず
+クラスタ内DNS(`zitadel.zitadel.svc.cluster.local`、
+`ansible/roles/zitadel-cutover/defaults/main.yml`の`zitadel_cutover_api_base_url`)
+を直接参照するため、本Stepの影響を受けない。Step2のrevertのみで復旧する。
+
+### Step4: ArgoCD syncを実行する
 
 ```bash
 argocd app sync mailserver --server-side
@@ -90,8 +162,10 @@ argocd app sync vaultwarden --server-side
 argocd app sync roundcube --server-side
 ```
 
-### Step4: 検証
+### Step5: 検証
 
+- [ ] `https://idp.aramakisai.com/.well-known/openid-configuration` の応答が
+      Zitadelではなくauthentikのものに戻っていること(Step3の効果を直接確認する)
 - [ ] CMS: `https://cms.aramakisai.com/admin/login` からauthentikへリダイレクトされ、
       ログインできること
 - [ ] Vaultwarden(凍結解除環境の場合): `https://vault.aramakisai.com` から
@@ -117,6 +191,17 @@ argocd app sync roundcube --server-side
   そのまま利用できる状態のため、Zitadel側のデータを消す必要はない。
 ## 既知のギャップ
 
-- 本ランブックは文書の整備のみ(task9.5)であり、実際のカットオーバー・切り戻しは
-  まだ本番に対して一度も実行していない。手順の実地検証はtask9.6でk3d PoC上のみ
-  行った(本番のArgoCD/Infisical/DNSへの実操作は含まない)。
+- task9.6(2026-09-17)時点で、実際の本番切り戻し(Step2〜5の実行)そのものは
+  まだ一度も実行していない。task9.4のStep1(mailserver)・Step2(CMS/Roundcube)は
+  この時点で本番稼働中(idp.aramakisai.com経由のZitadelログインが実際に
+  使われている状態)であり、確認目的だけで実際に本番認証を切り戻す/戻す往復は
+  可用性への影響が大きいため見送った。本ランブックの正しさは、(1)実リポジトリの
+  使い捨てクローンに対してStep2のコマンド列を実際に実行し、対象5パスが良好
+  コミットの内容と`git diff`で完全一致(出力ゼロ)することを確認、(2)Step3で
+  必要な`terraform/tunnel.tf`の切り戻しが従来漏れていたことを本番の実設定
+  (`make kubectl`によるArgoCD Application参照・`terraform/tunnel.tf`の実内容)
+  から発見・追記、という形で行った(本番リポジトリへのrevertコミットや本番への
+  terraform applyそのものは未実行)。使い捨てクローンは検証後に削除済み。
+- 実際の切り戻し実行は、次にDovecot Lua Auth Bridge・RPアプリのいずれかで
+  Step3記載の切り戻し基準に該当する障害が発生したタイミング、またはユーザーが
+  意図的な切り戻しリハーサルの実施を承認したタイミングで行うこと。
