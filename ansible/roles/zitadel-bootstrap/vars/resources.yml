@@ -32,13 +32,17 @@ zitadel_oidc_apps:
       - https://vault.aramakisai.com/identity/connect/oidc-signin
     post_logout_redirect_uris:
       - https://vault.aramakisai.com/
-    infisical_hint: "VAULTWARDEN_OIDC_CLIENT_ID / VAULTWARDEN_OIDC_CLIENT_SECRET (既存キー更新)"
+    # VAULTWARDEN_OIDC_CLIENT_ID/SECRETはauthentik時代の値をそのまま使っている既存キーのため、
+    # 上書きせず別名の新規キーに保存する(切り戻し時にauthentikの値を失わないため)。
+    infisical_hint: "VAULTWARDEN_OIDC_CLIENT_ID_ZITADEL / VAULTWARDEN_OIDC_CLIENT_SECRET_ZITADEL (新設、旧VAULTWARDEN_OIDC_CLIENT_ID/SECRETは上書きしない)"
   - name: roundcube
     redirect_uris:
       - https://webmail.aramakisai.com/index.php/login/oauth
     post_logout_redirect_uris:
       - https://webmail.aramakisai.com/
-    infisical_hint: "ROUNDCUBE_OIDC_CLIENT_ID / MAIL_OAUTH2_CLIENT_SECRET (既存キー更新)"
+    # MAIL_OAUTH2_CLIENT_SECRETはauthentik時代からroundcube/mailserver両方が参照する既存キーのため、
+    # 上書きせず別名の新規キーに保存する。
+    infisical_hint: "ROUNDCUBE_OIDC_CLIENT_ID / MAIL_OAUTH2_CLIENT_SECRET_ZITADEL (新設、旧MAIL_OAUTH2_CLIENT_SECRETは上書きしない)"
   - name: cloudflare-access
     # コールバック先はCloudflare Zero Trust側固定。terraform/access.tfのCloudflare Access
     # IdP登録(zitadel_cf_access_client_id/secret変数)がこのアプリのclient_id/secretを

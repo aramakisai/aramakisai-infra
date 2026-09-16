@@ -30,7 +30,10 @@ data:
 
     // Zitadel OIDC ログイン (client_idはZitadelが発行するためgetenvで注入する。
     // ansible/roles/zitadel-bootstrap/vars/resources.yml infisical_hint:
-    // ROUNDCUBE_OIDC_CLIENT_ID / MAIL_OAUTH2_CLIENT_SECRET)
+    // ROUNDCUBE_OIDC_CLIENT_ID / MAIL_OAUTH2_CLIENT_SECRET_ZITADEL。
+    // Infisical上のキー名は_ZITADELサフィックス付きだが、ExternalSecret側で
+    // k8s Secretのキー名はMAIL_OAUTH2_CLIENT_SECRETのまま保っているため
+    // ここでのgetenv名は変更不要)
     $config['oauth_provider'] = 'generic';
     $config['oauth_provider_name'] = 'Zitadel';
     $config['oauth_client_id'] = getenv('ROUNDCUBE_OIDC_CLIENT_ID');
