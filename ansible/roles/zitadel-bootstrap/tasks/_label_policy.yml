@@ -1,12 +1,14 @@
 ---
 # Label Policy (旧terraform/zitadel_branding.tf、task10.7)。
 #
-# Label Policyはインスタンス/組織に必ず1つデフォルトが存在するため(project等と異なり
-# 「存在しない」状態がない)、検索して作成/更新を分岐する必要はない。GETして差分があれば
-# PUTするのみ。ロゴ/アイコンの再アップロードは同一内容なら再実行してもchangeDate/
-# sequenceが変化しないこと(=冪等)をk3d実機で確認済み。フォント(Requirement 17.3)は
-# task10.7の実機検証で512KB上限に阻まれ適用見送り済みのため対象外(zitadel_branding.tf
-# 削除時のコメントを踏襲)。
+# GET /management/v1/policies/label はorgが一度もLabel Policyをカスタマイズして
+# いない場合、instanceのデフォルトpolicyをisDefault:trueで返す。この状態のorgに
+# PUT(update)を投げると404 (Errors.Label.NotFound)になることをtask9.3で実機確認済み
+# (updateはorg専用policyの存在を前提とするため)。そのためisDefaultならPOST(add)、
+# 既にorg専用policyがあるならPUT(update)、という分岐が必須。ロゴ/アイコンの
+# 再アップロードは同一内容なら再実行してもchangeDate/sequenceが変化しないこと
+# (=冪等)をk3d実機で確認済み。フォント(Requirement 17.3)はtask10.7の実機検証で
+# 512KB上限に阻まれ適用見送り済みのため対象外(zitadel_branding.tf削除時のコメントを踏襲)。
 - name: Label Policyを取得
   ansible.builtin.include_tasks: _api_call.yml
   vars:
@@ -17,9 +19,38 @@
 - name: Label Policy取得結果を退避
   ansible.builtin.set_fact:
     _zitadel_label_policy: "{{ zitadel_api_result.body.policy | default({}) }}"
+    _zitadel_label_policy_is_default: "{{ zitadel_api_result.body.policy.isDefault | default(true) }}"
   no_log: true
 
-- name: Label Policyを更新
+- name: Label Policyを新規作成 (org専用policyが未作成の場合)
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    zitadel_api_method: POST
+    zitadel_api_path: /management/v1/policies/label
+    zitadel_api_body:
+      primaryColor: "{{ zitadel_label_policy.primary_color }}"
+      backgroundColor: "{{ zitadel_label_policy.background_color }}"
+      warnColor: "{{ zitadel_label_policy.warn_color }}"
+      fontColor: "{{ zitadel_label_policy.font_color }}"
+      primaryColorDark: "{{ zitadel_label_policy.primary_color_dark }}"
+      backgroundColorDark: "{{ zitadel_label_policy.background_color_dark }}"
+      warnColorDark: "{{ zitadel_label_policy.warn_color_dark }}"
+      fontColorDark: "{{ zitadel_label_policy.font_color_dark }}"
+      themeMode: "{{ zitadel_label_policy.theme_mode }}"
+      disableWatermark: "{{ zitadel_label_policy.disable_watermark }}"
+      hideLoginNameSuffix: "{{ zitadel_label_policy.hide_login_name_suffix }}"
+    zitadel_api_label: "create label policy"
+  when: _zitadel_label_policy_is_default | bool
+
+- name: Label Policy新規作成結果を確認
+  ansible.builtin.assert:
+    that:
+      - zitadel_api_result.status == 200
+    fail_msg: "label policyの作成に失敗しました: {{ zitadel_api_result.status }}"
+  when: _zitadel_label_policy_is_default | bool
+  no_log: true
+
+- name: Label Policyを更新 (org専用policyが既に存在する場合のみ)
   ansible.builtin.include_tasks: _api_call.yml
   vars:
     zitadel_api_method: PUT
@@ -38,12 +69,13 @@
       hideLoginNameSuffix: "{{ zitadel_label_policy.hide_login_name_suffix }}"
     zitadel_api_label: "update label policy"
   when: >-
-    _zitadel_label_policy.primaryColor | default('') != zitadel_label_policy.primary_color
+    not (_zitadel_label_policy_is_default | bool)
+    and (_zitadel_label_policy.primaryColor | default('') != zitadel_label_policy.primary_color
     or _zitadel_label_policy.backgroundColor | default('') != zitadel_label_policy.background_color
     or _zitadel_label_policy.warnColor | default('') != zitadel_label_policy.warn_color
     or _zitadel_label_policy.fontColor | default('') != zitadel_label_policy.font_color
     or _zitadel_label_policy.themeMode | default('') != zitadel_label_policy.theme_mode
-    or _zitadel_label_policy.disableWatermark | default(false) != zitadel_label_policy.disable_watermark
+    or _zitadel_label_policy.disableWatermark | default(false) != zitadel_label_policy.disable_watermark)
 
 - name: Label Policy更新結果を確認 (No Changesは許容)
   ansible.builtin.assert:
@@ -51,12 +83,13 @@
       - zitadel_api_result.status == 200 or zitadel_api_result.body.code | default(0) == 9
     fail_msg: "label policyの更新に失敗しました: {{ zitadel_api_result.status }}"
   when: >-
-    _zitadel_label_policy.primaryColor | default('') != zitadel_label_policy.primary_color
+    not (_zitadel_label_policy_is_default | bool)
+    and (_zitadel_label_policy.primaryColor | default('') != zitadel_label_policy.primary_color
     or _zitadel_label_policy.backgroundColor | default('') != zitadel_label_policy.background_color
     or _zitadel_label_policy.warnColor | default('') != zitadel_label_policy.warn_color
     or _zitadel_label_policy.fontColor | default('') != zitadel_label_policy.font_color
     or _zitadel_label_policy.themeMode | default('') != zitadel_label_policy.theme_mode
-    or _zitadel_label_policy.disableWatermark | default(false) != zitadel_label_policy.disable_watermark
+    or _zitadel_label_policy.disableWatermark | default(false) != zitadel_label_policy.disable_watermark)
   no_log: true
 
 - name: ロゴ/アイコンをアップロード
