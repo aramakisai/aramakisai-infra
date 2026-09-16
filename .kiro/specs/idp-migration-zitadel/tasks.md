@@ -835,7 +835,7 @@
       E2E確認・出展団体CSV実データ化等の残課題は9.2の受け入れ基準外のため後続タスク
       (9.4以降または別タスク)で扱う。
 
-- [ ] 9.3 Terraform管理外のインスタンス設定をAdmin API importで反映する
+- [x] 9.3 Terraform管理外のインスタンス設定をAdmin API importで反映する
   - Assert Roles on Authentication等、Terraformで管理しきれないインスタンス設定の差分を洗い出す
   - 9.1で取得したexportデータを本番Zitadelの`POST /admin/v1/import`で取り込む(masterkeyに依存しないアプリケーションレイヤーの移行であることを確認する)
   - import後、9.2でAnsible管理化されたproject/role/application/action等に意図しない副作用が発生していないことを確認する(旧方針の`terraform plan`によるdrift確認に相当する手段は9.2の方針転換に伴い別途定める)
@@ -932,6 +932,45 @@
       ものと推測される。本タスクの実行時は`ZITADEL_EXTERNAL_DOMAIN=idp.aramakisai.com`を
       明示的に指定した。`defaults/main.yml`のコメント更新自体は本タスクのスコープ外
       として変更していない。
+  - **追記1(2026-09-17、本番反映・確認・タスク完了)**:
+    - **前提の未整備(worktree固有)**: `zitadel-admin-import.yml`は`tasks_from: admin_import`
+      で`zitadel-bootstrap`ロールの`main.yml`(kubeconfig材料化)を経由しないため、
+      「`zitadel-bootstrap.yml`実行済みで`.zitadel-poc-secrets/kubeconfig`が既に
+      存在すること」が暗黙の前提になっている(READMEの「前提」コメント通り)。本タスクの
+      作業worktreeは新規checkoutでこのローカルファイルが存在しなかったため、まず
+      `infisical run --env=prod -- ansible-playbook ansible/playbooks/zitadel-bootstrap.yml`
+      (`ZITADEL_EXTERNAL_DOMAIN=idp.aramakisai.com`)を実行してkubeconfigを材料化した
+      (PATは`TF_VAR_zitadel_token`としてInfisicalに既登録済みのため新規発行は発生せず、
+      ローカルの`.zitadel-poc-secrets/`配下の複製が増えるのみ、gitignore対象、
+      Infisicalへの新規登録なし)。
+    - **本番実行と発覚したバグ**: 上記の上で`zitadel-admin-import.yml`を本番へ実行した
+      ところ、`POST /admin/v1/import`が`Errors.ORG.LockoutPolicy.AlreadyExists`で
+      失敗した。直前の`GET /management/v1/policies/lockout`確認で
+      `maxPasswordAttempts: "10"`, `maxOtpAttempts: "10"`(目標値と一致)かつ
+      `isDefault`キー自体が応答に存在しないことを確認し、**Lockout Policyは既に
+      本番へ適用済みだった**と判明した(`creationDate: 2026-09-16T07:35:25Z`、
+      19087bbのコミット時刻(2026-09-16 16:44 JST)の9分前で、実装時の動作確認時に
+      `ZITADEL_EXTERNAL_DOMAIN`が本番向けのまま実行され、意図せず本番へ適用されて
+      いたものと推測される。同コミットメッセージの「本番への実import実行は未実施」は
+      当時この事実に気付いていなかったための誤り)。
+    - **isDefault判定の欠陥を修正**: `admin_import.yml`の
+      `_zitadel_lockout_is_default: "{{ zitadel_api_result.body.isDefault | default(true) }}"`
+      は、protobuf3のJSON mappingがbool `false`のフィールドを応答から省略する
+      仕様であるにもかかわらず、キー欠落(=カスタム化済みでfalseの意味)を
+      `default(true)`(未カスタム扱い)へ誤ってフォールバックさせており、
+      カスタム化済みの状態に対して常に再importを試みて失敗する欠陥だった。
+      `default(false)`へ修正し、本番に対して再実行して
+      「lockout policyは既にカスタム化済みのためimportをスキップしました」で
+      正常終了する(冪等)ことを確認した。
+    - **反映確認**: `GET /management/v1/policies/lockout`(Admin API経由)で
+      `maxPasswordAttempts: "10"`, `maxOtpAttempts: "10"`が本番へ反映済みであることを
+      確認した。`make kubectl ARGS="get pods -n zitadel"`で`zitadel-0` 2/2 Running・
+      `zitadel-db-1` 1/1 Running(再起動なし)を確認し、task9.2管理リソースへの
+      副作用がないことも確認した。`ansible-lint ansible/roles/zitadel-bootstrap
+      ansible/playbooks/zitadel-admin-import.yml`は0 failure/warningで通過した。
+    - **結論**: 目標のLockout Policy(`maxPasswordAttempts`/`maxOtpAttempts`=10)は
+      本番へ反映済みであることをAdmin API経由で確認し、再実行時の冪等性バグも
+      修正した。本タスクを完了扱いとする。
 
 - [ ] 9.4 一括カットオーバー順序を実行する
   - Dovecot Lua Auth Bridge・RPアプリ(CMS/Vaultwarden/Roundcube)OIDC Clientの順に本番切替を実行する

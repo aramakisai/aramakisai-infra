@@ -47,7 +47,11 @@
 
 - name: Lockout Policyがカスタム化済みか判定
   ansible.builtin.set_fact:
-    _zitadel_lockout_is_default: "{{ zitadel_api_result.body.isDefault | default(true) }}"
+    # protobuf3のJSON mappingではbool falseはフィールド自体を省略するため、
+    # カスタム化済み(isDefault=false)の場合キーが存在しない。欠落時にtrueへ
+    # フォールバックすると「未カスタムと誤判定→再importでAlreadyExists」に
+    # なるため、欠落時はfalse(カスタム化済み)側へフォールバックする。
+    _zitadel_lockout_is_default: "{{ zitadel_api_result.body.isDefault | default(false) }}"
 
 - name: Admin API importを実行 (Lockout Policyのカスタム化、未カスタム時のみ)
   ansible.builtin.include_tasks: _api_call.yml
