@@ -726,6 +726,17 @@
       `zitadel_action_target_endpoint`は`https://idp.aramakisai.com/webhook/rbac-sync`に
       変更し、`terraform/dns.tf`の`cloudflare_record.rbac_sync`リソースは削除した
       (`idp.aramakisai.com`の既存DNSレコードをそのまま使うため新規レコード不要)。
+    - **vaultwarden-rbac-sync連携のスコープ除外(ユーザー判断)**: Vaultwarden自体が
+      本番で`replicas: 0`のまま凍結中で使われていないため、これ以上コストを掛けない
+      というユーザー判断により、Actions v2 webhook(vaultwarden-rbac-syncのロール同期)
+      連携そのものをスコープ除外した。`ansible/roles/zitadel-bootstrap/tasks/_action_target.yml`・
+      `resources.yml`からのinclude・`vars/resources.yml`の`zitadel_action_target_*`変数を
+      削除し、`terraform/tunnel.tf`の`idp.aramakisai.com`向け`/webhook/rbac-sync`path分岐も
+      削除して元の2ルール構成(`/ui/v2/login`分岐+フォールバック)に戻した。上記の
+      DeniedURL制約・新規サブドメイン撤回・`/webhook/zitadel`未実装の記録はいずれも
+      対応検討の経緯として残すが、最終的にAction Target/Execution自体を投入しない
+      方針に確定した。vaultwarden-rbac-syncのイベント駆動同期(task4)は今後も
+      手動運用のまま引き継ぐ。
 
 - [ ] 9.3 Terraform管理外のインスタンス設定をAdmin API importで反映する
   - Assert Roles on Authentication等、Terraformで管理しきれないインスタンス設定の差分を洗い出す
@@ -948,7 +959,15 @@
         いないこと(上記Step3参照、確認済み)を含め、PR #205 revertの影響範囲の
         全容は本タスクでは調査していない。task1-8・10の各タスクについて、
         tasks.mdの実施結果とmain上の実ファイルの整合性を別途確認する必要がある。
-      - Step3のDeniedURL対応方針(webhook外部公開 or DenyList緩和)は未確定。
+    - **訂正(ユーザー判断、Step3廃止)**: Vaultwarden自体が本番で`replicas: 0`の
+      まま凍結中で使われていないため、これ以上コストを掛けないという判断により、
+      Step3(vaultwarden-rbac-sync webhook切替)を実行順序から完全に削除した
+      (`ansible/roles/zitadel-cutover/tasks/step3_webhook.yml`・
+      `zitadel_cutover_include_webhook`変数を削除し、`main.yml`を
+      Step1→Step2→Step3(旧Step4、招待ベース移行)の3ステップに詰めた)。
+      上記のDeniedURL未確定・PR #205 revert影響の記録は経緯として残すが、
+      これらは今後Step3(webhook)を検討する場合の課題ではなく、
+      「対応しない」と決定済みの事項として扱う。
 
 - [x] 9.5 authentik構成への切り戻し手順を整備する
   - Zitadel切替後に重大な認証障害が発生した場合の、旧authentik構成への切り戻し手順を作成する

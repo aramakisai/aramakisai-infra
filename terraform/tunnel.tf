@@ -36,17 +36,6 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "main" {
       service  = "http://zitadel.zitadel.svc.cluster.local:3000"
     }
 
-    # vaultwarden-rbac-sync: Zitadel Actions v2 webhook受信用。ZitadelのHTTPClient.DenyList
-    # (SSRF対策)がRFC1918/cluster-local宛先へのtarget作成を拒否するため外部公開が必須だが、
-    # 新規サブドメインは増やさず(サブドメインを冗長に増やさない方針)、既にZitadel自身の
-    # 外部到達に使っている idp.aramakisai.com にpathで相乗りさせる。ブラウザアクセスは
-    # 想定しないためCloudflare Accessは付与しない(認証はwebhook側の署名検証に委ねる)。
-    ingress_rule {
-      hostname = "idp.aramakisai.com"
-      path     = "^/webhook/rbac-sync.*"
-      service  = "http://vaultwarden-rbac-sync.prod.svc.cluster.local:80"
-    }
-
     ingress_rule {
       hostname = "idp.aramakisai.com"
       service  = "http://zitadel.zitadel.svc.cluster.local:8080"

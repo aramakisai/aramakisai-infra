@@ -115,25 +115,19 @@
     label: "{{ zitadel_app_item.name }}"
 
 # ------------------------------------------------------------
-# 4. Actions v2 Target / Execution
-# ------------------------------------------------------------
-- name: Action Targetを投入
-  ansible.builtin.include_tasks: _action_target.yml
-
-# ------------------------------------------------------------
-# 5. Discord OAuth2 IdP
+# 4. Discord OAuth2 IdP
 # ------------------------------------------------------------
 - name: Discord OAuth2 IdPを投入
   ansible.builtin.include_tasks: _org_idp_oauth.yml
 
 # ------------------------------------------------------------
-# 6. Label Policy (ブランディング)
+# 5. Label Policy (ブランディング)
 # ------------------------------------------------------------
 - name: Label Policyを投入
   ansible.builtin.include_tasks: _label_policy.yml
 
 # ------------------------------------------------------------
-# 7. Machine User + PAT + org_member/instance_member
+# 6. Machine User + PAT + org_member/instance_member
 # ------------------------------------------------------------
 - name: Machine User (Dovecot / Invite Recovery SA)を投入
   ansible.builtin.include_tasks: _machine_user_pat.yml
@@ -143,7 +137,7 @@
     label: "{{ zitadel_mu_item.user_name }}"
 
 # ------------------------------------------------------------
-# 8. 出展団体 Human User + User Grant (CSV駆動)
+# 7. 出展団体 Human User + User Grant (CSV駆動)
 # ------------------------------------------------------------
 - name: 出展団体CSVを読み込み
   community.general.read_csv:

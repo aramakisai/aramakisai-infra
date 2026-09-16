@@ -13,14 +13,6 @@
 # しないため、roleが直接kubectl applyで検証用リソースを展開する。
 zitadel_cutover_target_env: "{{ lookup('env', 'ZITADEL_CUTOVER_TARGET_ENV') | default('k3d', true) }}"
 
-# task4.4の検証結果 (2026-08-31、k3d Zitadel v4.12.3、10/10発火 x2セット) により
-# 既定はtrue。ただしtask9.2で新たに判明したActions v2のHTTPClient.DenyList制約
-# (Errors.Target.DeniedURL)により、この既定がtrueでも実際のaction_target作成は
-# 現状ブロックされたまま警告付きスキップになる(zitadel-resources.yml参照)。
-# 対応方針(webhook外部公開 or DenyList緩和)が決まるまでは実質的にスコープ外
-# 運用となる。false を明示すればstep3自体を完全にスキップする。
-zitadel_cutover_include_webhook: true
-
 zitadel_cutover_namespace: "{{ 'prod' if zitadel_cutover_target_env == 'prod' else 'poc-apps' }}"
 
 # k3d検証用の一時Dovecotテストリソース (namespace/Pod名)。実際のmailserver

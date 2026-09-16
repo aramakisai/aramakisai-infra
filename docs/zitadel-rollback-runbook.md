@@ -115,13 +115,6 @@ argocd app sync roundcube --server-side
 - **Zitadelへ招待済みのユーザーデータ(task9.4 Step4)の削除**: 不要。
   authentikの既存ユーザーデータはtask9.1のexportで消えておらず、authentik側は
   そのまま利用できる状態のため、Zitadel側のデータを消す必要はない。
-- **vaultwarden-rbac-sync webhook(`terraform/tunnel.tf`の`idp.aramakisai.com`
-  向け`/webhook/rbac-sync`ingress、`ansible/roles/zitadel-bootstrap`のaction_target)の
-  切り戻し**: 不要。この経路はZitadelのAction Target/Executionという
-  Zitadel側リソースのみで完結しており、authentik構成への切り戻し(RPアプリの
-  OIDC接続先変更)とは独立している。切り戻し後もこのTunnel ingress自体は残置して
-  問題ない(呼び出し元のZitadelが使われなくなるだけで、単体では実害がない)。
-
 ## 既知のギャップ
 
 - 本ランブックは文書の整備のみ(task9.5)であり、実際のカットオーバー・切り戻しは

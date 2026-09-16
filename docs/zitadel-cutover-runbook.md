@@ -11,12 +11,15 @@ authentikからZitadelへ本番の認証基盤を切り替える際の実行順�
 
 1. Dovecot Lua Auth Bridge切替
 2. RPアプリ(CMS/Vaultwarden/Roundcube)OIDC Client切替
-3. vaultwarden-rbac-sync webhook切替(task4.4で安定と判断された場合のみ)
-4. 既存ユーザーへの招待ベース移行
+3. 既存ユーザーへの招待ベース移行
 
-この順序である理由: 1と2は互いに独立だが、3(webhook)は2で投入されたZitadel
-Project/Roleに依存し、4(招待)はユーザーが実際にログインできる状態(1・2完了後)
-で行わないと「招待は成功したがどのアプリにもログインできない」状態を生む。
+この順序である理由: 1と2は互いに独立だが、3(招待)はユーザーが実際にログイン
+できる状態(1・2完了後)で行わないと「招待は成功したがどのアプリにもログイン
+できない」状態を生む。
+
+vaultwarden-rbac-sync(Actions v2 webhook経由のロール同期)はスコープ外とした
+(Vaultwarden自体が本番でreplicas: 0のまま凍結中で使われていないため、tasks.md
+task9.2参照)。
 
 ## 前提条件
 
@@ -109,34 +112,7 @@ argocd app sync roundcube --server-side
       (Infisical prod環境から取得、`--client-secret`をターミナル出力に残さないこと)
       で実行し、Authorization Code + PKCE + userinfoまで成功することを確認する
 
-## Step3: vaultwarden-rbac-sync webhook切替(条件付き)
-
-**前提**: task4.4でActions v2 Event条件トリガーが安定と判断されていること
-(2026-08-31時点で安定と判定済み)。ただしtask9.2実機検証で、Zitadel Actions v2の
-`action_target`作成がHTTPClient.DenyList(SSRF対策)によりcluster-local宛先を
-`Errors.Target.DeniedURL`で拒否することが判明しており、対応方針
-((a) webhookエンドポイント外部公開、(b) `ZITADEL_HTTPCLIENT_DENYLIST`緩和)が
-ユーザー判断待ちのまま未確定。**方針が確定するまでこのステップは実施せず、
-Vaultwarden Collection権限同期は手動運用のまま引き継ぐこと。**
-
-### 実行(方針確定後)
-
-```bash
-# (a)(b)いずれかの対応をgitops/manifests/prod/{zitadel,vaultwarden-rbac-sync}/へ適用しPRマージ・sync後
-infisical run --env=prod -- ansible-playbook ansible/playbooks/zitadel-resources.yml
-# vaultwarden-rbac-sync Deploymentのreplicasを1へ戻す(要PR)
-```
-
-### 検証チェックリスト
-
-- [ ] `POST /v2/actions/targets/search`で`vaultwarden-rbac-sync-webhook`が
-      `Errors.Target.DeniedURL`なしで作成されていること
-- [ ] テストユーザーのロールを変更し、vaultwarden-rbac-syncのPodログに
-      webhook受信ログが出ること
-- [ ] Vaultwarden側のCollection権限が実際に更新されること
-- [ ] 反映までの遅延がtask8.4の実測値(中央値約0.57秒)と大きく乖離しないこと
-
-## Step4: 既存ユーザーへの招待ベース移行
+## Step3: 既存ユーザーへの招待ベース移行
 
 `scripts/zitadel-invite-migration.py`(task6.1/task9.4)を使う。CSVフォーマット:
 `email,given_name,family_name,role_keys`(role_keysはセミコロン区切り)。
@@ -191,4 +167,3 @@ python3 scripts/zitadel-invite-migration.py --csv=/path/to/existing-users.csv --
   本タスクで再実装した(task6.1記載の設計に基づく)。同様に他タスクの成果物も
   再確認が必要な可能性がある。
 - Step1のDocker Mailserverイメージでのdovecot-lua同梱可否は未検証。
-- Step3のDeniedURL対応方針は未確定。
