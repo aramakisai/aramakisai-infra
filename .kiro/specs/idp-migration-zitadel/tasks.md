@@ -595,7 +595,7 @@
   - _Requirements: 10.8_
   - _Depends: 9.5_
 
-- [ ] 10. 追加移行スコープ(既存authentik付随機能6件)のk3d PoC実装
+- [x] 10. 追加移行スコープ(既存authentik付随機能6件)のk3d PoC実装
   - task1〜8完了後にセッション内の追加検討で判明した、旧spec(idp-migration-zitadel初版)ではスコープ外だった`terraform/authentik_*.tf`6ファイル相当の移行。PoCとしてk3d環境で検証する(本番反映はtask9の一括カットオーバーに含める)。task9とは独立して着手可能(依存はtask1/2/6のみ)
 - [x] 10.1 enrollment/recoveryを整理する
   - `terraform/authentik_enrollment.tf`(学籍番号等カスタム項目付き招待制登録)の学籍番号項目を廃止し、`scripts/zitadel-invite-migration.py`の招待コード発行フローへ一本化する(新規カスタムUIは作らない)
