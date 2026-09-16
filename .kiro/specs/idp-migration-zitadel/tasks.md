@@ -406,7 +406,7 @@
     実機で機能することを確認した。exportデータ(PII含み得るため)は`.zitadel-poc-secrets/export-task9.1.json`
     (.gitignore対象)に保存、リポジトリには含めていない。
 
-- [ ] 9.2 本番Zitadelをデプロイしproject/role/application/actionを再現する
+- [x] 9.2 本番Zitadelをデプロイしproject/role/application/actionを再現する
   - 本番用のZitadel manifest(namespace/StatefulSet/Service/CNPG DBクラスタ/ExternalSecret)を空DBの状態でデプロイする
   - Ansible Zitadelブートストラップを本番で実行し、project/role/application/action等を投入するAnsible role用のPATを発行する
   - `terraform/zitadel_*.tf`(9ファイル、リソースブロック19個: project/role/application_oidc/action_target/action_execution_event/org_idp_oauth/label_policy/machine_user/personal_access_token/org_member/instance_member/human_user/user_grant)が定義するリソースを、Ansible role(既存`ansible/roles/zitadel-bootstrap`の拡張または新規role)によるv2 Management API(HTTP/JSON)呼び出しへ置き換えて実装する。各リソースは「存在確認→存在すれば更新、なければ作成」の冪等パターンで投入する
@@ -801,6 +801,39 @@
       未準備)、CMS/Roundcube/メール認証の実際のE2Eログイン確認(ブラウザでの実ログイン、
       Pod正常化とAPIレベルの疎通確認のみ実施済み)、出展団体CSVの実データ差し替え
       (上記の既知課題)、`vaultwarden`の動作確認(`replicas: 0`のため未確認)。
+  - **追記10(2026-09-17、受け入れ基準の最終判定とタスク完了)**:
+    - **webhook実装が9.2の受け入れ基準に含まれるかの判定**: design.mdの`Zitadel Provider
+      Access Path`コンポーネント(本タスクの実装対象範囲)が明記する`Requirements`は
+      `7.2, 11.4, 11.5, 11.6, 11.7, 11.8`であり、vaultwarden-rbac-sync webhook
+      (Requirement 4、design.mdの別コンポーネント`vaultwarden-rbac-sync(webhook常駐版)`
+      が対応)は9.2自体の受け入れ基準に含まれないと確認した。加えてrequirements.md
+      Requirement 4.4は「k3d検証環境でActions v2のEvent条件トリガーが不安定と判明した
+      場合、イベント駆動同期(4.1/4.2)は本specのスコープから除外してよく、Zitadel移行
+      自体は継続する」という明示的な除外規定を持つ。追記8で確定した除外判断(Vaultwarden
+      自体が`replicas: 0`で凍結中のためコストを掛けないというユーザー判断)はこの4.4とは
+      別の理由によるものだが、いずれもユーザー判断による除外という点で仕様上正当であり、
+      9.2としては「webhook実装は受け入れ基準の対象外」と判定した。したがって
+      `/webhook/zitadel`エンドポイント未実装(追記8で判明)は9.2の未達事由にはならない。
+    - **残り受け入れ基準(project/role/application/action)の再検証**: 本番Zitadel
+      (`zitadel-0`)へ`kubectl exec`経由のv2 Management API検索のみ(作成・更新は一切
+      行わない、既存`_api_call.yml`タスクを流用した使い捨て検証playbookを一時的に
+      `ansible-playbook`実行、リポジトリ非コミット)で以下を確認した:
+      project 1件(`aramakisai`)・application_oidc 4件(`cms-prod`/`vaultwarden`/
+      `roundcube`/`cloudflare-access`、追記8のk3d検証と同数)・role 10件
+      (`accounting`/`admin`/`executive`/`exhibitor`/`general_affairs`/`leader`/
+      `performers`/`planning`/`pr`/`vendors`、追記8のk3d検証と同数)・machine_user
+      カスタム2件(`dovecot-lua-auth`/`invite-recovery-sa`、システム既定の
+      `login-client`/`terraform-provider`除く)・action_target 0件(webhookスコープ
+      除外の判断通り、意図せぬ残留無し)・human_user 1件(`zitadel-admin`組み込みのみ、
+      追記9で削除したPoCダミー出展団体4件が再混入していないことも確認)。`make kubectl
+      ARGS="get pods -n zitadel"`で`zitadel-0` 2/2 Running・`zitadel-db-1` 1/1
+      Runningを確認、`make kubectl ARGS="get deploy -A"`で`vaultwarden-rbac-sync`
+      (prod namespace)が`0/0`のまま(webhookスコープ除外の判断と整合)であることも確認した。
+    - **結論**: 上記によりRequirement 7.2(project/role/application/actionの本番再現)・
+      11.4-11.8(Zitadel Provider Access Path、Ansible+HTTP API方式での到達経路確定)
+      いずれも満たしたと判断し、本タスクを完了扱いとする。招待コード発行・実ユーザー
+      E2E確認・出展団体CSV実データ化等の残課題は9.2の受け入れ基準外のため後続タスク
+      (9.4以降または別タスク)で扱う。
 
 - [ ] 9.3 Terraform管理外のインスタンス設定をAdmin API importで反映する
   - Assert Roles on Authentication等、Terraformで管理しきれないインスタンス設定の差分を洗い出す
