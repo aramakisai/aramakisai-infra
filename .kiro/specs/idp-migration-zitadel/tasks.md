@@ -629,7 +629,7 @@
          (誤ると405 Method Not Allowed)。
       4. `/management/v1/users/_search`のmachine user検索結果の項目は`.id`であり
          `.userId`ではない(`AddMachineUser`のレスポンス自体は`.userId`を返すため紛らわしい)。
-    - **未解決の重大な制約(ユーザー判断待ち、本番未適用)**: Actions v2の`action_target`作成
+    - **重大な制約と対応方針の決定(本番未適用)**: Actions v2の`action_target`作成
       (`POST /v2/actions/targets`)を、既存の`vaultwarden_rbac_sync_webhook_endpoint`
       (`http://vaultwarden-rbac-sync.prod.svc.cluster.local/webhook/zitadel`、クラスタ内Service)
       で実行したところ、本番と同一image tag(v4.12.3)のk3d実機で
@@ -643,10 +643,27 @@
       `ZITADEL_HTTPCLIENT_DENYLIST`(または旧`ZITADEL_ACTIONS_HTTP_DENYLIST`)環境変数を
       追加しRFC1918の一部を許可リストから除外する(SSRF対策の一部を意図的に緩めることになる
       セキュリティ上のトレードオフ)、のいずれかしかない。過去のTailscale Operator導入の
-      経緯(ユーザーに無断実装を却下された事例)を踏まえ、本タスクではどちらも実装せず、
-      Ansible role側は`Errors.Target.DeniedURL`を検知した場合はexecution設定をスキップし
-      警告を表示するに留めた(それ以外のエラーは通常通り失敗として扱う)。対応方針の決定は
-      ユーザー判断が必要。
+      経緯(ユーザーに無断実装を却下された事例)を踏まえ、当初はどちらも実装せず
+      `Errors.Target.DeniedURL`検知時はexecution設定をスキップし警告するに留めていたが、
+      ユーザー判断により(a)を採用。`terraform/tunnel.tf`・`terraform/dns.tf`へ
+      `rbac-sync.aramakisai.com`のCloudflare Tunnel ingress/DNSレコードを追加して
+      webhookエンドポイントを外部公開し、`zitadel_action_target_endpoint`
+      (`vars/resources.yml`)を`https://rbac-sync.aramakisai.com/webhook/zitadel`へ変更、
+      `_action_target.yml`のDeniedURLスキップ分岐は削除して通常の作成失敗時assertに戻した。
+      k3dはクラスタ外DNS/Tunnelへ到達できないためこの経路自体の実機検証は不可(k3d実機検証は
+      引き続きAction Target作成以外の項目のみ)。
+    - **`/webhook/zitadel`エンドポイント自体は現状未実装(要修正)**: `zitadel_action_target_endpoint`
+      が指す`/webhook/zitadel`パスおよびtask4.1/4.2が実装したはずの署名検証(`ZITADEL-Signature`、
+      `WebhookReceiver`/`verify_zitadel_signature`)は、`gitops/manifests/prod/vaultwarden-rbac-sync/sync.py`
+      を実機確認したところ存在せず、`/trigger`(Bearer token認証、`TriggerReceiver`)と`/healthz`
+      のみが実装されている。原因はPR #205(task1-10のPoC実装、`WebhookReceiver`実装含む)が
+      本番障害により丸ごとrevertされ(コミット`936e1d3`)、本ブランチ(revert後の`main`から分岐)には
+      その実装が含まれていないため。tasks.md上のtask4.1/4.2は`[x]`のままだが、これは
+      revert前時点の記録であり現在のコードとは一致しない。したがって本コミットで
+      action_target作成のDeniedURL自体は回避できるが、Zitadel側からの実際のwebhook配信は
+      `/webhook/zitadel`が存在せず404になり、vaultwarden-rbac-sync側の署名検証・受信実装を
+      別途再実装するまで機能しない(vaultwarden-rbac-sync Deployment自体も
+      `replicas: 0`で凍結中)。
     - **`terraform/`側の変更**: `terraform/zitadel_*.tf`全9ファイル(`zitadel_main.tf`含む、
       providerブロックも含めて全リソースがAnsible管理化されたため)を削除し、
       `terraform/providers.tf`の`zitadel`プロバイダ宣言も削除した。`terraform/outputs.tf`の
@@ -675,12 +692,13 @@
         実登録(想定キー名は`vars/resources.yml`の`infisical_hint`コメントに記載)
       - `terraform/access.tf`変更に伴う`TF_VAR_zitadel_cf_access_client_id`/
         `TF_VAR_zitadel_cf_access_client_secret`のInfisical登録と`terraform apply`
-      - Actions v2 `action_target`のDeniedURL制約への対応方針決定
+      - `terraform/tunnel.tf`・`terraform/dns.tf`の`rbac-sync.aramakisai.com`追加分の`terraform apply`
       - このタスクをマージ・本番適用する場合、本番Zitadel(追記5時点で`zitadel-0`
         2/2 Running、project/role/application等は0件)に対してAnsible roleを実行する前に、
-        上記のDeniedURL対応方針を先に決めておくこと(action_target作成が失敗して
-        止まる設計ではなく警告してスキップする設計のため、方針未決定のままでも
-        他リソースの投入は完了できるが、vaultwarden-rbac-sync連携は投入されないまま残る)。
+        上記`terraform apply`(DNS/Tunnel ingress反映)を先に完了させておくこと。ただし
+        前述の通り`/webhook/zitadel`エンドポイント自体が未実装のため、action_target/execution
+        投入は成功してもvaultwarden-rbac-sync連携が実際に機能するわけではない
+        (別途エンドポイント再実装が必要)。
 
 - [ ] 9.3 Terraform管理外のインスタンス設定をAdmin API importで反映する
   - Assert Roles on Authentication等、Terraformで管理しきれないインスタンス設定の差分を洗い出す

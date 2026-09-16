@@ -66,6 +66,15 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "main" {
       service  = "http://vaultwarden.prod.svc.cluster.local:80"
     }
 
+    # vaultwarden-rbac-sync: Zitadel Actions v2 webhook受信用。ZitadelのHTTPClient.DenyList
+    # (SSRF対策)がRFC1918/cluster-local宛先へのtarget作成を拒否するため外部公開が必須
+    # (クラスタ内Service宛のままではAction Target自体を作成できない)。ブラウザからの
+    # アクセスは想定しないためCloudflare Accessは付与しない(認証はwebhook側の実装に委ねる)。
+    ingress_rule {
+      hostname = "rbac-sync.aramakisai.com"
+      service  = "http://vaultwarden-rbac-sync.prod.svc.cluster.local:80"
+    }
+
     # フォールバック (いずれのホスト名にもマッチしない場合)
     ingress_rule {
       service = "http_status:404"

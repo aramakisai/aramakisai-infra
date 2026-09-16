@@ -53,10 +53,10 @@ zitadel_oidc_apps:
     infisical_hint: "TF_VAR_zitadel_cf_access_client_id / TF_VAR_zitadel_cf_access_client_secret (要新設、terraform/access.tf参照)"
 
 zitadel_action_target_name: vaultwarden-rbac-sync-webhook
-# 本番エンドポイント値。ただしZitadel v4.12.3のActions v2 REST APIは
-# HTTPClient.DenyListによりRFC1918/cluster-local宛先を"Errors.Target.DeniedURL"で
-# 拒否することをk3d実機で確認済み(action_target作成をスキップする判断はtasks.md参照)。
-zitadel_action_target_endpoint: http://vaultwarden-rbac-sync.prod.svc.cluster.local/webhook/zitadel
+# ZitadelのHTTPClient.DenyList(SSRF対策)がRFC1918/cluster-local宛先を
+# "Errors.Target.DeniedURL"で拒否するため(k3d実機確認済み)、cluster-local URLではなく
+# terraform/tunnel.tf・dns.tfで公開したCloudflare Tunnel経由の外部URLを指定する。
+zitadel_action_target_endpoint: https://rbac-sync.aramakisai.com/webhook/zitadel
 zitadel_action_target_timeout: 10s
 
 zitadel_discord_idp_name: Discord
