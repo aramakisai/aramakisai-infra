@@ -1197,6 +1197,60 @@
       確認)。Step3(招待コード発行)はSMTP未設定・実ユーザーCSV未準備という
       具体的なブロッカーを確認したため実行せず、チェックボックスは未完了のまま
       残す。
+  - **追記3(2026-09-17、Step3の2ブロッカーのうちSMTP未設定を解消)**: 追記2で
+      確認した2つのブロッカーのうち、SMTP未設定側を調査した結果、
+      「未設計」ではなく「既存資産の転用漏れ」と判明した。Infisicalキー
+      `NOREPLY_SMTP_PASSWORD`がAuthentik/Vaultwardenで既に共通利用中の既存キー
+      であり、接続値(HOST `mail.aramakisai.com`、PORT 587、STARTTLS、USERNAME
+      `noreply@aramakisai.com`)も`gitops/manifests/prod/vaultwarden/
+      deployment.yaml`に実在していたため、新規キー・新規設計は不要だった。
+    - **実装**: `ansible/roles/zitadel-bootstrap/tasks/_api_call.yml`の
+      既存パターンを流用し`ansible/roles/zitadel-bootstrap/tasks/_smtp_config.yml`
+      (新規)を追加した。`GET /admin/v1/smtp`(追記2で404を確認した旧Deprecated
+      API)ではなく、本番Zitadel(v4.12.3)の現行Email Provider API
+      (`POST /admin/v1/email/_search`→`POST /admin/v1/email/smtp`→
+      `POST /admin/v1/email/{id}/_activate`→`GET /admin/v1/email`)を使用した。
+      冪等性判定はレスポンスのsmtp.*フィールド名が未確認だったため、自分で設定する
+      `description`値の一致で行う設計にした。`vars/resources.yml`に
+      `zitadel_smtp_config`(非機密の接続情報のみ)を追加し、
+      `tasks/resources.yml`のリソース投入順(8番目)へ組み込んだ。
+    - **本番投入とresources.yml全体再実行の回避**: `tasks/resources.yml`を
+      丸ごと再実行すると、`ansible/roles/zitadel-bootstrap/files/
+      zitadel_student_exhibitors.csv`が実データ未確定のPoCダミーのままである
+      既知の問題(task9.2追記9参照)により、削除済みのダミー出展団体アカウントが
+      本番に再作成されてしまう。これを避けるため、`_smtp_config.yml`単体を
+      呼ぶ`ansible/playbooks/zitadel-smtp.yml`(新規)を追加し、SMTP設定のみを
+      独立実行できるようにした。
+    - **実機確認(2026-09-17、本番)**: `ZITADEL_EXTERNAL_DOMAIN=idp.aramakisai.com
+      infisical run --env=prod -- ansible-playbook ansible/playbooks/
+      zitadel-smtp.yml`を実行し、`PLAY RECAP`で`failed=0`、最終タスクで
+      `GET /admin/v1/email`のレスポンス`config.id`が作成したSMTP設定のidと一致し
+      `state`に`ACTIVE`が含まれることを確認した。同じコマンドを再実行し
+      (冪等性確認)、`skipped=2`(検索一致により新規作成・作成結果assertがskip)で
+      同一idが再度activate・確認され、`failed=0`のまま完了することを確認した。
+      `ansible-lint`・`pre-commit run`(check-confidential-info/gitleaks含む
+      全hook)いずれも新規/変更ファイルに対しPassedを確認した。
+    - **招待コード発行(Step3本体)は未実施のまま**: SMTP側のブロッカーは解消した
+      が、追記2で確認したもう一方のブロッカーである実ユーザーCSV
+      (`email,given_name,family_name,role_keys`、既存authentikからの抽出)は
+      本タスクの時点でも用意されていない(`terraform/data/student_exhibitors.csv`・
+      `ansible/roles/zitadel-bootstrap/files/zitadel_student_exhibitors.csv`は
+      いずれも出展団体向けの別データ、かつ後者は実データ未確定のPoCダミー。
+      招待ベース移行が対象とする「既存ユーザー」とは形式・対象母集団が異なり
+      転用不可)。招待コード発行はユーザーに対する不可逆な操作であるため、
+      CSV未準備のまま代替データで代用する実行は行わなかった。
+    - **9.4のチェックボックスについて**: Step1・Step2は合格、Step3は
+      SMTP未設定ブロッカーを解消したが実ユーザーCSV未準備ブロッカーが残るため
+      招待コード発行(受け入れ基準「既存ユーザーへの招待ベース移行を本番Zitadelに
+      対して実施する」)は未達である。よってチェックボックスは引き続き未完了
+      のままとする。実ユーザーCSVが用意され次第、
+      `ansible/roles/zitadel-cutover/tasks/step4_invite_migration.yml`
+      (`ZITADEL_CUTOVER_TARGET_ENV=prod`)を実行すればStep3を完了できる状態に
+      あるが、同ファイルの`argv`は現状`--send-email`を一切付与しない実装のまま
+      (51-54行目の`prod向けの送信メール確認を促す`debugは注意喚起のみで、
+      実際にフラグを付与する分岐は未実装)であることも次の実行者向けに
+      記録しておく。実行前に`--send-email`を付与する分岐追加、または
+      `scripts/zitadel-invite-migration.py`の直接呼び出しへの切り替えが必要。
 
 - [x] 9.5 authentik構成への切り戻し手順を整備する
   - Zitadel切替後に重大な認証障害が発生した場合の、旧authentik構成への切り戻し手順を作成する

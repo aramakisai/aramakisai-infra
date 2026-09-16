@@ -78,6 +78,20 @@ zitadel_branding_favicon: "{{ zitadel_branding_dir }}/favicon.png"
 
 # machine_user + PAT + (org_member|instance_member) の組。旧
 # terraform/zitadel_dovecot_auth.tf・terraform/zitadel_recovery_sa.tfに対応。
+# 招待コード発行(task9.4 Step3)のメール送信に使うSMTP設定 (旧authentik/現Directus/
+# Vaultwardenと共通のmailserver自体を配送基盤として使う。外部リレーは使わない
+# (2026-07-01にResendリレー廃止済み))。パスワードは既存Infisicalキー
+# NOREPLY_SMTP_PASSWORDをそのまま流用する(新規キー不要)。
+zitadel_smtp_config:
+  host: mail.aramakisai.com
+  port: 587
+  tls: true # STARTTLS (vaultwarden SMTP_SECURITY=starttls相当)
+  username: noreply@aramakisai.com
+  sender_address: noreply@aramakisai.com
+  sender_name: 荒牧祭実行委員会
+  description: aramakisai-noreply-smtp
+  infisical_hint: "NOREPLY_SMTP_PASSWORD (既存キー、Authentik/Vaultwardenと共通利用)"
+
 zitadel_machine_users:
   - user_name: dovecot-lua-auth
     name: Dovecot Lua Auth Bridge

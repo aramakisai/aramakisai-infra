@@ -1,0 +1,15 @@
+---
+# SMTP Email Provider投入のみ (task9.4 Step3の前提)。zitadel-resources.yml
+# (project/role/application/出展団体CSV等の一括投入)は経由しない
+# (出展団体CSVが現時点でPoCダミーデータのままで、再実行すると本番にダミー団体が
+# 再作成される既知の問題があるため)。
+# 前提: zitadel-bootstrap.ymlで初回admin/PATブートストラップが完了していること。
+- name: Zitadel SMTP Email Provider投入
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: zitadel-bootstrapロールの_smtp_configタスクを実行
+      ansible.builtin.include_role:
+        name: zitadel-bootstrap
+        tasks_from: _smtp_config

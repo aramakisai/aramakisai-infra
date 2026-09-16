@@ -155,3 +155,9 @@
   loop_control:
     loop_var: zitadel_exhibitor_item
     label: "{{ zitadel_exhibitor_item.email }}"
+
+# ------------------------------------------------------------
+# 8. Email Provider (SMTP、招待コード発行のメール送信に使用)
+# ------------------------------------------------------------
+- name: SMTP Email Providerを投入
+  ansible.builtin.include_tasks: _smtp_config.yml
