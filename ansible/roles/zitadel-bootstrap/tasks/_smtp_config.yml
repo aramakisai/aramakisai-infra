@@ -1,0 +1,120 @@
+---
+# Email Provider (SMTP)投入 (task9.4 Step3の前提)。
+#
+# GET /admin/v1/smtp (旧Deprecated AddSMTPConfig系API) は本番Zitadel(v4.12.3)で
+# 404だった。同バージョンではSMTP設定は汎用Email Provider API
+# (POST /admin/v1/email/_search、/admin/v1/email/smtp、
+# POST /admin/v1/email/{id}/_activate、GET /admin/v1/email)に統合済みのため
+# こちらを使う。
+#
+# 冪等性判定はレスポンスのsmtp.*フィールド名(未確認)には依存せず、自分で設定する
+# description(zitadel_smtp_config.description)の一致で行う。
+#
+# resources.yml(project/role/application等の一括投入)は経由しない (出展団体CSVが
+# 現時点でPoCダミーデータのままで、resources.yml全体を再実行すると本番に
+# ダミー団体が再作成される既知の問題があるため、このタスクは
+# ansible/playbooks/zitadel-smtp.yml から単独で呼べるようvars/resources.ymlを
+# 自前で読み込む)。
+
+- name: リソース定義を読み込み (zitadel_smtp_config)
+  ansible.builtin.include_vars: resources.yml
+
+- name: NOREPLY_SMTP_PASSWORDを解決 (Authentik/Vaultwardenと共通利用の既存Infisicalキー)
+  ansible.builtin.set_fact:
+    _zitadel_smtp_password: "{{ lookup('env', 'NOREPLY_SMTP_PASSWORD') }}"
+  no_log: true
+
+- name: 必須変数を検証
+  ansible.builtin.assert:
+    that:
+      - zitadel_admin_pat is defined
+      - zitadel_admin_pat | length > 0
+      - _zitadel_smtp_password | length > 0
+    fail_msg: >-
+      zitadel_admin_pat または NOREPLY_SMTP_PASSWORD を解決できませんでした。
+      `infisical run --env=prod -- ansible-playbook ...`で実行してください。
+
+- name: 既存のEmail Providerを検索
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    zitadel_api_method: POST
+    zitadel_api_path: /admin/v1/email/_search
+    zitadel_api_body: {}
+    zitadel_api_label: "search email providers"
+
+- name: 検索結果からSMTP設定を退避
+  ansible.builtin.set_fact:
+    _zitadel_smtp_existing: >-
+      {{ (zitadel_api_result.body.result | default([]))
+         | selectattr('description', 'defined')
+         | selectattr('description', 'equalto', zitadel_smtp_config.description)
+         | list }}
+  no_log: true
+
+- name: SMTP Email Providerを新規作成
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    zitadel_api_method: POST
+    zitadel_api_path: /admin/v1/email/smtp
+    zitadel_api_body:
+      senderAddress: "{{ zitadel_smtp_config.sender_address }}"
+      senderName: "{{ zitadel_smtp_config.sender_name }}"
+      host: "{{ zitadel_smtp_config.host }}:{{ zitadel_smtp_config.port }}"
+      tls: "{{ zitadel_smtp_config.tls }}"
+      description: "{{ zitadel_smtp_config.description }}"
+      plain:
+        user: "{{ zitadel_smtp_config.username }}"
+        password: "{{ _zitadel_smtp_password }}"
+    zitadel_api_label: "create smtp email provider"
+  when: (_zitadel_smtp_existing | length) == 0
+  no_log: true
+
+- name: SMTP Email Provider新規作成結果を確認
+  ansible.builtin.assert:
+    that:
+      - zitadel_api_result.status == 200
+    fail_msg: "SMTP email providerの作成に失敗しました: {{ zitadel_api_result.status }}"
+  when: (_zitadel_smtp_existing | length) == 0
+  no_log: true
+
+- name: SMTP Email Provider IDを確定
+  ansible.builtin.set_fact:
+    zitadel_smtp_provider_id: >-
+      {{ zitadel_api_result.body.id if (_zitadel_smtp_existing | length) == 0
+         else _zitadel_smtp_existing[0].id }}
+  no_log: true
+
+- name: SMTP Email Providerをactivate (activate済みの場合は無害、Label Policyと同じ扱い)
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    zitadel_api_method: POST
+    zitadel_api_path: "/admin/v1/email/{{ zitadel_smtp_provider_id }}/_activate"
+    zitadel_api_label: "activate smtp email provider"
+
+- name: SMTP Email Provider activate結果を確認
+  ansible.builtin.assert:
+    that:
+      - zitadel_api_result.status == 200 or zitadel_api_result.body.code | default(0) == 9
+    fail_msg: "SMTP email providerのactivateに失敗しました: {{ zitadel_api_result.status }}"
+  no_log: true
+
+- name: 有効化されたEmail Providerを取得して確認
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    zitadel_api_method: GET
+    zitadel_api_path: /admin/v1/email
+    zitadel_api_label: "get active email provider"
+
+- name: 有効化確認 (対象のSMTP設定がactiveであること)
+  ansible.builtin.assert:
+    that:
+      - zitadel_api_result.body.config.id == zitadel_smtp_provider_id
+      - "'ACTIVE' in (zitadel_api_result.body.config.state | default(''))"
+    fail_msg: >-
+      有効なEmail Providerがhost={{ zitadel_smtp_config.host }}のSMTP設定と一致しません:
+      {{ zitadel_api_result.body }}
+  no_log: true
+
+- name: SMTP設定投入完了
+  ansible.builtin.debug:
+    msg: "SMTP email provider (id={{ zitadel_smtp_provider_id }}, host={{ zitadel_smtp_config.host }}) を有効化しました。"
