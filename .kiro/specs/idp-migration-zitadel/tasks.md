@@ -905,10 +905,59 @@
         tasks.mdの実施結果とmain上の実ファイルの整合性を別途確認する必要がある。
       - Step3のDeniedURL対応方針(webhook外部公開 or DenyList緩和)は未確定。
 
-- [ ] 9.5 authentik構成への切り戻し手順を整備する
+- [x] 9.5 authentik構成への切り戻し手順を整備する
   - Zitadel切替後に重大な認証障害が発生した場合の、旧authentik構成への切り戻し手順を作成する
   - _Requirements: 7.5, 7.6_
   - _Depends: 9.4_
+  - **実施結果**:
+    - `docs/zitadel-rollback-runbook.md`(手順書)と`scripts/zitadel-rollback.sh`
+      (機械的実行スクリプト)を新規作成した。GitOps原則(Requirement 7.6)に
+      従い、スクリプトは`kubectl`/`argocd`/`terraform`を一切実行しない設計とし、
+      `git revert`によるgitopsマニフェストの巻き戻しと、Infisicalシークレットの
+      退避・復元のみを行う。ArgoCD syncは手順書に従い人間が実行する。
+    - **重大な発見(調査結果)**: task9.4のカットオーバーで変更される
+      `gitops/manifests/prod/{cms,cms-secrets,vaultwarden,roundcube,mailserver}/`
+      の実diffを精査した結果、`CMS_PROD_OIDC_CLIENT_SECRET`・
+      `VAULTWARDEN_OIDC_CLIENT_ID`・`VAULTWARDEN_OIDC_CLIENT_SECRET`・
+      `MAIL_OAUTH2_CLIENT_SECRET`の4つのInfisical prodキーが、authentik時代と
+      **同じキー名のままZitadelの値で上書き**される設計になっていることを確認した
+      (`ansible/roles/zitadel-bootstrap/vars/resources.yml`の
+      `infisical_hint: "... (既存キー更新)"`記載と一致)。そのため
+      `git revert`でgitopsマニフェストをauthentik構成に戻しても、この4キーの
+      値がZitadelのものに上書きされたままだと認証は復旧しない。この事実を
+      ランブックの「重要な注意」として明記し、`scripts/zitadel-rollback.sh`に
+      `backup-secrets`(カットオーバー実行前に4キーの現在値を退避)・
+      `restore-secrets`(退避した値を書き戻す)サブコマンドを実装した。
+      値はいずれもターミナルへ出力せずファイルへ直接リダイレクトする
+      (`feedback_infisical_cli_output_leak.md`の教訓を踏襲)。
+    - `scripts/zitadel-rollback.sh`には上記2サブコマンドに加え、
+      `find-commits`(カットオーバー対象パスを変更したコミット一覧表示)・
+      `revert <commit-ish>`(対象コミットが実際にカットオーバー対象パスを
+      変更しているかを検証してから`git revert --no-commit`を行う安全ガード付き)
+      を実装した。
+    - 検証は本番・k3dいずれのクラスタにも触れず、次の2種類で行った。
+      (1) `git`のロジック部分は使い捨てのtmp gitリポジトリ(`mktemp -d`)を
+      作って`commit_touches_cutover_paths`/`cmd_revert`の受理・拒否・
+      ワーキングツリー不変・revert後の内容復元を確認、
+      (2) Infisical連携部分はPATH上のfake `infisical`コマンド(ネットワーク
+      アクセスなし)で`backup-secrets`/`restore-secrets`のコマンド構築と
+      「値を標準出力に出さないこと」を確認。
+      `scripts/test-zitadel-rollback.sh`としてテストを追加し、12件成功を確認した。
+    - さらに、実リポジトリの使い捨てクローン(`git clone`後、実リポジトリには
+      一切書き込まない)に対して`scripts/zitadel-rollback.sh revert ce90de0`
+      (task9.4のカットオーバーコミット)を実行し、実際の本番相当diff
+      (25ファイル、`gitops/manifests/prod/{cms,cms-secrets,mailserver,
+      roundcube,vaultwarden}/`を含む)がコンフリクトなく`git revert
+      --no-commit`できることを確認した(クローンは検証後に削除済み)。
+    - ansible-lint/pre-commit(shellcheck含む全hook)は対象外(Ansible roleでは
+      なくbashスクリプトとして実装したため)だが、pre-commit run
+      (shellcheck/trailing-whitespace/check-confidential-info/gitleaks等)は
+      新規3ファイルに対して実行しPassedを確認した。
+    - **未実施・スコープ外**: 実際の本番カットオーバー・切り戻しの実行(いずれも
+      本タスクでは行っていない)。手順書・スクリプトの実地検証はtask9.6が担当する。
+      vaultwarden-rbac-sync webhook(Step3)は本ランブック作成時点で本番未投入
+      のため切り戻し対象に含めていない(投入され次第、対象パスをスクリプトの
+      `CUTOVER_PATHS`に追加する必要がある)。
 
 - [ ] 9.6 ロールバック手順を実地検証する
   - 旧authentik構成への切り戻し手順を実際に実行し、切り戻し後に既存アプリのログインが復旧することを確認する
