@@ -1,8 +1,11 @@
 # Zitadel 一括カットオーバー ランブック
 
 authentikからZitadelへ本番の認証基盤を切り替える際の実行順序と、各ステップ後の
-検証手順を示す。**本番への実カットオーバーはこのドキュメント自体の作成時点では
-実行していない。** 実行時は必ずこのドキュメントの手順に従うこと。
+検証手順を示す。
+
+**現在の状態**: Step1(Dovecot)・Step2(RPアプリOIDC Client)は本番で稼働中。
+Step3(招待ベース移行)は本番Zitadel自体にSMTP設定が存在しないため未実施
+(下記「既知のギャップ・未実施事項」参照)。
 
 自動化: `ansible/playbooks/zitadel-cutover.yml`(`ansible/roles/zitadel-cutover`)。
 `ZITADEL_CUTOVER_TARGET_ENV`環境変数(`k3d`|`prod`、既定`k3d`)で対象環境を切り替える。
@@ -30,9 +33,9 @@ task9.2参照)。
 - Infisical `prod`環境に以下のキーが登録済みであること(task9.2の
   `ansible/roles/zitadel-bootstrap/vars/resources.yml` infisical_hint参照):
   `CMS_PROD_OIDC_CLIENT_ID`/`CMS_PROD_OIDC_CLIENT_SECRET`、
-  `VAULTWARDEN_OIDC_CLIENT_ID`/`VAULTWARDEN_OIDC_CLIENT_SECRET`、
-  `ROUNDCUBE_OIDC_CLIENT_ID`/`MAIL_OAUTH2_CLIENT_SECRET`、
-  `DOVECOT_ZITADEL_AUTH_PAT`、`ZITADEL_INVITE_RECOVERY_SA_PAT`。
+  `VAULTWARDEN_OIDC_CLIENT_ID_ZITADEL`/`VAULTWARDEN_OIDC_CLIENT_SECRET_ZITADEL`、
+  `ROUNDCUBE_OIDC_CLIENT_ID`/`MAIL_OAUTH2_CLIENT_SECRET_ZITADEL`、
+  `DOVECOT_ZITADEL_AUTH_PAT`、`ZITADEL_INVITE_RECOVERY_SA_PAT`(いずれも登録済み)。
 
 ## Step1: Dovecot Lua Auth Bridge切替
 
@@ -158,12 +161,11 @@ python3 scripts/zitadel-invite-migration.py --csv=/path/to/existing-users.csv --
 
 ## 既知のギャップ・未実施事項
 
-- **本番への実カットオーバーは未実施**。本ドキュメントは手順の整備と
-  k3d PoCクラスタでの動作確認までがtask9.4のスコープ。
-- task1〜8・10の実装コード(PR #205)は2026-09-15の本番障害を受けてrevertされ
-  (`936e1d3`)、tasks.mdの実施結果に記載された成果物(k3dマニフェスト、
-  `scripts/zitadel-invite-migration.py`等)の大半は現在のmainに存在しない。
-  task9.4の実施にあたり、失われていた`scripts/zitadel-invite-migration.py`は
-  本タスクで再実装した(task6.1記載の設計に基づく)。同様に他タスクの成果物も
-  再確認が必要な可能性がある。
-- Step1のDocker Mailserverイメージでのdovecot-lua同梱可否は未検証。
+- **Step3(招待ベース移行)は未実施**。本番Zitadelインスタンス自体にSMTP設定が
+  存在しない(`GET /admin/v1/smtp`が`404 SMTP configuration not found`)ため、
+  `scripts/zitadel-invite-migration.py --send-email`は招待メールを配送できない。
+  本specはZitadel自身のSMTP設定投入をタスク化しておらず、送信元アドレス・
+  リレー方式の方針決定とgitops/Infisical実装が別途必要。
+- Step3の実行には既存authentikユーザーの実CSV(`email,given_name,family_name,
+  role_keys`)も別途準備が必要(本ランブックのスコープ外、authentik管理画面
+  またはAPIから取得すること)。
