@@ -372,6 +372,11 @@ data:
   # fan-out の移行状態に関係なく全MLで送信制限が機能する。
   user-patches.sh: |
     #!/bin/bash
+    # zitadel-auth.lua (Dovecot Lua Auth Bridge) が require("socket.http") /
+    # require("cjson.safe") に依存するが、docker-mailserver イメージには
+    # 同梱されていない (Debian bookworm、Lua 5.4)。
+    apt-get update -qq
+    apt-get install -y --no-install-recommends lua-socket lua-cjson
     cat > /etc/postfix/ldap-senders.cf <<INNEREOF
     bind = yes
     bind_dn = ${LDAP_BIND_DN}
