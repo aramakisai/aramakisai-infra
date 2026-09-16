@@ -737,6 +737,70 @@
       対応検討の経緯として残すが、最終的にAction Target/Execution自体を投入しない
       方針に確定した。vaultwarden-rbac-syncのイベント駆動同期(task4)は今後も
       手動運用のまま引き継ぐ。
+  - **追記9(2026-09-17、本番実行と復旧)**: PR #214(worktreeブランチ8コミット)を
+      `gh pr merge --admin --squash`でmainへマージ(`dfcaca4`)した後、
+      `ZITADEL_EXTERNAL_DOMAIN=idp.aramakisai.com infisical run --
+      ansible-playbook ansible/playbooks/zitadel-resources.yml`を本番へ実行した。
+      結果は`changed=0, failed=0`(ok=193, skipped=70)だったが、これは新規作成が
+      0件だったのではなく、2026-09-16の`terraform apply`時に`server closed the
+      stream without sending trailers`エラーで失敗したはずのリソース(project
+      「aramakisai」・role・OIDC application「cms-prod」「vaultwarden」
+      「roundcube」「cloudflare-access」・machine user「dovecot-lua-auth」
+      「invite-recovery-sa」・出展団体human user4件)が、**gRPCの応答ストリームだけ
+      切れてZitadelサーバー側では実際に作成が成功していた**ことが本番へのread-only
+      GET/search(project一覧・application一覧・machine user一覧)で判明したためだった
+      (terraform stateは空のまま)。
+    - **PoCダミーデータの本番混入と削除**: `ansible/roles/zitadel-bootstrap/files/
+      zitadel_student_exhibitors.csv`が実データではなく「模擬店A」「〇〇研究会」等の
+      プレースホルダー団体名+`team-a/b/c/d@aramakisai-poc.invalid`というPoCダミー <!-- confidential:allow -->
+      データのままであることが判明した。上記の理由でこの4件が本番に実際に作成
+      されていたため、ユーザー判断により`DELETE /management/v1/users/{id}`で削除した
+      (4件とも200で削除成功)。**このCSVファイル自体は今も同じダミーデータのままであり、
+      本Ansible roleを再度本番実行すると同じダミー団体が作り直される。実出展団体
+      データが確定するまでの未解決課題として残る。**
+    - **失われたclient_secret/PATの復旧**: 上記4アプリ・2 machine userは「器」は
+      存在するが、client_secret/PAT(一度きり発行)は2026-09-16の事故で記録前に
+      失われていた。ユーザー判断によりZitadel Management API
+      (`_generate_client_secret`・`POST /management/v1/users/{id}/pats`)で
+      再発行し、値を標準出力に出さずInfisical `prod`環境へ直接登録した:
+      `CMS_PROD_OIDC_CLIENT_ID`/`CMS_PROD_OIDC_CLIENT_SECRET`、
+      `VAULTWARDEN_OIDC_CLIENT_ID_ZITADEL`/`VAULTWARDEN_OIDC_CLIENT_SECRET_ZITADEL`、
+      `ROUNDCUBE_OIDC_CLIENT_ID`/`MAIL_OAUTH2_CLIENT_SECRET_ZITADEL`、
+      `TF_VAR_zitadel_cf_access_client_id`/`TF_VAR_zitadel_cf_access_client_secret`、
+      `DOVECOT_ZITADEL_AUTH_PAT`、`ZITADEL_INVITE_RECOVERY_SA_PAT`
+      (PAT2件はexpirationDate 2029-01-01T00:00:00Z、旧`zitadel_dovecot_auth.tf`の
+      設計値を踏襲)。
+    - **インシデント: client_secretの平文露出**: `cms-prod`の初回`_generate_client_secret`
+      呼び出し結果を誤ってターミナル出力に表示してしまった。直ちに同じエンドポイントで
+      再発行して前の値を無効化し、以降はファイル経由でのみ扱う方式(標準出力へ表示しない)
+      に切り替えて残り5件を処理した。リポジトリへのコミットには含まれていない。
+    - **terraform apply**: `terraform/access.tf`の
+      `cloudflare_zero_trust_access_identity_provider.zitadel`を`-target`指定で
+      apply(`authentik_*.tf`群はtunnel backend切替済みで触ると502になる既知の制約の
+      ため対象外)、`Apply complete! Resources: 1 added`。
+    - **ArgoCD反映**: `cms`/`roundcube`は`syncPolicy.automated`により、新しい
+      Infisicalキー登録後に自動でExternalSecretが更新されPodがselfHealで再作成され
+      正常化した。`vaultwarden`は2026-07-11から無関係の理由で`replicas: 0`のまま
+      (今回の作業対象外、変更せず)。
+    - **本番障害の発生と復旧(Dovecot Lua Auth Bridge)**: `mailserver-0`が0/1のまま、
+      Dovecotが`/etc/dovecot/zitadel-auth.lua`の`require('socket.http')`で失敗し
+      クラッシュし、実際に`postmaster@aramakisai.com`宛lmtp配送が`deferred`
+      (Internal error)になる実障害が発生した。原因は本番`docker-mailserver:15.1.0`
+      (Debian bookworm、Lua 5.4)に`lua-socket`/`lua-cjson`が同梱されていなかった
+      ことで、task9.4のk3d検証は別のテスト用Podへ手動インストールして確認していた
+      ため未検出だった。`kubectl exec`でコンテナへ直接`apt-get install`する一時
+      しのぎを試みかけたがコード管理外の変更でありユーザー指摘により中断した
+      (実インストールは未実行、read-only調査のみ)。正しい対応として
+      `gitops/manifests/prod/mailserver/configmap.yaml`の`user-patches.sh`に
+      `apt-get install -y --no-install-recommends lua-socket lua-cjson`を追記し
+      (`47aab29`、main直接push)、`docker-mailserver`公式サポートの永続化機構で
+      GitOps管理下に修正した。ArgoCD hard refresh→selfHealでPod再作成、
+      `doveadm auth test`で正常応答・メールキュー空を確認し復旧した。
+    - **未実施のまま残っている作業**: 既存ユーザーへの招待コード発行・メール送信
+      (`scripts/zitadel-invite-migration.py`の実ユーザー実行、実ユーザーリストCSVも
+      未準備)、CMS/Roundcube/メール認証の実際のE2Eログイン確認(ブラウザでの実ログイン、
+      Pod正常化とAPIレベルの疎通確認のみ実施済み)、出展団体CSVの実データ差し替え
+      (上記の既知課題)、`vaultwarden`の動作確認(`replicas: 0`のため未確認)。
 
 - [ ] 9.3 Terraform管理外のインスタンス設定をAdmin API importで反映する
   - Assert Roles on Authentication等、Terraformで管理しきれないインスタンス設定の差分を洗い出す
@@ -968,6 +1032,20 @@
       上記のDeniedURL未確定・PR #205 revert影響の記録は経緯として残すが、
       これらは今後Step3(webhook)を検討する場合の課題ではなく、
       「対応しない」と決定済みの事項として扱う。
+  - **追記(2026-09-17、本番実行時に発生した障害と復旧)**: task9.2の本番適用に伴い
+      Dovecot Lua Auth Bridge(Step1)が本番で稼働開始したところ、本番
+      `docker-mailserver:15.1.0`(Debian bookworm、Lua 5.4)に`lua-socket`/
+      `lua-cjson`が同梱されておらず`/etc/dovecot/zitadel-auth.lua`の
+      `require('socket.http')`が失敗、Dovecot認証が全面クラッシュし実際に
+      `postmaster@aramakisai.com`宛lmtp配送が`deferred`になる障害が発生した。
+      k3d検証(本タスクの実施結果参照)は別のテスト用Podへ手動でライブラリを
+      インストールして確認していたため、本番イメージでの同梱可否は未検証のまま
+      だったことが原因(既知課題として記録済みだった)。
+      `gitops/manifests/prod/mailserver/configmap.yaml`の`user-patches.sh`に
+      `apt-get install -y --no-install-recommends lua-socket lua-cjson`を追記し
+      (`47aab29`)、`docker-mailserver`公式サポートの永続化機構で解消した(詳細は
+      task9.2追記9参照)。既存ユーザーへの招待コード発行・メール送信(Step3)は
+      実ユーザーリスト未準備のため未実施。
 
 - [x] 9.5 authentik構成への切り戻し手順を整備する
   - Zitadel切替後に重大な認証障害が発生した場合の、旧authentik構成への切り戻し手順を作成する
