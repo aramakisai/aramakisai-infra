@@ -1,0 +1,92 @@
+---
+# Actions v2 Target + Execution (旧terraform/zitadel_actions.tf)。
+#
+# 既知の制約: Zitadel v4.12.3(本番と同一image tag)のActions v2 REST APIは
+# HTTPClient.DenyListによりRFC1918/`.cluster.local`宛のtarget作成を
+# "Errors.Target.DeniedURL"で拒否する(k3d実機で確認済み、upstream
+# zitadel/zitadel#12326と同種の制約で回避策なし、issueはnot plannedでclose済み)。
+# クラスタ内Serviceを外部公開せずこの制約を回避する方法が未確定なため、
+# 本ロールはtarget作成を試行しDeniedURLで失敗した場合はexecution設定を
+# スキップして警告を表示するに留める(ユーザー判断待ち、tasks.md参照)。
+- name: Action Targetを検索
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    zitadel_api_method: POST
+    zitadel_api_path: /v2/actions/targets/search
+    zitadel_api_body:
+      queries:
+        - nameFilter: { name: "{{ zitadel_action_target_name }}" }
+    zitadel_api_label: "search action target {{ zitadel_action_target_name }}"
+
+- name: Action Target検索結果を退避
+  ansible.builtin.set_fact:
+    _zitadel_target_search: "{{ zitadel_api_result }}"
+  no_log: true
+
+- name: Action Targetを新規作成
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    zitadel_api_method: POST
+    zitadel_api_path: /v2/actions/targets
+    zitadel_api_body:
+      name: "{{ zitadel_action_target_name }}"
+      restWebhook: { interruptOnError: false }
+      endpoint: "{{ zitadel_action_target_endpoint }}"
+      timeout: "{{ zitadel_action_target_timeout }}"
+    zitadel_api_label: "create action target {{ zitadel_action_target_name }}"
+  when: (_zitadel_target_search.body.targets | default([])) | length == 0
+
+- name: DeniedURLで拒否された場合は警告して以降(execution)をスキップ
+  ansible.builtin.set_fact:
+    zitadel_action_target_denied: true
+  when: >-
+    (_zitadel_target_search.body.targets | default([])) | length == 0
+    and zitadel_api_result.body.message is defined
+    and 'DeniedURL' in zitadel_api_result.body.message
+
+- name: DeniedURL警告を表示
+  ansible.builtin.debug:
+    msg: >-
+      Action Target '{{ zitadel_action_target_name }}' の作成がZitadelの
+      HTTPClient.DenyList(RFC1918/cluster-local宛先の拒否)によりスキップされました。
+      endpoint={{ zitadel_action_target_endpoint }}。vaultwarden-rbac-sync webhookの
+      Actions v2連携は現状投入できません。対応方針はユーザー判断が必要です
+      (tasks.md task9.2参照)。
+  when: zitadel_action_target_denied | default(false)
+
+- name: Action Target作成結果を確認 (DeniedURL以外の失敗のみエラー)
+  ansible.builtin.assert:
+    that:
+      - zitadel_api_result.status == 200 or zitadel_action_target_denied | default(false)
+    fail_msg: "action target {{ zitadel_action_target_name }} の作成に失敗しました: {{ zitadel_api_result.status }}"
+  when: (_zitadel_target_search.body.targets | default([])) | length == 0
+  no_log: true
+
+- name: Action Target IDを確定
+  ansible.builtin.set_fact:
+    zitadel_action_target_id: >-
+      {{ (zitadel_api_result.body.id)
+         if ((_zitadel_target_search.body.targets | default([])) | length == 0)
+         else (_zitadel_target_search.body.targets[0].id) }}
+  when: not (zitadel_action_target_denied | default(false))
+  no_log: true
+
+# SetExecutionは完全上書き(upsert)のため存在確認が不要 (実機確認済み)。
+- name: "Execution(user.grant event条件)を設定"
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    zitadel_api_method: PUT
+    zitadel_api_path: /v2/actions/executions
+    zitadel_api_body:
+      condition: { event: { group: "user.grant" } }
+      targets: ["{{ zitadel_action_target_id }}"]
+    zitadel_api_label: "set execution user.grant"
+  when: not (zitadel_action_target_denied | default(false))
+
+- name: Execution設定結果を確認
+  ansible.builtin.assert:
+    that:
+      - zitadel_api_result.status == 200
+    fail_msg: "execution(user.grant)の設定に失敗しました: {{ zitadel_api_result.status }}"
+  when: not (zitadel_action_target_denied | default(false))
+  no_log: true

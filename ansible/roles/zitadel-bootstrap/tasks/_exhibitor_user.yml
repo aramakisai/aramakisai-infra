@@ -1,0 +1,62 @@
+---
+# zitadel_exhibitor_item: {team_name, email} (CSV 1行、terraform/data/zitadel_student_exhibitors.csv)
+# 旧terraform/zitadel_student_exhibitor.tf。招待コード発行そのものは本タスクの対象外
+# (task6.1のscripts/zitadel-invite-migration.py相当の一括移行フローで別途実施する)。
+# ここではhuman_user作成 + project role付与のみを冪等に行う。
+
+- name: "出展団体ユーザーを検索: {{ zitadel_exhibitor_item.email }}"
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    zitadel_api_method: POST
+    zitadel_api_path: /management/v1/users/_search
+    zitadel_api_body:
+      queries:
+        - userNameQuery: { userName: "{{ zitadel_exhibitor_item.email }}", method: TEXT_QUERY_METHOD_EQUALS }
+    zitadel_api_label: "search exhibitor {{ zitadel_exhibitor_item.email }}"
+
+- name: "出展団体ユーザー検索結果を退避: {{ zitadel_exhibitor_item.email }}"
+  ansible.builtin.set_fact:
+    _zitadel_exhibitor_search: "{{ zitadel_api_result }}"
+  no_log: true
+
+- name: "出展団体ユーザーを新規作成: {{ zitadel_exhibitor_item.email }}"
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    zitadel_api_method: POST
+    zitadel_api_path: /v2/users/human
+    zitadel_api_body:
+      username: "{{ zitadel_exhibitor_item.email }}"
+      profile: { givenName: "{{ zitadel_exhibitor_item.team_name }}", familyName: "出展団体" }
+      email: { email: "{{ zitadel_exhibitor_item.email }}", isVerified: true }
+    zitadel_api_label: "create exhibitor {{ zitadel_exhibitor_item.email }}"
+  when: (_zitadel_exhibitor_search.body.result | default([])) | length == 0
+
+- name: "出展団体ユーザーIDを確定: {{ zitadel_exhibitor_item.email }}"
+  ansible.builtin.set_fact:
+    zitadel_exhibitor_id: >-
+      {{ (zitadel_api_result.body.userId)
+         if ((_zitadel_exhibitor_search.body.result | default([])) | length == 0)
+         else (_zitadel_exhibitor_search.body.result[0].id) }}
+  no_log: true
+
+- name: "既存user_grantを確認: {{ zitadel_exhibitor_item.email }}"
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    zitadel_api_method: POST
+    zitadel_api_path: /management/v1/users/grants/_search
+    zitadel_api_body:
+      queries:
+        - userIdQuery: { userId: "{{ zitadel_exhibitor_id }}" }
+        - projectIdQuery: { projectId: "{{ zitadel_project_id }}" }
+    zitadel_api_label: "search user grant {{ zitadel_exhibitor_item.email }}"
+
+- name: "user_grantを付与: {{ zitadel_exhibitor_item.email }}"
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    zitadel_api_method: POST
+    zitadel_api_path: "/management/v1/users/{{ zitadel_exhibitor_id }}/grants"
+    zitadel_api_body:
+      projectId: "{{ zitadel_project_id }}"
+      roleKeys: ["exhibitor"]
+    zitadel_api_label: "add user grant {{ zitadel_exhibitor_item.email }}"
+  when: (zitadel_api_result.body.result | default([])) | length == 0

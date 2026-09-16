@@ -1,0 +1,12 @@
+---
+# project/role/application/action等のZitadelリソース投入 (task 9.2)。
+# 前提: zitadel-bootstrap.ymlで初回admin/PATブートストラップが完了していること。
+- name: Zitadelリソース投入 (project/role/application/action)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: zitadel-bootstrapロールのresourcesタスクを実行
+      ansible.builtin.include_role:
+        name: zitadel-bootstrap
+        tasks_from: resources

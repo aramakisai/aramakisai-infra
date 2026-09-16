@@ -195,49 +195,30 @@ variable "vaultwarden_rbac_sync_trigger_token" {
 }
 
 # ============================================================
-# Zitadel IaC (authentikの後継、PoC)
+# Cloudflare Access × Zitadel OIDC
 # ============================================================
+#
+# project/role/application/action等のZitadelリソース管理主体はterraform-provider-zitadel
+# (gRPC専用)からAnsible経由のv2 Management API(HTTP/JSON)へ移行した(design.md
+# 「Zitadel Provider Access Path」参照)。Cloudflare Access用OIDC Applicationは
+# ansible/roles/zitadel-bootstrap(tasks/_oidc_app.yml)が作成し、client_id/secretは
+# Zitadelが作成時に一度だけ返す値のためterraform側では発行できない
+# (authentik時代のauthentik_cf_client_id/authentik_cf_client_secretと同じ、
+# チキンエッグ問題の回避パターン)。初回applyはdefault=""のまま実行し、Ansible実行後に
+# HCP Terraformワークスペースへ設定して再applyする。
 
-variable "zitadel_domain" {
-  description = "Zitadel API Endpoint ドメイン (スキーム無し。本番切替後はauthentikと同じidp.aramakisai.comを想定)"
-  type        = string
-  default     = "idp.aramakisai.com"
-}
-
-variable "zitadel_port" {
-  description = "Zitadel API 接続ポート (80/443以外を使う場合のみ指定。k3d検証等)"
-  type        = string
-  default     = ""
-}
-
-variable "zitadel_insecure" {
-  description = "Zitadel APIへの接続にTLSを使わない場合はtrue (k3d検証等、本番はfalse)"
-  type        = bool
-  default     = false
-}
-
-variable "zitadel_token" {
-  description = "Zitadel Terraform Provider用PAT (machine user: terraform-provider, role: IAM_OWNER)"
+variable "zitadel_cf_access_client_id" {
+  description = "Zitadel OIDC Client ID (Cloudflare Access IdP登録用、cloudflare-accessアプリ)"
   type        = string
   sensitive   = true
   default     = ""
 }
 
-variable "zitadel_org_id" {
-  description = <<-EOT
-    zitadel_project_roleがorg_idを必須とするため指定する組織ID (FirstInstanceで
-    自動作成される既定組織)。zitadel_tokenのPATで
-    `curl -H "Authorization: Bearer $PAT" -H "Host: <domain>" https://<domain>/auth/v1/users/me`
-    を呼び、レスポンスの`details.resourceOwner`を転記する。
-  EOT
+variable "zitadel_cf_access_client_secret" {
+  description = "Zitadel OIDC Client Secret (同上)"
   type        = string
+  sensitive   = true
   default     = ""
-}
-
-variable "vaultwarden_rbac_sync_webhook_endpoint" {
-  description = "vaultwarden-rbac-sync常駐PodのActions v2 webhook受信エンドポイント (クラスタ内Service、外部公開なし)"
-  type        = string
-  default     = "http://vaultwarden-rbac-sync.prod.svc.cluster.local/webhook/zitadel"
 }
 
 # ============================================================

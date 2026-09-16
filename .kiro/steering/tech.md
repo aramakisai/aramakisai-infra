@@ -149,7 +149,7 @@ ssh root@prod-node-1 "systemctl status os-update-notify.timer; cat /var/run/rebo
 ```
 
 ### Infisical で管理するシークレット一覧
-- **IaC & 認証**: `HCLOUD_TOKEN`, `CLOUDFLARE_API_TOKEN`, `TAILSCALE_OAUTH_CLIENT_ID`, `TAILSCALE_OAUTH_CLIENT_SECRET`, `TF_VAR_k3s_token`, `TF_VAR_tailscale_api_key`, `TF_VAR_authentik_cf_client_id`, `TF_VAR_authentik_cf_client_secret`
+- **IaC & 認証**: `HCLOUD_TOKEN`, `CLOUDFLARE_API_TOKEN`, `TAILSCALE_OAUTH_CLIENT_ID`, `TAILSCALE_OAUTH_CLIENT_SECRET`, `TF_VAR_k3s_token`, `TF_VAR_tailscale_api_key`, `TF_VAR_authentik_cf_client_id`, `TF_VAR_authentik_cf_client_secret`, `TF_VAR_zitadel_cf_access_client_id`, `TF_VAR_zitadel_cf_access_client_secret`（`terraform/access.tf`のCloudflare Access向けZitadel OIDC IdP登録用。`ansible/roles/zitadel-bootstrap`が作成するcloudflare-access OIDC Applicationの発行値を登録する、`authentik_cf_client_id`と同じチキンエッグ回避パターン）
 - **Ansible & 復旧**: `K3S_TOKEN`, `CLOUDFLARE_TUNNEL_TOKEN`, `CLOUDFLARE_TUNNEL_ID`, `INFISICAL_CLIENT_ID`, `INFISICAL_CLIENT_SECRET`, `ARGOCD_GITHUB_DEPLOY_KEY`, `TFC_API_TOKEN`, `TFC_WORKSPACE_ID`, `TAILSCALE_API_KEY`, `TAILSCALE_TAILNET`
 - **Cloudflare Access (E2E CI)**: `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET`（`aramakisai-web` の Playwright E2E テストが Cloudflare Access の Authentik ログインを迂回するための Service Token。`terraform/access.tf` の `cloudflare_zero_trust_access_service_token.e2e_ci` が発行元。`aramakisai-web` 側 `staging-e2e-verification` spec が前提としていた secret 名と一致しており乖離なし）
 - **アプリ用シークレット**:
@@ -164,7 +164,7 @@ ssh root@prod-node-1 "systemctl status os-update-notify.timer; cat /var/run/rebo
   - **Vaultwarden RBAC Sync**: `VAULTWARDEN_RBAC_SYNC_AUTHENTIK_API_TOKEN`（`PRESENCE_AUTHENTIK_API_TOKEN`と同パターン、`terraform/authentik_vaultwarden_rbac_sync.tf`で発行）, `VAULTWARDEN_RBAC_SYNC_SERVICE_ACCOUNT_CLIENT_ID`, `VAULTWARDEN_RBAC_SYNC_SERVICE_ACCOUNT_CLIENT_SECRET`（Vaultwarden専用サービスアカウントのPersonal API Key、手動ブートストラップ必須）, `TF_VAR_vaultwarden_rbac_sync_trigger_token`（Trigger Receiver共有ベアラートークン）, `DISCORD_OPS_WEBHOOK_URL`（既存キーを再利用、新規作成なし）
   - **os-k3s-auto-update**: 新規シークレットなし。既存 `DISCORD_OPS_WEBHOOK_URL` を再利用し、`ansible/roles/os-auto-update`(ホストOS更新結果通知)・`.github/workflows/k3s-version-check.yml`・`.github/workflows/k3s-upgrade.yml` の3箇所で新規に利用。
   - **ArgoCD ApplicationSet (directus-schema-preview)**: `ARGOCD_APPLICATIONSET_GITHUB_APP_ID`, `ARGOCD_APPLICATIONSET_GITHUB_APP_INSTALLATION_ID`, `ARGOCD_APPLICATIONSET_GITHUB_APP_PRIVATE_KEY`（aramakisai-infra への `pull-requests: read-only` のみを持つ専用 GitHub App。PR generator が open な `directus-schema-*` PR を検出するために使用）
-  - **Zitadel**: `ZITADEL_MASTERKEY`, `ZITADEL_DB_PASSWORD`, `TF_VAR_zitadel_token`（Terraform provider用PAT、`ansible/roles/zitadel-bootstrap`が発行・回収したPATを手動登録）。RPアプリ側(CMS/Vaultwarden/Roundcube)のOIDC Client Secret・`DOVECOT_ZITADEL_AUTH_PAT`等は別PRでのOIDC Client切替時に追加登録する
+  - **Zitadel**: `ZITADEL_MASTERKEY`, `ZITADEL_DB_PASSWORD`, `TF_VAR_zitadel_token`（project/role/application/action等のZitadelリソース管理はTerraform providerからAnsible(`ansible/roles/zitadel-bootstrap`のresourcesタスク)へ移行済み。このキーは元々Terraform provider用PATだったが、同一のPAT(machine user: `terraform-provider`, role: `IAM_OWNER`)をAnsible実行時にも`infisical run --env=prod`経由でそのまま再利用する）。RPアプリ側(CMS/Vaultwarden/Roundcube)のOIDC Client Secret・`DOVECOT_ZITADEL_AUTH_PAT`・`ZITADEL_INVITE_RECOVERY_SA_PAT`は、Ansible role初回実行時に新規発行されローカルファイルへ一時保存される値を手動登録する(想定キー名は`ansible/roles/zitadel-bootstrap/vars/resources.yml`の`infisical_hint`参照)
 
 ### Commit Protection & Coding Standards
 - **パス漏洩防止**: pre-commit フック `scripts/check-confidential-info.py` がローカル絶対パスや非許可メールのコミットをブロック。

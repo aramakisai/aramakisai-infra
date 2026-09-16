@@ -569,6 +569,118 @@
     `terraform/zitadel_recovery_sa.tf`(_Boundary: Zitadel Terraform Provider定義_)が新方針での
     Ansible化対象に含まれるかは本改訂の範囲外とし、9.2実装時に別途判断する。10.2/10.3自体の実施結果・
     Boundary表記は過去の実機検証の記録のため変更しない。
+  - **追記8(2026-09-16、Ansible role実装・k3d実機検証。本番未適用)**:
+    - **到達経路の決定**: design.md記載の候補(a)(既存`ansible/roles/zitadel-bootstrap`と同じ
+      `kubectl exec`パターン)を採用した。(b)(`idp.aramakisai.com`経由の直接HTTP到達)は、
+      追記5で判明した`ExternalDomain`とHostヘッダの一致要求(port-forward等でHostが
+      一致しないと`Instance not found`になる)がAnsible実行ホストからの到達でも同様に
+      発生しうる上、公開エンドポイント経由にすると認証情報(admin PAT)が外部到達可能な
+      経路を常時通ることになり不要にリスクを広げる。(a)は既存roleで実績があり
+      追加の到達経路確保が不要なため、実装前の判断としてもそのまま(a)を採用した。
+    - **実装**: `ansible/roles/zitadel-bootstrap/tasks/resources.yml`(+`_project_role.yml`・
+      `_oidc_app.yml`・`_action_target.yml`・`_org_idp_oauth.yml`・`_label_policy.yml`・
+      `_label_policy_asset.yml`・`_machine_user_pat.yml`・`_exhibitor_user.yml`・
+      汎用API呼び出し`_api_call.yml`)、および呼び出し先のNode.jsヘルパー
+      `files/zitadel_api.js`を追加。新規playbook`ansible/playbooks/zitadel-resources.yml`
+      (`include_role: zitadel-bootstrap, tasks_from: resources`)から実行する。
+      各リソースは「検索して存在確認→なければ作成、あれば必要な項目のみ更新」の冪等パターンで
+      実装し、project→role→application→action→idp→label_policy→machine_user→出展団体の順で
+      投入する。対象は design.md記載の19ブロック全て(`terraform/zitadel_student_exhibitor.tf`・
+      `terraform/zitadel_recovery_sa.tf`を含む。追記7で持ち越されていた「9.2実装時に別途判断」を
+      解消し、本文の資源数(project 1, role 2, application_oidc 4, action_target 1,
+      action_execution_event 1, org_idp_oauth 1, label_policy 1, machine_user 2,
+      personal_access_token 2, org_member 1, instance_member 1, human_user 1, user_grant 1、
+      計19)がこの2ファイルを含めて初めて一致することを根拠に、含める判断とした)。
+    - **HTTP到達の実装詳細**: `kubectl exec -i <pod> -c login -- node -e <script>`でZitadelと
+      同一Pod内のloginコンテナ(Node.js、curl/wgetは不在で`fetch`はある)からAPIを呼ぶ。
+      ただし`fetch`(undici)はHostヘッダの上書きをFetch仕様上のforbidden headerとして拒否する
+      ため、Node組み込みの`http`モジュール(低レベルAPI、Host上書き可能)を使用する実装にした。
+      常にPod自身のloopback(127.0.0.1:8080)へ接続しHostヘッダのみをそのインスタンスの
+      `ZITADEL_EXTERNALDOMAIN`値(k3d: `zitadel.zitadel.svc.cluster.local`、本番:
+      `idp.aramakisai.com`)へ差し替える設計(cloudflared等のリバースプロキシがoriginへ
+      転送する際に元のHostを保持するのと同じ仕組み)。この問題は既存roleが`kubectl exec`で
+      Zitadel CLIサブコマンド(`/app/zitadel ready`)しか呼んでおらずHTTPを経由しなかったため
+      未発覚だったもので、今回のHTTP API呼び出し実装で新たに顕在化した。
+    - **k3d実機検証(2026-09-16、`zitadel-poc`クラスタ)**: 同一の`ansible-playbook
+      ansible/playbooks/zitadel-resources.yml`を3回連続実行した。1回目でproject 1・role 10
+      (部門9+出展団体1)・application_oidc 4(cms-prod/vaultwarden/roundcube/cloudflare-access)・
+      action_execution_event 1・org_idp_oauth 1(Discord)・label_policy(色/テーマ/ロゴ/icon)・
+      machine_user 2(dovecot-lua-auth/invite-recovery-sa)+org_member/instance_member+PAT・
+      出展団体human_user 4+user_grant 4を投入。2回目・3回目は`changed=0, failed=0`
+      (Ansible自体の変更検知ではなく、各タスクが実際のAPI応答(検索結果と目的の設定値の比較、
+      またはZitadel自体が返す「No Changes」(HTTP 400, code 9)応答)を根拠に更新をスキップした
+      結果であり、再実行しても実際に差分が出ないことを確認した)。OIDC Applicationの
+      client_secret・PATはZitadelが発行時に一度しか返さない値のため、既存確認できた場合は
+      絶対に再作成・再発行しない設計にした(再作成すると稼働中のRPアプリ認証が壊れるため)。
+      ロゴ/icon画像の再アップロードも同一内容ならchangeDate/sequenceが変化しないこと
+      (=冪等)を実機で確認した。
+    - **実装中に見つかったAPI仕様上の非自明な点(いずれも実機で確認済み)**:
+      1. Actions v2のターゲット検索エンドポイントは`/v2/actions/targets/search`
+         (アンダースコアなし)であり、他のManagement/Admin API(v1系)で一貫している
+         `/_search`(アンダースコアあり)ではない。誤ったパスに`POST`すると404ではなく
+         `GetTarget`のID解決に化けて`Target not found`という紛らわしいエラーになる。
+      2. Discordのような`zitadel_org_idp_oauth`(Terraform provider側のリソース名)が実際に
+         作成するのは新系統の「IDP Template」であり、`/management/v1/idps/_search`
+         (旧系統)では見つからず`/management/v1/idps/templates/_search`でのみ検索できる。
+         更新エンドポイントも`/management/v1/idps/oauth/{id}`(PUT)であり、旧系統の
+         `/management/v1/idps/{id}`ではない。
+      3. Label Policyのdark版ロゴ/iconアップロードエンドポイントは`.../logo/dark`・
+         `.../icon/dark`(スラッシュ区切り)であり、`.../logo-dark`ではない
+         (誤ると405 Method Not Allowed)。
+      4. `/management/v1/users/_search`のmachine user検索結果の項目は`.id`であり
+         `.userId`ではない(`AddMachineUser`のレスポンス自体は`.userId`を返すため紛らわしい)。
+    - **未解決の重大な制約(ユーザー判断待ち、本番未適用)**: Actions v2の`action_target`作成
+      (`POST /v2/actions/targets`)を、既存の`vaultwarden_rbac_sync_webhook_endpoint`
+      (`http://vaultwarden-rbac-sync.prod.svc.cluster.local/webhook/zitadel`、クラスタ内Service)
+      で実行したところ、本番と同一image tag(v4.12.3)のk3d実機で
+      `Errors.Target.DeniedURL`(HTTP 400)により拒否されることを確認した。原因は
+      Zitadelの`HTTPClient.DenyList`(SSRF対策、RFC1918/`.cluster.local`宛先を既定で拒否)で
+      あり、upstream issue `zitadel/zitadel#12326`(v4.15.2で顕在化と報告されているが、
+      本検証でv4.12.3でも既に同じ挙動であることを実機で確認した)と同種の制約。同issueは
+      「allowlist機構なし」を理由にnot plannedでクローズ済みで、回避策は
+      (a) webhookエンドポイントを外部公開する(既存設計「クラスタ内Service経由で完結、
+      外部公開不要」(design.md)と矛盾する)、(b) Zitadel StatefulSetへ
+      `ZITADEL_HTTPCLIENT_DENYLIST`(または旧`ZITADEL_ACTIONS_HTTP_DENYLIST`)環境変数を
+      追加しRFC1918の一部を許可リストから除外する(SSRF対策の一部を意図的に緩めることになる
+      セキュリティ上のトレードオフ)、のいずれかしかない。過去のTailscale Operator導入の
+      経緯(ユーザーに無断実装を却下された事例)を踏まえ、本タスクではどちらも実装せず、
+      Ansible role側は`Errors.Target.DeniedURL`を検知した場合はexecution設定をスキップし
+      警告を表示するに留めた(それ以外のエラーは通常通り失敗として扱う)。対応方針の決定は
+      ユーザー判断が必要。
+    - **`terraform/`側の変更**: `terraform/zitadel_*.tf`全9ファイル(`zitadel_main.tf`含む、
+      providerブロックも含めて全リソースがAnsible管理化されたため)を削除し、
+      `terraform/providers.tf`の`zitadel`プロバイダ宣言も削除した。`terraform/outputs.tf`の
+      `zitadel_cms_client_secret`等4つのoutput(削除したリソースを参照していたもの)も削除した
+      (これらの値は今後Ansible roleが新規発行時にローカルファイルへ出力する運用に置き換わる)。
+      `terraform/access.tf`の`cloudflare_zero_trust_access_identity_provider.zitadel`が
+      参照していた`zitadel_application_oidc.cloudflare_access.client_id/secret`は、
+      新規変数`var.zitadel_cf_access_client_id`/`var.zitadel_cf_access_client_secret`
+      (`terraform/variables.tf`に追加、authentik時代の`authentik_cf_client_id`/
+      `authentik_cf_client_secret`と同じチキンエッグ回避パターン)に置き換えた。
+      Ansible roleが新規作成したcloudflare-access OIDC Applicationのclient_id/secretを
+      Infisicalへ登録後、HCP Terraformワークスペース側の変数を設定して再applyする運用になる。
+      使われなくなった`zitadel_domain`/`zitadel_port`/`zitadel_insecure`/`zitadel_token`/
+      `zitadel_org_id`/`vaultwarden_rbac_sync_webhook_endpoint`の6変数(いずれもterraform内で
+      他に参照元がないことをgrepで確認済み)も削除した。`terraform/data/zitadel_student_exhibitors.csv`
+      はTerraformから参照されなくなったため`ansible/roles/zitadel-bootstrap/files/`へ移設した。
+    - **静的チェック**: `terraform fmt -check`・`terraform validate`
+      (`terraform init -backend=false`によるローカル検証のみ、TFCバックエンド・state・lockには
+      一切接続していない)・`ansible-lint`・pre-commit全hook(gitleaks・
+      check-confidential-info含む)をいずれも通過した。
+    - **本番適用について(未実施)**: 以下は本番へは一切影響していない(worktree内の
+      コミットのみ、prod Terraform apply・prod Ansible実行・prod kubectl操作は一切実行していない):
+      - `infisical run --env=prod -- ansible-playbook ... zitadel-resources.yml`の実プロド実行
+      - 新規発行されるOIDC Client Secret(CMS/Vaultwarden/Roundcube/Cloudflare Access)・
+        machine user PAT(Dovecot Lua Auth Bridge/Invite Recovery SA)のInfisical `prod`環境への
+        実登録(想定キー名は`vars/resources.yml`の`infisical_hint`コメントに記載)
+      - `terraform/access.tf`変更に伴う`TF_VAR_zitadel_cf_access_client_id`/
+        `TF_VAR_zitadel_cf_access_client_secret`のInfisical登録と`terraform apply`
+      - Actions v2 `action_target`のDeniedURL制約への対応方針決定
+      - このタスクをマージ・本番適用する場合、本番Zitadel(追記5時点で`zitadel-0`
+        2/2 Running、project/role/application等は0件)に対してAnsible roleを実行する前に、
+        上記のDeniedURL対応方針を先に決めておくこと(action_target作成が失敗して
+        止まる設計ではなく警告してスキップする設計のため、方針未決定のままでも
+        他リソースの投入は完了できるが、vaultwarden-rbac-sync連携は投入されないまま残る)。
 
 - [ ] 9.3 Terraform管理外のインスタンス設定をAdmin API importで反映する
   - Assert Roles on Authentication等、Terraformで管理しきれないインスタンス設定の差分を洗い出す
