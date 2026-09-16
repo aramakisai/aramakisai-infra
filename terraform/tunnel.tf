@@ -28,12 +28,25 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "main" {
 
     # Zitadel IdP: login v2 UIはZitadel公式ドキュメント(reverse proxy設定例)通り
     # /ui/v2/login配下のみ別コンテナ(login, port 3000)、それ以外は全てAPI(port 8080)。
-    # path指定ルールは先勝ちのため、より具体的な/ui/v2/loginを先に置く必要がある
+    # path指定ルールは先勝ちのため、より具体的なpath指定ルールを先に、無指定の
+    # フォールバック(8080)を最後に置く必要がある
     ingress_rule {
       hostname = "idp.aramakisai.com"
       path     = "^/ui/v2/login.*"
       service  = "http://zitadel.zitadel.svc.cluster.local:3000"
     }
+
+    # vaultwarden-rbac-sync: Zitadel Actions v2 webhook受信用。ZitadelのHTTPClient.DenyList
+    # (SSRF対策)がRFC1918/cluster-local宛先へのtarget作成を拒否するため外部公開が必須だが、
+    # 新規サブドメインは増やさず(サブドメインを冗長に増やさない方針)、既にZitadel自身の
+    # 外部到達に使っている idp.aramakisai.com にpathで相乗りさせる。ブラウザアクセスは
+    # 想定しないためCloudflare Accessは付与しない(認証はwebhook側の署名検証に委ねる)。
+    ingress_rule {
+      hostname = "idp.aramakisai.com"
+      path     = "^/webhook/rbac-sync.*"
+      service  = "http://vaultwarden-rbac-sync.prod.svc.cluster.local:80"
+    }
+
     ingress_rule {
       hostname = "idp.aramakisai.com"
       service  = "http://zitadel.zitadel.svc.cluster.local:8080"
@@ -64,15 +77,6 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "main" {
     ingress_rule {
       hostname = "vault.aramakisai.com"
       service  = "http://vaultwarden.prod.svc.cluster.local:80"
-    }
-
-    # vaultwarden-rbac-sync: Zitadel Actions v2 webhook受信用。ZitadelのHTTPClient.DenyList
-    # (SSRF対策)がRFC1918/cluster-local宛先へのtarget作成を拒否するため外部公開が必須
-    # (クラスタ内Service宛のままではAction Target自体を作成できない)。ブラウザからの
-    # アクセスは想定しないためCloudflare Accessは付与しない(認証はwebhook側の実装に委ねる)。
-    ingress_rule {
-      hostname = "rbac-sync.aramakisai.com"
-      service  = "http://vaultwarden-rbac-sync.prod.svc.cluster.local:80"
     }
 
     # フォールバック (いずれのホスト名にもマッチしない場合)

@@ -50,18 +50,6 @@ resource "cloudflare_record" "vault" {
   comment = "Vaultwarden (Cloudflare Tunnel)"
 }
 
-# vaultwarden-rbac-sync (Zitadel Actions v2 webhook受信)
-# ZitadelのHTTPClient.DenyListがRFC1918/cluster-local宛先のtarget作成を拒否するため
-# 外部公開が必須 (terraform/tunnel.tf参照)
-resource "cloudflare_record" "rbac_sync" {
-  zone_id = var.cloudflare_zone_id
-  name    = "rbac-sync"
-  value   = local.tunnel_cname
-  type    = "CNAME"
-  proxied = true
-  comment = "vaultwarden-rbac-sync webhook (Cloudflare Tunnel)"
-}
-
 # 旧 Directus API。Directus 本体は撤去済みで Tunnel ingress も持たないが、
 # payload-cms-migration 5.4 の旧 URL リダイレクト (cloudflare_cms_media_redirects.tf) が
 # api.aramakisai.com/assets/<uuid> の 9 件を CMS media URL へ転送するために

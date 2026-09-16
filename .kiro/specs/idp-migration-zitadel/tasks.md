@@ -705,13 +705,27 @@
         実登録(想定キー名は`vars/resources.yml`の`infisical_hint`コメントに記載)
       - `terraform/access.tf`変更に伴う`TF_VAR_zitadel_cf_access_client_id`/
         `TF_VAR_zitadel_cf_access_client_secret`のInfisical登録と`terraform apply`
-      - `terraform/tunnel.tf`・`terraform/dns.tf`の`rbac-sync.aramakisai.com`追加分の`terraform apply`
+      - `terraform/tunnel.tf`・`terraform/dns.tf`の`idp.aramakisai.com`向けpath分岐追加分の
+        `terraform apply`
       - このタスクをマージ・本番適用する場合、本番Zitadel(追記5時点で`zitadel-0`
         2/2 Running、project/role/application等は0件)に対してAnsible roleを実行する前に、
-        上記`terraform apply`(DNS/Tunnel ingress反映)を先に完了させておくこと。ただし
+        上記`terraform apply`(Tunnel ingress反映、`idp.aramakisai.com`は既存DNSレコードの
+        ままで新規DNSレコードは不要)を先に完了させておくこと。ただし
         前述の通り`/webhook/zitadel`エンドポイント自体が未実装のため、action_target/execution
         投入は成功してもvaultwarden-rbac-sync連携が実際に機能するわけではない
         (別途エンドポイント再実装が必要)。
+    - **訂正(ユーザー指摘、新規サブドメイン方針の撤回)**: 上記の実装では当初
+      `rbac-sync.aramakisai.com`という新規サブドメインをCloudflare Tunnel ingress/DNS
+      レコードとして追加していたが、`.kiro/steering/tech.md`の既存方針「サブドメインを
+      冗長に増やさない: 既存のホスト名で目的を達成できないか先に検討する」を見落としていた
+      ことをユーザー指摘で発見した。新規サブドメインは撤回し、Zitadel自身の外部到達に
+      既に使っている`idp.aramakisai.com`へのpath分岐(`/webhook/rbac-sync`、
+      `/ui/v2/login`と同じpath先勝ちルールに追加)へ変更した。`vault.aramakisai.com`
+      (Vaultwarden本体のホスト名)への相乗りも検討したが、Vaultwardenは`replicas: 0`で
+      凍結中でありそちらにコストを掛けたくないというユーザー判断により見送った。
+      `zitadel_action_target_endpoint`は`https://idp.aramakisai.com/webhook/rbac-sync`に
+      変更し、`terraform/dns.tf`の`cloudflare_record.rbac_sync`リソースは削除した
+      (`idp.aramakisai.com`の既存DNSレコードをそのまま使うため新規レコード不要)。
 
 - [ ] 9.3 Terraform管理外のインスタンス設定をAdmin API importで反映する
   - Assert Roles on Authentication等、Terraformで管理しきれないインスタンス設定の差分を洗い出す

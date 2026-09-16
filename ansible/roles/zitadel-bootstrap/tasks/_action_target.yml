@@ -6,7 +6,8 @@
 # "Errors.Target.DeniedURL"で拒否する(k3d実機で確認済み、upstream
 # zitadel/zitadel#12326と同種の制約で回避策なし、issueはnot plannedでclose済み)。
 # そのため`zitadel_action_target_endpoint`(vars/resources.yml)はクラスタ内Service
-# ではなくterraform/tunnel.tf・dns.tfで公開したCloudflare Tunnel経由の外部URLを指す。
+# ではなく、新規サブドメインを増やさず idp.aramakisai.com にpathで相乗りさせた
+# Cloudflare Tunnel経由の外部URL(terraform/tunnel.tf参照)を指す。
 - name: Action Targetを検索
   ansible.builtin.include_tasks: _api_call.yml
   vars:
