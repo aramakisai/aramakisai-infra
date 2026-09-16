@@ -46,10 +46,14 @@ spec:
             # Directus が使う directus-uploads と衝突しないキー空間に置く
             - name: S3_PREFIX
               value: payload-uploads
+            # AUTHENTIK_*という変数名だがCMSアプリ側のenv名(historical、値はZitadel)。
+            # issuerはZitadelではアプリ単位パスを持たずインスタンスドメイン直下
+            # (実機の/.well-known/openid-configuration確認済み)。
+            # AUTHENTIK_CLIENT_IDはZitadelが発行する値でauthentikのような
+            # カスタムclient_id指定ができないため、cms-secrets(envFrom)側から注入する
+            # (このenv:には置かない、envFromの後にenv:が来ると後勝ちで上書きされるため)。
             - name: AUTHENTIK_ISSUER_URL
-              value: https://idp.aramakisai.com/application/o/cms-prod/
-            - name: AUTHENTIK_CLIENT_ID
-              value: cms-prod
+              value: https://idp.aramakisai.com
           resources:
             requests:
               memory: "256Mi"

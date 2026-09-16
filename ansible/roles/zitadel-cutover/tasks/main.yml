@@ -1,0 +1,42 @@
+---
+# 一括カットオーバー順序 (task9.4、design.md「一般IMAP/POP3クライアント認証フロー」
+# 「OIDCログインフロー」に対応):
+#   1. Dovecot Lua Auth Bridge切替
+#   2. RPアプリ(CMS/Vaultwarden/Roundcube)OIDC Client切替
+#   3. vaultwarden-rbac-sync webhook切替 (条件付き、task4.4参照)
+#   4. 既存ユーザーへの招待ベース移行
+#
+# prodでは各ステップの実際の適用はGitOps(PR merge → ArgoCD sync、手動操作)が
+# 本体であり、このroleはGitOps原則(CLAUDE.md)により`kubectl`/`argocd`をprodへ
+# 直接実行しない。prod向けにこのroleが行うのは「事前条件の確認」と
+# 「切替後の動作検証」のみ。k3dはArgoCDが存在しないPoC専用クラスタのため、
+# roleが検証用リソースを直接kubectl applyする。
+
+- name: 対象環境をログ出力する
+  ansible.builtin.debug:
+    msg: "target_env={{ zitadel_cutover_target_env }} include_webhook={{ zitadel_cutover_include_webhook }}"
+
+- name: "== Step 1: Dovecot Lua Auth Bridge切替 =="
+  ansible.builtin.include_tasks: step1_dovecot_bridge.yml
+
+- name: "== Step 2: RPアプリ(CMS/Vaultwarden/Roundcube) OIDC Client切替 =="
+  ansible.builtin.include_tasks: step2_rp_apps.yml
+
+- name: "== Step 3: vaultwarden-rbac-sync webhook切替 (条件付き) =="
+  ansible.builtin.include_tasks: step3_webhook.yml
+  when: zitadel_cutover_include_webhook | bool
+
+- name: Step3をスキップした場合の記録
+  ansible.builtin.debug:
+    msg: >
+      zitadel_cutover_include_webhook=false のためStep3をスキップした。
+      task4.4でActions v2が不安定と判断された場合、またはスコープ除外と
+      判断された場合の想定パス(vaultwarden-rbac-syncは手動運用へ引き継ぐ)。
+  when: not (zitadel_cutover_include_webhook | bool)
+
+- name: "== Step 4: 既存ユーザーへの招待ベース移行 =="
+  ansible.builtin.include_tasks: step4_invite_migration.yml
+
+- name: 全ステップ完了サマリ
+  ansible.builtin.debug:
+    msg: "カットオーバー順序の実行が完了した (target_env={{ zitadel_cutover_target_env }})。各ステップの検証結果は上記ログを参照。"

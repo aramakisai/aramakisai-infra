@@ -787,6 +787,123 @@
   - 切替完了後、全RPアプリ・メール認証が本番Zitadel経由で正常に機能することを確認する
   - _Requirements: 7.1_
   - _Depends: 9.3_
+  - **実施結果(実装・k3d実機検証のみ完了、本番カットオーバー未実施)**:
+    - **重大な事前発見**: 本タスク着手時、`scripts/zitadel-invite-migration.py`
+      (task6.1の成果物)が現在のmainに存在しないことが判明した。
+      `git log --all -- scripts/zitadel-invite-migration.py`を確認した結果、
+      2026-09-15の本番障害を受けてPR #205(`86e54cf`、task1-10のPoC実装一式)が
+      `936e1d3`で丸ごとrevertされており、tasks.mdの実施結果に記載された
+      k3dマニフェスト・スクリプト類の大半(task3/4/5/6等)がコードとしては
+      現存しないことを確認した(tasks.mdのプロセ自体は`3e0ecbf`で復元されたが
+      実装ファイルは復元されていない)。実例: `gitops/manifests/prod/
+      vaultwarden-rbac-sync/sync.py`は現在もAuthentik依存のまま
+      (`grep -c Authentik`で36件、`Zitadel`は0件)で、task4.1/4.2が
+      「実装済み」と記録したZitadel対応版は反映されていない。task9.2/9.3は
+      この状況下でも`ansible/roles/zitadel-bootstrap`一式を独立に新規実装した
+      ため影響を受けなかったが、本タスクは`scripts/zitadel-invite-migration.py`
+      に直接依存するため、task6.1記載の設計(argparse+CSV+urllib stdlib、
+      AddHumanUser→user_grant→CreateInviteCode、409冪等)に基づき本タスクで
+      再実装した。
+    - **実装**:
+      - `docs/zitadel-cutover-runbook.md`(新規): 実行順序・前提条件・
+        各ステップの実行コマンドとGitOps適用手順・検証チェックリスト・
+        既知のギャップを記載したランブック。
+      - `ansible/roles/zitadel-cutover`(新規role)+
+        `ansible/playbooks/zitadel-cutover.yml`(新規playbook):
+        `ZITADEL_CUTOVER_TARGET_ENV`(`k3d`|`prod`、既定`k3d`)で対象環境を
+        切り替える。prod向けの各ステップはGitOps原則
+        (CLAUDE.md、クラスタへの直接kubectl/argocd操作禁止、および本タスクの
+        実行制約)に従い、kubectl/argocdを一切実行せず適用手順を提示するのみに
+        留めた(gitops manifest変更のマージ→ArgoCD syncという人間の操作が
+        本体)。k3d向けは実際にリソースを作成・検証・削除する。
+      - **Step1(Dovecot Lua Auth Bridge)**: `gitops/manifests/prod/mailserver/
+        {configmap.yaml,statefulset.yaml,dovecot-lua-auth-external-secret.yaml,
+        dovecot-oauth2-external-secret.yaml}`を変更し、一般IMAP/POP3クライアント
+        認証(`auth-ldap.conf.ext`、ファイル名はDMSの自動生成分を上書きするため
+        据え置き)をLDAP(authentik-ldap-outpost)からZitadel Session APIへの
+        委譲(Lua passdb/userdb、`ansible/roles/zitadel-cutover/templates/
+        zitadel-auth.lua.j2`)へ切り替えた。Postfixのメールボックス存在確認・
+        MLグループ展開(design.md Requirement 15)は引き続きLDAPを使用し
+        変更していない。RoundcubeのOAUTHBEARER introspection先もZitadelへ
+        切り替えた。
+      - **Step2(RPアプリOIDC Client切替)**: `gitops/manifests/prod/{cms,
+        cms-secrets,vaultwarden,roundcube}/`を変更した。CMSはclient_idが
+        Zitadel発行(値は本番未確定)のため、従来の`env:`直書きから
+        `cms-secrets`(ExternalSecret、新規Infisicalキー
+        `CMS_PROD_OIDC_CLIENT_ID`)経由の注入へ変更した。Vaultwardenは
+        `SSO_AUTHORITY`をZitadelのissuer URLへ変更し、task5.2で発見された
+        `SSO_AUDIENCE_TRUSTED`回避策(dani-garcia/vaultwarden#6650)を追加した。
+        RoundcubeはOIDCエンドポイントをZitadelへ変更し、`oauth_client_id`を
+        `getenv()`経由(新規Infisicalキー`ROUNDCUBE_OIDC_CLIENT_ID`)に変更した。
+      - **Step3(vaultwarden-rbac-sync webhook切替)**: task4.4の安定判定
+        (2026-08-31、10/10発火)により既定で含めるが、task9.2が発見した
+        Actions v2のHTTPClient.DenyList制約(`Errors.Target.DeniedURL`)が
+        未解消のため、実際の投入は現状ブロックされたまま。本タスクの
+        `step3_webhook.yml`はこの状態を検知して警告するのみで、gitops manifest
+        の変更は行っていない。加えて本タスクの調査で
+        `gitops/manifests/prod/vaultwarden-rbac-sync/sync.py`自体もPR #205revert
+        の影響で現在もAuthentik依存のまま(`grep -c Authentik`で36件、`Zitadel`は
+        0件)であることを確認した。つまりStep3は仮にDeniedURL制約が解消されても、
+        sync.py側のZitadel対応(task4.1/4.2相当)を別途再実装しない限り機能しない。
+      - **Step4(招待ベース移行)**: 再実装した`scripts/zitadel-invite-migration.py`
+        をそのまま呼ぶ。単体テスト`scripts/test-zitadel-invite-migration.py`
+        (15件、fake_urlopenによるネットワーク非依存)を追加。
+    - **k3d実機検証(2026-09-16、`zitadel-poc`クラスタ)**:
+      - Step1: dovecot-lua-2.3.21.1(Alpine) + lua5.3-socket + lua5.3-cjsonの
+        軽量テストハーネス(mailserver本体はDebianベースで持ち込むには重すぎる
+        ための代替)に対し、実際に`ansible-playbook`から`doveadm auth test`
+        (正パスワード成功・誤パスワード拒否)・`doveadm user`
+        (userdb lookup、`acl_groups`にproject role_keyが反映されること)を
+        実行し3/3成功を確認した。実装過程で2件のバグを実機で発見・修正した:
+        (1) Lua側`req.log_error(...)`はメソッド呼び出し(`req:log_error(...)`)
+        でなければならず、ドット呼び出しだと`lua_pcall`が引数型エラーで
+        失敗する(内部障害時に別のエラーへ化ける形で辛うじて動いていた)。
+        (2) `kubectl exec`でdovecotを起動する際、`log_path`を`/dev/stderr`
+        にするとdovecotの子プロセスがそのFDを開いたまま存続し続け
+        `kubectl exec`自体がハングする(ファイルへのlog_pathへ変更、
+        起動コマンド自体も`sh -c "... >/dev/null 2>&1"`でリダイレクトして解消)。
+      - Step2: 検証用の一時Confidential OIDC Applicationを作成し、
+        Session API→`/oauth/v2/authorize`(302 Locationからauth_request_id抽出)
+        →CreateCallback→token交換→userinfoのEnd-to-Endが成功することを確認した。
+        実装過程で`urllib.request.urlopen`が既定で302を自動フォロー
+        してしまい、フォロー先(login v2 UI、クラスタ内DNS)へ
+        ansible実行ホストから到達できず`ConnectionRefusedError`になる
+        バグを実機で発見し、リダイレクトを追わないカスタムopenerへ修正した。
+        実アプリ(cms-prod/vaultwarden/roundcube)自身のclient_secretは
+        発行時一度しか取得できずこのセッションには残っていないため、
+        同一メカニズムを代表する一時Applicationでの検証に留まる
+        (実アプリの資格情報そのものの検証ではない)。
+      - Step3: `POST /v2/actions/targets/search`で`vaultwarden-rbac-sync-webhook`
+        が未作成(task9.2の記録通りDeniedURL制約でスキップされたまま)である
+        ことを確認し、想定通り警告を出して先へ進むことを確認した。
+      - Step4: ダミー2ユーザーの新規作成・ロール付与・招待コード発行が
+        いずれも成功(`succeeded: 2, failed: 0`)することを確認した。
+      - `ansible-playbook ansible/playbooks/zitadel-cutover.yml`
+        (`ZITADEL_CUTOVER_TARGET_ENV=k3d`)を通しで実行し、`PLAY RECAP`で
+        `failed=0`を確認した(1回目の実行はStep2のurlopenバグで失敗、
+        修正後の再実行で成功)。検証用に作成したPod・ユーザー・
+        OIDC Application・招待済みユーザーはすべて後片付け(削除)済み。
+    - **静的チェック**: `ansible-lint ansible/roles/zitadel-cutover
+      ansible/playbooks/zitadel-cutover.yml`(0 failure/warning)、
+      `python3 -m py_compile`・`scripts/test-zitadel-invite-migration.py`
+      (15件全パス)、`pre-commit run`(trailing-whitespace/check-yaml/
+      yamllint/ansible-lint/kubeconform/check-confidential-info/gitleaks含む
+      全hook)いずれも通過した。
+    - **本番適用について(未実施)**: 本タスクでは以下を一切実行していない
+      (worktree内のコミットのみ):
+      - `argocd app sync`(cms/vaultwarden/roundcube/mailserver等)の実行
+      - Infisical prod環境への新規キー登録(`CMS_PROD_OIDC_CLIENT_ID`、
+        `ROUNDCUBE_OIDC_CLIENT_ID`)
+      - `scripts/zitadel-invite-migration.py`の本番既存ユーザーに対する実行
+      - Step3(webhook)のDeniedURL対応方針決定と実投入
+    - **未解決の既知ギャップ**:
+      - `docker-mailserver:15.1.0`(Debianベース)に`dovecot-lua`相当が
+        同梱されているか未検証(k3d検証はAlpineベースの代替ハーネスで実施)。
+      - task4(vaultwarden-rbac-sync)のZitadel対応が実際にはmainへ反映されて
+        いないこと(上記Step3参照、確認済み)を含め、PR #205 revertの影響範囲の
+        全容は本タスクでは調査していない。task1-8・10の各タスクについて、
+        tasks.mdの実施結果とmain上の実ファイルの整合性を別途確認する必要がある。
+      - Step3のDeniedURL対応方針(webhook外部公開 or DenyList緩和)は未確定。
 
 - [ ] 9.5 authentik構成への切り戻し手順を整備する
   - Zitadel切替後に重大な認証障害が発生した場合の、旧authentik構成への切り戻し手順を作成する

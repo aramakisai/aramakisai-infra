@@ -1,0 +1,222 @@
+---
+# Step1: Dovecot Lua Auth Bridge切替。
+#
+# prod: gitops/manifests/prod/mailserver/{configmap.yaml,statefulset.yaml,
+# dovecot-lua-auth-external-secret.yaml,dovecot-oauth2-external-secret.yaml}は
+# 本タスクで既にコミット済み。実際の反映はPRレビュー・マージ後のArgoCD sync
+# (人間の操作)であり、このroleはprodのkubectl/argocdを一切実行しない
+# (CLAUDE.md GitOps原則、および本タスクの実行制約)。
+- name: "[prod] 適用手順を提示する (このroleはprodへ一切のkubectl/argocdを実行しない)"
+  ansible.builtin.debug:
+    msg:
+      - "gitops/manifests/prod/mailserver/ のPRをレビュー・マージすること。"
+      - "ArgoCD Application 'mailserver' をsyncすること (argocd app sync mailserver --server-side)。"
+      - "mailserver-0 (StatefulSet) が再起動し2コンテナともRunningになるまで待つこと。"
+      - "検証: docs/zitadel-cutover-runbook.md の Step1チェックリストを実施すること。"
+  when: zitadel_cutover_target_env == 'prod'
+
+# --- k3d: 実機検証用の軽量Dovecotテストハーネスをデプロイして動作確認する ---
+# mailserver本体(docker-mailserver、Debianベース、数百MB)をk3dへ持ち込むのは
+# 過剰なため、dovecot-lua-2.3.21.1(Alpine) + lua5.3-socket + lua5.3-cjsonの
+# 組み合わせで同じpassdb/userdbロジックを検証する(design.md実装時に実機で
+# 確認済みの構成、docker-mailserver側でのdovecot-lua同梱有無は未検証の別課題
+# としてrunbookに明記する)。
+- name: "[k3d] 既存の検証用Podを削除する (冪等な再実行のため)"
+  ansible.builtin.command:
+    argv: [kubectl, delete, pod, "{{ zitadel_cutover_k3d_dovecot_pod }}", -n, "{{ zitadel_cutover_k3d_dovecot_namespace }}", --ignore-not-found, --wait=true]
+  environment:
+    KUBECONFIG: "{{ zitadel_bootstrap_kubeconfig }}"
+  changed_when: false
+  when: zitadel_cutover_target_env == 'k3d'
+
+- name: "[k3d] 検証用Podを起動する"
+  ansible.builtin.command:
+    argv: [kubectl, run, "{{ zitadel_cutover_k3d_dovecot_pod }}", "--image=alpine:3.20", -n, "{{ zitadel_cutover_k3d_dovecot_namespace }}", --restart=Never, --command, --, sleep, "1800"]
+  environment:
+    KUBECONFIG: "{{ zitadel_bootstrap_kubeconfig }}"
+  changed_when: true
+  when: zitadel_cutover_target_env == 'k3d'
+
+- name: "[k3d] Podの起動を待つ"
+  ansible.builtin.command:
+    argv: [kubectl, wait, --for=condition=Ready, "pod/{{ zitadel_cutover_k3d_dovecot_pod }}", -n, "{{ zitadel_cutover_k3d_dovecot_namespace }}", --timeout=60s]
+  environment:
+    KUBECONFIG: "{{ zitadel_bootstrap_kubeconfig }}"
+  changed_when: false
+  when: zitadel_cutover_target_env == 'k3d'
+
+- name: "[k3d] dovecot-lua/lua5.3-socket/lua5.3-cjsonをインストールする"
+  ansible.builtin.command:
+    argv: [kubectl, exec, "{{ zitadel_cutover_k3d_dovecot_pod }}", -n, "{{ zitadel_cutover_k3d_dovecot_namespace }}", --, sh, -c,
+           "apk add --quiet dovecot dovecot-lua lua5.3 lua5.3-socket lua5.3-cjson && mkdir -p /etc/dovecot /var/run/dovecot /var/lib/dovecot"]
+  environment:
+    KUBECONFIG: "{{ zitadel_bootstrap_kubeconfig }}"
+  changed_when: true
+  when: zitadel_cutover_target_env == 'k3d'
+
+# --- dovecot-lua-auth machine userのPATを用意する (既存キャッシュがあれば再利用) ---
+- name: "[k3d] dovecot-lua-auth machine userを検索する"
+  ansible.builtin.include_role:
+    name: zitadel-bootstrap
+    tasks_from: _api_call
+  vars:
+    zitadel_api_method: POST
+    zitadel_api_path: /management/v1/users/_search
+    zitadel_api_body:
+      queries:
+        - userNameQuery: { userName: dovecot-lua-auth }
+    zitadel_api_label: "search dovecot-lua-auth machine user"
+  when: zitadel_cutover_target_env == 'k3d'
+
+- name: "[k3d] machine userの存在を確認する"
+  ansible.builtin.assert:
+    that:
+      - (zitadel_api_result.body.result | default([]) | length) > 0
+    fail_msg: "dovecot-lua-auth machine userが見つからない。先にansible-playbook ansible/playbooks/zitadel-resources.ymlを実行すること"
+  when: zitadel_cutover_target_env == 'k3d'
+
+- name: "[k3d] machine userIdを変数化する"
+  ansible.builtin.set_fact:
+    _dovecot_machine_user_id: "{{ zitadel_api_result.body.result[0].id }}"
+  when: zitadel_cutover_target_env == 'k3d'
+
+- name: "[k3d] このセッション用のPATを新規発行する (検証用)"
+  ansible.builtin.include_role:
+    name: zitadel-bootstrap
+    tasks_from: _api_call
+  vars:
+    zitadel_api_method: POST
+    zitadel_api_path: "/management/v1/users/{{ _dovecot_machine_user_id }}/pats"
+    # 既存roleの慣例 (zitadel-bootstrap/vars/resources.yml) と同じ固定有効期限。
+    # k3d検証専用の使い捨てPATのため短命化は不要。
+    zitadel_api_body:
+      expirationDate: "2029-01-01T00:00:00Z"
+    zitadel_api_label: "issue dovecot-lua-auth PAT"
+  when: zitadel_cutover_target_env == 'k3d'
+
+- name: "[k3d] 発行したPATをファイルへ保存する (機密情報のためno_log)"
+  ansible.builtin.copy:
+    content: "{{ zitadel_api_result.body.token }}"
+    dest: "{{ zitadel_bootstrap_output_dir }}/dovecot-lua-auth.pat"
+    mode: "0600"
+  no_log: true
+  when: zitadel_cutover_target_env == 'k3d'
+
+- name: "[k3d] PATをPodへ転送する"
+  ansible.builtin.command:
+    argv: [kubectl, cp, "{{ zitadel_bootstrap_output_dir }}/dovecot-lua-auth.pat", "{{ zitadel_cutover_k3d_dovecot_namespace }}/{{ zitadel_cutover_k3d_dovecot_pod }}:/run/secrets/zitadel-dovecot-pat"]
+  environment:
+    KUBECONFIG: "{{ zitadel_bootstrap_kubeconfig }}"
+  changed_when: true
+  no_log: true
+  when: zitadel_cutover_target_env == 'k3d'
+
+- name: "[k3d] Luaスクリプトをレンダリングする"
+  ansible.builtin.set_fact:
+    _dovecot_lua_rendered: "{{ lookup('template', role_path + '/templates/zitadel-auth.lua.j2') }}"
+  when: zitadel_cutover_target_env == 'k3d'
+
+- name: "[k3d] Luaスクリプトをローカル一時ファイルへ書き出す"
+  ansible.builtin.copy:
+    content: "{{ _dovecot_lua_rendered }}"
+    dest: "{{ zitadel_bootstrap_output_dir }}/zitadel-auth.lua"
+    mode: "0644"
+  when: zitadel_cutover_target_env == 'k3d'
+
+- name: "[k3d] Luaスクリプト・dovecot.confをPodへ転送する"
+  ansible.builtin.command:
+    argv: "{{ item }}"
+  loop:
+    - [kubectl, cp, "{{ zitadel_bootstrap_output_dir }}/zitadel-auth.lua", "{{ zitadel_cutover_k3d_dovecot_namespace }}/{{ zitadel_cutover_k3d_dovecot_pod }}:/etc/dovecot/zitadel-auth.lua"]
+    - [kubectl, cp, "{{ role_path }}/files/dovecot-test.conf", "{{ zitadel_cutover_k3d_dovecot_namespace }}/{{ zitadel_cutover_k3d_dovecot_pod }}:/etc/dovecot/dovecot.conf"]
+  environment:
+    KUBECONFIG: "{{ zitadel_bootstrap_kubeconfig }}"
+  changed_when: true
+  when: zitadel_cutover_target_env == 'k3d'
+
+- name: "[k3d] dovecotを起動する"
+  # kubectl execのstdout/stderrをそのままdovecot(および転送された各子プロセス)に
+  # 継承させるとFDが開いたままになりkubectl exec自体がハングするため、
+  # sh -c内で明示的に/dev/nullへリダイレクトする。
+  ansible.builtin.command:
+    argv: [kubectl, exec, "{{ zitadel_cutover_k3d_dovecot_pod }}", -n, "{{ zitadel_cutover_k3d_dovecot_namespace }}", --, sh, -c,
+           "dovecot -c /etc/dovecot/dovecot.conf >/dev/null 2>&1"]
+  environment:
+    KUBECONFIG: "{{ zitadel_bootstrap_kubeconfig }}"
+  changed_when: true
+  when: zitadel_cutover_target_env == 'k3d'
+
+- name: "[k3d] dovecotの起動を待つ"
+  ansible.builtin.pause:
+    seconds: 2
+  when: zitadel_cutover_target_env == 'k3d'
+
+# --- 検証用テストユーザーを用意する (task6.1のCSVとは別、このロール専用の使い捨てユーザー) ---
+- name: "[k3d] 検証用ユーザーを作成する (既存の場合は409を許容)"
+  ansible.builtin.include_role:
+    name: zitadel-bootstrap
+    tasks_from: _api_call
+  vars:
+    zitadel_api_method: POST
+    zitadel_api_path: /v2/users/human
+    zitadel_api_body:
+      username: cutover-dovecot-test@aramakisai.invalid
+      profile: { givenName: Cutover, familyName: DovecotTest }
+      email: { email: cutover-dovecot-test@aramakisai.invalid, isVerified: true }
+      password: { password: "CutoverTest1!", changeRequired: false }
+    zitadel_api_label: "create dovecot bridge test user"
+  when: zitadel_cutover_target_env == 'k3d'
+
+- name: "[k3d] 正しいパスワードで認証成功することを確認する"
+  ansible.builtin.command:
+    argv: [kubectl, exec, "{{ zitadel_cutover_k3d_dovecot_pod }}", -n, "{{ zitadel_cutover_k3d_dovecot_namespace }}", --, doveadm, -c, /etc/dovecot/dovecot.conf, auth, test, cutover-dovecot-test@aramakisai.invalid, "CutoverTest1!"]
+  environment:
+    KUBECONFIG: "{{ zitadel_bootstrap_kubeconfig }}"
+  register: _dovecot_auth_ok
+  changed_when: false
+  failed_when: "'auth succeeded' not in _dovecot_auth_ok.stdout"
+  when: zitadel_cutover_target_env == 'k3d'
+
+- name: "[k3d] 誤ったパスワードで認証拒否されることを確認する"
+  ansible.builtin.command:
+    argv: [kubectl, exec, "{{ zitadel_cutover_k3d_dovecot_pod }}", -n, "{{ zitadel_cutover_k3d_dovecot_namespace }}", --, doveadm, -c, /etc/dovecot/dovecot.conf, auth, test, cutover-dovecot-test@aramakisai.invalid, WrongPassword!]
+  environment:
+    KUBECONFIG: "{{ zitadel_bootstrap_kubeconfig }}"
+  register: _dovecot_auth_wrong
+  changed_when: false
+  failed_when: "'auth failed' not in _dovecot_auth_wrong.stdout"
+  when: zitadel_cutover_target_env == 'k3d'
+
+- name: "[k3d] userdbルックアップが成功することを確認する"
+  ansible.builtin.command:
+    argv: [kubectl, exec, "{{ zitadel_cutover_k3d_dovecot_pod }}", -n, "{{ zitadel_cutover_k3d_dovecot_namespace }}", --, doveadm, -c, /etc/dovecot/dovecot.conf, user, cutover-dovecot-test@aramakisai.invalid]
+  environment:
+    KUBECONFIG: "{{ zitadel_bootstrap_kubeconfig }}"
+  register: _dovecot_userdb
+  changed_when: false
+  failed_when: "'uid\t5000' not in _dovecot_userdb.stdout"
+  when: zitadel_cutover_target_env == 'k3d'
+
+- name: Step1検証結果
+  ansible.builtin.debug:
+    msg: "Dovecot Lua Auth Bridge: 正パスワード成功/誤パスワード拒否/userdbルックアップをいずれも確認した"
+  when: zitadel_cutover_target_env == 'k3d'
+
+- name: "[k3d] 検証用Podを停止・削除する (後片付け)"
+  ansible.builtin.command:
+    argv: [kubectl, delete, pod, "{{ zitadel_cutover_k3d_dovecot_pod }}", -n, "{{ zitadel_cutover_k3d_dovecot_namespace }}", --ignore-not-found]
+  environment:
+    KUBECONFIG: "{{ zitadel_bootstrap_kubeconfig }}"
+  changed_when: true
+  when: zitadel_cutover_target_env == 'k3d'
+
+- name: "[k3d] 検証用ユーザーを削除する (後片付け)"
+  ansible.builtin.include_role:
+    name: zitadel-bootstrap
+    tasks_from: _api_call
+  vars:
+    zitadel_api_method: DELETE
+    zitadel_api_path: "/v2/users/{{ zitadel_api_result.body.userId | default('') }}"
+    zitadel_api_label: "delete dovecot bridge test user (best-effort, may already be searched-and-found id)"
+  when: zitadel_cutover_target_env == 'k3d'
+  ignore_errors: true

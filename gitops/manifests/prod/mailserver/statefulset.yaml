@@ -7,7 +7,7 @@ metadata:
   labels:
     app: mailserver
   annotations:
-    secret.reloader.stakater.com/reload: "mail-tls,mailserver-secrets,dovecot-oauth2-config"
+    secret.reloader.stakater.com/reload: "mail-tls,mailserver-secrets,dovecot-oauth2-config,dovecot-lua-auth-secret"
     configmap.reloader.stakater.com/reload: "mailserver-config"
 spec:
   serviceName: mailserver
@@ -54,7 +54,12 @@ spec:
               value: "mail.aramakisai.com"
             - name: TLS_LEVEL
               value: "modern"
-            # LDAP 認証構成
+            # LDAP設定 (Postfixのメールボックス存在確認・MLグループ展開専用):
+            # Dovecot自身のIMAP/POP3クライアント認証はauth-ldap.conf.ext (中身はlua、
+            # configmap.yaml参照)が同名ファイルを上書きするため、この
+            # DOVECOT_USER_FILTER/DOVECOT_PASS_FILTERから自動生成される分はDovecotの
+            # auth判定には使われない。Postfix側のLDAP依存解消はdesign.md
+            # Requirement 15(メーリングリストDovecot完結化)の別タスク。
             - name: LDAP_ENABLED
               value: "1"
             - name: ACCOUNT_PROVISIONER
@@ -177,6 +182,14 @@ spec:
               subPath: auth-ldap.conf.ext
               readOnly: true
             - name: dms-config
+              mountPath: /etc/dovecot/zitadel-auth.lua
+              subPath: zitadel-auth.lua
+              readOnly: true
+            - name: dovecot-lua-auth
+              mountPath: /run/secrets/zitadel-dovecot-pat
+              subPath: pat
+              readOnly: true
+            - name: dms-config
               mountPath: /etc/dovecot/conf.d/05-acl-plugin.conf
               subPath: 05-acl-plugin.conf
               readOnly: true
@@ -244,6 +257,8 @@ spec:
                 path: dovecot.cf
               - key: auth-ldap.conf.ext
                 path: auth-ldap.conf.ext
+              - key: zitadel-auth.lua
+                path: zitadel-auth.lua
               - key: 05-acl-plugin.conf
                 path: 05-acl-plugin.conf
               - key: ldap-groups.cf
@@ -263,6 +278,9 @@ spec:
         - name: dovecot-oauth2
           secret:
             secretName: dovecot-oauth2-config
+        - name: dovecot-lua-auth
+          secret:
+            secretName: dovecot-lua-auth-secret
         - name: tls
           secret:
             secretName: mail-tls

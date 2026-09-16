@@ -1,0 +1,17 @@
+---
+# 一括カットオーバー順序 (task9.4)。target_envはZITADEL_CUTOVER_TARGET_ENV環境変数
+# (k3d|prod、既定k3d)で切り替える。詳細はdocs/zitadel-cutover-runbook.md参照。
+#
+# prod向けの実行例:
+#   ZITADEL_CUTOVER_TARGET_ENV=prod ZITADEL_EXTERNAL_DOMAIN=idp.aramakisai.com \
+#     infisical run --env=prod -- ansible-playbook ansible/playbooks/zitadel-cutover.yml
+# k3d向けの実行例 (既定):
+#   ansible-playbook ansible/playbooks/zitadel-cutover.yml
+- name: Zitadel 一括カットオーバー順序 (task9.4)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - ../roles/zitadel-bootstrap/defaults/main.yml
+  roles:
+    - zitadel-cutover
