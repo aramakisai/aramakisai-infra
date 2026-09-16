@@ -963,6 +963,78 @@
   - 旧authentik構成への切り戻し手順を実際に実行し、切り戻し後に既存アプリのログインが復旧することを確認する
   - _Requirements: 10.8_
   - _Depends: 9.5_
+  - **実施結果**:
+    - 本タスクが要求する「実際に切り戻しを実行し既存アプリのログイン復旧を
+      確認する」検証は、本番環境でのみ意味を持つ(Requirement 10.8はカット
+      オーバー後の本番障害復旧確認が目的)。本ワークフローの制約上、本番への
+      変更は一切行っていない。以下は代替として、現存するk3d PoCクラスタ
+      (`zitadel-poc`)と実リポジトリに対して`scripts/zitadel-rollback.sh`を
+      実際に実行し、スクリプト自体の正しさを検証した結果。
+    - **k3d PoCクラスタの現状確認**: `zitadel-poc`クラスタ(1台構成、稼働中)を
+      確認したところ、`zitadel`namespaceにZitadel本体(`zitadel-0`)と
+      CNPG DBのみが存在し、authentikおよびCMS/Vaultwarden/Roundcube/
+      mailserver等のRPアプリは存在しない(ExternalSecret/SecretStore CRDも
+      未導入)。task1〜8・10の実装が2026-09-15の本番障害を受けて`936e1d3`で
+      revertされたことと符合しており(9.4記載の既知ギャップと同一原因)、
+      「authentikとZitadelが両方稼働し、実際にRPアプリのログインが復旧する
+      ことを目視確認する」構成は現在のk3d PoCに存在しない。この構成をゼロから
+      再構築することは本タスクの指示(スクリプト自体の正しさの検証)の
+      スコープを超えると判断し、行っていない。
+    - **実行した検証(実リポジトリの使い捨てクローンに対して、実際に
+      `scripts/zitadel-rollback.sh`を実行)**:
+      - `find-commits`: 実行し、カットオーバー対象パス配下を変更した全コミット
+        (100件超、2024年分含む)が列挙されることを確認。
+      - `revert <commit-ish>`の安全ガード: カットオーバーと無関係な
+        `c613c49`(fix(cms): db-init Job即失敗問題の修正、`gitops/manifests/
+        prod/cms/`配下のファイルを変更するコミット)に対して`revert`を実行した
+        ところ、**ガードが通過してrevertが実行されてしまう**ことを確認した。
+        `CUTOVER_PATHS`が`gitops/manifests/prod/cms/`のようなディレクトリ
+        単位で定義されているため、「そのディレクトリ配下の任意のファイルを
+        変更したコミットか」しか判定できておらず、「実際にOIDC切替を行った
+        カットオーバーコミットか」は判定できていない。9.5の実施結果に
+        書かれた「無関係なコミットSHAを誤ってrevertしてしまう事故を防ぐ」
+        という設計意図に対し、ガードの粒度が期待より粗いことが実行によって
+        判明した(9.5時点のテストは正しいカットオーバーコミットでの受理と、
+        カットオーバーパスを一切含まないコミットでの拒否のみを検証しており、
+        「パスは含むが無関係なコミット」のケースは未検証だった)。
+      - 実際のカットオーバーコミット`ce90de0`に対して`revert`を実行し、
+        コンフリクトなく`--no-commit`で反映されることを再確認した(9.5と
+        同じ結果を本セッションで独立に再現)。反映後、`gitops/manifests/prod/
+        cms/deployment.yaml`をrevert前後で`diff`し、`AUTHENTIK_CLIENT_ID`/
+        `AUTHENTIK_ISSUER_URL`まわりの記述が実際に切替前の構成へ戻っている
+        ことをファイル内容レベルで確認した。
+      - 存在しないコミットSHA・空引数(usage表示)についても期待通りexit code
+        1で終了することを確認した。
+      - 使い捨てクローンは検証後に削除済み(実worktree・実リポジトリ本体には
+        一切書き込んでいない)。
+    - **infisical CLI実コマンドとの整合性確認(値の取得・設定は実行せず)**:
+      インストール済み`infisical`CLI(v0.43.96)の`secrets get --help`/
+      `secrets set --help`を実行し、スクリプトが使う`--plain`/`--silent`/
+      `--env`(get)、`KEY=@file`構文/`--env`(set)のフラグが実際に存在する
+      ことを確認した。`backup-secrets`/`restore-secrets`自体の実データでの
+      実行(prod環境およびそれに代わる安全なdev/poc環境どちらに対しても)は
+      行っていない(下記の注記参照)。
+    - **注記(infisical設定の自動探索)**: このworktreeには`.infisical.json`が
+      無いが、`infisical`CLIは親ディレクトリを遡って設定ファイルを探索する
+      ため、`git worktree`の外側にある元リポジトリ本体直下の
+      `.infisical.json`のプロジェクト設定を無自覚に拾ってしまうことを
+      確認した(`--env=dev`を
+      試したところ該当プロジェクトに`dev`環境が存在せず404で失敗、値の
+      取得・表示は発生していない)。この事実により、このworktree内で
+      `--env=dev`等の「安全なつもりの」環境を指定しても、実際にどの
+      Infisicalプロジェクトに対して実行されるかはCLIの探索結果次第になる
+      リスクがあると判断し、`backup-secrets`/`restore-secrets`の実データ
+      実行は本タスクでは見送った。
+    - **本タスクではリポジトリ変更なし**: 検証はすべて使い捨てクローン・
+      既存CLIの`--help`出力の確認のみで完結しており、`scripts/
+      zitadel-rollback.sh`本体・`docs/zitadel-rollback-runbook.md`への
+      変更は行っていない(発見したガードの粒度の粗さは下記の対応要否として
+      ユーザー判断待ちとし、本タスクでは修正していない)。
+    - **未実施・本番承認待ち**: 本番authentik構成への実際の切り戻し実行、
+      切り戻し後の実アプリ(CMS/Vaultwarden/Roundcube/メール)ログイン復旧の
+      目視確認、本番Infisical環境に対する`backup-secrets`/`restore-secrets`
+      の実行。いずれもユーザー承認と実際の本番カットオーバー実施タイミングを
+      待つ。
 
 - [ ] 10. 追加移行スコープ(既存authentik付随機能6件)のk3d PoC実装
   - task1〜8完了後にセッション内の追加検討で判明した、旧spec(idp-migration-zitadel初版)ではスコープ外だった`terraform/authentik_*.tf`6ファイル相当の移行。PoCとしてk3d環境で検証する(本番反映はtask9の一括カットオーバーに含める)。task9とは独立して着手可能(依存はtask1/2/6のみ)
