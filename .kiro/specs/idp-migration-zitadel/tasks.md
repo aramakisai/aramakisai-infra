@@ -408,14 +408,11 @@
 
 - [ ] 9.2 本番Zitadelをデプロイしproject/role/application/actionを再現する
   - 本番用のZitadel manifest(namespace/StatefulSet/Service/CNPG DBクラスタ/ExternalSecret)を空DBの状態でデプロイする
-  - Ansible Zitadelブートストラップを本番で実行しTerraform provider用PATを発行する
-  - cert-managerの内部CA(SelfSigned Issuer→CA証明書→CA Issuer)とorigin証明書を`gitops/manifests/prod/zitadel/`へ追加する。SANに`idp.aramakisai.com`と`zitadel.zitadel.svc.cluster.local`の双方を含める
-  - ZitadelのTLS終端を有効化し、login v2コンテナが内部CAを信頼した状態でクラスタ内Service名経由のAPI呼び出しに成功することを確認する
-  - `terraform/tunnel.tf`の`idp.aramakisai.com` API向けingress ruleをHTTPS origin + HTTP/2 origin + TLS検証スキップへ変更する。cloudflared→edgeがHTTP/2トランスポートであることを併せて確認する
-  - Cloudflareダッシュボードでzone単位のgRPC設定を有効化する(Terraform管理対象外)
-  - `idp.aramakisai.com`経由でTerraform providerのgRPC接続が成立することを確認する
-  - 既存のTerraformコード(project/role/application/action)を本番Zitadelへterraform applyし、k3dと同じ設定が再現されることを確認する
-  - `terraform state list`で`zitadel_*`リソースがstateにコミットされていることを確認する
+  - Ansible Zitadelブートストラップを本番で実行し、project/role/application/action等を投入するAnsible role用のPATを発行する
+  - `terraform/zitadel_*.tf`(9ファイル、リソースブロック19個: project/role/application_oidc/action_target/action_execution_event/org_idp_oauth/label_policy/machine_user/personal_access_token/org_member/instance_member/human_user/user_grant)が定義するリソースを、Ansible role(既存`ansible/roles/zitadel-bootstrap`の拡張または新規role)によるv2 Management API(HTTP/JSON)呼び出しへ置き換えて実装する。各リソースは「存在確認→存在すれば更新、なければ作成」の冪等パターンで投入する
+  - project→role→application→actionの依存順をAnsible taskの実行順で表現する
+  - Ansible実行環境からZitadel自身のHTTP APIへの到達経路を確定させる(design.md「Zitadel Provider Access Path」記載の2候補、(a)`kubectl exec`でPod内からcurl等を実行、(b)Ansible実行ホストから`idp.aramakisai.com`経由でHTTP到達、のいずれかへ実装前に確定する)
+  - k3dと同じ設定が本番Zitadelへ再現されることを確認する
   - _Requirements: 7.2, 11.4, 11.5, 11.6, 11.7, 11.8_
   - _Depends: 9.1_
   - **実施結果(実装のみ、マージ・本番適用は未実施)**: `feat/idp-zitadel-prod-core`ブランチでZitadel本体一式
@@ -557,11 +554,26 @@
     チェックリスト(cert-manager内部CA・TLS終端・`tunnel.tf`のHTTPS origin化・Cloudflareダッシュボードの
     gRPC設定)が現在の実行順序であり、追記5の「未解決」および「Tailscale Operator案」は採用しなかった
     過去の検討記録として残すのみ。以降このタスクを再開する場合は上記チェックリストに従うこと。
+  - **追記7(2026-09-16、Terraform providerからAnsible+HTTP APIへの方針転換)**: design.mdの
+    `Zitadel Provider Access Path`を改訂し(PR #212)、project/role/application/action等のZitadelリソース
+    管理をgRPC専用のTerraform providerからAnsible経由のv2 Management API(HTTP/JSON)呼び出しへ転換した。
+    Cloudflare公式ドキュメントに「gRPCはpublic hostname経由のCloudflare Tunnelでは非サポート」と明記されて
+    おり、追記6までのチェックリスト(cert-manager内部CA・TLS終端・`tunnel.tf`のHTTPS origin化・
+    Cloudflareダッシュボードのgrpc設定・Terraform providerのgRPC接続確認・`terraform apply`・
+    `terraform state list`確認)はこの制約の回避を目的としていたが、Zitadel API自体はgRPC/HTTP双方に対応し
+    gRPC限定なのはterraform-provider-zitadel(クライアント実装)側の制約であるという事実
+    (task6.1/9.1/10.2/10.3のHTTP API実機実績で裏付け済み)を踏まえ、不要と判断し本タスクのチェックリストを
+    上記の通り新方針へ書き換えた。旧方針の実装であるPR #211(`feat/idp-zitadel-grpc-tls-termination`)は
+    別途クローズ・取り下げを判断する。
+    task10.2/10.3で実装・実機検証済みの`terraform/zitadel_student_exhibitor.tf`・
+    `terraform/zitadel_recovery_sa.tf`(_Boundary: Zitadel Terraform Provider定義_)が新方針での
+    Ansible化対象に含まれるかは本改訂の範囲外とし、9.2実装時に別途判断する。10.2/10.3自体の実施結果・
+    Boundary表記は過去の実機検証の記録のため変更しない。
 
 - [ ] 9.3 Terraform管理外のインスタンス設定をAdmin API importで反映する
   - Assert Roles on Authentication等、Terraformで管理しきれないインスタンス設定の差分を洗い出す
   - 9.1で取得したexportデータを本番Zitadelの`POST /admin/v1/import`で取り込む(masterkeyに依存しないアプリケーションレイヤーの移行であることを確認する)
-  - import後にterraform planを実行しdriftがないことを確認する
+  - import後、9.2でAnsible管理化されたproject/role/application/action等に意図しない副作用が発生していないことを確認する(旧方針の`terraform plan`によるdrift確認に相当する手段は9.2の方針転換に伴い別途定める)
   - _Requirements: 7.3_
   - _Depends: 9.2_
 
