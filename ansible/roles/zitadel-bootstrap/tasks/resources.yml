@@ -161,3 +161,9 @@
 # ------------------------------------------------------------
 - name: SMTP Email Providerを投入
   ansible.builtin.include_tasks: _smtp_config.yml
+
+# ------------------------------------------------------------
+# 9. noreply送信用Human User (Dovecot Lua Auth BridgeのSMTP submission認証対象)
+# ------------------------------------------------------------
+- name: noreply SMTP Userを投入
+  ansible.builtin.include_tasks: _noreply_smtp_user.yml
