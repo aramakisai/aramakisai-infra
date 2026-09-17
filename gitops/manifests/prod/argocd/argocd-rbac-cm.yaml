@@ -10,5 +10,5 @@ metadata:
 data:
   policy.default: role:readonly
   policy.csv: |
-    g, 管理者, role:admin
+    g, admin, role:admin
   scopes: "[groups]"
