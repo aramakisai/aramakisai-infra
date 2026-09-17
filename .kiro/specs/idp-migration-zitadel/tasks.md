@@ -1251,6 +1251,52 @@
       実際にフラグを付与する分岐は未実装)であることも次の実行者向けに
       記録しておく。実行前に`--send-email`を付与する分岐追加、または
       `scripts/zitadel-invite-migration.py`の直接呼び出しへの切り替えが必要。
+  - **追記4(2026-09-17、招待コード発行を一部実施・完了には至らず)**:
+    - **実装**: `ansible/roles/zitadel-cutover/tasks/step4_invite_migration.yml`に
+      `zitadel_cutover_invite_send_email`(既定false、`ZITADEL_CUTOVER_SEND_EMAIL`
+      環境変数でも上書き可)による分岐を追加し、trueの場合のみ`--send-email`を
+      付与する実装にした。
+    - **新たに判明したブロッカーとその修正**: 実ユーザーCSV(7件、氏名正規化・
+      ダミー除去済み)に対し`--dry-run`を実行し7/7件が対象として認識される
+      ことを確認した後、1〜2件の試験実送信を試みたところ、
+      `zitadel_cutover_host_reachable_url`(prod既定値`https://idp.aramakisai.com`、
+      公開ドメインへの直接アクセス)に対し`scripts/zitadel-invite-migration.py`
+      (urllib、User-Agent未設定)が常に`HTTP 403 "error code: 1010"`
+      (CloudflareのBot Fight Mode等によるブロックと推定)で失敗することを発見した。
+      既存の`_api_call.yml`(SMTP設定・resources投入等で使用)は同じ制約を
+      `kubectl exec`によるPod内実行(ループバック接続、Cloudflareを経由しない)で
+      回避しており、本タスクのブロッカーも同種の問題と判断した。
+      `zitadel_cutover_host_reachable_url`をprod/k3d共通で
+      `http://127.0.0.1:18080`(port-forward経由)に統一し、
+      `step4_invite_migration.yml`のport-forward開始/待機/終了タスクから
+      `when: target_env == 'k3d'`条件を外してprod/k3d共通実行に変更した
+      (`zitadel_cutover_api_base_url`をLuaスクリプトへ焼き込むStep1、および
+      k3d限定のStep2検証用一時Application呼び出しへの影響はない)。
+    - **試験実送信(2件)**: 修正後、CSV先頭2件を対象に`--send-email`付きで
+      実行し、`ansible-playbook`が`failed=0`で正常終了(スクリプト側の
+      `sys.exit`もrc=0、内部的に全件成功を意味する)することを確認した。
+      読み取り専用のAdmin API検索(`kubectl exec`経由、使い捨て検証playbook、
+      コミット対象外)で対象2件が実際にZitadelへ作成され、project grant
+      (`grant_count=1`)も付与済みであることを確認した(招待コード自体の
+      到達確認は受信箱を持たないため未実施、API応答上は`sendCode`が
+      正常応答したことのみ確認)。
+    - **残り5件は未実施(自動化基盤のガードレールによりブロック)**: 試験成功後、
+      残り5件に対して同じ手順で`--send-email`付き実行を試みたところ、
+      本セッションの自動実行基盤(Claude Code auto modeの安全分類器)が
+      「実世界への不可逆な取引(Real-World Transactions)」に該当する操作として
+      実行を拒否した。ユーザーからの事前の包括的な実行承認とは別に、
+      セッション側のガードレールが個別の意思確認を要求する設計になっており、
+      本タスクの実行者(エージェント)側で回避策を取ることは意図的に行っていない
+      (指示にも「回避を試みるべきでない」旨が明記されている)。
+    - **結論**: `--send-email`分岐の実装、Cloudflareブロッカーの発見と修正、
+      7件中2件の実送信・API経由での作成/grant確認までは完了したが、
+      残り5件の招待コード発行は未実施のまま残っている。既存ユーザーへの
+      招待ベース移行(Step3の受け入れ基準)は全件完了していないため、
+      9.4のチェックボックスは引き続き未完了のままとする。次の実行者は
+      対話セッションで`ZITADEL_CUTOVER_TARGET_ENV=prod ZITADEL_EXTERNAL_DOMAIN=idp.aramakisai.com
+      infisical run --env=prod -- ansible-playbook ansible/playbooks/zitadel-cutover.yml
+      -e zitadel_cutover_invite_csv=<残り5件のCSV> -e zitadel_cutover_invite_send_email=true`
+      を実行すれば完了できる状態にある(実装・接続経路の課題は解消済み)。
 
 - [x] 9.5 authentik構成への切り戻し手順を整備する
   - Zitadel切替後に重大な認証障害が発生した場合の、旧authentik構成への切り戻し手順を作成する
