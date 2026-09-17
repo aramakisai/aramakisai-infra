@@ -10,9 +10,10 @@ metadata:
 data:
   url: https://argocd.aramakisai.com
   oidc.config: |
-    name: Authentik
-    issuer: https://idp.aramakisai.com/application/o/argocd/
-    clientID: argocd
+    name: Zitadel
+    issuer: https://idp.aramakisai.com
+    clientID: $argocd-oidc-secret:clientID
     clientSecret: $argocd-oidc-secret:clientSecret
-    requestedScopes: ["openid", "profile", "email", "groups"]
+    # groups claimはscope指定ではなくZitadelのgroupsClaim Action(project roleキー)が付与する
+    requestedScopes: ["openid", "profile", "email"]
   admin.enabled: "false"
