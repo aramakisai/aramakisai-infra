@@ -114,7 +114,7 @@ LDAP は使わない。関連設定は `gitops/manifests/prod/mailserver/configm
 - **ログイン認証**: PLAIN/LOGIN は Dovecot Lua Auth Bridge(`zitadel-auth.lua`)が Zitadel Session API へ委譲、
   OAUTHBEARER(Roundcube)は Zitadel introspection。noreply も Zitadel の human user として認証する。
 - **ML 閲覧**: Zitadel 認証済みの全ユーザーが全 ML 共有メールボックスを同等権限で読み書きできる
-  (`acl-postsync-job.yaml` が各部署の `dovecot-acl` に `authenticated` を書き出す)。
+  (`user-patches.sh` が起動時に各部署の `dovecot-acl` に `authenticated` を書き出す)。
 - **送信者認可**: `user-patches.sh` が `mua_sender_restrictions` を上書きする。From が ML アドレス(エイリアス含む)なら
   SASL 認証済みの誰でも許可、noreply は SASL ユーザー noreply のみ許可、それ以外(個人アドレス等)は拒否。
 - **再発時の確認手順**:
