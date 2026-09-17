@@ -1,0 +1,16 @@
+---
+# noreply@aramakisai.com human user投入のみ (task9.4追記6: SMTP認証失敗の根本原因対応)。
+# zitadel-resources.yml (project/role/application/出展団体CSV等の一括投入) は経由しない
+# (出展団体CSVが現時点でPoCダミーデータのままで、再実行すると本番にダミー団体が
+# 再作成される既知の問題があるため、zitadel-smtp.ymlと同じ理由でこのplaybookを分離する)。
+# 前提: zitadel-bootstrap.ymlで初回admin/PATブートストラップが完了していること、
+# NOREPLY_SMTP_PASSWORDがInfisicalに設定済みであること (SMTP設定と共通)。
+- name: Zitadel noreply SMTP User投入
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: zitadel-bootstrapロールの_noreply_smtp_userタスクを実行
+      ansible.builtin.include_role:
+        name: zitadel-bootstrap
+        tasks_from: _noreply_smtp_user

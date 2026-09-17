@@ -92,6 +92,14 @@ zitadel_smtp_config:
   description: aramakisai-noreply-smtp
   infisical_hint: "NOREPLY_SMTP_PASSWORD (既存キー、Authentik/Vaultwardenと共通利用)"
 
+# Dovecot Lua Auth Bridge (SMTP submission:587認証) がSession API経由で照会する
+# human user。上記zitadel_smtp_configのusername/passwordと必ず一致させること。
+zitadel_noreply_smtp_user:
+  username: noreply@aramakisai.com
+  given_name: Aramakisai
+  family_name: Noreply
+  infisical_hint: "NOREPLY_SMTP_PASSWORD (zitadel_smtp_configと共通利用)"
+
 zitadel_machine_users:
   - user_name: dovecot-lua-auth
     name: Dovecot Lua Auth Bridge

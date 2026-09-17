@@ -1,0 +1,132 @@
+---
+# noreply@aramakisai.com用Human User投入 (task9.4追記6: SMTP認証失敗の根本原因対応)。
+#
+# Dovecot Lua Auth Bridge(gitops/manifests/prod/mailserver/configmap.yamlの
+# zitadel-auth.lua)はSMTP submission(587)認証をPOST /v2/sessionsのchecks.password
+# (Session API)で検証する。このAPIはhuman userのパスワード認証のみを対象とし、
+# machine user(client credentials/JWT)は認証できない
+# (ansible/roles/zitadel-cutover/tasks/step1_dovecot_bridge.ymlのk3d実機検証で
+# 確認済みの/v2/users/human + password.passwordパターンを踏襲)。そのため
+# `noreply@aramakisai.com`はhuman userとして作成する必要がある。
+#
+# パスワードはZitadel自身のSMTP設定(_smtp_config.yml)と同じ既存Infisicalキー
+# NOREPLY_SMTP_PASSWORDに一致させる。再実行時も常にSetPasswordで最新化し、
+# Infisical側の値と乖離しないようにする(冪等)。
+#
+# NOREPLY_SMTP_PASSWORDはZitadelのデフォルトPassword Complexity Policy
+# (記号必須)を満たさず、平文パスワードとして送ると
+# `POST /v2/users/human`が400 (code=3 "Password must contain symbol")で拒否する
+# (本タスクで実機確認済み)。Authentik/Vaultwardenと共通利用中の既存キーの値を
+# 変更すると他システムとの整合が崩れるため値は変更せず、Zitadelの
+# hashedPassword経路(既存パスワードのインポート用、complexity policyの対象外)
+# でbcryptハッシュとして投入することで回避する。
+
+- name: リソース定義を読み込み (zitadel_noreply_smtp_user)
+  ansible.builtin.include_vars: resources.yml
+
+- name: NOREPLY_SMTP_PASSWORDを解決 (Zitadel自身のSMTP設定と共通の既存Infisicalキー)
+  ansible.builtin.set_fact:
+    _zitadel_noreply_password: "{{ lookup('env', 'NOREPLY_SMTP_PASSWORD') }}"
+  no_log: true
+
+- name: 必須変数を検証
+  ansible.builtin.assert:
+    that:
+      - zitadel_admin_pat is defined
+      - zitadel_admin_pat | length > 0
+      - _zitadel_noreply_password | length > 0
+    fail_msg: >-
+      zitadel_admin_pat または NOREPLY_SMTP_PASSWORD を解決できませんでした。
+      `infisical run --env=prod -- ansible-playbook ...`で実行してください。
+
+- name: "パスワードをbcryptハッシュ化 (標準入力経由、平文をコマンドライン引数・ログへ出さない)"
+  # stdin_add_newline: false 必須。既定(true)だとAnsibleがstdinへ暗黙に改行を
+  # 付与し、末尾"\n"込みでハッシュ化されてしまい実際のパスワードと一致しなく
+  # なる(本タスクで実機発見、doveadm auth testがpassword mismatchになった原因)。
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - "import sys, bcrypt; sys.stdout.write(bcrypt.hashpw(sys.stdin.buffer.read(), bcrypt.gensalt()).decode())"
+    stdin: "{{ _zitadel_noreply_password }}"
+    stdin_add_newline: false
+  register: _zitadel_noreply_password_hash_raw
+  changed_when: false
+  no_log: true
+
+- name: ハッシュ値を退避
+  ansible.builtin.set_fact:
+    _zitadel_noreply_password_hash: "{{ _zitadel_noreply_password_hash_raw.stdout }}"
+  no_log: true
+
+- name: "noreply SMTP userを検索: {{ zitadel_noreply_smtp_user.username }}"
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    zitadel_api_method: POST
+    zitadel_api_path: /management/v1/users/_search
+    zitadel_api_body:
+      queries:
+        - userNameQuery: { userName: "{{ zitadel_noreply_smtp_user.username }}", method: TEXT_QUERY_METHOD_EQUALS }
+    zitadel_api_label: "search noreply smtp user"
+
+- name: 検索結果を退避
+  ansible.builtin.set_fact:
+    _zitadel_noreply_search: "{{ zitadel_api_result }}"
+  no_log: true
+
+- name: "noreply SMTP userを新規作成: {{ zitadel_noreply_smtp_user.username }}"
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    zitadel_api_method: POST
+    zitadel_api_path: /v2/users/human
+    zitadel_api_body:
+      username: "{{ zitadel_noreply_smtp_user.username }}"
+      profile:
+        givenName: "{{ zitadel_noreply_smtp_user.given_name }}"
+        familyName: "{{ zitadel_noreply_smtp_user.family_name }}"
+      email: { email: "{{ zitadel_noreply_smtp_user.username }}", isVerified: true }
+      hashedPassword: { hash: "{{ _zitadel_noreply_password_hash }}" }
+    zitadel_api_label: "create noreply smtp user"
+  when: (_zitadel_noreply_search.body.result | default([])) | length == 0
+  no_log: true
+
+- name: 新規作成結果を確認
+  ansible.builtin.assert:
+    that:
+      - zitadel_api_result.status == 200
+    fail_msg: "noreply smtp userの作成に失敗しました: {{ zitadel_api_result.status }}"
+  when: (_zitadel_noreply_search.body.result | default([])) | length == 0
+  no_log: true
+
+- name: noreply userIdを確定
+  ansible.builtin.set_fact:
+    zitadel_noreply_smtp_user_id: >-
+      {{ (zitadel_api_result.body.userId)
+         if ((_zitadel_noreply_search.body.result | default([])) | length == 0)
+         else (_zitadel_noreply_search.body.result[0].id) }}
+  no_log: true
+
+- name: "noreply SMTP userのパスワードを最新化 (既存userの場合のみ、常にNOREPLY_SMTP_PASSWORDへ上書きして冪等にする)"
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    zitadel_api_method: POST
+    zitadel_api_path: "/v2/users/{{ zitadel_noreply_smtp_user_id }}/password"
+    zitadel_api_body:
+      hashedPassword: { hash: "{{ _zitadel_noreply_password_hash }}" }
+    zitadel_api_label: "set noreply smtp user password"
+  when: (_zitadel_noreply_search.body.result | default([])) | length > 0
+  no_log: true
+
+- name: パスワード再設定結果を確認 (既存userの場合のみ)
+  ansible.builtin.assert:
+    that:
+      - zitadel_api_result.status == 200
+    fail_msg: "noreply smtp userのパスワード再設定に失敗しました: {{ zitadel_api_result.status }}"
+  when: (_zitadel_noreply_search.body.result | default([])) | length > 0
+  no_log: true
+
+- name: 投入完了
+  ansible.builtin.debug:
+    msg: >-
+      noreply SMTP user ({{ zitadel_noreply_smtp_user.username }}, id={{ zitadel_noreply_smtp_user_id }}) を投入しました
+      ({{ '新規作成' if (_zitadel_noreply_search.body.result | default([])) | length == 0 else '既存user、パスワードのみ再設定' }})。

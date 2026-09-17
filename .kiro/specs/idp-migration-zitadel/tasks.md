@@ -972,7 +972,7 @@
       本番へ反映済みであることをAdmin API経由で確認し、再実行時の冪等性バグも
       修正した。本タスクを完了扱いとする。
 
-- [x] 9.4 一括カットオーバー順序を実行する
+- [ ] 9.4 一括カットオーバー順序を実行する
   - Dovecot Lua Auth Bridge・RPアプリ(CMS/Vaultwarden/Roundcube)OIDC Clientの順に本番切替を実行する
   - task 4.4でActions v2が安定と判断された場合のみvaultwarden-rbac-sync webhookを本番切替に含める。スコープ除外と判断された場合はこのステップを省略し手動運用へ引き継ぐ
   - 既存ユーザーへの招待ベース移行(task 6)を本番Zitadelに対して実施する
@@ -1309,6 +1309,77 @@
       含めていない。
     - Step1(Dovecot Lua Auth Bridge)・Step2(RPアプリOIDC切替)・Step3
       (招待コード発行)すべて受け入れ基準を満たしたため、9.4を完了とする。
+  - **追記6(2026-09-17、招待メール全件未達の根本原因判明と修正、9.4を未完了へ差し戻し)**:
+    - **発覚**: 追記5で発行した招待コード7件が、SMTP経由のメール通知として1件も
+      届いていなかった。
+    - **根本原因1(確認済み・修正済み)**: `noreply@aramakisai.com`がZitadel側に
+      ユーザーとして存在しなかった。Dovecot Lua Auth Bridge
+      (`gitops/manifests/prod/mailserver/configmap.yaml`の`zitadel-auth.lua`)は
+      SMTP submission(587)の認証を`POST /v2/sessions`(Session API、
+      `checks.password`)で検証するが、これはhuman userのパスワード認証のみが
+      対象でmachine user(client credentials/JWT)は認証できない
+      (`ansible/roles/zitadel-cutover/tasks/step1_dovecot_bridge.yml`のk3d実機
+      検証パターンで確認済み)。Admin APIで存在しないことを読み取り専用検索で
+      確認した上で、`noreply@aramakisai.com`をhuman userとして新規作成した。
+      パスワードはZitadel自身のSMTP設定(9.4追記3の`_smtp_config.yml`)と同じ
+      既存Infisicalキー`NOREPLY_SMTP_PASSWORD`に一致させる必要があるが、この
+      値はZitadelの既定Password Complexity Policy(記号必須)を満たさず平文
+      パスワードでの作成は400で拒否されたため、`hashedPassword`(既存パスワード
+      インポート用エンドポイント、complexity policy対象外)経由でbcryptハッシュ
+      として投入した。実装過程で、Ansibleの`command`モジュールが既定
+      (`stdin_add_newline: true`)でstdinへ暗黙に改行を付与し、末尾`\n`込みで
+      ハッシュ化してしまいパスワードが一致しなくなるバグも実機で発見・修正した
+      (`stdin_add_newline: false`を明示)。
+      - 新規: `ansible/roles/zitadel-bootstrap/tasks/_noreply_smtp_user.yml`、
+        `ansible/playbooks/zitadel-noreply-user.yml`(resources.yml全体の
+        再実行を避けるため`_smtp_config.yml`と同じ理由で単独実行できるplaybook
+        として分離)。
+      - 変更: `ansible/roles/zitadel-bootstrap/vars/resources.yml`
+        (`zitadel_noreply_smtp_user`追加)、`tasks/resources.yml`
+        (9番目のリソースとして投入順に組み込み)。
+      - 本番投入・冪等性確認済み(新規作成→再実行でパスワードのみ最新化する
+        分岐が正常応答することを確認)。
+    - **根本原因2(未解決・本タスクのスコープ外)**: 上記のnoreply user作成後も
+      `doveadm auth test`が`auth failed`/`code=temp_fail`(パスワード不一致では
+      なく内部エラー)を返し続ける状態を発見した。調査の結果、mailserver Pod
+      (`mailserver-0`、`hostNetwork: true`)からZitadel Pod
+      (`zitadel.zitadel.svc.cluster.local:8080`、ClusterIP経由・Pod IP直接とも)
+      への接続が`Connection timed out`になっており、`prod-node-1`のroot権限
+      からの直接curlでも同様に再現することを確認した(Dovecot Lua Auth
+      Bridgeそのものがhuman/machineユーザーを問わずZitadelへ到達できていない
+      状態)。一方、Pod間通信(`cms` Pod → Zitadel等)は正常に機能しており、
+      hostNetwork PodからZitadel Pod宛の経路のみが異常だった。
+      `NetworkPolicy`/`CiliumNetworkPolicy`/`CiliumClusterwideNetworkPolicy`は
+      クラスタ全体に1件も存在せず、`cilium-dbg endpoint list`でもzitadel-0の
+      ingress/egress enforcementは無効(Disabled)、`cilium-dbg monitor
+      --type drop`でも該当のdrop記録なしだったため、Ciliumのポリシー機構による
+      明示的な遮断ではないと判断した。`zitadel-0` Podを再作成(`kubectl delete
+      pod`、StatefulSetが同一定義で再作成)したところ接続は一時的に復旧したが、
+      数分後に同一Pod IPへの接続が再びタイムアウトする状態に戻った。
+      `prod-node-1`の`free -h`/`uptime`を確認したところ、空きメモリが恒常的に
+      217Mi程度(合計7.6Gi中)、load averageが2.9〜4.7と高く、直近
+      (2026-09-17 04:27)に`netdata`関連プロセスがOOM Killされた形跡
+      (`dmesg`)も確認した。ノードのメモリひっ迫が今回の断続的な接続タイムアウト
+      の原因である可能性が高いと推定するが、確定原因の特定・恒久対処は本タスク
+      (noreply userの作成)のスコープ外と判断し、これ以上の調査・修正は行って
+      いない(authentik撤去等によるノード負荷削減は既知の未着手負債、
+      9.4追記2「terraform未適用差分」と同根の可能性がある)。
+    - **個人情報の非露出**: 上記のログ確認・診断作業において、実ユーザーの
+      氏名・メールアドレスを含む行は表示・記録していない。
+    - **9.4のチェックボックスについて**: 誤って`[x]`のまま次のPRでマージされて
+      いたが、招待メールが実際に届く状態にはまだなっていないため`[ ]`へ戻す。
+      根本原因1(noreply user不在)は本タスクで解消したが、根本原因2
+      (mailserver→Zitadelの断続的な接続タイムアウト、ノードメモリひっ迫が
+      濃厚)が解消するまでは、Zitadel発のメール(招待メール含む)は安定して
+      送信できない。
+    - **残課題**:
+      (1) `prod-node-1`のメモリひっ迫と、それに伴うmailserver→Zitadel間の
+      断続的な接続タイムアウトの根本解決(ノードリソース増強、または
+      authentik撤去等による負荷削減の要否をユーザー判断で決定する必要がある)。
+      (2) (1)解消後、`doveadm auth test`が安定して`auth succeeded`を返すこと、
+      および`admin/v1/email`のSMTP設定から実際にテストメールが送信できることの
+      再確認。
+      (3) 招待済み7名への招待メール再送信の要否判断(本タスクでは実施しない)。
 
 - [x] 9.5 authentik構成への切り戻し手順を整備する
   - Zitadel切替後に重大な認証障害が発生した場合の、旧authentik構成への切り戻し手順を作成する
