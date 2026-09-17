@@ -7,7 +7,7 @@ metadata:
   labels:
     app: mailserver
   annotations:
-    secret.reloader.stakater.com/reload: "mail-tls,mailserver-secrets,dovecot-oauth2-config,dovecot-lua-auth-secret"
+    secret.reloader.stakater.com/reload: "mail-tls,dovecot-oauth2-config,dovecot-lua-auth-secret"
     configmap.reloader.stakater.com/reload: "mailserver-config"
 spec:
   serviceName: mailserver
@@ -65,12 +65,6 @@ spec:
             # 送信者認可の最終ルールは user-patches.sh で上書きする (configmap.yaml 参照)
             - name: SPOOF_PROTECTION
               value: "1"
-            # Roundcube OAuth2 クライアントシークレット (OAUTHBEARER introspection 用)
-            - name: MAIL_OAUTH2_CLIENT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: mailserver-secrets
-                  key: MAIL_OAUTH2_CLIENT_SECRET
             # SMTP 直接配送 (2026-07-01: Resend リレー廃止)
             # DEFAULT_RELAY_HOST 未設定 → Postfix が宛先ドメインの MX へ直接配送する
             # セキュリティ・スパム設定
