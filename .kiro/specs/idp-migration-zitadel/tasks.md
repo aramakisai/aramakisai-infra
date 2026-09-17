@@ -1650,8 +1650,12 @@
     - ArgoCD: `argocd-config`がSynced/Healthy、`/auth/login`がZitadelのauthorizeへ
       リダイレクトしlogin v2のloginname画面(200)まで到達、argocd-serverログにOIDCエラーなし。
       実ユーザーでのログイン・`role:admin`付与は管理者本人の操作で確認する
-    - 残課題: CMSの`role-mapping.ts`は出展団体を`student_exhibitor`で判定しているが、
-      Zitadelのroleキーは`exhibitor`のためCMS上で出展団体ロールが付かない
+    - 出展団体のroleキーはCMSの`role-mapping.ts`に合わせ`student_exhibitor`とする。Zitadelの
+      roleキーは変更できないため、`vars/resources.yml`の`zitadel_project_role_renames`で旧キー
+      `exhibitor`からの付け替えを宣言し、`ansible/playbooks/zitadel-role-renames.yml`
+      (`_project_role_renames.yml`、`resources.yml`からも実行)が新キー作成・user grant付け替え・
+      旧キー削除を行う。本番で`student_exhibitor`を作成し`exhibitor`を削除した(付け替え対象の
+      grantは0件)。一時machine userで`groups`に`student_exhibitor`が入ることを確認後、削除した
 
 - [ ] 10. 追加移行スコープ(既存authentik付随機能6件)のk3d PoC実装
   - task1〜8完了後にセッション内の追加検討で判明した、旧spec(idp-migration-zitadel初版)ではスコープ外だった`terraform/authentik_*.tf`6ファイル相当の移行。PoCとしてk3d環境で検証する(本番反映はtask9の一括カットオーバーに含める)。task9とは独立して着手可能(依存はtask1/2/6のみ)
@@ -1686,7 +1690,7 @@
   - **実施結果**: `terraform/zitadel_student_exhibitor.tf`を新規作成。CSV(`terraform/data/
     zitadel_student_exhibitors.csv`、`.invalid`ドメインのダミー4件、task6.1 SAMPLE_USERSと同型)
     を`csvdecode`+`for_each`で読み込み`zitadel_human_user`(パスワード未設定)を一括生成し、
-    専用role_key `exhibitor`(`zitadel_project_role`、aramakisaiプロジェクトへ追加)を
+    専用role_key `student_exhibitor`(`zitadel_project_role`、aramakisaiプロジェクトへ追加)を
     `zitadel_user_grant`で付与する構成にした。招待コード発行(`CreateInviteCode`)は
     terraform-provider-zitadel v3系(`zitadel_human_user`docs確認、2026-09-01)に対応
     リソース・属性が存在せず(`initial_password`系の直接設定のみ)、かつ`external` data

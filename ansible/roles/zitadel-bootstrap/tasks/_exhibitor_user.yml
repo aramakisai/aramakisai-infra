@@ -57,6 +57,6 @@
     zitadel_api_path: "/management/v1/users/{{ zitadel_exhibitor_id }}/grants"
     zitadel_api_body:
       projectId: "{{ zitadel_project_id }}"
-      roleKeys: ["exhibitor"]
+      roleKeys: ["student_exhibitor"]
     zitadel_api_label: "add user grant {{ zitadel_exhibitor_item.email }}"
   when: (zitadel_api_result.body.result | default([])) | length == 0

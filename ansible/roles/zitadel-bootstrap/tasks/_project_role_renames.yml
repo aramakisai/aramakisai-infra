@@ -1,0 +1,45 @@
+---
+# zitadel_project_role_renames(旧キー => 新キー)を適用する。Zitadelのroleキーは変更不可のため、
+# 新キー作成 → 旧キーを持つuser grantを新キーへ付け替え(他roleは保持)→ 旧キー削除 の順で行う。
+# 旧キーが存在しなければ何もしない(冪等)。
+# zitadel_project_role_rename_apply=false で対象件数の表示のみ(変更なし)。
+# 本番はZITADEL_EXTERNAL_DOMAIN=idp.aramakisai.comを指定して実行する(未指定だとinstanceを解決できない)。
+
+- name: 必須変数を検証
+  ansible.builtin.assert:
+    that:
+      - zitadel_admin_pat is defined
+      - zitadel_admin_pat | length > 0
+    fail_msg: >-
+      zitadel_admin_pat を解決できませんでした。
+      `infisical run --env=prod -- ansible-playbook ...`で実行してください。
+
+- name: リソース定義を読み込み
+  ansible.builtin.include_vars: resources.yml
+  when: zitadel_project_role_renames is not defined
+
+- name: Project IDを解決 (resources.yml経由でない単独実行時)
+  when: zitadel_project_id is not defined
+  block:
+    - name: Projectを検索
+      ansible.builtin.include_tasks: _api_call.yml
+      vars:
+        zitadel_api_method: POST
+        zitadel_api_path: /management/v1/projects/_search
+        zitadel_api_body:
+          query: { offset: "0", limit: 100 }
+          queries:
+            - nameQuery: { name: "{{ zitadel_project_name }}", method: TEXT_QUERY_METHOD_EQUALS }
+        zitadel_api_label: "search project {{ zitadel_project_name }}"
+
+    - name: Project IDを退避
+      ansible.builtin.set_fact:
+        zitadel_project_id: "{{ zitadel_api_result.body.result[0].id }}"
+      no_log: true
+
+- name: roleキーを付け替え
+  ansible.builtin.include_tasks: _project_role_rename.yml
+  loop: "{{ zitadel_project_role_renames | default({}) | dict2items }}"
+  loop_control:
+    loop_var: zitadel_rename_item
+    label: "{{ zitadel_rename_item.key }} -> {{ zitadel_rename_item.value }}"

@@ -1,0 +1,12 @@
+---
+# vars/resources.ymlのzitadel_project_role_renames(旧roleキー => 新roleキー)を本番へ適用する。
+# `-e zitadel_project_role_rename_apply=false`で対象件数の表示のみ。
+- name: Zitadel project roleキーの付け替え
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: zitadel-bootstrapロールの_project_role_renamesタスクを実行
+      ansible.builtin.include_role:
+        name: zitadel-bootstrap
+        tasks_from: _project_role_renames

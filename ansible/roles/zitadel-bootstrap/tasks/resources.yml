@@ -104,6 +104,9 @@
     loop_var: zitadel_role_item
     label: "{{ zitadel_role_item.key }}"
 
+- name: Project Roleキーの付け替えを適用
+  ansible.builtin.include_tasks: _project_role_renames.yml
+
 # ------------------------------------------------------------
 # 3. OIDC Application
 # ------------------------------------------------------------
