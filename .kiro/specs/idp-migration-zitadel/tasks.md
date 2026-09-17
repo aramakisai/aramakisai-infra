@@ -1396,6 +1396,13 @@
       移し、既存providerを毎回`PUT /admin/v1/email/smtp/{id}`で更新する。
       あわせてZitadelの`tls: true`が暗黙TLSを先に試す実装のため、portを465
       (submissions)へ変更した。
+      (3) v4.12.3では`PUT /admin/v1/email/smtp/{id}`にpasswordを含めると、
+      projection(`smtp_configs6`)が同一列の二重SETでSQLエラーになり、
+      MaxFailureCount(5)到達後にイベントごと読み飛ばされる(API応答は200、
+      write modelは更新済みのため再送しても変更なし扱い)。更新はpasswordを
+      含めず行い、passwordは`PUT /admin/v1/email/smtp/{id}/password`で別途
+      更新する。読み飛ばされた変更は一度別値へ変更してから戻すことで
+      projectionへ反映させた。最終タスクでGET結果のhost/userを検証する。
 
 - [x] 9.5 authentik構成への切り戻し手順を整備する
   - Zitadel切替後に重大な認証障害が発生した場合の、旧authentik構成への切り戻し手順を作成する
