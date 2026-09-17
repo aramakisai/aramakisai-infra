@@ -416,3 +416,10 @@ data:
     count = 1;
   rspamd-worker-controller.inc: |
     enabled = false;
+  # mailserver は hostNetwork + NET_ADMIN のため、fail2ban の BAN はノード全体の
+  # nftables input フックに入る。Pod IP が BAN されると SMTP だけでなくノード⇔その Pod
+  # 間の全 TCP が破棄され、Zitadel Pod を BAN すると Lua Auth Bridge が到達不能になり
+  # 認証失敗→再 BAN のループに陥る。クラスタ内 Pod (Pod CIDR) は BAN 対象外にする。
+  fail2ban-jail.cf: |
+    [DEFAULT]
+    ignoreip = 127.0.0.1/8 10.42.0.0/16

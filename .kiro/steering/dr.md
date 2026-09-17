@@ -128,6 +128,24 @@ DR 時は `recovery.sh` が自動で VolSync リストアを行う。
      SMTP認証(`235`)は通るが送信が失敗する場合は、認証問題ではなく Postfix の
      `reject_authenticated_sender_login_mismatch`（`SPOOF_PROTECTION=1` 由来）を疑う。
 
+### fail2ban によるクラスタ内 Pod の BAN
+
+mailserver は `hostNetwork: true` + `NET_ADMIN` のため、fail2ban の BAN はノード全体の nftables
+(`inet f2b-table` の input フック) に入る。クラスタ内 Pod の IP が BAN されると、SMTP だけでなく
+ノード(および hostNetwork Pod)とその Pod 間の全 TCP が破棄される。Zitadel Pod が BAN されると
+Dovecot Lua Auth Bridge が到達不能になり `doveadm auth test` が `code=temp_fail` を返し、
+Zitadel からの SMTP 送信も失敗→認証失敗で再 BAN のループになる。
+
+- 対策: `configmap.yaml` の `fail2ban-jail.cf` で Pod CIDR (`10.42.0.0/16`) を `ignoreip` に入れている
+- 再発時の確認手順:
+  ```bash
+  ssh root@prod-node-1 "nft list table inet f2b-table"
+  make kubectl ARGS="exec -n prod mailserver-0 -- fail2ban-client status postfix"
+  make kubectl ARGS="exec -n prod mailserver-0 -- fail2ban-client get postfix ignoreip"
+  ```
+- 解除: `fail2ban-client set <jail> unbanip <IP>`。BAN 元の認証失敗が続いている場合は即再 BAN されるため、
+  先に `ignoreip` が効いていることを確認する
+
 ---
 
 ## Tailscale デバイス削除の必要性
