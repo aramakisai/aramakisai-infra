@@ -1403,6 +1403,36 @@
       含めず行い、passwordは`PUT /admin/v1/email/smtp/{id}/password`で別途
       更新する。読み飛ばされた変更は一度別値へ変更してから戻すことで
       projectionへ反映させた。最終タスクでGET結果のhost/userを検証する。
+  - **追記7(2026-09-17、招待メール経路の全面修正と再送結果)**:
+    - **判明した原因と対応**:
+      - mailserver(hostNetwork)のfail2banがZitadel Pod IPをBANし、ノード全体の
+        inputで双方向の通信を破棄していた → Pod CIDRを`ignoreip`へ追加(#224)。
+      - noreplyのパスワードとSMTP設定のusernameがAPIリクエスト形式の誤りで
+        正しく投入されていなかった → 追記6末尾のとおり修正(#225/#227)。
+      - Postfixの送信者認可・受信者解決がAuthentik LDAP outpostに依存しており、
+        outpost停止で機能していなかった → LDAP依存を撤去し静的定義化、MLは
+        Zitadel認証済み全員に同等アクセスとする設計へ変更(#226/#228/#229、
+        判断理由はmailing-list-shared-mailboxのdesign.md参照)。
+      - login v2 UIがPod再作成でlogin-client PATを失い502、復旧後も
+        `Instance not found`で500 → PATをInfisical+ExternalSecretで永続化し、
+        API呼び出しにinstance hostヘッダを付与(#230/#231)。
+      - 最初の発行時の通知イベントは、SMTP失敗中にprojectionで処理済みとして
+        読み飛ばされ自動再送されなかった。
+    - **再送**: 対象7件(招待コード発行済み・パスワード未設定)へ
+      `POST /v2/users/{id}/invite_code/resend`を1回ずつ実行し7/7件200。
+      `user.human.invite.code.sent`イベント7件、mailserverでnoreplyのSASL認証
+      7件成功。外部MXへの配送は6件`status=sent`、1件は宛先が
+      `@aramakisai.com`のアドレスで、ローカル配送時にDovecotが
+      `Failed to initialize user: Namespace '': Ambiguous mail location setting`
+      で`451 4.3.0`(deferred)。宛先はvmailbox/virtualのいずれにも存在せず、
+      認証済みsubmission経由ではPostfixが未定義の`@aramakisai.com`宛をLMTPへ
+      渡してしまう(方針上個人宛は受信不可)。該当ユーザーには受信可能な別
+      アドレスでの招待が必要。
+    - 招待リンクのログイン画面(`/ui/v2/login/verify`)は200で表示される。
+    - Zitadelの通知処理時の`missing translation`警告ログは招待対象者の氏名・
+      招待コードを含むため、ログ確認時はこの行を必ず除外すること。
+    - **9.4のチェックボックスについて**: Step1・Step2は機能確認済み、Step3は
+      7件中6件のメール配送を確認したが1件が未達のため`[ ]`のままとする。
 
 - [x] 9.5 authentik構成への切り戻し手順を整備する
   - Zitadel切替後に重大な認証障害が発生した場合の、旧authentik構成への切り戻し手順を作成する
