@@ -34,7 +34,9 @@ postgresql:
 
 # Server
 server:
-  replicas: 1
+  # idp-migration-zitadel task9.4カットオーバー完了によりAuthentikは待機状態
+  # (実ログイン0件を確認済み)。prod-node-1のメモリひっ迫解消のためスケールダウン。
+  replicas: 0
   resources:
     requests:
       memory: "500Mi"
@@ -94,7 +96,7 @@ server:
 
 # Worker
 worker:
-  replicas: 1
+  replicas: 0
   resources:
     requests:
       memory: "500Mi"
