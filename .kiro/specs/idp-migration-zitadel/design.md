@@ -429,17 +429,15 @@ Session成功後、Management APIでuser_grant(ロール)を取得し、Requirem
 - Output / destination: InfisicalへPAT/Service User Token登録
 - Idempotency & recovery: 既発行トークンが存在する場合はスキップまたは再発行の運用手順(Requirement 11.3)に従う
 
-##### 管理者権限の同期(Requirement 8.4)
-- project role `admin`(旧authentik管理者グループ相当)保持者 = Zitadel `IAM_OWNER`。project roleはRP向けclaimでありConsole/Admin APIの権限(instance member)と連動しないため、roleだけでは管理者がConsoleで操作できない
-- `IAM_OWNER`(インスタンス全体)を採る理由: authentik管理者グループはsuperuser相当で、SMTP・ログインポリシー等のインスタンス設定も管理対象に含むため`ORG_OWNER`では不足する
-- 同期方式: `ansible/playbooks/zitadel-admin-iam-owner.yml`(`_admin_iam_owner_sync.yml`)の実行時のみ。role `admin`を付与/剥奪したら再実行する。Actions v2 webhookによるイベント駆動は、管理者の変更頻度が低く常駐受信部の追加に見合わないため採らない
-- 対象はhuman userのみ。machine userと組み込み初期管理者(`zitadel-admin`)の`IAM_OWNER`には触れない
-- 反映確認はAPI応答コードではなく、instance memberを再取得した実状態とrole保持者集合の一致で判定する
+##### 管理者権限の分離(Requirement 8.4)
+- project role `admin` = RPアプリ(ArgoCD等)の管理者。`groups` claim経由で各RPが解釈し、Zitadel自体の管理者権限(instance/org memberの`IAM_OWNER`/`ORG_OWNER`)とは連動させない
+- Zitadelインスタンス管理者は別管理: 組み込み初期管理者(`zitadel-admin`)、自動化用machine user(`terraform-provider`等)。Zitadelインスタンス管理者はadminロールと連動せず個別に管理し、human userへの付与・剥奪は個別判断でConsole/APIから行う(roleの付け外しでは変化しない)
+- 分離する理由: Zitadelはinstance memberをuser単位でしか登録できず(roleやgroupを管理者にできない)、role連動には個人単位の同期が必要になる。同期はrole剥奪から反映までに遅れが生じ、その間インスタンス全体の最上位権限(自身へのrole再付与やPAT発行も可能)が残るリスクがあるため
 
 ##### groups claim互換(Requirement 8.2)
 - RPアプリ(CMS/ArgoCD)はauthentik時代から`groups` claimで権限を判定している。Zitadel標準の`urn:zitadel:iam:org:project:roles` claimへRP側を合わせる改修はせず、Zitadel側でproject roleキーの配列を`groups` claimとして返す
 - 実装: v1 Action `groupsClaim`(`ansible/roles/zitadel-bootstrap/files/groups_claim.js`)をComplement Token flowのPre Userinfo Creation/Pre Access Token Creation triggerへ設定(`ansible/playbooks/zitadel-groups-claim.yml`)。Actions v2はclaim追加に外部HTTP受信部が必要になるためZitadel内で完結するv1を採る
-- グループ名への変換はしない(roleキーそのまま)。roleキーの意味付け(`admin`=インフラ管理者: Zitadel `IAM_OWNER`・ArgoCD `role:admin`、`executive`=CMS管理者)は`vars/resources.yml`の`zitadel_role_bindings`に宣言し、各RPの設定(ArgoCD `argocd-rbac-cm`、CMS `role-mapping.ts`)がそれに対応する
+- グループ名への変換はしない(roleキーそのまま)。roleキーの意味付け(`admin`=ArgoCD等のアプリ管理者: ArgoCD `role:admin`、`executive`=CMS管理者)は`vars/resources.yml`の`zitadel_role_bindings`に宣言し、各RPの設定(ArgoCD `argocd-rbac-cm`、CMS `role-mapping.ts`)がそれに対応する
 - `allowedToFail: true`: script失敗でログイン自体を止めない(groups欠落はRP側で権限なしになる)
 
 #### Zitadel Provider Access Path

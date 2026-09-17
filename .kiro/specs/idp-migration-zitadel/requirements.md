@@ -96,7 +96,7 @@
 1. The 新IdP基盤 shall プロジェクト単位のフラットなロール(キー・表示名のみ)でユーザー権限を表現し、permission行列による細粒度制御を導入しない
 2. The 新IdP基盤 shall project roleのキーをOIDC ID Token/Userinfo/Access Tokenの`groups` claim(authentik時代からRPアプリが権限判定に使うclaim名)としてRPアプリへ配布し、権限の意味づけ(何ができるか)はRPアプリ側で解釈する設計とする
 3. The 移行手順 shall authentikのrbac_role/permission_role相当の細粒度権限管理機能を移行対象から除外する
-4. The 新IdP基盤 shall project role `admin` を保持するhuman userにZitadelインスタンス管理者権限(instance memberの`IAM_OWNER`)を与え、role非保持のhuman userからは剥奪する(Ansible再実行時に同期)
+4. The 新IdP基盤 shall project role `admin` をRPアプリ(ArgoCD等)の管理者権限としてのみ扱い、Zitadel自体の管理者権限(instance/org member)とは連動させない(Zitadel管理者権限は個別付与で管理する)
 
 ### Requirement 9: セキュリティ検証(モンキーテスト)
 **Objective:** As a インフラ運用担当者, I want 前spec [[idp-migration-authentik-to-authelia-lldap]] のk3d検証で実施したものと同水準のセキュリティ検証を新IdPに対しても行う, so that 本番切替前にOIDC/認証フローの既知の攻撃パターンへの耐性を確認できる

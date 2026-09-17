@@ -25,11 +25,10 @@ zitadel_project_role_renames:
   exhibitor: student_exhibitor
 
 # roleキーの意味付け。roleキーはgroups claim(_groups_claim_action.yml)にそのままRPへ渡り、
-# 権限の解釈は各RP側で行う。ここはその対応をコードベース上で一覧できる宣言で、
-# zitadel_instance_rolesのみ_admin_iam_owner_sync.ymlが直接読む(他は各RP設定が正本)。
+# 権限の解釈は各RP側で行う。ここはその対応をコードベース上で一覧できる宣言で、正本は各RP設定。
+# roleはZitadel自体の管理者権限(instance member)とは連動しない(design.md「管理者権限の分離」)。
 zitadel_role_bindings:
   admin:
-    zitadel_instance_roles: [IAM_OWNER]
     argocd: role:admin # gitops/manifests/prod/argocd/argocd-rbac-cm.yaml
   executive:
     cms: executive # aramakisai-web cms/src/auth/role-mapping.ts
