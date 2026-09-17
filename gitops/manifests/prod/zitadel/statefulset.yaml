@@ -29,7 +29,8 @@ spec:
       # (ZITADEL_PORT=tcp://...等) がZitadel自身のZITADEL_PORT設定と衝突し
       # "'Port' cannot parse value as 'uint16'"で起動失敗するため無効化する
       enableServiceLinks: false
-      # login-client.pat / zitadel-admin-sa.pat の受け渡し用 (永続不要、Pod再作成毎に再発行されて良い)
+      # ZITADEL_FIRSTINSTANCE_*PATPATH の書き出し先。インスタンス初期化時に一度だけ書かれ、
+      # DBが既にある状態でPodを再作成しても再発行されない (Pod再作成で中身は失われる)
       volumes:
         - name: zitadel-data
           emptyDir: {}
@@ -95,8 +96,9 @@ spec:
               value: https://idp.aramakisai.com/ui/v2/login/login?authRequest=
             - name: ZITADEL_OIDC_DEFAULTLOGOUTURLV2
               value: https://idp.aramakisai.com/ui/v2/login/logout?post_logout_redirect=
-            # --- login-client (login v2 UIがZitadel APIを呼ぶためのmachine user PAT) を
-            #     初回起動時に自動発行する。IAM_LOGIN_CLIENT roleが自動付与される ---
+            # --- login-client (login v2 UIがZitadel APIを呼ぶためのmachine user) を初回起動時に
+            #     自動作成する。IAM_LOGIN_CLIENT roleが自動付与される。loginコンテナが使うPATは
+            #     ansible/playbooks/zitadel-login-client-pat.ymlが発行しInfisicalで永続化する ---
             - name: ZITADEL_FIRSTINSTANCE_LOGINCLIENTPATPATH
               value: /zitadel-data/login-client.pat
             - name: ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_MACHINE_USERNAME
@@ -142,6 +144,7 @@ spec:
             - name: login
               containerPort: 3000
           volumeMounts:
+            # zitadel-bootstrapロールが初回セットアップ時にadmin PATをこのコンテナ経由で回収する
             - name: zitadel-data
               mountPath: /zitadel-data
               readOnly: true
@@ -153,8 +156,14 @@ spec:
               value: http://zitadel.zitadel.svc.cluster.local:8080
             - name: NEXT_PUBLIC_BASE_PATH
               value: /ui/v2/login
-            - name: ZITADEL_SERVICE_USER_TOKEN_FILE
-              value: /zitadel-data/login-client.pat
+            # optional: 新規インスタンス構築直後はPAT未発行のため、Pod(zitadelコンテナ)の
+            # 起動を妨げない。発行後にPodを再起動すると反映される
+            - name: ZITADEL_SERVICE_USER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: zitadel-login-client
+                  key: TOKEN
+                  optional: true
           resources:
             # PoC暫定値。task 1.3 の実測を踏まえて見直す
             requests:

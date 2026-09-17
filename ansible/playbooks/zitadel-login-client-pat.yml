@@ -1,0 +1,13 @@
+---
+# login v2 UI用login-client PATの発行・Infisical登録。
+# 登録後はExternalSecret(zitadel-login-client)経由でloginコンテナへ反映される
+# (ESOのrefresh待ちを避けるならzitadel Podを再起動する)。
+- name: Zitadel login-client PAT投入
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: zitadel-bootstrapロールの_login_client_patタスクを実行
+      ansible.builtin.include_role:
+        name: zitadel-bootstrap
+        tasks_from: _login_client_pat
