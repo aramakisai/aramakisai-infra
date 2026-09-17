@@ -53,6 +53,23 @@
   no_log: true
   delegate_to: localhost
 
+- name: "新規発行されたclient_id/secretをInfisicalへ登録: {{ zitadel_app_item.name }}"
+  # infisical CLIは値を含む出力を返しうるため必ず/dev/nullへ抑制する
+  ansible.builtin.shell: >-
+    infisical secrets set --env=prod
+    {{ zitadel_app_item.infisical_keys.client_id }}="$CLIENT_ID"
+    {{ zitadel_app_item.infisical_keys.client_secret }}="$CLIENT_SECRET" >/dev/null 2>&1
+  args:
+    chdir: "{{ playbook_dir }}/../.."
+  environment:
+    CLIENT_ID: "{{ zitadel_api_result.body.clientId }}"
+    CLIENT_SECRET: "{{ zitadel_api_result.body.clientSecret }}"
+  when:
+    - (_zitadel_app_search.body.result | default([])) | length == 0
+    - zitadel_app_item.infisical_keys is defined
+  no_log: true
+  delegate_to: localhost
+
 - name: "OIDC Appを更新 (redirect_uris等の差分検知時): {{ zitadel_app_item.name }}"
   ansible.builtin.include_tasks: _api_call.yml
   vars:

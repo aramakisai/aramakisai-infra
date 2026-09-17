@@ -207,7 +207,7 @@ sequenceDiagram
     RP->>Zitadel: Token交換
     Zitadel->>RP: ID Token Access Token
     RP->>Zitadel: Userinfo取得
-    Zitadel->>RP: roles claim含むUserinfo
+    Zitadel->>RP: groups claim含むUserinfo
 ```
 
 ### 招待オンボーディングフロー
@@ -435,6 +435,12 @@ Session成功後、Management APIでuser_grant(ロール)を取得し、Requirem
 - 同期方式: `ansible/playbooks/zitadel-admin-iam-owner.yml`(`_admin_iam_owner_sync.yml`)の実行時のみ。role `admin`を付与/剥奪したら再実行する。Actions v2 webhookによるイベント駆動は、管理者の変更頻度が低く常駐受信部の追加に見合わないため採らない
 - 対象はhuman userのみ。machine userと組み込み初期管理者(`zitadel-admin`)の`IAM_OWNER`には触れない
 - 反映確認はAPI応答コードではなく、instance memberを再取得した実状態とrole保持者集合の一致で判定する
+
+##### groups claim互換(Requirement 8.2)
+- RPアプリ(CMS/ArgoCD)はauthentik時代から`groups` claimで権限を判定している。Zitadel標準の`urn:zitadel:iam:org:project:roles` claimへRP側を合わせる改修はせず、Zitadel側でproject roleキーの配列を`groups` claimとして返す
+- 実装: v1 Action `groupsClaim`(`ansible/roles/zitadel-bootstrap/files/groups_claim.js`)をComplement Token flowのPre Userinfo Creation/Pre Access Token Creation triggerへ設定(`ansible/playbooks/zitadel-groups-claim.yml`)。Actions v2はclaim追加に外部HTTP受信部が必要になるためZitadel内で完結するv1を採る
+- グループ名への変換はしない(roleキーそのまま)。roleキーの意味付け(`admin`=インフラ管理者: Zitadel `IAM_OWNER`・ArgoCD `role:admin`、`executive`=CMS管理者)は`vars/resources.yml`の`zitadel_role_bindings`に宣言し、各RPの設定(ArgoCD `argocd-rbac-cm`、CMS `role-mapping.ts`)がそれに対応する
+- `allowedToFail: true`: script失敗でログイン自体を止めない(groups欠落はRP側で権限なしになる)
 
 #### Zitadel Provider Access Path
 
