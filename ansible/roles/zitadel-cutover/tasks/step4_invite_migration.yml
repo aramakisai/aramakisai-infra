@@ -6,11 +6,11 @@
 #     zitadel_cutover_invite_csv / --extra-vars で上書きすること
 #     (このroleは既存authentikユーザー一覧のエクスポート処理を持たない、
 #     別途の手順として運用ドキュメントに委ねる)。
-# k3dはZitadel APIがクラスタ内DNS限定のため、ansible実行ホストからscripts/
-# zitadel-invite-migration.py(標準のurllib、kubectl execを介さない独立スクリプト)
-# を直接動かすにはport-forwardが必要(prodはidp.aramakisai.comへ直接到達できる
-# ため不要)。
-- name: "[k3d] ansible実行ホストからZitadel APIへport-forwardする"
+# prod/k3dとも、ansible実行ホストからscripts/zitadel-invite-migration.py
+# (標準のurllib、kubectl execを介さない独立スクリプト)を直接動かすには
+# port-forwardが必要(prodの公開ドメイン直叩きはCloudflareのbot対策で403に
+# なるため使わない。defaults/main.ymlのzitadel_cutover_host_reachable_url参照)。
+- name: ansible実行ホストからZitadel APIへport-forwardする
   ansible.builtin.shell:
     cmd: >
       nohup kubectl port-forward -n {{ zitadel_bootstrap_namespace }} svc/zitadel 18080:8080
@@ -18,16 +18,14 @@
       > {{ zitadel_bootstrap_output_dir }}/port-forward.log 2>&1 &
       echo $! > {{ zitadel_bootstrap_output_dir }}/port-forward.pid
   changed_when: true
-  when: zitadel_cutover_target_env == 'k3d'
 
-- name: "[k3d] port-forwardの確立を待つ"
+- name: port-forwardの確立を待つ
   ansible.builtin.wait_for:
     host: 127.0.0.1
     port: 18080
     timeout: 15
-  when: zitadel_cutover_target_env == 'k3d'
 
-- name: 招待ベース移行を実行する
+- name: "招待ベース移行を実行する (--send-emailなし、returnCodeモード)"
   ansible.builtin.command:
     argv:
       - python3
@@ -41,16 +39,36 @@
   register: _cutover_invite_result
   changed_when: true
   no_log: "{{ zitadel_cutover_target_env == 'prod' }}"
+  when: not (zitadel_cutover_invite_send_email | default(false) | bool)
 
-- name: "[k3d] port-forwardを終了する"
+- name: "招待ベース移行を実行する (--send-emailあり、招待メール送信)"
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ zitadel_cutover_invite_script }}"
+      - --csv={{ zitadel_cutover_invite_csv }}
+      - --project-name={{ zitadel_project_name | default('aramakisai') }}
+      - --send-email
+  environment:
+    ZITADEL_API_BASE_URL: "{{ zitadel_cutover_host_reachable_url }}"
+    ZITADEL_EXTERNAL_DOMAIN: "{{ zitadel_external_domain }}"
+    ZITADEL_INVITE_RECOVERY_SA_PAT: "{{ zitadel_admin_pat }}"
+  register: _cutover_invite_result
+  changed_when: true
+  no_log: "{{ zitadel_cutover_target_env == 'prod' }}"
+  when: zitadel_cutover_invite_send_email | default(false) | bool
+
+- name: port-forwardを終了する
   ansible.builtin.shell:
     cmd: "kill $(cat {{ zitadel_bootstrap_output_dir }}/port-forward.pid) 2>/dev/null || true"
   changed_when: false
-  when: zitadel_cutover_target_env == 'k3d'
 
 - name: prod向けの送信メール確認を促す
   ansible.builtin.debug:
-    msg: "--send-emailを指定した場合、SMTP設定(ZITADEL_SMTP_*)が本番Zitadelに投入済みであることを事前に確認すること。未指定の場合はreturnCodeのみでメール送信は行われない。"
+    msg: >-
+      {{ 'send_email=true (--send-email付与、招待メールを実送信した。SMTP設定(ansible/playbooks/zitadel-smtp.yml)が本番Zitadelに投入済みであることが前提)'
+         if (zitadel_cutover_invite_send_email | default(false) | bool)
+         else 'send_email=false (--send-emailなし、returnCodeモードでメール送信は行っていない)' }}
   when: zitadel_cutover_target_env == 'prod'
 
 - name: 招待発行結果を表示する

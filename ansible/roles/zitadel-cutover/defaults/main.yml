@@ -25,11 +25,18 @@ zitadel_cutover_k3d_dovecot_pod: dovecot-lua-bridge-test
 # Zitadel到達経路。zitadel_cutover_api_base_urlはPod間のクラスタ内DNS(prod/k3d
 # 共通、mailserver PodからZitadel Podへの接続に使う値をLuaスクリプトへ焼き込む
 # 際に使用)。zitadel_cutover_host_reachable_urlはAnsible実行ホスト自身から
-# 到達する際の値(prodはidp.aramakisai.comへ直接到達可、k3dはport-forward
-# 経由でのみ到達可能なためstep2/step4が個別にport-forwardを張る)。
+# 到達する際の値。prod/k3dともport-forward経由(http://127.0.0.1:18080)固定
+# (step2/step4が個別にport-forwardを張る)。
+# task9.4 Step3実装時に判明: prodの公開ドメイン(https://idp.aramakisai.com)への
+# urllib直接アクセスはCloudflareのbot対策(User-Agent未設定のHTTPクライアントを
+# ブロック)によりHTTP 403 "error code: 1010"で拒否される。ブラウザ経由のOIDC
+# フロー(Step2検証)は実ブラウザのUser-Agentを持つため影響を受けないが、
+# scripts/zitadel-invite-migration.py(urllib.request、User-Agent未設定)はこの
+# ブロックに直撃するため、他のAdmin API呼び出し(_api_call.yml)と同じく
+# kubectl port-forward経由でクラスタ内から到達する方式に統一した。
 zitadel_cutover_api_base_url: "http://zitadel.zitadel.svc.cluster.local:8080"
 zitadel_cutover_external_domain: "{{ lookup('env', 'ZITADEL_EXTERNAL_DOMAIN') | default('zitadel.zitadel.svc.cluster.local', true) }}"
-zitadel_cutover_host_reachable_url: "{{ 'http://127.0.0.1:18080' if zitadel_cutover_target_env == 'k3d' else 'https://' + zitadel_cutover_external_domain }}"
+zitadel_cutover_host_reachable_url: "http://127.0.0.1:18080"
 zitadel_cutover_dovecot_pat_file: /run/secrets/zitadel-dovecot-pat
 zitadel_cutover_lua_http_timeout: 5
 
@@ -39,3 +46,8 @@ zitadel_cutover_lua_http_timeout: 5
 # (このデフォルト値はk3d検証用ダミーデータ)。
 zitadel_cutover_invite_csv: "{{ role_path }}/files/invite-migration-poc-users.csv"
 zitadel_cutover_invite_script: "{{ role_path }}/../../../scripts/zitadel-invite-migration.py"
+
+# true時のみ--send-emailを付与し招待メールを実送信する(既定false、returnCodeモード)。
+# prodで実送信する場合はZitadel自身のSMTP設定(ansible/playbooks/zitadel-smtp.yml)が
+# 投入済みであることが前提。
+zitadel_cutover_invite_send_email: "{{ lookup('env', 'ZITADEL_CUTOVER_SEND_EMAIL') | default(false, true) | bool }}"
