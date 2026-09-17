@@ -214,3 +214,9 @@ resource "authentik_policy_binding" "vaultwarden_rbac_sync_group_change_binding"
   policy = authentik_policy_event_matcher.vaultwarden_rbac_sync_group_change.id
   order  = 0
 }
+
+output "vaultwarden_rbac_sync_authentik_token" {
+  description = "vaultwarden-rbac-sync用Authentik APIトークン (apply後にInfisicalのVAULTWARDEN_RBAC_SYNC_AUTHENTIK_API_TOKENへ手動反映 / 機密情報)"
+  value       = authentik_token.vaultwarden_rbac_sync.key
+  sensitive   = true
+}
