@@ -99,7 +99,7 @@ Vaultwarden (OSS) は Collection 権限を**ユーザー単位**でのみ設定�
 
 - **グループ単位権限自動連携なし**: Vaultwarden OSS はユーザーベースのみ。Authentik グループ変更は手動反映が必要
 - **SMTP 設定済み**(`8f65183`): 招待メールは実際に送信される。送信元は`noreply@aramakisai.com` <!-- confidential:allow -->
-- **DMS個人メール受信廃止**: mailserverのLDAP連携(`LDAP_QUERY_FILTER_USER`)は`mailListAddress=true`属性を持つメーリングリスト専用ユーザーのみ配送対象。`@aramakisai.com`の新規個人宛アドレスは原則受信不可
+- **DMS個人メール受信廃止**: mailserverの配送対象は`postfix-accounts.cf`に静的定義したメーリングリスト等のアドレスのみ。`@aramakisai.com`の新規個人宛アドレスは原則受信不可
 - **SSO_ONLY=true**: パスワードログインは不可。SSO 経由のみアクセス可能
 
 ---

@@ -71,8 +71,6 @@ argocd app sync mailserver --server-side
       (`python3 imaplib`等、`docs/zitadel-security-poc-tests-results.md`の
       手法を参照)
 - [ ] 誤ったパスワードでIMAP LOGINが拒否されること
-- [ ] `master userdb out:` ログに`acl_groups=<department>`が正しい値で
-      出力されること(部署メンバーのログを1件確認)
 - [ ] RoundcubeからのOAUTHBEARERログインが成功すること(dovecot-oauth2側の
       introspection先切替、後述Step2完了後に確認可能)
 - [ ] メーリングリスト宛メールの配送(Postfix経由、LDAP側は無変更)が

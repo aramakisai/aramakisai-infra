@@ -158,11 +158,11 @@
 3. The 移行手順 shall 当該Service Userにinstance-wideなロール(IAM_OWNER等)を付与しない
 
 ### Requirement 15: メーリングリストアドレスのDovecot完結化
-**Objective:** As a インフラ運用担当者, I want `authentik_mailing_lists.tf`が定義する8件のML共有アドレス(pr@/planning@/accounting@/booth@/stage@/admin@[+5エイリアス]/general-affairs@/noreply@)をZitadelのユーザー管理対象から外す, so that ログイン主体ではない配送専用アドレスをIdPに載せる不整合を解消できる
+**Objective:** As a インフラ運用担当者, I want `authentik_mailing_lists.tf`が定義する8件のML共有アドレス(pr@/planning@/accounting@/booth@/stage@/admin@[+5エイリアス]/general-affairs@/noreply@)の配送先解決をIdPから切り離す, so that Authentik LDAPを撤去してもメール配送が成立する
 
 #### Acceptance Criteria
-1. The 移行手順 shall 上記8件をZitadelのhuman userとして作成しない(これらはIMAP等で認証されるログイン主体ではなく、Dovecotのmail属性解決による配送ルーティング専用のレコードであるため)
-2. The 移行手順 shall Dovecot側の静的userdb(またはSQL userdb)で8件のmail属性・エイリアス(admin@の5エイリアス含む)解決を完結させる
+1. The 移行手順 shall ML 7件をZitadelのhuman userとして作成しない(ログイン主体ではなく配送専用アドレスであるため)。noreply@はシステム通知のSMTP送信でログイン主体となるため、Zitadelのhuman userとして作成する
+2. The メールサーバー shall 8件の配送先とadmin@の5エイリアスの解決を、LDAPに依存しない静的定義(docker-mailserverのFILE provisioner)で完結させる
 
 ### Requirement 16: Discord連携アクセス制御の廃止
 **Objective:** As a 実行委員会運営担当者, I want `authentik_policies.tf`が実装するDiscord連携必須のアプリアクセス動的ブロック機能を廃止する, so that Requirement 5で定めた「動的グループ判定を実装しない」方針と矛盾しない構成にできる

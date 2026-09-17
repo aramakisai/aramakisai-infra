@@ -5,35 +5,23 @@ metadata:
   name: mailserver-config
   namespace: prod
 data:
-  # Postfix 設定オーバーライド:
-  # virtual_mailbox_domains から LDAP lookup を除外 (query_filter が空で Operations error になるため)
-  # /etc/postfix/vhost に aramakisai.com が静的に書かれているのでそれだけで十分
-  postfix-main.cf: |
-    virtual_mailbox_domains = /etc/postfix/vhost
-  # 一般IMAP/POP3クライアント認証 (plain/login) の passdb/userdb オーバーライド:
-  # mechanisms = plain login により、OAUTHBEARER ではこちらを試みない。
-  # OAUTHBEARER (Roundcube) の場合は oauth2 passdb のみを使用する。
-  #
-  # authentikからZitadel Session APIへの認証委譲 (design.md「Dovecot Lua Auth
-  # Bridge」) に伴い driver を lua へ変更した。ファイル名 auth-ldap.conf.ext は
-  # 据え置く: DMS (docker-mailserver) は DOVECOT_USER_FILTER/DOVECOT_PASS_FILTER
-  # からこの同名パスへ自前のLDAP passdb/userdbを自動生成するため、別名にすると
-  # DMS生成分とこのlua版の両方がconf.d/*.confとして同時ロードされ、複数passdbが
-  # 直列に試行される事故(意図しないLDAP認証の残存)になる。同名を維持することで
-  # このマウントがDMS生成分を確実に上書きする(オリジナルのLDAP版で確立済みの
-  # 挙動を踏襲、実docker-mailserverでの二重ロード有無は未検証のためファイル名は
-  # 変更しないことでリスクを避けた)。
-  #
-  # Postfixのメールボックス存在確認・MLグループ展開 (このファイル内の
-  # LDAP_QUERY_FILTER_* / ldap-groups.cf) は本切替のスコープ外で、引き続き
-  # authentik-ldap-outpostへのLDAPを使用する(design.md Requirement 15、別タスク)。
-  auth-ldap.conf.ext: |
+  # Dovecot passdb/userdb (FILE provisioner 時に 10-auth.conf から include される):
+  # - passdb は Zitadel Session API への委譲 (lua) のみ。postfix-accounts.cf の ML
+  #   アドレスは配送専用で、passwd-file passdb を置かないことでログイン不可にする。
+  # - userdb は passwd-file (ML アドレス、DMS が postfix-accounts.cf から生成) を先に引き、
+  #   見つからなければ lua (Zitadel ユーザー) へフォールスルーする。
+  # mechanisms = plain login により、OAUTHBEARER (Roundcube) は dovecot.cf の oauth2 passdb のみを使う。
+  auth-passwdfile.inc: |
     passdb {
       driver = lua
       args = file=/etc/dovecot/zitadel-auth.lua blocking=yes
       mechanisms = plain login
       result_failure = continue
       result_internalfail = continue
+    }
+    userdb {
+      driver = passwd-file
+      args = username_format=%u /etc/dovecot/userdb
     }
     userdb {
       driver = lua
@@ -51,9 +39,8 @@ data:
     -- 要求しPASSDB_RESULT_SCHEME_NOT_AVAILABLEで失敗する。dovecot-lua-2.3.21.1 +
     -- luasocket + lua5.3-cjsonの組み合わせでk3d実機検証済み)。
     --
-    -- この設定はDovecot自身のIMAP/POP3クライアント認証のみを対象とする。
-    -- Postfixのメールボックス存在確認・ML展開(LDAP_QUERY_FILTER_*)は本ブリッジの
-    -- スコープ外で、引き続きLDAPを使用する(design.md Requirement 15、別タスク)。
+    -- この設定はログイン主体(Zitadelユーザー)の認証のみを対象とする。ML アドレスの
+    -- 配送先解決は DMS の FILE provisioner (postfix-accounts.cf) が担う。
 
     local http = require("socket.http")
     local ltn12 = require("ltn12")
@@ -131,31 +118,6 @@ data:
       return true, status_or_err, parsed
     end
 
-    -- ロール割り当てをacl_groupsへ変換する。project role_keyがそのまま部署名
-    -- (dovecot.cfのnamespace prefix、例: planning/accounting/booth/stage/pr/admin/
-    -- general_affairs)と一致する設計のため、値の変換テーブルを持たない
-    -- (ansible/roles/zitadel-bootstrap/vars/resources.ymlのrole定義と同期させること)。
-    local function fetch_acl_groups(user_id)
-      local ok, status, parsed = zitadel_api(
-        "POST",
-        "/management/v1/users/grants/_search",
-        { queries = { { userIdQuery = { userId = user_id } } } }
-      )
-      if not ok or status ~= 200 or parsed == nil or parsed.result == nil then
-        return nil
-      end
-      local groups = {}
-      for _, grant in ipairs(parsed.result) do
-        for _, role_key in ipairs(grant.roleKeys or {}) do
-          table.insert(groups, role_key)
-        end
-      end
-      if #groups == 0 then
-        return nil
-      end
-      return table.concat(groups, ",")
-    end
-
     function auth_passdb_lookup(req)
       local ok, status, parsed = zitadel_api("POST", "/v2/sessions", {
         checks = {
@@ -195,14 +157,7 @@ data:
         return dovecot.auth.USERDB_RESULT_USER_UNKNOWN, "no such user"
       end
 
-      local user_id = parsed.result[1].userId
-      local acl_groups = fetch_acl_groups(user_id)
-
-      local fields = { "uid=5000", "gid=5000", "mail=" .. req.user }
-      if acl_groups ~= nil then
-        table.insert(fields, "acl_groups=" .. acl_groups)
-      end
-      return dovecot.auth.USERDB_RESULT_OK, table.concat(fields, " ")
+      return dovecot.auth.USERDB_RESULT_OK, "uid=5000 gid=5000 mail=" .. req.user
     end
   # Dovecot ACL plugin の有効化 (mail_plugins への acl 追加):
   # DMS の dovecot.cf 相当 (下の dovecot.cf キー) は /etc/dovecot/local.conf として
@@ -218,7 +173,7 @@ data:
   dovecot.cf: |
     auth_mechanisms = plain login oauthbearer xoauth2
 
-    # OAUTHBEARER: Authentik introspection endpoint でトークン検証 (ファイル参照)
+    # OAUTHBEARER: Zitadel introspection endpoint でトークン検証 (ファイル参照)
     passdb {
       driver = oauth2
       mechanisms = oauthbearer xoauth2
@@ -251,21 +206,12 @@ data:
     # (タスク4.1で発覚)。メール PVC のルート /var/mail は 0777 docker 所有で書込可能なため、
     # ここに共有 index を置く。DMS は全ユーザー単一 uid 5000 のため共有 index で問題ない。
     #
-    # subscriptions = no + list = children: 共有メールボックスの LIST 可視性を ACL で
-    # fail-closed に制御する (Req 2.2)。
+    # アクセス権は acl-postsync-job.yaml が各部署ルートの dovecot-acl に `authenticated` として付与し、
+    # Zitadel 認証済みの全ユーザーが全 ML を同等に読み書きできる (利用者は実行委員のみのため
+    # 部署別の閲覧制限は設けない。mailing-list-shared-mailbox design.md 参照)。
     #
-    # list = yes は子の有無に関わらず namespace prefix を常に LIST へ出すため、アクセス権の
-    # ない部署も \Noselect ノードとして全ユーザーに名前が漏れる (実機確認)。一方 list = children は
-    # 「ユーザーが LIST 可能な子メールボックスを持つ namespace のみ表示」する。Dovecot vfile ACL は
-    # 子に dovecot-acl が無ければ親 (= 部署ルート) の ACL を継承するため、子メールボックスの可視性も
-    # group= マッチ (acl_groups) で決まる。結果:
-    #   - 部署メンバー (acl_groups=<dept>): 自部署の子のみ可視 → 自部署のみ LIST に出る
-    #   - リーダー (acl_groups=leader,...): 全部署が group=leader を継承するため全部署の子が可視
-    #     → 全部署が LIST に出る (実機確認: 会計のみユーザーは pr の子を一切 LIST できない)
-    # acl_groups は oauth2 introspection の userdb_acl_groups 経由で注入される
-    # (dovecot-oauth2-external-secret.yaml の pass_attrs 参照)。
-    #
-    # 前提: list = children のゲートには各部署 maildir に最低1つの子メールボックスが必要。
+    # list = children は子メールボックスを持つ namespace のみ LIST に出すため、各部署 maildir に
+    # 最低1つの子メールボックスが必要。
     # 受信専用で一度もクライアント接続していない部署は子が無く LIST に出ないため、
     # acl-postsync-job.yaml が全部署に標準サブフォルダ (Drafts/Sent/Junk/Trash) を冪等作成する。
     # 部署受信トレイ (maildir ルート) は "Shared/<dept>" 自体を SELECT してアクセスする。
@@ -334,42 +280,47 @@ data:
       subscriptions = no
       list = children
     }
-  # Postfix LDAP グループマップ オーバーライド (メーリングリスト用):
-  # DMS が自動生成する ldap-groups.cf は result_attribute=mail のみのため、
-  # マッチしたグループ自身の mail (= 検索キーと同じ) が返るだけでメンバーに展開されない。
-  # special_result_attribute=member でメンバー DN を取得し、leaf_result_attribute=mail で
-  # 各メンバーの mail 属性に展開する。result_attribute は空にすることで、
-  # マッチしたグループ自身の mail (検索キーと同一アドレス) が結果に混入し
-  # 「グループ自身宛の配送が宛先不明でバウンスする」問題を回避する。
-  # timeout=30: special_result_attribute による複数回の LDAP ラウンドトリップが
-  # デフォルトの 10 秒を超えることがあり、"map lookup problem ... try again later"
-  # でメッセージが受理されず消失することがあるため延長する。
-  # bind/bind_dn/bind_pw/query_filter/search_base/server_host/start_tls/version は
-  # LDAP_* 環境変数から _replace_by_env_in_file により自動置換される (DMS ldap.sh)。
-  ldap-groups.cf: |
-    bind = yes
-    bind_dn =
-    bind_pw =
-    query_filter =
-    result_attribute =
-    leaf_result_attribute = mail
-    search_base =
-    server_host =
-    special_result_attribute = member
-    start_tls = no
-    timeout = 30
-    version = 3
-  # 送信者なりすまし防止 (LDAP_QUERY_FILTER_SENDERS / SPOOF_PROTECTION 用) の最終ファイルを
-  # DMS公式の拡張フック (user-patches.sh、_setup完了後に実行) で生成する。
-  # DMSのldap.shは/tmp/docker-mailserver/ldap-{users,groups,aliases,domains}.cfのみを
-  # /etc/postfix/へコピーする実装でsendersは対象外、かつ/etc/postfix/ldap-senders.cfへの
-  # 直接マウントもConfigMapボリュームがread-onlyのため後続のldap.shによる
-  # _replace_by_env_in_file (sed -i) が失敗する (いずれも実機確認済み、
-  # research.md「Phase 0実装時の発見」参照)。そのため _setup 完了後に呼ばれる
-  # user-patches.sh で、ldap-groups.cf と同じ member 展開パターン
-  # (special_result_attribute=member / leaf_result_attribute=mail / timeout=30) を持つ
-  # ldap-senders.cf を直接生成する。mailListMigrated の値は一切参照しないため、
-  # fan-out の移行状態に関係なく全MLで送信制限が機能する。
+  # ML アドレス (配送専用)。DMS FILE provisioner が vmailbox と Dovecot userdb を生成し、
+  # /var/mail/aramakisai.com/<localpart> へ配送する。パスワード欄は passwd-file passdb を
+  # 置いていない (auth-passwdfile.inc) ため使われず、ログインには使えない。
+  postfix-accounts.cf: |
+    pr@aramakisai.com|{SHA512-CRYPT}!
+    planning@aramakisai.com|{SHA512-CRYPT}!
+    accounting@aramakisai.com|{SHA512-CRYPT}!
+    booth@aramakisai.com|{SHA512-CRYPT}!
+    stage@aramakisai.com|{SHA512-CRYPT}!
+    admin@aramakisai.com|{SHA512-CRYPT}!
+    general-affairs@aramakisai.com|{SHA512-CRYPT}!
+    noreply@aramakisai.com|{SHA512-CRYPT}!
+  postfix-virtual.cf: |
+    postmastar@aramakisai.com admin@aramakisai.com
+    webmastar@aramakisai.com admin@aramakisai.com
+    abuse@aramakisai.com admin@aramakisai.com
+    administrator@aramakisai.com admin@aramakisai.com
+    www@aramakisai.com admin@aramakisai.com
+  # 送信者認可 (user-patches.sh で mua_sender_restrictions に組み込む):
+  # - ML アドレス (エイリアス含む) を From にした送信は SASL 認証済みなら誰でも許可する。
+  # - それ以外の From は sender-login-maps.cf の所有者と SASL ユーザーが一致する場合のみ
+  #   許可 (noreply のみ)。未登録の From (個人アドレス等) は
+  #   reject_authenticated_sender_login_mismatch で拒否される。
+  ml-sender-access.cf: |
+    pr@aramakisai.com permit_sasl_authenticated
+    planning@aramakisai.com permit_sasl_authenticated
+    accounting@aramakisai.com permit_sasl_authenticated
+    booth@aramakisai.com permit_sasl_authenticated
+    stage@aramakisai.com permit_sasl_authenticated
+    admin@aramakisai.com permit_sasl_authenticated
+    general-affairs@aramakisai.com permit_sasl_authenticated
+    postmastar@aramakisai.com permit_sasl_authenticated
+    webmastar@aramakisai.com permit_sasl_authenticated
+    abuse@aramakisai.com permit_sasl_authenticated
+    administrator@aramakisai.com permit_sasl_authenticated
+    www@aramakisai.com permit_sasl_authenticated
+  sender-login-maps.cf: |
+    noreply@aramakisai.com noreply@aramakisai.com
+  # DMS 公式の拡張フック (_setup 完了後に実行)。DMS の spoofing.sh が設定する
+  # smtpd_sender_login_maps (FILE provisioner では「From と同名のログインなら許可」する
+  # pcre を含み、個人アドレスでの送信を許してしまう) をここで上書きする。
   user-patches.sh: |
     #!/bin/bash
     # zitadel-auth.lua (Dovecot Lua Auth Bridge) が require("socket.http") /
@@ -377,20 +328,9 @@ data:
     # 同梱されていない (Debian bookworm、Lua 5.4)。
     apt-get update -qq
     apt-get install -y --no-install-recommends lua-socket lua-cjson
-    cat > /etc/postfix/ldap-senders.cf <<INNEREOF
-    bind = yes
-    bind_dn = ${LDAP_BIND_DN}
-    bind_pw = ${LDAP_BIND_PW}
-    query_filter = ${LDAP_QUERY_FILTER_SENDERS}
-    result_attribute =
-    leaf_result_attribute = mail
-    search_base = ${LDAP_SEARCH_BASE}
-    server_host = ${LDAP_SERVER_HOST}
-    special_result_attribute = member
-    start_tls = no
-    timeout = 30
-    version = 3
-    INNEREOF
+    postconf 'smtpd_sender_login_maps = texthash:/tmp/docker-mailserver/sender-login-maps.cf'
+    # shellcheck disable=SC2016
+    postconf 'mua_sender_restrictions = check_sender_access texthash:/tmp/docker-mailserver/ml-sender-access.cf, reject_authenticated_sender_login_mismatch, $dms_smtpd_sender_restrictions'
   # OpenDKIM KeyTable/SigningTable/TrustedHosts:
   # `setup config dkim domain` はこれらを /tmp/docker-mailserver/opendkim/ 配下に
   # 生成するが、その場所はConfigMap/Secretマウントではなく実行時の一時領域のため

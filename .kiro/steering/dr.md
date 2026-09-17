@@ -104,29 +104,24 @@ DR 時は `recovery.sh` が自動で VolSync リストアを行う。
 - TLS は cert-manager (`mail-tls` Certificate) で管理。DR 後は ArgoCD sync で自動適用される
   - `mail-tls` が未作成の場合は `gitops/manifests/prod/cert-manager/` を先に手動 apply する
 
-### Authentik LDAP 連携でのメール認証・送信トラブル (2026-06-23 解決)
+### アカウント・認証・送信者認可の構成
 
-個人ユーザーのメール送受信は方針上禁止（ML専用、`mailListAddress=true` のみ受信可）。
-例外は `noreply`（システム通知送信元）のみ。この前提を崩さずに2つの不具合を修正した。
+LDAP は使わない。関連設定は `gitops/manifests/prod/mailserver/configmap.yaml` に集約されている。
 
-1. **SMTP認証が全ユーザーで `535 Authentication failed`（パスワードは常に正しい）**
-   - 原因: Authentik 2024.8+ で LDAP 全件検索には RBAC 権限 `search_full_directory`
-     （旧 `search_group` 設定の後継）が必要になった。`mailserver-service` に未割当だと
-     bind したユーザー自身のエントリしか検索できず、dovecot の DN ルックアップが失敗する。
-   - 修正: `terraform/authentik_ldap.tf` の `authentik_rbac_role`/`authentik_rbac_permission_role`
-     を `mailserver_ldap_search` として付与（LDAP Outpost再起動で `search_mode=cached` のキャッシュをflush）。
-
-2. **SMTP認証成功後に `553 Sender address rejected: not owned by user`**
-   - 原因: docker-mailserver は `LDAP_QUERY_FILTER_SENDERS` を設定すると USER/ALIAS/GROUP
-     フィルタの自動OR結合を無効化し、SENDERSフィルタのみが送信者認可チェックになる仕様。
-     既存値 `(&(objectClass=group)(mail=%s))` は ML(group)宛のなりすまし防止用で、
-     個人ユーザー（`noreply`含む）は構造的に一切マッチしなかった。
-   - 修正: `gitops/manifests/prod/mailserver/statefulset.yaml` の `LDAP_QUERY_FILTER_SENDERS` を
-     `(|(&(objectClass=group)(mail=%s))(&(objectClass=inetOrgPerson)(mail=%s)(cn=noreply)))` に変更。
-     `cn=noreply` で個人ユーザー全体ではなく `noreply` のみに例外を限定（方針を維持）。
-   - **再発時の確認手順**: `authentik-worker` ログで `SMTPRecipientsRefused`/`exc_type` を grep。
-     SMTP認証(`235`)は通るが送信が失敗する場合は、認証問題ではなく Postfix の
-     `reject_authenticated_sender_login_mismatch`（`SPOOF_PROTECTION=1` 由来）を疑う。
+- **ML アドレス(配送専用)**: DMS の `ACCOUNT_PROVISIONER=FILE` で `postfix-accounts.cf`(ML 7件 + noreply)と
+  `postfix-virtual.cf`(admin@ の5エイリアス)を静的定義する。passwd-file passdb を置かない
+  (`auth-passwdfile.inc` で上書き)ため、これらのアドレスではログインできない。
+- **ログイン認証**: PLAIN/LOGIN は Dovecot Lua Auth Bridge(`zitadel-auth.lua`)が Zitadel Session API へ委譲、
+  OAUTHBEARER(Roundcube)は Zitadel introspection。noreply も Zitadel の human user として認証する。
+- **ML 閲覧**: Zitadel 認証済みの全ユーザーが全 ML 共有メールボックスを同等権限で読み書きできる
+  (`acl-postsync-job.yaml` が各部署の `dovecot-acl` に `authenticated` を書き出す)。
+- **送信者認可**: `user-patches.sh` が `mua_sender_restrictions` を上書きする。From が ML アドレス(エイリアス含む)なら
+  SASL 認証済みの誰でも許可、noreply は SASL ユーザー noreply のみ許可、それ以外(個人アドレス等)は拒否。
+- **再発時の確認手順**:
+  - `postconf -h smtpd_sender_login_maps mua_sender_restrictions` が上記の texthash マップを指していること
+  - `doveadm user <ML アドレス>` が `/var/mail/aramakisai.com/<localpart>` を返すこと
+  - SMTP 認証(`235`)は通るが `553 5.7.1 Sender address rejected: not owned by user` になる場合は、
+    From が `ml-sender-access.cf` / `sender-login-maps.cf` に載っているかを確認する
 
 ### fail2ban によるクラスタ内 Pod の BAN
 
