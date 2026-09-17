@@ -115,6 +115,12 @@
     label: "{{ zitadel_app_item.name }}"
 
 # ------------------------------------------------------------
+# 3b. groups claim Action (RPのgroups claim判定用)
+# ------------------------------------------------------------
+- name: groups claim Actionを投入
+  ansible.builtin.include_tasks: _groups_claim_action.yml
+
+# ------------------------------------------------------------
 # 4. Discord OAuth2 IdP
 # ------------------------------------------------------------
 - name: Discord OAuth2 IdPを投入

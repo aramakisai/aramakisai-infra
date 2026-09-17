@@ -21,6 +21,17 @@
       zitadel_admin_pat を解決できませんでした。
       `infisical run --env=prod -- ansible-playbook ...`で実行してください。
 
+- name: リソース定義を読み込み
+  ansible.builtin.include_vars: resources.yml
+
+- name: IAM_OWNERに対応するroleキーを宣言から解決
+  ansible.builtin.set_fact:
+    _iam_owner_role_key: >-
+      {{ zitadel_role_bindings | dict2items
+         | selectattr('value.zitadel_instance_roles', 'defined')
+         | selectattr('value.zitadel_instance_roles', 'contains', 'IAM_OWNER')
+         | map(attribute='key') | first }}
+
 - name: role admin保持者を検索
   ansible.builtin.include_tasks: _api_call.yml
   vars:
@@ -29,7 +40,7 @@
     zitadel_api_body:
       query: { offset: "0", limit: 1000 }
       queries:
-        - roleKeyQuery: { roleKey: admin, method: TEXT_QUERY_METHOD_EQUALS }
+        - roleKeyQuery: { roleKey: "{{ _iam_owner_role_key }}", method: TEXT_QUERY_METHOD_EQUALS }
     zitadel_api_label: "search admin role grants"
 
 - name: role admin保持者(human)のuserIdを退避

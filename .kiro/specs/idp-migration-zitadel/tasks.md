@@ -1633,6 +1633,12 @@
       ループ中)。mailserver Pod自体は1/1 Runningで即座の障害ではないが、
       task9.4系の未解決課題として別途調査が必要。
 
+- [ ] 9.7 RPアプリのgroups claim互換を確立しArgoCDをZitadelへ切り替える
+  - Requirement 8.2の旧設計(roles claimをRP側で解釈)に対応するRP改修タスクが無く、CMS/ArgoCDは`groups` claimを読んだままZitadelからgroupsが返らない状態だった
+  - Zitadel側: v1 Action `groupsClaim`でproject roleキーを`groups` claimとして返す(`ansible/playbooks/zitadel-groups-claim.yml`)。roleキーの意味付けは`vars/resources.yml`の`zitadel_role_bindings`
+  - ArgoCD: Zitadel OIDC App `argocd`作成(`ansible/playbooks/zitadel-oidc-apps.yml`、Infisical自動登録)→ `argocd-cm`のissuerをZitadelへ、`argocd-rbac-cm`を`g, admin, role:admin`へ
+  - _Requirements: 8.2, 8.4_
+
 - [ ] 10. 追加移行スコープ(既存authentik付随機能6件)のk3d PoC実装
   - task1〜8完了後にセッション内の追加検討で判明した、旧spec(idp-migration-zitadel初版)ではスコープ外だった`terraform/authentik_*.tf`6ファイル相当の移行。PoCとしてk3d環境で検証する(本番反映はtask9の一括カットオーバーに含める)。task9とは独立して着手可能(依存はtask1/2/6のみ)
 - [x] 10.1 enrollment/recoveryを整理する

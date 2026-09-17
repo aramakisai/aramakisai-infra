@@ -1,0 +1,11 @@
+---
+# project roleキーをgroups claimとしてRPへ返すAction投入。
+- name: Zitadel groups claim Action投入
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: zitadel-bootstrapロールの_groups_claim_actionタスクを実行
+      ansible.builtin.include_role:
+        name: zitadel-bootstrap
+        tasks_from: _groups_claim_action

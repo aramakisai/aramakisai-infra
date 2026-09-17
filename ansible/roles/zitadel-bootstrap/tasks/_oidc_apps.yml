@@ -1,0 +1,40 @@
+---
+# 既存projectに対してOIDC Applicationだけを投入する(resources.yml全体を流さずにRPを追加する用)。
+# 既存アプリは再作成されない(_oidc_app.yml参照)。
+
+- name: リソース定義を読み込み
+  ansible.builtin.include_vars: resources.yml
+
+- name: Projectを検索
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    zitadel_api_method: POST
+    zitadel_api_path: /management/v1/projects/_search
+    zitadel_api_body:
+      queries:
+        - nameQuery: { name: "{{ zitadel_project_name }}", method: TEXT_QUERY_METHOD_EQUALS }
+    zitadel_api_label: "search project {{ zitadel_project_name }}"
+
+- name: Projectの存在を検証
+  ansible.builtin.assert:
+    that:
+      - (zitadel_api_result.body.result | default([])) | length == 1
+    fail_msg: "project {{ zitadel_project_name }} が見つかりません(先にzitadel-resources.ymlを実行)"
+
+- name: Project IDを退避
+  ansible.builtin.set_fact:
+    zitadel_project_id: "{{ zitadel_api_result.body.result[0].id }}"
+
+- name: 出力先ディレクトリを作成 (infisical_keys未定義アプリの発行値の一時退避先)
+  ansible.builtin.file:
+    path: "{{ zitadel_resources_output_dir }}"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+
+- name: OIDC Applicationを投入
+  ansible.builtin.include_tasks: _oidc_app.yml
+  loop: "{{ zitadel_oidc_apps }}"
+  loop_control:
+    loop_var: zitadel_app_item
+    label: "{{ zitadel_app_item.name }}"

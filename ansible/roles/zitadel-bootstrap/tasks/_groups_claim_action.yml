@@ -1,0 +1,87 @@
+---
+# project roleキーをgroups claimとしてRPへ返すv1 Action(Complement Token flow)を投入する。
+# Actions v2はclaim追加に外部HTTP受信部が必要になるため、Zitadel内で完結するv1を使う。
+# RPアプリはgroups claimで権限を判定する(意味付けはvars/resources.ymlのzitadel_role_bindings)。
+
+- name: リソース定義を読み込み
+  ansible.builtin.include_vars: resources.yml
+
+- name: groups claim Actionを検索
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    zitadel_api_method: POST
+    zitadel_api_path: /management/v1/actions/_search
+    zitadel_api_body:
+      queries:
+        - actionNameQuery: { name: "{{ zitadel_groups_claim_action_name }}", method: TEXT_QUERY_METHOD_EQUALS }
+    zitadel_api_label: "search action {{ zitadel_groups_claim_action_name }}"
+
+- name: groups claim Action検索結果を退避
+  ansible.builtin.set_fact:
+    _groups_action: "{{ (zitadel_api_result.body.result | default([]) | first) | default(none) }}"
+    _groups_action_script: "{{ lookup('file', role_path + '/files/groups_claim.js') }}"
+
+- name: groups claim Actionを作成/更新
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    zitadel_api_method: "{{ 'PUT' if _groups_action else 'POST' }}"
+    zitadel_api_path: "/management/v1/actions{{ '/' ~ _groups_action.id if _groups_action else '' }}"
+    zitadel_api_body:
+      name: "{{ zitadel_groups_claim_action_name }}"
+      script: "{{ _groups_action_script }}"
+      timeout: 10s
+      # scriptエラーでログイン自体を止めない(groups欠落はRP側で権限なしとして扱われる)
+      allowedToFail: true
+    zitadel_api_label: "upsert action {{ zitadel_groups_claim_action_name }}"
+  when: not _groups_action or _groups_action.script != _groups_action_script
+
+- name: groups claim Action IDを確定
+  ansible.builtin.set_fact:
+    _groups_action_id: "{{ _groups_action.id if _groups_action else zitadel_api_result.body.id }}"
+
+- name: Complement Token flowを取得
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    zitadel_api_method: GET
+    zitadel_api_path: /management/v1/flows/2
+    zitadel_api_label: "get complement token flow"
+
+- name: Complement Token flowを退避 (loop中にzitadel_api_resultが上書きされるため)
+  ansible.builtin.set_fact:
+    _complement_flow: "{{ zitadel_api_result.body.flow | default({}) }}"
+
+# SetTriggerActionsはtriggerのaction一覧を置き換えるため、既存actionを保持して追記する
+- name: Pre Userinfo(4)/Pre Access Token(5) triggerへActionを設定
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    _existing_ids: >-
+      {{ _complement_flow.triggerActions | default([])
+         | selectattr('triggerType.id', 'equalto', _trigger) | map(attribute='actions') | flatten
+         | map(attribute='id') | list }}
+    zitadel_api_method: POST
+    zitadel_api_path: "/management/v1/flows/2/trigger/{{ _trigger }}"
+    zitadel_api_body:
+      actionIds: "{{ _existing_ids + [_groups_action_id] }}"
+    zitadel_api_label: "set trigger {{ _trigger }}"
+  loop: ["4", "5"]
+  loop_control:
+    loop_var: _trigger
+  when: _groups_action_id not in _existing_ids
+
+# 応答200でも未反映の事例(SMTP設定更新)があったため再取得した実状態で判定する
+- name: Complement Token flowを再取得
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    zitadel_api_method: GET
+    zitadel_api_path: /management/v1/flows/2
+    zitadel_api_label: "re-get complement token flow"
+
+- name: 両triggerにActionが設定されていることを検証
+  ansible.builtin.assert:
+    that:
+      - _groups_action_id in (zitadel_api_result.body.flow.triggerActions | default([])
+          | selectattr('triggerType.id', 'equalto', item) | map(attribute='actions') | flatten
+          | map(attribute='id') | list)
+    fail_msg: "trigger {{ item }} に {{ zitadel_groups_claim_action_name }} が設定されていません"
+    quiet: true
+  loop: ["4", "5"]
