@@ -337,6 +337,9 @@ data:
     postconf 'smtpd_sender_login_maps = texthash:/tmp/docker-mailserver/sender-login-maps.cf'
     # shellcheck disable=SC2016
     postconf 'mua_sender_restrictions = check_sender_access texthash:/tmp/docker-mailserver/ml-sender-access.cf, reject_authenticated_sender_login_mismatch, $dms_smtpd_sender_restrictions'
+    # DMS の master.cf は submission/submissions で smtpd_reject_unlisted_recipient=no にしており、
+    # 未登録の自ドメイン宛を受理して LMTP で 451 のまま deferred に滞留させる。
+    postconf -P 'submission/inet/smtpd_reject_unlisted_recipient=yes' 'submissions/inet/smtpd_reject_unlisted_recipient=yes'
     # ML 共有メールボックスの ACL と標準サブフォルダ。Zitadel 認証済みの全ユーザーに同等権限を与える。
     # 'a'(ACL管理権)は付けない: 全員が同一権限のため、IMAP SETACL で他ユーザーのアクセスを
     # 外せてしまうだけで利点がない。サブフォルダは namespace の list = children が LIST 表示の
