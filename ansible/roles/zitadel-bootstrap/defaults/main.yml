@@ -56,10 +56,5 @@ zitadel_student_exhibitor_csv: "{{ role_path }}/files/zitadel_student_exhibitors
 # .gitignore対象。既存リソースの更新時はここに何も書き込まれない)
 zitadel_resources_output_dir: "{{ zitadel_bootstrap_output_dir }}/resources"
 
-# _admin_iam_owner_sync.yml: role admin保持者とIAM_OWNERの同期から除外するhuman userの
-# loginName接頭辞(組み込みの初期管理者はrole adminを持たないためIAM_OWNERを剥奪しない)
-zitadel_admin_iam_owner_sync_exclude: [zitadel-admin]
-zitadel_admin_iam_owner_sync_apply: true
-
 # _project_role_renames.yml: falseで付け替え対象件数の表示のみ
 zitadel_project_role_rename_apply: true

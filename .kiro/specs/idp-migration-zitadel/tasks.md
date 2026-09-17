@@ -1256,9 +1256,9 @@
       `zitadel_cutover_invite_send_email`(既定false、`ZITADEL_CUTOVER_SEND_EMAIL`
       環境変数でも上書き可)による分岐を追加し、trueの場合のみ`--send-email`を
       付与する実装にした。
-    - **新たに判明したブロッカーとその修正**: 実ユーザーCSV(7件、氏名正規化・
-      ダミー除去済み)に対し`--dry-run`を実行し7/7件が対象として認識される
-      ことを確認した後、1〜2件の試験実送信を試みたところ、
+    - **新たに判明したブロッカーとその修正**: 実ユーザーCSV(氏名正規化・
+      ダミー除去済み)に対し`--dry-run`を実行し全件が対象として認識される
+      ことを確認した後、一部の試験実送信を試みたところ、
       `zitadel_cutover_host_reachable_url`(prod既定値`https://idp.aramakisai.com`、
       公開ドメインへの直接アクセス)に対し`scripts/zitadel-invite-migration.py`
       (urllib、User-Agent未設定)が常に`HTTP 403 "error code: 1010"`
@@ -1272,16 +1272,16 @@
       `when: target_env == 'k3d'`条件を外してprod/k3d共通実行に変更した
       (`zitadel_cutover_api_base_url`をLuaスクリプトへ焼き込むStep1、および
       k3d限定のStep2検証用一時Application呼び出しへの影響はない)。
-    - **試験実送信(2件)**: 修正後、CSV先頭2件を対象に`--send-email`付きで
+    - **試験実送信**: 修正後、CSV先頭の一部を対象に`--send-email`付きで
       実行し、`ansible-playbook`が`failed=0`で正常終了(スクリプト側の
       `sys.exit`もrc=0、内部的に全件成功を意味する)することを確認した。
       読み取り専用のAdmin API検索(`kubectl exec`経由、使い捨て検証playbook、
-      コミット対象外)で対象2件が実際にZitadelへ作成され、project grant
+      コミット対象外)で対象が実際にZitadelへ作成され、project grant
       (`grant_count=1`)も付与済みであることを確認した(招待コード自体の
       到達確認は受信箱を持たないため未実施、API応答上は`sendCode`が
       正常応答したことのみ確認)。
-    - **残り5件は未実施(自動化基盤のガードレールによりブロック)**: 試験成功後、
-      残り5件に対して同じ手順で`--send-email`付き実行を試みたところ、
+    - **残りは未実施(自動化基盤のガードレールによりブロック)**: 試験成功後、
+      残りに対して同じ手順で`--send-email`付き実行を試みたところ、
       本セッションの自動実行基盤(Claude Code auto modeの安全分類器)が
       「実世界への不可逆な取引(Real-World Transactions)」に該当する操作として
       実行を拒否した。ユーザーからの事前の包括的な実行承認とは別に、
@@ -1289,28 +1289,27 @@
       本タスクの実行者(エージェント)側で回避策を取ることは意図的に行っていない
       (指示にも「回避を試みるべきでない」旨が明記されている)。
     - **結論**: `--send-email`分岐の実装、Cloudflareブロッカーの発見と修正、
-      7件中2件の実送信・API経由での作成/grant確認までは完了したが、
-      残り5件の招待コード発行は未実施のまま残っている。既存ユーザーへの
+      一部の実送信・API経由での作成/grant確認までは完了したが、
+      残りの招待コード発行は未実施のまま残っている。既存ユーザーへの
       招待ベース移行(Step3の受け入れ基準)は全件完了していないため、
       9.4のチェックボックスは引き続き未完了のままとする。次の実行者は
       対話セッションで`ZITADEL_CUTOVER_TARGET_ENV=prod ZITADEL_EXTERNAL_DOMAIN=idp.aramakisai.com
       infisical run --env=prod -- ansible-playbook ansible/playbooks/zitadel-cutover.yml
-      -e zitadel_cutover_invite_csv=<残り5件のCSV> -e zitadel_cutover_invite_send_email=true`
+      -e zitadel_cutover_invite_csv=<残りのCSV> -e zitadel_cutover_invite_send_email=true`
       を実行すれば完了できる状態にある(実装・接続経路の課題は解消済み)。
   - **追記5(2026-09-17、招待コード発行を完遂)**:
     - 招待対象の実ユーザーCSV(Authentik DBから抽出、ユーザー本人が氏名正規化・
-      ダミーアカウント除去済み)は最終的に7件。
+      ダミーアカウント除去済み)を確定。
     - `ansible/playbooks/zitadel-cutover.yml -e zitadel_cutover_invite_send_email=true`
-      で本番実行し、7/7件が招待コード発行・メール送信に成功したことを確認した
-      (内訳: 試験送信2件成功→残り5件のうち4件成功・1件は`family_name`列が
-      空欄のままだったため`SetHumanProfile.FamilyName`バリデーションエラーで
-      失敗→該当1件のみ氏名正規化後に再送し成功)。
+      で本番実行し、全件の招待コード発行・メール送信APIが成功したことを確認した
+      (`family_name`が空欄の行は`SetHumanProfile.FamilyName`バリデーションエラーで
+      失敗するため、CSVの氏名正規化で全列を埋めてから実行する)。
     - 個人情報(実メールアドレス・氏名)はこのタスクの記録・コミットのいずれにも
       含めていない。
     - Step1(Dovecot Lua Auth Bridge)・Step2(RPアプリOIDC切替)・Step3
       (招待コード発行)すべて受け入れ基準を満たしたため、9.4を完了とする。
   - **追記6(2026-09-17、招待メール全件未達の根本原因判明と修正、9.4を未完了へ差し戻し)**:
-    - **発覚**: 追記5で発行した招待コード7件が、SMTP経由のメール通知として1件も
+    - **発覚**: 追記5で発行した招待コードのメール通知が、SMTP経由で全件
       届いていなかった。
     - **根本原因1(確認済み・修正済み)**: `noreply@aramakisai.com`がZitadel側に
       ユーザーとして存在しなかった。Dovecot Lua Auth Bridge
@@ -1379,7 +1378,7 @@
       (2) (1)解消後、`doveadm auth test`が安定して`auth succeeded`を返すこと、
       および`admin/v1/email`のSMTP設定から実際にテストメールが送信できることの
       再確認。
-      (3) 招待済み7名への招待メール再送信の要否判断(本タスクでは実施しない)。
+      (3) 招待済みユーザーへの招待メール再送信の要否判断(本タスクでは実施しない)。
     - **Zitadel APIリクエスト形式の誤り(noreply SMTP認証失敗の真因)**:
       上記根本原因2の接続タイムアウトは、mailserver(hostNetwork)のfail2banが
       Zitadel Pod IPをBANしノード全体のinputで破棄していたことが真因だった
@@ -1418,21 +1417,22 @@
         API呼び出しにinstance hostヘッダを付与(#230/#231)。
       - 最初の発行時の通知イベントは、SMTP失敗中にprojectionで処理済みとして
         読み飛ばされ自動再送されなかった。
-    - **再送**: 対象7件(招待コード発行済み・パスワード未設定)へ
-      `POST /v2/users/{id}/invite_code/resend`を1回ずつ実行し7/7件200。
-      `user.human.invite.code.sent`イベント7件、mailserverでnoreplyのSASL認証
-      7件成功。外部MXへの配送は6件`status=sent`、1件は宛先が
-      `@aramakisai.com`のアドレスで、ローカル配送時にDovecotが
+    - **再送**: 招待コード発行済み・パスワード未設定の全対象へ
+      `POST /v2/users/{id}/invite_code/resend`を1回ずつ実行し全件200。
+      `user.human.invite.code.sent`イベントとmailserverでのnoreply SASL認証は
+      全件成功。外部MXへの配送は`status=sent`を確認。宛先が`@aramakisai.com`の
+      未登録アドレスの場合、ローカル配送時にDovecotが
       `Failed to initialize user: Namespace '': Ambiguous mail location setting`
       で`451 4.3.0`(deferred)。宛先はvmailbox/virtualのいずれにも存在せず、
       認証済みsubmission経由ではPostfixが未定義の`@aramakisai.com`宛をLMTPへ
-      渡してしまう(方針上個人宛は受信不可)。該当ユーザーには受信可能な別
-      アドレスでの招待が必要。
+      渡していた(方針上個人宛は受信不可、submission/submissionsでも
+      `smtpd_reject_unlisted_recipient=yes`とし拒否するよう修正済み)。そのような
+      宛先のユーザーは受信可能な別アドレスで招待する必要がある。
     - 招待リンクのログイン画面(`/ui/v2/login/verify`)は200で表示される。
     - Zitadelの通知処理時の`missing translation`警告ログは招待対象者の氏名・
       招待コードを含むため、ログ確認時はこの行を必ず除外すること。
     - **9.4のチェックボックスについて**: Step1・Step2は機能確認済み、Step3は
-      7件中6件のメール配送を確認したが1件が未達のため`[ ]`のままとする。
+      未達の宛先が残るため`[ ]`のままとする。
 
 - [x] 9.5 authentik構成への切り戻し手順を整備する
   - Zitadel切替後に重大な認証障害が発生した場合の、旧authentik構成への切り戻し手順を作成する
@@ -1654,8 +1654,9 @@
       roleキーは変更できないため、`vars/resources.yml`の`zitadel_project_role_renames`で旧キー
       `exhibitor`からの付け替えを宣言し、`ansible/playbooks/zitadel-role-renames.yml`
       (`_project_role_renames.yml`、`resources.yml`からも実行)が新キー作成・user grant付け替え・
-      旧キー削除を行う。本番で`student_exhibitor`を作成し`exhibitor`を削除した(付け替え対象の
-      grantは0件)。一時machine userで`groups`に`student_exhibitor`が入ることを確認後、削除した
+      旧キー削除を行う。本番で`student_exhibitor`を作成し`exhibitor`を削除した。一時machine userで`groups`に`student_exhibitor`が入ることを確認後、削除した
+    - role `admin`はArgoCD等のアプリ管理者に限定し、Zitadel管理者権限とは分離した(design.md
+      「管理者権限の分離」)。Zitadelインスタンス管理者はadminロールと連動せず個別に管理する
 
 - [ ] 10. 追加移行スコープ(既存authentik付随機能6件)のk3d PoC実装
   - task1〜8完了後にセッション内の追加検討で判明した、旧spec(idp-migration-zitadel初版)ではスコープ外だった`terraform/authentik_*.tf`6ファイル相当の移行。PoCとしてk3d環境で検証する(本番反映はtask9の一括カットオーバーに含める)。task9とは独立して着手可能(依存はtask1/2/6のみ)
