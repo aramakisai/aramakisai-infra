@@ -6,9 +6,8 @@
 -- 要求しPASSDB_RESULT_SCHEME_NOT_AVAILABLEで失敗する。dovecot-lua-2.3.21.1 +
 -- luasocket + lua5.3-cjsonの組み合わせでk3d実機検証済み)。
 --
--- この設定はDovecot自身のIMAP/POP3クライアント認証のみを対象とする。
--- Postfixのメールボックス存在確認・ML展開(LDAP_QUERY_FILTER_*)は本ブリッジの
--- スコープ外で、引き続きLDAPを使用する(design.md Requirement 15、別タスク)。
+-- この設定はログイン主体(Zitadelユーザー)の認証のみを対象とする。ML アドレスの
+-- 配送先解決は DMS の FILE provisioner (postfix-accounts.cf) が担う。
 
 local http = require("socket.http")
 local ltn12 = require("ltn12")
@@ -86,31 +85,6 @@ local function zitadel_api(method, path, body_table)
   return true, status_or_err, parsed
 end
 
--- ロール割り当てをacl_groupsへ変換する。project role_keyがそのまま部署名
--- (dovecot.cfのnamespace prefix、例: planning/accounting/booth/stage/pr/admin/
--- general_affairs)と一致する設計のため、値の変換テーブルを持たない
--- (ansible/roles/zitadel-bootstrap/vars/resources.ymlのrole定義と同期させること)。
-local function fetch_acl_groups(user_id)
-  local ok, status, parsed = zitadel_api(
-    "POST",
-    "/management/v1/users/grants/_search",
-    { queries = { { userIdQuery = { userId = user_id } } } }
-  )
-  if not ok or status ~= 200 or parsed == nil or parsed.result == nil then
-    return nil
-  end
-  local groups = {}
-  for _, grant in ipairs(parsed.result) do
-    for _, role_key in ipairs(grant.roleKeys or {}) do
-      table.insert(groups, role_key)
-    end
-  end
-  if #groups == 0 then
-    return nil
-  end
-  return table.concat(groups, ",")
-end
-
 function auth_passdb_lookup(req)
   local ok, status, parsed = zitadel_api("POST", "/v2/sessions", {
     checks = {
@@ -150,12 +124,5 @@ function auth_userdb_lookup(req)
     return dovecot.auth.USERDB_RESULT_USER_UNKNOWN, "no such user"
   end
 
-  local user_id = parsed.result[1].userId
-  local acl_groups = fetch_acl_groups(user_id)
-
-  local fields = { "uid=5000", "gid=5000", "mail=" .. req.user }
-  if acl_groups ~= nil then
-    table.insert(fields, "acl_groups=" .. acl_groups)
-  end
-  return dovecot.auth.USERDB_RESULT_OK, table.concat(fields, " ")
+  return dovecot.auth.USERDB_RESULT_OK, "uid=5000 gid=5000 mail=" .. req.user
 end

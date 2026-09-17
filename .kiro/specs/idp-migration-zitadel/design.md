@@ -166,7 +166,7 @@ gitops/
 
 gitops/manifests/prod/mailserver/
 ├── dovecot-lua-auth-external-secret.yaml  # Zitadel PAT等をluaスクリプトへ注入(新規)
-└── ml-userdb.conf.ext(仮)                 # メーリングリスト8件のmail属性・エイリアス解決用静的userdb(Requirement 15、authentik_mailing_lists.tf相当をDovecot側で完結)
+└── configmap.yaml                         # postfix-accounts.cf / postfix-virtual.cf でML 8件とadmin@エイリアスを静的定義(Requirement 15、DMS FILE provisioner)
 
 gitops/manifests/prod/vaultwarden-rbac-sync/
 └── (CronJob定義を削除し、常駐Deployment + クラスタ内Serviceへ置換。外部公開なし)
@@ -176,7 +176,7 @@ gitops/manifests/prod/vaultwarden-rbac-sync/
 - `terraform/tunnel.tf` — `idp.aramakisai.com`のAPI向けingress ruleをHTTPS origin + HTTP/2 origin + TLS検証スキップへ変更(Requirement 11.6)
 - `gitops/manifests/prod/zitadel/statefulset.yaml` — ZitadelのTLS終端を有効化し内部CA発行の証明書をマウント(Requirement 11.6、11.7)
 - `gitops/manifests/prod/zitadel/` — 内部CA用Issuer・CA Certificate・origin Certificate(SANに`idp.aramakisai.com`と`zitadel.zitadel.svc.cluster.local`)を追加(Requirement 11.7)
-- `gitops/manifests/prod/mailserver/statefulset.yaml` — auth-ldap.conf.extを廃止しlua passdb設定を追加。ML用静的userdb(Requirement 15)のマウントも追加
+- `gitops/manifests/prod/mailserver/statefulset.yaml` — LDAP設定を撤去し`ACCOUNT_PROVISIONER=FILE`へ。lua passdb/userdbは`auth-passwdfile.inc`の上書きで注入し、ML用静的定義(Requirement 15)をマウント
 - `gitops/manifests/prod/vaultwarden-rbac-sync/*` — CronJob方式を常駐webhook受信Deploymentへ全面書き換え
 - `gitops/helm-values/prod/falco.yaml` — vaultwarden-rbac-syncの新プロセス形態(常駐Deployment)に合わせた誤検知除外ルールの見直し
 
@@ -288,7 +288,7 @@ sequenceDiagram
 | 12.1-12.2 | 招待制登録整理・パスワードリカバリー標準化 | Zitadel Core | Invite Code API | 招待オンボーディングフロー |
 | 13.1-13.2 | 出展団体アカウント移行 | Zitadel Core, Terraform IaC | Invite Code API, zitadel_human_user | 招待オンボーディングフロー |
 | 14.1-14.3 | 招待発行用SAの最小権限移行 | Zitadel Terraform Provider定義 | ORG_USER_MANAGERロール | - |
-| 15.1-15.2 | メーリングリストDovecot完結化 | Dovecot Lua Auth Bridge(userdb) | Dovecot static/SQL userdb | - |
+| 15.1-15.2 | メーリングリストDovecot完結化 | Dovecot Lua Auth Bridge(userdb) | DMS FILE provisioner (passwd-file userdb) | - |
 | 16.1-16.2 | Discordアクセス制御廃止 | Zitadel Core(OIDC IdP設定) | OAuth2 Source | - |
 | 17.1-17.8 | ブランディング設定 | Zitadel Branding | Label Policy API | - |
 

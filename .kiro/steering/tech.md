@@ -154,7 +154,7 @@ ssh root@prod-node-1 "systemctl status os-update-notify.timer; cat /var/run/rebo
 - **Cloudflare Access (E2E CI)**: `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET`（`aramakisai-web` の Playwright E2E テストが Cloudflare Access の Authentik ログインを迂回するための Service Token。`terraform/access.tf` の `cloudflare_zero_trust_access_service_token.e2e_ci` が発行元。`aramakisai-web` 側 `staging-e2e-verification` spec が前提としていた secret 名と一致しており乖離なし）
 - **アプリ用シークレット**:
   - **Authentik**: `AUTHENTIK_SECRET_KEY`, `AUTHENTIK_DB_PASSWORD`, `NOREPLY_SMTP_PASSWORD`（`noreply@aramakisai.com` 用 SMTP パスワード。Vaultwarden・Directus の SMTP 設定でも同一キーを再利用） <!-- confidential:allow -->
-  - **DMS**: `MAILSERVER_LDAP_BIND_PASSWORD`, `MAILSERVER_DKIM_KEY`, `MAILSERVER_RESTIC_PASSWORD`, `B2_APPLICATION_KEY_ID`, `B2_APPLICATION_KEY`
+  - **DMS**: `MAILSERVER_LDAP_BIND_PASSWORD`(Authentik LDAP 用、現在はどこからも参照しない), `MAILSERVER_DKIM_KEY`, `MAILSERVER_RESTIC_PASSWORD`, `B2_APPLICATION_KEY_ID`, `B2_APPLICATION_KEY`
   - **Directus**: `DIRECTUS_SECRET`, `DIRECTUS_ADMIN_EMAIL`, `DIRECTUS_ADMIN_PASSWORD`, `DIRECTUS_DB_PASSWORD`, `EMAIL_SMTP_PASSWORD`（Authentik の `NOREPLY_SMTP_PASSWORD` を再利用、新規キーなし）, `DIRECTUS_STAGING_SECRET`, `DIRECTUS_STAGING_ADMIN_EMAIL`, `DIRECTUS_STAGING_ADMIN_PASSWORD`, `DIRECTUS_STAGING_DB_PASSWORD`（staging 用）, `DIRECTUS_LICENSE_KEY`（Open Innovation Grant Key。prod/staging で同一キーを共有し `LICENSE_KEY` env に注入。5 activations枠を消費するため、DB復元先PUBLIC_URL変更時やインスタンス破棄前は要注意）。`directus-db` のメモリ制限は、通常稼働時は約60MiBだが、barman-cloud-backup や wal-archive などのバックアップ処理に伴うメモリスパイクで OOM クラッシュループするのを回避するため、制限を `512Mi` に設定。
   - **Alloy**: `LOKI_URL`, `LOKI_USERNAME`, `LOKI_PASSWORD`, `PROMETHEUS_REMOTE_WRITE_URL`, `PROMETHEUS_USERNAME`, `PROMETHEUS_PASSWORD`
   - **Roundcube**: `MAIL_OAUTH2_CLIENT_SECRET`, `ROUNDCUBE_DES_KEY`

@@ -8,6 +8,25 @@
 
 **Impact**: 現行の「LDAP グループ展開による個人メールボックスへの fan-out 配送」（`ldap-groups.cf` の `special_result_attribute=member` ハック、2026-06-11 本番検証済み）を廃止し、ML 宛メールは ML 専用の共有メールボックスへ直接配送される。個人メールアドレス宛の受信・送信は廃止するが、個人の IMAP/SMTP AUTH ログイン機能自体は ML 共有メールボックスへのアクセス手段として維持する。
 
+### 現行の認可モデル(設計判断)
+
+IdP を Zitadel へ移行し Authentik LDAP を撤去したため、本書のうち LDAP グループ所属に基づくアクセス制御・送信者制限・配送判定の記述は以下で置き換えられている。
+
+- **決定**: Zitadel で認証済みの全ユーザーに、全 ML の閲覧(Dovecot ACL `authenticated`)と ML アドレスを From とした送信を同等に許可する。
+- **理由**: 利用者は実行委員のみで誤用は運用でカバーでき、部署別の厳密な RBAC より UX(誰でもどの ML も扱える、設定が単純)を優先する。
+- **実装**: ML アドレスは DMS `ACCOUNT_PROVISIONER=FILE` の静的定義(配送専用、ログイン不可)。送信者認可は Postfix の静的マップ(ML アドレス → `permit_sasl_authenticated`、noreply → SASL ユーザー noreply)で、未登録の From は拒否する。詳細は `.kiro/steering/dr.md` のメールサーバー節。
+
+検討し不採用とした案:
+- 静的マップを ML 自身 + noreply のみにする — 個人ログインの Roundcube から ML 名義で送信できなくなる
+- Zitadel role から送信者マップを定期生成する — 権限変更が即時反映されない(非リアルタイム)
+- Postfix から Zitadel DB を直接参照する — Zitadel 内部スキーマに依存しアップグレードで壊れる
+- OpenLDAP 等を立てて Zitadel から同期する — idp-migration-zitadel Requirement 3.1 が禁じる翻訳層にあたる
+- `SPOOF_PROTECTION` を撤去する — 個人アドレスの詐称を許す
+- SASL authzid / Dovecot master user 方式 — Roundcube の OAUTHBEARER では ML を指定できず、複数 ML の区別に ML ごとの別ログインが必要
+- Postfix policy service で Zitadel role を都度照会する — 成立するが、実装・運用コストに対し UX 優先方針のもとで見合わない
+
+再検討条件: 実行委員以外が Zitadel にログイン可能になる場合、または部署別の閲覧・送信制限が必要になった場合。
+
 ### Goals
 - 7 件の ML 宛アドレスをそれぞれ専用の共有メールボックスとして運用する
 - LDAP グループ所属に基づく動的な受信アクセス制御（Discord ロール失効 → 次回ログインから自動失効）

@@ -54,83 +54,17 @@ spec:
               value: "mail.aramakisai.com"
             - name: TLS_LEVEL
               value: "modern"
-            # LDAP設定 (Postfixのメールボックス存在確認・MLグループ展開専用):
-            # Dovecot自身のIMAP/POP3クライアント認証はauth-ldap.conf.ext (中身はlua、
-            # configmap.yaml参照)が同名ファイルを上書きするため、この
-            # DOVECOT_USER_FILTER/DOVECOT_PASS_FILTERから自動生成される分はDovecotの
-            # auth判定には使われない。Postfix側のLDAP依存解消はdesign.md
-            # Requirement 15(メーリングリストDovecot完結化)の別タスク。
-            - name: LDAP_ENABLED
-              value: "1"
+            # ML アドレス(配送専用、ログイン不可)は DMS 標準の FILE provisioner で
+            # 静的に定義する (configmap.yaml の postfix-accounts.cf 参照)。
+            # ログイン主体の認証は Zitadel へ委譲するため LDAP は使わない。
             - name: ACCOUNT_PROVISIONER
-              value: "LDAP"
-            - name: LDAP_SERVER_HOST
-              value: "ldap://authentik-ldap-outpost.prod.svc.cluster.local"
-            - name: LDAP_SEARCH_BASE
-              value: "dc=ldap,dc=goauthentik,dc=io"
-            - name: LDAP_BIND_DN
-              value: "cn=mailserver-service,ou=users,dc=ldap,dc=goauthentik,dc=io"
-            - name: LDAP_BIND_PW
-              valueFrom:
-                secretKeyRef:
-                  name: mailserver-secrets
-                  key: LDAP_BIND_PASSWORD
-            # mailListAddress=true: ML専用Userのみを配送先候補にする (個人メール受信廃止)
-            - name: LDAP_QUERY_FILTER_USER
-              value: "(&(objectClass=inetOrgPerson)(mail=%s)(ak-active=true)(mailListAddress=true))"
-            - name: LDAP_QUERY_FILTER_ALIAS
-              value: "(&(objectClass=inetOrgPerson)(mailAlias=%s)(ak-active=true))"
-            # ak-active はグループエントリには存在しないため、グループでは
-            # mail 属性のみでフィルタする (ユーザーと違いグループに有効/無効の概念はない)
-            # mailListMigrated=true が設定されたグループ (新方式へ移行済み) は
-            # fan-out 展開の対象から除外する
-            - name: LDAP_QUERY_FILTER_GROUP
-              value: "(&(objectClass=group)(mail=%s)(!(mailListMigrated=true)))"
-            # 2026-06-29: ML メールアドレスと同一メールを持つ別 LDAP エントリが存在し、
-            # Dovecot userdb が複数マッチで TEMPFAIL を返していた。
-            # mailListAddress=true を追加して ML 専用ユーザーに一意に絞り込む。
-            - name: DOVECOT_USER_FILTER
-              value: "(&(objectClass=inetOrgPerson)(mail=%u)(ak-active=true)(mailListAddress=true))"
-            - name: DOVECOT_PASS_FILTER
-              value: "(&(objectClass=inetOrgPerson)(mail=%u)(ak-active=true)(mailListAddress=true))"
-            # 送信者なりすまし防止: MLアドレスをFromに使える送信者をグループメンバーに限定する
-            # 2026-06-23 hotfix: SENDERSフィルタを設定すると docker-mailserver の
-            # 仕様上 USER/ALIAS/GROUP フィルタの自動OR結合が無効化される
-            # (SENDERSフィルタが唯一の送信者認可チェックになる)。元の値は
-            # objectClass=group限定だったため、システム通知用の noreply も含め
-            # 個人ユーザーからの送信が一切できず、SMTP認証成功後に Postfix が
-            # 553 5.7.1 Sender address rejected: not owned by user で全件拒否
-            # していた。個人ユーザーのメール送受信は方針として禁止のため、
-            # 例外は noreply (cn=noreply) のみに限定して許可する
-            # (他の個人ユーザーには広げない)。
-            # 2026-06-26: Roundcube OAuth2 で email claim を ML グループの mail 属性に
-            # 変更したため、SASL ユーザー名が ML 専用 User のメールアドレスになる。
-            # このため ML 専用 User (mailListAddress=true) 自身も送信者として許可する
-            # (groups の member 展開結果に ML 専用 User は含まれないため)。
-            - name: LDAP_QUERY_FILTER_SENDERS
-              value: "(|(&(objectClass=group)(mail=%s))(&(objectClass=inetOrgPerson)(mail=%s)(mailListAddress=true))(&(objectClass=inetOrgPerson)(mail=%s)(cn=noreply)))"
+              value: "FILE"
+            # FILE provisioner は既定で quota を有効化するが、quota は運用しない
+            - name: ENABLE_QUOTAS
+              value: "0"
+            # 送信者認可の最終ルールは user-patches.sh で上書きする (configmap.yaml 参照)
             - name: SPOOF_PROTECTION
               value: "1"
-            # auth_bind=yes: Dovecot が LDAP に直接バインドしてユーザー認証 (PLAIN auth)
-            - name: DOVECOT_AUTH_BIND
-              value: "yes"
-            # Authentik LDAP は mailUidNumber/mailGidNumber/mailHomeDirectory を持たないため
-            # UID/GID に docker(5000) を使い、メールパスを静的に指定する
-            # acl_groups は LDAP user_attrs に含めない。
-            # oauth2 passdb は introspection レスポンスのフィールドを自動転送しないため、
-            # dovecot-oauth2.conf.ext の pass_attrs で introspection の "userdb_acl_groups"
-            # クレームを passdb extra field にマップする (dovecot-oauth2-external-secret.yaml 参照)。
-            # passdb extra の "userdb_xxx" → userdb フィールド "xxx" の Dovecot 規約により
-            # acl_groups へ反映される。%{passdb:xxx} は LDAP user_attrs では展開されないため不可。
-            # 2026-06-26: auth_username_format 削除により %d がユーザーの入力ドメイン (gmail.com 等)
-            # に展開されるようになった。メールボックスは aramakisai.com 配下に統一しているため
-            # %d の代わりに静的に aramakisai.com を指定する。
-            # 2026-06-28: 全属性静的値のため Dovecot が LDAP に attrs=[] (全属性要求) を送り、
-            # Authentik outpost が ml-admin の mailAlias multi-value 属性をシリアライズ失敗して
-            # 空応答を返す → Dovecot userdb TEMPFAIL → admin@ 宛 451 エラー。
-            # mail=_ldap_check を先頭に追加し attrs=["mail"] を強制することで回避する。
-            - name: DOVECOT_USER_ATTRS
-              value: "mail=_ldap_check,=uid=5000,=gid=5000,=home=/var/mail/aramakisai.com/%n,=mail=maildir:/var/mail/aramakisai.com/%n"
             # Roundcube OAuth2 クライアントシークレット (OAUTHBEARER introspection 用)
             - name: MAIL_OAUTH2_CLIENT_SECRET
               valueFrom:
@@ -170,16 +104,12 @@ spec:
             - name: data
               mountPath: /var/mail
             - name: dms-config
-              mountPath: /tmp/docker-mailserver/postfix-main.cf
-              subPath: postfix-main.cf
-              readOnly: true
-            - name: dms-config
               mountPath: /tmp/docker-mailserver/dovecot.cf
               subPath: dovecot.cf
               readOnly: true
             - name: dms-config
-              mountPath: /etc/dovecot/conf.d/auth-ldap.conf.ext
-              subPath: auth-ldap.conf.ext
+              mountPath: /etc/dovecot/conf.d/auth-passwdfile.inc
+              subPath: auth-passwdfile.inc
               readOnly: true
             - name: dms-config
               mountPath: /etc/dovecot/zitadel-auth.lua
@@ -194,11 +124,21 @@ spec:
               subPath: 05-acl-plugin.conf
               readOnly: true
             - name: dms-config
-              mountPath: /tmp/docker-mailserver/ldap-groups.cf
-              subPath: ldap-groups.cf
+              mountPath: /tmp/docker-mailserver/postfix-accounts.cf
+              subPath: postfix-accounts.cf
               readOnly: true
-            # ldap-senders.cf は DMS が標準サポートしない override 対象のため、
-            # user-patches.sh (DMS公式拡張フック) 内で直接生成する (configmap.yaml参照)
+            - name: dms-config
+              mountPath: /tmp/docker-mailserver/postfix-virtual.cf
+              subPath: postfix-virtual.cf
+              readOnly: true
+            - name: dms-config
+              mountPath: /tmp/docker-mailserver/ml-sender-access.cf
+              subPath: ml-sender-access.cf
+              readOnly: true
+            - name: dms-config
+              mountPath: /tmp/docker-mailserver/sender-login-maps.cf
+              subPath: sender-login-maps.cf
+              readOnly: true
             - name: dms-config
               mountPath: /tmp/docker-mailserver/user-patches.sh
               subPath: user-patches.sh
@@ -255,18 +195,22 @@ spec:
           configMap:
             name: mailserver-config
             items:
-              - key: postfix-main.cf
-                path: postfix-main.cf
               - key: dovecot.cf
                 path: dovecot.cf
-              - key: auth-ldap.conf.ext
-                path: auth-ldap.conf.ext
+              - key: auth-passwdfile.inc
+                path: auth-passwdfile.inc
               - key: zitadel-auth.lua
                 path: zitadel-auth.lua
               - key: 05-acl-plugin.conf
                 path: 05-acl-plugin.conf
-              - key: ldap-groups.cf
-                path: ldap-groups.cf
+              - key: postfix-accounts.cf
+                path: postfix-accounts.cf
+              - key: postfix-virtual.cf
+                path: postfix-virtual.cf
+              - key: ml-sender-access.cf
+                path: ml-sender-access.cf
+              - key: sender-login-maps.cf
+                path: sender-login-maps.cf
               - key: user-patches.sh
                 path: user-patches.sh
               - key: opendkim-keytable
