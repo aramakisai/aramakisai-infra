@@ -24,7 +24,7 @@ Terraform でクラウドリソースを定義し、Ansible で K3s クラスタ
 │  Cloudflare                                         │
 │  ├── DNS (aramakisai.com)                           │
 │  ├── Tunnel → argocd / idp / stg / api.stg          │
-│  └── Access (Authentik OIDC で保護)                  │
+│  └── Access (Zitadel OIDC で保護)                    │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -59,7 +59,7 @@ Terraform でクラウドリソースを定義し、Ansible で K3s クラスタ
 
 | サービス | Namespace | 用途 |
 |---------|-----------|------|
-| [Authentik](https://goauthentik.io) | `prod` | Identity Provider (SSO) |
+| [Zitadel](https://zitadel.com) | `prod` | Identity Provider (SSO) |
 | [Directus](https://directus.io) | `prod` / `staging` | Headless CMS |
 | [Docker Mailserver (DMS)](https://docker-mailserver.github.io/docker-mailserver/) | `prod` | メールサーバー |
 | cloudflared | `cloudflared` | Cloudflare Tunnel クライアント |
@@ -209,13 +209,13 @@ infisical run --env=prod -- ansible-playbook -i ansible/inventory/tailscale.yml 
 | 環境 | URL |
 |-----|-----|
 | ArgoCD | https://argocd.aramakisai.com |
-| Authentik IdP | https://idp.aramakisai.com |
+| Zitadel IdP | https://idp.aramakisai.com |
 
-認証: Cloudflare Access → Authentik OIDC
+認証: Cloudflare Access → Zitadel OIDC
 
-### ブレークグラス: Authentik 障害時の ArgoCD アクセス
+### ブレークグラス: IdP 障害時の ArgoCD アクセス
 
-Authentik が落ちていて argocd.aramakisai.com にアクセスできない場合:
+Zitadel が落ちていて argocd.aramakisai.com にアクセスできない場合:
 
 ```bash
 ssh root@prod-node-1.tail<hash>.ts.net  # confidential:allow

@@ -383,7 +383,7 @@
     `"urn:zitadel:iam:org:project:roles": {"planning": {"<org_id>": "<org_domain>"}}`が
     一貫して含まれることを確認した(3アプリ×2箇所=6箇所すべて一致)。
 
-- [ ] 9. バックアップ移行による本番カットオーバーとロールバック
+- [x] 9. バックアップ移行による本番カットオーバーとロールバック
   - prod-node-1でのauthentik/Zitadel長期並行稼働を避けるため、k3dで検証済みのZitadel設定をバックアップ経由で本番へ持ち込み一括カットオーバーする(Requirement 7、セキュリティ・機能検証完了後に実施)
 - [x] 9.1 k3d検証用テストデータを除外してZitadel Admin API exportを取得する
   - testuser等の検証専用組織・ユーザーをexport対象から除外するフィルタ(`excludedOrgIds`等)を確定する
@@ -972,7 +972,7 @@
       本番へ反映済みであることをAdmin API経由で確認し、再実行時の冪等性バグも
       修正した。本タスクを完了扱いとする。
 
-- [ ] 9.4 一括カットオーバー順序を実行する
+- [x] 9.4 一括カットオーバー順序を実行する
   - Dovecot Lua Auth Bridge・RPアプリ(CMS/Vaultwarden/Roundcube)OIDC Clientの順に本番切替を実行する
   - task 4.4でActions v2が安定と判断された場合のみvaultwarden-rbac-sync webhookを本番切替に含める。スコープ除外と判断された場合はこのステップを省略し手動運用へ引き継ぐ
   - 既存ユーザーへの招待ベース移行(task 6)を本番Zitadelに対して実施する
@@ -1371,14 +1371,8 @@
       (mailserver→Zitadelの断続的な接続タイムアウト、ノードメモリひっ迫が
       濃厚)が解消するまでは、Zitadel発のメール(招待メール含む)は安定して
       送信できない。
-    - **残課題**:
-      (1) `prod-node-1`のメモリひっ迫と、それに伴うmailserver→Zitadel間の
-      断続的な接続タイムアウトの根本解決(ノードリソース増強、または
-      authentik撤去等による負荷削減の要否をユーザー判断で決定する必要がある)。
-      (2) (1)解消後、`doveadm auth test`が安定して`auth succeeded`を返すこと、
-      および`admin/v1/email`のSMTP設定から実際にテストメールが送信できることの
-      再確認。
-      (3) 招待済みユーザーへの招待メール再送信の要否判断(本タスクでは実施しない)。
+    - **残課題(解決済み)**: 接続タイムアウトはメモリひっ迫ではなくfail2banによる
+      Zitadel Pod IPのBANが真因で、以下の修正と招待メール再送信により解消した。
     - **Zitadel APIリクエスト形式の誤り(noreply SMTP認証失敗の真因)**:
       上記根本原因2の接続タイムアウトは、mailserver(hostNetwork)のfail2banが
       Zitadel Pod IPをBANしノード全体のinputで破棄していたことが真因だった
@@ -1433,6 +1427,9 @@
       招待コードを含むため、ログ確認時はこの行を必ず除外すること。
     - **9.4のチェックボックスについて**: Step1・Step2は機能確認済み、Step3は
       未達の宛先が残るため`[ ]`のままとする。
+    - **完了判断**: ユーザー判断で完了扱いとした。受信不可アドレスで登録された
+      招待対象への再招待はspec外の運用対応とする。
+
 
 - [x] 9.5 authentik構成への切り戻し手順を整備する
   - Zitadel切替後に重大な認証障害が発生した場合の、旧authentik構成への切り戻し手順を作成する
@@ -1488,7 +1485,7 @@
       のため切り戻し対象に含めていない(投入され次第、対象パスをスクリプトの
       `CUTOVER_PATHS`に追加する必要がある)。
 
-- [ ] 9.6 ロールバック手順を実地検証する
+- [x] 9.6 ロールバック手順を実地検証する
   - 旧authentik構成への切り戻し手順を実際に実行し、切り戻し後に既存アプリのログインが復旧することを確認する
   - _Requirements: 10.8_
   - _Depends: 9.5_
@@ -1632,6 +1629,9 @@
       (`status.health.lastTransitionTime`は2026-09-16T15:22:45Z、自動sync再試行
       ループ中)。mailserver Pod自体は1/1 Runningで即座の障害ではないが、
       task9.4系の未解決課題として別途調査が必要。
+  - **完了判断**: ユーザー判断で完了扱いとした。本番での切り戻しリハーサルは
+    未実施で、Requirement 10.8は未検証のまま。
+
 
 - [x] 9.7 RPアプリのgroups claim互換を確立しArgoCDをZitadelへ切り替える
   - Requirement 8.2の旧設計(roles claimをRP側で解釈)に対応するRP改修タスクが無く、CMS/ArgoCDは`groups` claimを読んだままZitadelからgroupsが返らない状態だった
@@ -1658,7 +1658,7 @@
     - role `admin`はArgoCD等のアプリ管理者に限定し、Zitadel管理者権限とは分離した(design.md
       「管理者権限の分離」)。Zitadelインスタンス管理者はadminロールと連動せず個別に管理する
 
-- [ ] 10. 追加移行スコープ(既存authentik付随機能6件)のk3d PoC実装
+- [x] 10. 追加移行スコープ(既存authentik付随機能6件)のk3d PoC実装
   - task1〜8完了後にセッション内の追加検討で判明した、旧spec(idp-migration-zitadel初版)ではスコープ外だった`terraform/authentik_*.tf`6ファイル相当の移行。PoCとしてk3d環境で検証する(本番反映はtask9の一括カットオーバーに含める)。task9とは独立して着手可能(依存はtask1/2/6のみ)
 - [x] 10.1 enrollment/recoveryを整理する
   - `terraform/authentik_enrollment.tf`(学籍番号等カスタム項目付き招待制登録)の学籍番号項目を廃止し、`scripts/zitadel-invite-migration.py`の招待コード発行フローへ一本化する(新規カスタムUIは作らない)
