@@ -11,22 +11,16 @@
 **目的**: クラウドプロバイダーリソースの宣言的定義  
 **ファイル粒度**: リソース種別ごとに 1 ファイル  
 ```
-providers.tf         ← Terraform provider 設定 (hcloud, cloudflare, tailscale, authentik)
+providers.tf         ← Terraform provider 設定 (hcloud, cloudflare, tailscale ほか)
 main.tf              ← ノード (hcloud_server)  ※null_resource はコメントアウト済み
 firewall.tf          ← Hetzner ファイアウォールルール
 network.tf           ← Hetzner プライベートネットワーク
 dns.tf               ← Cloudflare DNS レコード
 tunnel.tf            ← Cloudflare Tunnel 設定
-access.tf            ← Cloudflare Access (staging 保護 + Authentik OIDC IdP)
+access.tf            ← Cloudflare Access (dev/workers.dev 保護 + Zitadel OIDC IdP)
 tailscale.tf         ← Tailscale auth key 発行
 storage.tf           ← Hetzner Object Storage (バケットは手動作成、TF リソースはコメントアウト)
-authentik_main.tf    ← Authentik provider 基本設定
-authentik_apps.tf    ← Authentik Applications / Providers (OIDC・LDAP・Discord)
-authentik_ldap.tf    ← LDAP Outpost 設定
-authentik_discord.tf ← Discord OAuth2 連携 (Discord ロール同期)
-authentik_policies.tf← Authentik ポリシー定義
-authentik_imports.tf ← 既存リソースのインポート定義
-authentik_recovery.tf← Authentik リカバリー設定
+authentik_*.tf.disabled ← Authentik 時代の定義一式。ルートモジュール外で plan/apply の対象外
 variables.tf / outputs.tf  ← 変数・出力
 ```
 

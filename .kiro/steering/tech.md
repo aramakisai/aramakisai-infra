@@ -34,10 +34,14 @@ infisical run -- ansible-playbook k3s-bootstrap.yml
 | tailscale | tailscale/tailscale | ~> 0.17 |
 | cloudflare | cloudflare/cloudflare | ~> 4.0 |
 | null | hashicorp/null | ~> 3.0 |
-| authentik | goauthentik/authentik | >= 2024.12.0 |
 | uptimerobot | uptimerobot/uptimerobot | ~> 1.8 |
 | healthchecksio | kristofferahl/healthchecksio | ~> 1.6 |
 | netdata | netdata/netdata | ~> 0.4 |
+
+IdP は Zitadel。Zitadel のリソース管理は `ansible/roles/zitadel-bootstrap` が担い、Terraform provider は使わない。
+Authentik 時代の定義は `terraform/authentik_*.tf.disabled` として残すが、ルートモジュール外のため
+`terraform plan/apply` の対象にならない。対応するリソースは state からも除外済みで、
+再度 Terraform 管理下に戻すには拡張子を `.tf` へ戻し、provider 定義と `terraform import` が必要。
 
 ## Key Technical Decisions
 
