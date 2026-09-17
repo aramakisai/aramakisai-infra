@@ -149,11 +149,13 @@ spec:
               mountPath: /zitadel-data
               readOnly: true
           env:
-            # localhost指定だとHostヘッダがExternalDomain(zitadel.zitadel.svc.cluster.local)と
-            # 不一致になりinstance解決に失敗する(Errors.Instance.NotFound)ため、
-            # ExternalDomainと同一のService DNS名を指定する
             - name: ZITADEL_API_URL
               value: http://zitadel.zitadel.svc.cluster.local:8080
+            # ZitadelはHost(またはx-zitadel-instance-host)でインスタンスを解決するため、
+            # 接続先のService DNS名のままだとExternalDomain(idp.aramakisai.com)と一致せず
+            # getAuthRequest等が"Instance not found"になる
+            - name: CUSTOM_REQUEST_HEADERS
+              value: x-zitadel-instance-host:idp.aramakisai.com
             - name: NEXT_PUBLIC_BASE_PATH
               value: /ui/v2/login
             # optional: 新規インスタンス構築直後はPAT未発行のため、Pod(zitadelコンテナ)の
