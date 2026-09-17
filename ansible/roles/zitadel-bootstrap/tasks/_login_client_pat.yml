@@ -1,0 +1,97 @@
+---
+# login v2 UI(zitadel-loginコンテナ)がZitadel APIを呼ぶためのlogin-client PATを
+# Infisical(ZITADEL_LOGIN_CLIENT_PAT)で永続化する。
+#
+# ZITADEL_FIRSTINSTANCE_LOGINCLIENTPATPATHによるPATファイル書き出しはインスタンス
+# 初期化時の一度きりで、DBが既にある状態でPodを再作成しても再発行されない。ファイル
+# (emptyDir)経由の受け渡しだとPod再作成でPATが失われloginコンテナが起動待ちのまま
+# 止まるため、発行したPATはInfisical→ExternalSecret→env経由でloginコンテナへ渡す。
+#
+# Infisicalの現行値がZitadelで有効なら何もしない(冪等)。無効/未登録の場合のみ
+# login-client machine userに新規PATを発行してInfisicalへ登録する。
+
+- name: 必須変数を検証
+  ansible.builtin.assert:
+    that:
+      - zitadel_admin_pat is defined
+      - zitadel_admin_pat | length > 0
+    fail_msg: >-
+      zitadel_admin_pat を解決できませんでした。
+      `infisical run --env=prod -- ansible-playbook ...`で実行してください。
+
+- name: Infisicalの現行ZITADEL_LOGIN_CLIENT_PATを解決
+  ansible.builtin.set_fact:
+    _zitadel_login_client_pat: "{{ lookup('env', 'ZITADEL_LOGIN_CLIENT_PAT') }}"
+  no_log: true
+
+- name: 現行PATの有効性を確認
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    zitadel_admin_pat: "{{ _zitadel_login_client_pat }}"
+    zitadel_api_method: GET
+    zitadel_api_path: /auth/v1/users/me
+    zitadel_api_label: "verify current login-client pat"
+  when: _zitadel_login_client_pat | length > 0
+
+- name: 現行PATの有効性を退避
+  ansible.builtin.set_fact:
+    _zitadel_login_client_pat_valid: "{{ _zitadel_login_client_pat | length > 0 and zitadel_api_result.status == 200 }}"
+
+- name: PATを再発行してInfisicalへ登録
+  when: not _zitadel_login_client_pat_valid
+  block:
+    - name: login-client machine userを検索
+      ansible.builtin.include_tasks: _api_call.yml
+      vars:
+        zitadel_api_method: POST
+        zitadel_api_path: /management/v1/users/_search
+        zitadel_api_body:
+          queries:
+            - userNameQuery: { userName: "{{ zitadel_login_client_user_name }}", method: TEXT_QUERY_METHOD_EQUALS }
+        zitadel_api_label: "search login-client user"
+
+    - name: login-client machine userの存在を検証
+      # ユーザー自体とIAM_LOGIN_CLIENT roleはZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_*で
+      # インスタンス初期化時に作成される前提
+      ansible.builtin.assert:
+        that:
+          - (zitadel_api_result.body.result | default([])) | length == 1
+        fail_msg: "login-client machine user ({{ zitadel_login_client_user_name }}) が見つかりません"
+
+    - name: PATを新規発行
+      ansible.builtin.include_tasks: _api_call.yml
+      vars:
+        zitadel_api_method: POST
+        zitadel_api_path: "/management/v1/users/{{ zitadel_api_result.body.result[0].id }}/pats"
+        zitadel_api_body:
+          expirationDate: "2029-01-01T00:00:00Z"
+        zitadel_api_label: "create login-client pat"
+
+    - name: 発行結果を退避
+      ansible.builtin.set_fact:
+        _zitadel_login_client_pat: "{{ zitadel_api_result.body.token | default('') }}"
+      no_log: true
+
+    - name: 発行されたPATの有効性を確認
+      ansible.builtin.include_tasks: _api_call.yml
+      vars:
+        zitadel_admin_pat: "{{ _zitadel_login_client_pat }}"
+        zitadel_api_method: GET
+        zitadel_api_path: /auth/v1/users/me
+        zitadel_api_label: "verify new login-client pat"
+
+    - name: 発行されたPATが有効であることを検証
+      ansible.builtin.assert:
+        that:
+          - zitadel_api_result.status == 200
+        fail_msg: "発行したlogin-client PATでの認証に失敗しました (status={{ zitadel_api_result.status }})"
+
+    - name: InfisicalへPATを登録
+      # infisical CLIは値を含む出力を返しうるため必ず/dev/nullへ抑制する
+      ansible.builtin.shell: 'infisical secrets set --env=prod ZITADEL_LOGIN_CLIENT_PAT="$PAT" >/dev/null 2>&1'
+      args:
+        chdir: "{{ playbook_dir }}/../.."
+      environment:
+        PAT: "{{ _zitadel_login_client_pat }}"
+      no_log: true
+      delegate_to: localhost
