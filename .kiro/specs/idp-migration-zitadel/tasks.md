@@ -1633,11 +1633,25 @@
       ループ中)。mailserver Pod自体は1/1 Runningで即座の障害ではないが、
       task9.4系の未解決課題として別途調査が必要。
 
-- [ ] 9.7 RPアプリのgroups claim互換を確立しArgoCDをZitadelへ切り替える
+- [x] 9.7 RPアプリのgroups claim互換を確立しArgoCDをZitadelへ切り替える
   - Requirement 8.2の旧設計(roles claimをRP側で解釈)に対応するRP改修タスクが無く、CMS/ArgoCDは`groups` claimを読んだままZitadelからgroupsが返らない状態だった
   - Zitadel側: v1 Action `groupsClaim`でproject roleキーを`groups` claimとして返す(`ansible/playbooks/zitadel-groups-claim.yml`)。roleキーの意味付けは`vars/resources.yml`の`zitadel_role_bindings`
   - ArgoCD: Zitadel OIDC App `argocd`作成(`ansible/playbooks/zitadel-oidc-apps.yml`、Infisical自動登録)→ `argocd-cm`のissuerをZitadelへ、`argocd-rbac-cm`を`g, admin, role:admin`へ
   - _Requirements: 8.2, 8.4_
+  - **実施結果(本番)**:
+    - `zitadel-groups-claim.yml`を実行し、2回目の実行で変更なし(冪等)を確認
+    - 一時テスト用machine userを作成しrole `admin`/`executive`を付与、client_credentialsで
+      取得したaccess tokenとuserinfoの双方で`groups: ["admin", "executive"]`を確認後、
+      ユーザーを削除(残存0件)。roleのassertionが無いトークン(project audience/roles scope
+      なし)ではgrantが解決されずgroupsは付かない。RPアプリはproject設定の
+      `projectRoleAssertion`でroleが解決される
+    - `zitadel-oidc-apps.yml`でOIDC App `argocd`を作成、発行値のInfisical登録と既存アプリの
+      非変更を確認。`argocd-oidc-secret`はESO同期済み(`SecretSynced`)
+    - ArgoCD: `argocd-config`がSynced/Healthy、`/auth/login`がZitadelのauthorizeへ
+      リダイレクトしlogin v2のloginname画面(200)まで到達、argocd-serverログにOIDCエラーなし。
+      実ユーザーでのログイン・`role:admin`付与は管理者本人の操作で確認する
+    - 残課題: CMSの`role-mapping.ts`は出展団体を`student_exhibitor`で判定しているが、
+      Zitadelのroleキーは`exhibitor`のためCMS上で出展団体ロールが付かない
 
 - [ ] 10. 追加移行スコープ(既存authentik付随機能6件)のk3d PoC実装
   - task1〜8完了後にセッション内の追加検討で判明した、旧spec(idp-migration-zitadel初版)ではスコープ外だった`terraform/authentik_*.tf`6ファイル相当の移行。PoCとしてk3d環境で検証する(本番反映はtask9の一括カットオーバーに含める)。task9とは独立して着手可能(依存はtask1/2/6のみ)
