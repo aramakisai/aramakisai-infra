@@ -292,7 +292,11 @@ data:
     admin@aramakisai.com|{SHA512-CRYPT}!
     general-affairs@aramakisai.com|{SHA512-CRYPT}!
     noreply@aramakisai.com|{SHA512-CRYPT}!
+  # postmaster@ は RFC 5321 必須かつ DMARC/TLS-RPT レポート (terraform/dns.tf) と
+  # DMS の起動通知の宛先。postmastar@/webmastar@ は既に外部に出回っている綴りのため残す。
   postfix-virtual.cf: |
+    postmaster@aramakisai.com admin@aramakisai.com
+    webmaster@aramakisai.com admin@aramakisai.com
     postmastar@aramakisai.com admin@aramakisai.com
     webmastar@aramakisai.com admin@aramakisai.com
     abuse@aramakisai.com admin@aramakisai.com
@@ -311,6 +315,8 @@ data:
     stage@aramakisai.com permit_sasl_authenticated
     admin@aramakisai.com permit_sasl_authenticated
     general-affairs@aramakisai.com permit_sasl_authenticated
+    postmaster@aramakisai.com permit_sasl_authenticated
+    webmaster@aramakisai.com permit_sasl_authenticated
     postmastar@aramakisai.com permit_sasl_authenticated
     webmastar@aramakisai.com permit_sasl_authenticated
     abuse@aramakisai.com permit_sasl_authenticated
