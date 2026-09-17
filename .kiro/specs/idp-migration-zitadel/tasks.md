@@ -972,7 +972,7 @@
       本番へ反映済みであることをAdmin API経由で確認し、再実行時の冪等性バグも
       修正した。本タスクを完了扱いとする。
 
-- [ ] 9.4 一括カットオーバー順序を実行する
+- [x] 9.4 一括カットオーバー順序を実行する
   - Dovecot Lua Auth Bridge・RPアプリ(CMS/Vaultwarden/Roundcube)OIDC Clientの順に本番切替を実行する
   - task 4.4でActions v2が安定と判断された場合のみvaultwarden-rbac-sync webhookを本番切替に含める。スコープ除外と判断された場合はこのステップを省略し手動運用へ引き継ぐ
   - 既存ユーザーへの招待ベース移行(task 6)を本番Zitadelに対して実施する
@@ -1297,6 +1297,18 @@
       infisical run --env=prod -- ansible-playbook ansible/playbooks/zitadel-cutover.yml
       -e zitadel_cutover_invite_csv=<残り5件のCSV> -e zitadel_cutover_invite_send_email=true`
       を実行すれば完了できる状態にある(実装・接続経路の課題は解消済み)。
+  - **追記5(2026-09-17、招待コード発行を完遂)**:
+    - 招待対象の実ユーザーCSV(Authentik DBから抽出、ユーザー本人が氏名正規化・
+      ダミーアカウント除去済み)は最終的に7件。
+    - `ansible/playbooks/zitadel-cutover.yml -e zitadel_cutover_invite_send_email=true`
+      で本番実行し、7/7件が招待コード発行・メール送信に成功したことを確認した
+      (内訳: 試験送信2件成功→残り5件のうち4件成功・1件は`family_name`列が
+      空欄のままだったため`SetHumanProfile.FamilyName`バリデーションエラーで
+      失敗→該当1件のみ氏名正規化後に再送し成功)。
+    - 個人情報(実メールアドレス・氏名)はこのタスクの記録・コミットのいずれにも
+      含めていない。
+    - Step1(Dovecot Lua Auth Bridge)・Step2(RPアプリOIDC切替)・Step3
+      (招待コード発行)すべて受け入れ基準を満たしたため、9.4を完了とする。
 
 - [x] 9.5 authentik構成への切り戻し手順を整備する
   - Zitadel切替後に重大な認証障害が発生した場合の、旧authentik構成への切り戻し手順を作成する
