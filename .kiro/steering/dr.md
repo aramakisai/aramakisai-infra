@@ -117,6 +117,8 @@ LDAP は使わない。関連設定は `gitops/manifests/prod/mailserver/configm
   (`user-patches.sh` が起動時に各部署の `dovecot-acl` に `authenticated` を書き出す)。
 - **送信者認可**: `user-patches.sh` が `mua_sender_restrictions` を上書きする。From が ML アドレス(エイリアス含む)なら
   SASL 認証済みの誰でも許可、noreply は SASL ユーザー noreply のみ許可、それ以外(個人アドレス等)は拒否。
+- **未登録の自ドメイン宛**: 25/587/465 すべてで RCPT TO 段階に `550 5.1.1` で拒否する(`user-patches.sh` が DMS 既定の
+  submission/submissions の `smtpd_reject_unlisted_recipient=no` を `yes` に上書き)。受理すると LMTP で 451 のまま滞留する。
 - **再発時の確認手順**:
   - `postconf -h smtpd_sender_login_maps mua_sender_restrictions` が上記の texthash マップを指していること
   - `doveadm user <ML アドレス>` が `/var/mail/aramakisai.com/<localpart>` を返すこと
