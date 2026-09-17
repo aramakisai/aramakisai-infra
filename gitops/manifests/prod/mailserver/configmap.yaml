@@ -206,14 +206,14 @@ data:
     # (タスク4.1で発覚)。メール PVC のルート /var/mail は 0777 docker 所有で書込可能なため、
     # ここに共有 index を置く。DMS は全ユーザー単一 uid 5000 のため共有 index で問題ない。
     #
-    # アクセス権は acl-postsync-job.yaml が各部署ルートの dovecot-acl に `authenticated` として付与し、
+    # アクセス権は user-patches.sh が各部署ルートの dovecot-acl に `authenticated` として付与し、
     # Zitadel 認証済みの全ユーザーが全 ML を同等に読み書きできる (利用者は実行委員のみのため
     # 部署別の閲覧制限は設けない。mailing-list-shared-mailbox design.md 参照)。
     #
     # list = children は子メールボックスを持つ namespace のみ LIST に出すため、各部署 maildir に
     # 最低1つの子メールボックスが必要。
     # 受信専用で一度もクライアント接続していない部署は子が無く LIST に出ないため、
-    # acl-postsync-job.yaml が全部署に標準サブフォルダ (Drafts/Sent/Junk/Trash) を冪等作成する。
+    # user-patches.sh が全部署に標準サブフォルダ (Drafts/Sent/Junk/Trash) を冪等作成する。
     # 部署受信トレイ (maildir ルート) は "Shared/<dept>" 自体を SELECT してアクセスする。
     # subscriptions = no は Roundcube 側 imap_force_list=true で補い、購読不要で表示させる。
     namespace {
@@ -331,6 +331,23 @@ data:
     postconf 'smtpd_sender_login_maps = texthash:/tmp/docker-mailserver/sender-login-maps.cf'
     # shellcheck disable=SC2016
     postconf 'mua_sender_restrictions = check_sender_access texthash:/tmp/docker-mailserver/ml-sender-access.cf, reject_authenticated_sender_login_mismatch, $dms_smtpd_sender_restrictions'
+    # ML 共有メールボックスの ACL と標準サブフォルダ。Zitadel 認証済みの全ユーザーに同等権限を与える。
+    # 'a'(ACL管理権)は付けない: 全員が同一権限のため、IMAP SETACL で他ユーザーのアクセスを
+    # 外せてしまうだけで利点がない。サブフォルダは namespace の list = children が LIST 表示の
+    # ゲートにするため必要 (子は dovecot-acl を持たず部署ルートの ACL を継承する)。
+    for box in planning accounting booth stage pr admin general-affairs; do
+      base="/var/mail/aramakisai.com/${box}"
+      echo "authenticated lrwstipekx" > "${base}/dovecot-acl"
+      chown 5000:5000 "${base}/dovecot-acl"
+      for folder in Drafts Sent Junk Trash; do
+        dir="${base}/.${folder}"
+        [[ -d ${dir} ]] && continue
+        mkdir -p "${dir}/cur" "${dir}/new" "${dir}/tmp"
+        touch "${dir}/maildirfolder"
+        chown -R 5000:5000 "${dir}"
+        chmod -R 0700 "${dir}"
+      done
+    done
   # OpenDKIM KeyTable/SigningTable/TrustedHosts:
   # `setup config dkim domain` はこれらを /tmp/docker-mailserver/opendkim/ 配下に
   # 生成するが、その場所はConfigMap/Secretマウントではなく実行時の一時領域のため
