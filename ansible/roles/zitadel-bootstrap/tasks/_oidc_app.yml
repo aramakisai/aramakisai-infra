@@ -37,6 +37,7 @@
       devMode: false
       idTokenRoleAssertion: true
       accessTokenRoleAssertion: true
+      idTokenUserinfoAssertion: "{{ zitadel_app_item.id_token_userinfo_assertion | default(false) }}"
     zitadel_api_label: "create app {{ zitadel_app_item.name }}"
   when: (_zitadel_app_search.body.result | default([])) | length == 0
 
@@ -86,12 +87,14 @@
       devMode: false
       idTokenRoleAssertion: true
       accessTokenRoleAssertion: true
+      idTokenUserinfoAssertion: "{{ zitadel_app_item.id_token_userinfo_assertion | default(false) }}"
     zitadel_api_label: "update app {{ zitadel_app_item.name }}"
   when: >-
     (_zitadel_app_search.body.result | default([])) | length > 0
     and (
       (_zitadel_app_search.body.result[0].oidcConfig.redirectUris | default([])) != zitadel_app_item.redirect_uris
       or (_zitadel_app_search.body.result[0].oidcConfig.postLogoutRedirectUris | default([])) != zitadel_app_item.post_logout_redirect_uris
+      or (_zitadel_app_search.body.result[0].oidcConfig.idTokenUserinfoAssertion | default(false)) != (zitadel_app_item.id_token_userinfo_assertion | default(false))
     )
 
 # UpdateOIDCAppConfigは変更なしの場合HTTP 400 code=9 "No changes"を返す(実機確認済み、
@@ -106,5 +109,6 @@
     and (
       (_zitadel_app_search.body.result[0].oidcConfig.redirectUris | default([])) != zitadel_app_item.redirect_uris
       or (_zitadel_app_search.body.result[0].oidcConfig.postLogoutRedirectUris | default([])) != zitadel_app_item.post_logout_redirect_uris
+      or (_zitadel_app_search.body.result[0].oidcConfig.idTokenUserinfoAssertion | default(false)) != (zitadel_app_item.id_token_userinfo_assertion | default(false))
     )
   no_log: true
