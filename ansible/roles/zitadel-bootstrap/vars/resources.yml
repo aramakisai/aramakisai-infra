@@ -84,8 +84,10 @@ zitadel_branding_favicon: "{{ zitadel_branding_dir }}/favicon.png"
 # NOREPLY_SMTP_PASSWORDをそのまま流用する(新規キー不要)。
 zitadel_smtp_config:
   host: mail.aramakisai.com
-  port: 587
-  tls: true # STARTTLS (vaultwarden SMTP_SECURITY=starttls相当)
+  # Zitadelのtls=trueは暗黙TLSを先に試しSTARTTLSへフォールバックする実装のため、
+  # 587だと毎回平文ポートへTLS ClientHelloを送りmail.logにnon-SMTP commandが出る。
+  port: 465
+  tls: true
   username: noreply@aramakisai.com
   sender_address: noreply@aramakisai.com
   sender_name: 荒牧祭実行委員会

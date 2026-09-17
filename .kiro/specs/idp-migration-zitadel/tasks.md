@@ -1380,6 +1380,22 @@
       および`admin/v1/email`のSMTP設定から実際にテストメールが送信できることの
       再確認。
       (3) 招待済み7名への招待メール再送信の要否判断(本タスクでは実施しない)。
+    - **Zitadel APIリクエスト形式の誤り(noreply SMTP認証失敗の真因)**:
+      上記根本原因2の接続タイムアウトは、mailserver(hostNetwork)のfail2banが
+      Zitadel Pod IPをBANしノード全体のinputで破棄していたことが真因だった
+      (メモリひっ迫は無関係、`.kiro/steering/dr.md`参照)。BAN解除後も認証は
+      失敗し、以下2点のリクエスト形式の誤りが判明したため修正した。
+      (1) `_noreply_smtp_user.yml`の既存user向け`POST /v2/users/{id}/password`
+      (SetPasswordRequest)は`hashedPassword`フィールドを持たず、送った値は
+      無視され空パスワードで上書きされていた(200応答のため検知できず、
+      上記「冪等性確認済み」は誤り)。hashedPasswordを受け付ける
+      `PUT /v2/users/human/{id}`の`password.hashedPassword`へ変更し、
+      Session API(`POST /v2/sessions`)での認証成功をassertで検証する。
+      (2) `_smtp_config.yml`は`plain.user`を送っていたが、SMTPPlainAuthは
+      `password`のみでusernameは空で保存されていた。`user`をトップレベルへ
+      移し、既存providerを毎回`PUT /admin/v1/email/smtp/{id}`で更新する。
+      あわせてZitadelの`tls: true`が暗黙TLSを先に試す実装のため、portを465
+      (submissions)へ変更した。
 
 - [x] 9.5 authentik構成への切り戻し手順を整備する
   - Zitadel切替後に重大な認証障害が発生した場合の、旧authentik構成への切り戻し手順を作成する

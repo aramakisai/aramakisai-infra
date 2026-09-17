@@ -62,8 +62,8 @@
       host: "{{ zitadel_smtp_config.host }}:{{ zitadel_smtp_config.port }}"
       tls: "{{ zitadel_smtp_config.tls }}"
       description: "{{ zitadel_smtp_config.description }}"
+      user: "{{ zitadel_smtp_config.username }}"
       plain:
-        user: "{{ zitadel_smtp_config.username }}"
         password: "{{ _zitadel_smtp_password }}"
     zitadel_api_label: "create smtp email provider"
   when: (_zitadel_smtp_existing | length) == 0
@@ -75,6 +75,36 @@
       - zitadel_api_result.status == 200
     fail_msg: "SMTP email providerの作成に失敗しました: {{ zitadel_api_result.status }}"
   when: (_zitadel_smtp_existing | length) == 0
+  no_log: true
+
+# 既存providerも毎回PUTで上書きする。descriptionだけで存在判定してスキップすると
+# resources.ymlやパスワードの変更が既存providerへ反映されない。
+# userはトップレベル、plainにはpasswordのみ (SMTPPlainAuthにuserフィールドはなく、
+# plain.userは黙って無視され空usernameで保存される)。
+- name: 既存のSMTP Email Providerを更新
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    zitadel_api_method: PUT
+    zitadel_api_path: "/admin/v1/email/smtp/{{ _zitadel_smtp_existing[0].id }}"
+    zitadel_api_body:
+      senderAddress: "{{ zitadel_smtp_config.sender_address }}"
+      senderName: "{{ zitadel_smtp_config.sender_name }}"
+      host: "{{ zitadel_smtp_config.host }}:{{ zitadel_smtp_config.port }}"
+      tls: "{{ zitadel_smtp_config.tls }}"
+      description: "{{ zitadel_smtp_config.description }}"
+      user: "{{ zitadel_smtp_config.username }}"
+      plain:
+        password: "{{ _zitadel_smtp_password }}"
+    zitadel_api_label: "update smtp email provider"
+  when: (_zitadel_smtp_existing | length) > 0
+  no_log: true
+
+- name: SMTP Email Provider更新結果を確認 (code=9は変更なし)
+  ansible.builtin.assert:
+    that:
+      - zitadel_api_result.status == 200 or zitadel_api_result.body.code | default(0) == 9
+    fail_msg: "SMTP email providerの更新に失敗しました: {{ zitadel_api_result.status }}"
+  when: (_zitadel_smtp_existing | length) > 0
   no_log: true
 
 - name: SMTP Email Provider IDを確定
