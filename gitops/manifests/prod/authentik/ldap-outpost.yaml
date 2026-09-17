@@ -29,7 +29,7 @@ metadata:
     # Outpost Token が更新されたら自動再起動
     secret.reloader.stakater.com/reload: "authentik-ldap-outpost-token"
 spec:
-  replicas: 1
+  replicas: 0
   selector:
     matchLabels:
       app: authentik-ldap-outpost
