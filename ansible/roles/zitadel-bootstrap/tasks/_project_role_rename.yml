@@ -1,0 +1,150 @@
+---
+# zitadel_rename_item: {key: 旧roleキー, value: 新roleキー}
+- name: "旧roleの存在を確認: {{ zitadel_rename_item.key }}"
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    zitadel_api_method: POST
+    zitadel_api_path: "/management/v1/projects/{{ zitadel_project_id }}/roles/_search"
+    zitadel_api_body:
+      queries:
+        - keyQuery: { key: "{{ zitadel_rename_item.key }}", method: TEXT_QUERY_METHOD_EQUALS }
+    zitadel_api_label: "search role {{ zitadel_rename_item.key }}"
+
+- name: "旧roleの有無を退避: {{ zitadel_rename_item.key }}"
+  ansible.builtin.set_fact:
+    _old_role_exists: "{{ (zitadel_api_result.body.result | default([])) | length > 0 }}"
+    _old_role_search_status: "{{ zitadel_api_result.status }}"
+
+- name: 旧role検索が成功したことを検証
+  ansible.builtin.assert:
+    that: [_old_role_search_status | int == 200]
+    quiet: true
+
+- name: "付け替え: {{ zitadel_rename_item.key }} -> {{ zitadel_rename_item.value }}"
+  when: _old_role_exists | bool
+  block:
+    - name: 新roleを投入
+      ansible.builtin.include_tasks: _project_role.yml
+      vars:
+        zitadel_role_item:
+          key: "{{ zitadel_rename_item.value }}"
+          value: "{{ zitadel_project_roles[zitadel_rename_item.value] }}"
+      when: zitadel_project_role_rename_apply | bool
+
+    - name: 旧roleを持つuser grantを検索
+      ansible.builtin.include_tasks: _api_call.yml
+      vars:
+        zitadel_api_method: POST
+        zitadel_api_path: /management/v1/users/grants/_search
+        zitadel_api_body:
+          query: { offset: "0", limit: 1000 }
+          queries:
+            - projectIdQuery: { projectId: "{{ zitadel_project_id }}" }
+            - roleKeyQuery: { roleKey: "{{ zitadel_rename_item.key }}", method: TEXT_QUERY_METHOD_EQUALS }
+        zitadel_api_label: "search grants {{ zitadel_rename_item.key }}"
+
+    - name: 付け替え対象を退避
+      ansible.builtin.set_fact:
+        _rename_grants: "{{ zitadel_api_result.body.result | default([]) }}"
+        _rename_grants_status: "{{ zitadel_api_result.status }}"
+      no_log: true
+
+    - name: 対象件数を表示 (件数のみ)
+      ansible.builtin.debug:
+        msg: >-
+          role {{ zitadel_rename_item.key }} -> {{ zitadel_rename_item.value }}:
+          search_status={{ _rename_grants_status }} grants={{ _rename_grants | length }}
+          apply={{ zitadel_project_role_rename_apply }}
+
+    - name: grant検索が成功したことを検証
+      ansible.builtin.assert:
+        that: [_rename_grants_status | int == 200]
+        quiet: true
+
+    - name: 付け替えを適用
+      when: zitadel_project_role_rename_apply | bool
+      block:
+        - name: user grantのroleキーを置換
+          ansible.builtin.include_tasks: _api_call.yml
+          vars:
+            zitadel_api_method: PUT
+            zitadel_api_path: "/management/v1/users/{{ _grant.userId }}/grants/{{ _grant.id }}"
+            zitadel_api_body:
+              roleKeys: >-
+                {{ (_grant.roleKeys | reject('equalto', zitadel_rename_item.key) | list
+                    + [zitadel_rename_item.value]) | unique | list }}
+            zitadel_api_label: "update grant"
+          loop: "{{ _rename_grants }}"
+          loop_control:
+            loop_var: _grant
+            label: grant
+
+        # 応答200でもprojection未反映の事例があったため、再取得した実状態で判定する。
+        # 旧roleの削除はそれを持つgrantからも外れるため、付け替え完了の確認後にのみ行う
+        - name: 付け替え後に旧roleを持つgrantを再検索
+          ansible.builtin.include_tasks: _api_call.yml
+          vars:
+            zitadel_api_method: POST
+            zitadel_api_path: /management/v1/users/grants/_search
+            zitadel_api_body:
+              query: { offset: "0", limit: 1000 }
+              queries:
+                - projectIdQuery: { projectId: "{{ zitadel_project_id }}" }
+                - roleKeyQuery: { roleKey: "{{ zitadel_rename_item.key }}", method: TEXT_QUERY_METHOD_EQUALS }
+            zitadel_api_label: "re-search grants {{ zitadel_rename_item.key }}"
+
+        - name: 旧roleを持つgrantが0件であることを検証
+          ansible.builtin.assert:
+            that:
+              - zitadel_api_result.status | int == 200
+              - (zitadel_api_result.body.result | default([])) | length == 0
+            fail_msg: "旧role {{ zitadel_rename_item.key }} を持つgrantが残っています"
+            quiet: true
+
+        - name: 新roleを持つgrantを再検索
+          ansible.builtin.include_tasks: _api_call.yml
+          vars:
+            zitadel_api_method: POST
+            zitadel_api_path: /management/v1/users/grants/_search
+            zitadel_api_body:
+              query: { offset: "0", limit: 1000 }
+              queries:
+                - projectIdQuery: { projectId: "{{ zitadel_project_id }}" }
+                - roleKeyQuery: { roleKey: "{{ zitadel_rename_item.value }}", method: TEXT_QUERY_METHOD_EQUALS }
+            zitadel_api_label: "re-search grants {{ zitadel_rename_item.value }}"
+
+        - name: 付け替え対象の全grantが新roleを持つことを検証
+          ansible.builtin.assert:
+            that:
+              - zitadel_api_result.status | int == 200
+              - >-
+                _rename_grants | map(attribute='id') | reject('in',
+                zitadel_api_result.body.result | default([]) | map(attribute='id') | list)
+                | list | length == 0
+            fail_msg: "新role {{ zitadel_rename_item.value }} への付け替えが反映されていないgrantがあります"
+            quiet: true
+
+        - name: 旧roleを削除
+          ansible.builtin.include_tasks: _api_call.yml
+          vars:
+            zitadel_api_method: DELETE
+            zitadel_api_path: "/management/v1/projects/{{ zitadel_project_id }}/roles/{{ zitadel_rename_item.key }}"
+            zitadel_api_label: "delete role {{ zitadel_rename_item.key }}"
+
+        - name: 旧roleが削除されたことを再検索で検証
+          ansible.builtin.include_tasks: _api_call.yml
+          vars:
+            zitadel_api_method: POST
+            zitadel_api_path: "/management/v1/projects/{{ zitadel_project_id }}/roles/_search"
+            zitadel_api_body:
+              queries:
+                - keyQuery: { key: "{{ zitadel_rename_item.key }}", method: TEXT_QUERY_METHOD_EQUALS }
+            zitadel_api_label: "re-search role {{ zitadel_rename_item.key }}"
+
+        - name: 旧role削除を検証
+          ansible.builtin.assert:
+            that:
+              - zitadel_api_result.status | int == 200
+              - (zitadel_api_result.body.result | default([])) | length == 0
+            fail_msg: "旧role {{ zitadel_rename_item.key }} が残っています"
+            quiet: true

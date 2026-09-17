@@ -6,7 +6,7 @@
 zitadel_project_name: aramakisai
 
 # role_key => display_name (旧terraform/zitadel_projects.tfのaramakisai_project_roles
-# + terraform/zitadel_student_exhibitor.tfのexhibitorロールを統合)
+# + terraform/zitadel_student_exhibitor.tfの出展団体ロールを統合)
 zitadel_project_roles:
   admin: 管理者
   executive: 実行委員
@@ -17,7 +17,12 @@ zitadel_project_roles:
   performers: 出演
   pr: 広報
   general_affairs: 総務
-  exhibitor: 出展団体
+  student_exhibitor: 出展団体
+
+# roleキーはZitadel上で変更できないため、旧キー => 新キーの付け替えを宣言する
+# (_project_role_rename.ymlが新キーの作成、user grantの付け替え、旧キーの削除を行う)。
+zitadel_project_role_renames:
+  exhibitor: student_exhibitor
 
 # roleキーの意味付け。roleキーはgroups claim(_groups_claim_action.yml)にそのままRPへ渡り、
 # 権限の解釈は各RP側で行う。ここはその対応をコードベース上で一覧できる宣言で、
@@ -28,6 +33,8 @@ zitadel_role_bindings:
     argocd: role:admin # gitops/manifests/prod/argocd/argocd-rbac-cm.yaml
   executive:
     cms: executive # aramakisai-web cms/src/auth/role-mapping.ts
+  student_exhibitor:
+    cms: student_exhibitor # aramakisai-web cms/src/auth/role-mapping.ts
 
 zitadel_groups_claim_action_name: groupsClaim
 
