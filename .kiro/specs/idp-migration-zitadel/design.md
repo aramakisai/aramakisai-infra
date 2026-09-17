@@ -429,6 +429,13 @@ Session成功後、Management APIでuser_grant(ロール)を取得し、Requirem
 - Output / destination: InfisicalへPAT/Service User Token登録
 - Idempotency & recovery: 既発行トークンが存在する場合はスキップまたは再発行の運用手順(Requirement 11.3)に従う
 
+##### 管理者権限の同期(Requirement 8.4)
+- project role `admin`(旧authentik管理者グループ相当)保持者 = Zitadel `IAM_OWNER`。project roleはRP向けclaimでありConsole/Admin APIの権限(instance member)と連動しないため、roleだけでは管理者がConsoleで操作できない
+- `IAM_OWNER`(インスタンス全体)を採る理由: authentik管理者グループはsuperuser相当で、SMTP・ログインポリシー等のインスタンス設定も管理対象に含むため`ORG_OWNER`では不足する
+- 同期方式: `ansible/playbooks/zitadel-admin-iam-owner.yml`(`_admin_iam_owner_sync.yml`)の実行時のみ。role `admin`を付与/剥奪したら再実行する。Actions v2 webhookによるイベント駆動は、管理者の変更頻度が低く常駐受信部の追加に見合わないため採らない
+- 対象はhuman userのみ。machine userと組み込み初期管理者(`zitadel-admin`)の`IAM_OWNER`には触れない
+- 反映確認はAPI応答コードではなく、instance memberを再取得した実状態とrole保持者集合の一致で判定する
+
 #### Zitadel Provider Access Path
 
 | Field | Detail |

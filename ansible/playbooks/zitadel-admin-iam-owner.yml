@@ -1,0 +1,12 @@
+---
+# project role `admin`保持者(human)のIAM_OWNERを同期する。role adminを付与/剥奪したら再実行する。
+# `-e zitadel_admin_iam_owner_sync_apply=false`で差分件数の表示のみ。
+- name: Zitadel role admin -> IAM_OWNER同期
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: zitadel-bootstrapロールの_admin_iam_owner_syncタスクを実行
+      ansible.builtin.include_role:
+        name: zitadel-bootstrap
+        tasks_from: _admin_iam_owner_sync

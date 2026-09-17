@@ -55,3 +55,8 @@ zitadel_student_exhibitor_csv: "{{ role_path }}/files/zitadel_student_exhibitors
 # 新規作成時のみ発行されるclient_secret/PAT平文の保存先 (本番Infisical登録前の一時退避、
 # .gitignore対象。既存リソースの更新時はここに何も書き込まれない)
 zitadel_resources_output_dir: "{{ zitadel_bootstrap_output_dir }}/resources"
+
+# _admin_iam_owner_sync.yml: role admin保持者とIAM_OWNERの同期から除外するhuman userの
+# loginName接頭辞(組み込みの初期管理者はrole adminを持たないためIAM_OWNERを剥奪しない)
+zitadel_admin_iam_owner_sync_exclude: [zitadel-admin]
+zitadel_admin_iam_owner_sync_apply: true
