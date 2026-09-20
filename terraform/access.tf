@@ -49,6 +49,20 @@ resource "cloudflare_zero_trust_access_application" "aramakisai_web_workers_dev"
   type             = "self_hosted"
   session_duration = "24h"
 
+  # destinations を指定する場合、domain の値も列挙しないと API が
+  # access.api.error.invalid_request (12130) を返す
+  destinations {
+    type = "public"
+    uri  = "aramakisai-web.aramakisai.workers.dev"
+  }
+
+  # wrangler versions upload が発行するPRプレビューURLはバージョンID由来の
+  # ラベルがデプロイごとに変わるため、完全一致のdomainだけでは捕捉できない
+  destinations {
+    type = "public"
+    uri  = "*-aramakisai-web.aramakisai.workers.dev"
+  }
+
   auto_redirect_to_identity = true
   allowed_idps              = [cloudflare_zero_trust_access_identity_provider.zitadel.id]
 }
