@@ -88,6 +88,12 @@ Authentik 時代の定義は `terraform/authentik_*.tf.disabled` として残す
 - **grant_types 空リスト問題**: terraform-provider-authentik `< 2026.5.0` は OAuth2 Provider の `grant_types` 属性をサポートしておらず、新規作成された Provider は Authentik server 側で `grant_types` が空リストのままになる。この状態だと `authorize` は通っても `token` 交換時に `Invalid grant_type for provider`（400、認証ログには `auth_via: unauthenticated` として記録される）で失敗し、CF Access 側には「Failed to fetch user/group information from the identity provider」と表示される。2026-07-09 にプロバイダを `>= 2026.5.0` へ更新し、`authentik_provider_oauth2.cloudflare`/`room_presence` に `grant_types = ["authorization_code", "refresh_token"]` を明示（room_presence は従来 API 直接 PATCH で暫定対応していたものを Terraform 管理に統一）。既存の argocd/vaultwarden/roundcube/directus-* は 2026.5.0 未満の provider で作成済みのため元々値が入っており影響なし。
 - **provider アップグレード時の副作用**: terraform-provider-authentik `2026.5.0` は `allowed_redirect_uris` の `redirect_uri_type` を新たに round-trip するようになった。HCL 側で明示していないと `"authorization" -> null` の diff が出て apply すると型指定が失われかねないため、既存の `allowed_redirect_uris` ブロック全てに `redirect_uri_type = "authorization"` を明示済み（2026-07-09）。同provider の今後のアップグレードでも `terraform plan` で全 `authentik_provider_oauth2.*` の diff を必ず確認すること。
 
+### Zitadel OIDC アプリの `idTokenUserinfoAssertion`
+Zitadel の既定値は無効。Cloudflare Access は userinfo エンドポイントを呼ばず id_token 自体から
+email claim を読むため、`ansible/roles/zitadel-bootstrap/vars/resources.yml` の
+`zitadel_oidc_apps` で `cloudflare-access` エントリのみ `id_token_userinfo_assertion: true`
+を指定している（CMS/roundcube 等の他アプリは userinfo を自前で呼ぶため不要）。
+
 ### Ansible 実行タイミング
 - `null_resource` + `local-exec` は HCP Terraform リモート実行非対応のため `main.tf` でコメントアウト済み。
 - **Terraform 完了後、常に手動で Ansible を実行する**（設定変更のみの場合も同様）。
