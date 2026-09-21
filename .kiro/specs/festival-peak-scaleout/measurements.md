@@ -488,3 +488,103 @@ infisical run --env=prod -- terraform plan \
 - **nginx-ingress**（`gitops/apps/prod/nginx-ingress.yaml`、Helm 管理でローカルマニフェストなし）: ステートフルワークロードではないが、design.md が「外部公開経路の構成を変更しない」対象として明記しているため参考記録する。来場者トラフィックを担わない autoconfig 専用の経路であり、配置を変更しても効果がない
 
 対象外としたワークロード（authentik・vaultwarden・room-presence 本体とその DB）はいずれも本タスクで再開していない。
+
+---
+
+# タスク 5.9: CMS CPU limit 引き上げ後の再測定（2026-09-21 20:32頃〜20:45頃 JST）
+
+案 B（`gitops/manifests/prod/cms/deployment.yaml` の CMS コンテナ `limits.cpu` を `500m` → `2000m` へ引き上げ）が PR #252 で main へマージ・ArgoCD sync 済みとなったため、タスク 1.2 と同じ手法（SSH 直接経路、`breakpoint.js`）でブレークポイントを再測定した。
+
+## 事前条件確認
+
+- 変更内容: `limits.cpu: 500m → 2000m`（`limits.memory: 512Mi`・`replicas: 1` は据え置き）。実機 Pod (`cms-8798b458d-qnq2m`) の `resources` が `{"limits":{"cpu":"2","memory":"512Mi"},"requests":{"cpu":"250m","memory":"256Mi"}}` であることを確認済み。
+- CNPG バックアップ: `directus-db-1` のログで `2026-09-21T02:00` の daily barman backup が `Backup completed`、WAL archiving 継続稼働を確認済み。
+- 測定前 CMS Pod: `Running`、`RESTARTS 0`。アイドル時 CPU 3-13m、MEMORY 95-96Mi（タスク 1.2 のアイドルベースラインと同水準）。
+
+## 測定経路
+
+タスク 1.2 と同一の SSH ローカルポートフォワード（`ssh -f -N -L 18090:10.43.111.239:80 root@prod-node-1`、k6 は `docker run --network=host` で `BASE_URL=http://localhost:18090`）を採用した。Cloudflare 経由は対象 API が `cf-cache-status: DYNAMIC` で素通りするため高レートでは使用しない（タスク 1.3 の判定を踏襲）。
+
+## 測定 5（本測定）: MAX_RATE=200, RAMP_DURATION=5m
+
+パラメータ: `START_RATE=10 MAX_RATE=200 RAMP_DURATION=5m PRE_ALLOCATED_VUS=200 MAX_VUS=2000`
+
+- 結果: 開始 4 分 24 秒後（264s、目標レート ≈177 req/s 付近）で `abortOnFail` 発動。
+- `error_rate` / `http_req_failed`: 10.12%（2313/22846）
+- `http_req_duration`: avg=2.66s, min=269ms, med=380ms, p90=9.1s, p95=9.45s, max=10s（k6 側タイムアウト値）
+- 実測スループット: 22846 リクエスト / 264s ≈ **86.5 req/s**（測定 1-4 と同じ「総リクエスト数 ÷ 経過時間」の算出方法）
+- エラー種別: `read: connection reset by peer`（SSH トンネルのローカル終端でのリセット）2194 件、`request timeout`（k6 側 10 秒タイムアウト）119 件。`dial tcp: connect: connection refused`（旧 port-forward 測定時のトンネルクラッシュの signature）は 0 件で、SSH トンネル自体はクラッシュしていない。
+
+この測定では監視スクリプトの不備（`kubectl top pod` に複数 Pod 名を同時指定するとエラーになる仕様を見落としていた）により、ノード全体の CPU/メモリは採取できたが CMS Pod 単体・`directus-db-1` 単体の値は採取できなかった。ノード CPU はアイドル 990-1043m/26-27% から最大 2963m/77% まで上昇した（テスト終了直前 20:39:28 時点）。
+
+## 測定 6（補助測定、Pod 単体テレメトリ取得目的）: MAX_RATE=200, RAMP_DURATION=2m
+
+測定 5 で欠落した CMS Pod / `directus-db-1` 単体の CPU・メモリを 6 秒間隔で採取する目的で、監視スクリプトを個別 `kubectl top pod` 呼び出しに修正した上で、同一経路・同一シナリオをより短いランプで再実行した。
+
+パラメータ: `START_RATE=50 MAX_RATE=200 RAMP_DURATION=2m PRE_ALLOCATED_VUS=200 MAX_VUS=1500`
+
+- 結果: 開始 1 分 48 秒後（108s、目標レート ≈185 req/s 付近）で `abortOnFail` 発動。
+- `error_rate` / `http_req_failed`: 10.59%（1150/10858）
+- `http_req_duration`: avg=2.41s, min=266ms, med=479ms, p90=7.63s, p95=8.13s
+- 実測スループット: 10858 リクエスト / 108s ≈ **100.5 req/s**
+- エラー種別: `connection reset by peer` 715 件、`request timeout` 435 件
+
+ランプ時間を 5m→2m に短縮しても、目標レート 177→185 req/s・実測スループット 86.5→100.5 req/s と近い値に収束しており、単一のランプ設定に依存した偶然ではないと判断する。**本タスクのブレークポイントは「目標レート約 177-185 req/s 帯、実測スループット約 86.5-100.5 req/s」を採用する。**
+
+## CMS Pod CPU/メモリの実測（測定 6、6 秒間隔サンプリング）
+
+| 時刻 | CMS Pod CPU | CMS Pod MEM | directus-db-1 CPU | ノード CPU | ノード MEM |
+|---|---|---|---|---|---|
+| 20:42:20（アイドル） | 10m | 103Mi | 8m | 990m/26% | 5125Mi/73% |
+| 20:42:55 | 153m | 121Mi | 9m | 2182m/57% |  |
+| 20:43:12 | 962m | 122Mi | 131m | 2227m/58% |  |
+| 20:43:28 | 909m | 123Mi | 164m | 2341m/61% |  |
+| 20:43:45 | 1130m | 132Mi | 186m | 2566m/67% |  |
+| 20:44:02 | 1136m | 166Mi | 162m | 2624m/69% |  |
+| 20:44:18（abortOnFail 直前） | 1166m | 221Mi | 159m | 2698m/71% |  |
+
+- **CMS Pod CPU のピーク実測値: 1166m**（`limits.cpu: 2000m` に対し 58%。制限値付近への張り付きは観測されなかった）
+- **CMS Pod メモリのピーク実測値: 221Mi**（`limits.memory: 512Mi` に対し 43%。OOMKilled なし、テスト後 98Mi まで減衰）
+- `directus-db-1` CPU のピーク実測値: 186m（旧測定の 63-82m より上昇しているが、CMS の 1166m と比べ小さく、DB が新たな律速とは判断できない）
+
+## 律速箇所の判定
+
+- CMS Pod CPU は `limits.cpu: 2000m` に対し最大でも 1166m（58%）までしか到達せず、旧測定（500m 制限時に 460-502m ＝ 92-100% で頭打ち）のような CPU cgroup スロットリングの兆候は観測されなかった。
+- ノード全体も CPU 71%（2698m/3800m）・MEMORY 75%に留まり、ノード側のリソース枯渇でもない。
+- `directus-db-1` の CPU も 159-186m に留まり、DB 側が新たな律速になっている根拠もない。
+- エラーの主因は旧測定と同様「connection reset by peer」（SSH トンネルのローカル終端でのリセット）で、次点が「request timeout」（k6 側 10 秒タイムアウト）。CMS プロセスの CPU 使用率が制限値の 58%程度に留まったまま接続断・タイムアウトが増加していることから、**CPU limit によるスロットリングではなく、CMS（Payload/Node.js）アプリケーション側の処理能力が新たな律速になっていると判断する。** design.md・タスク 1.4 で留保されていた「Node.js の単一スレッド特性により 1 vCPU 超で線形性が崩れる可能性」に整合する観測結果である。
+- CPU 使用率がなぜ 2000m まで到達しなかったか（イベントループのブロック、DB コネクションプールサイズ、keep-alive・SSH トンネル側のソケット処理限界等、アプリケーション内部のどの要素が実際の天井か）は、本測定ではプロセス内部のプロファイリングを行っておらず特定できていない。
+
+## 変更前（500m）との比較
+
+| | 変更前（500m） | 変更後（2000m） |
+|---|---|---|
+| ブレークポイント（目標レート） | 約 50-55 req/s | 約 177-185 req/s |
+| 実測スループット | 約 25-31 req/s | 約 86.5-100.5 req/s |
+| CMS Pod CPU 頭打ち値 | 460-502m（limit 500m の 92-100%） | 最大 1166m（limit 2000m の 58%、制限未到達） |
+| 律速要因 | CPU limit（500m）による cgroup スロットリング | CPU limit 未到達。アプリケーション（Node.js）側の処理能力上限と推定（詳細未特定） |
+
+目標レート・実測スループットとも約 3-3.3 倍に向上した。
+
+## 合格ライン（≈218 req/s）との比較
+
+実測スループット（86.5-100.5 req/s）・目標レート（177-185 req/s）のいずれも合格ライン（≈218 req/s）には**届いていない**。
+
+タスク 1.4 で算出した外挿レンジ（CPU limit 2000m で期待スループット 108-206 req/s）と比較すると、目標レート（177-185 req/s）はこのレンジ内に収まるが、**実測スループット（86.5-100.5 req/s）は外挿レンジの下限（108 req/s）にも届いていない。** 外挿はタスク 1.2 の飽和効率（CPU limit で頭打ちになる前提、54-62 req/s/core）を CPU limit 引き上げ後にも適用したものだったが、実際には CPU limit に到達する前にアプリケーション側の別要因で頭打ちになったため、外挿の前提（「CPU limit が天井になる」）自体がこの構成では成立しなかったと考えられる。
+
+タスク 1.4 の判定（案 B 単独では合格ラインにわずかに届かない可能性が高く、案 C（レプリカ分散）との併用が必要）は、今回の実測により**裏付けられた**。むしろ案 B 単独の実測効果は外挿の楽観値（206 req/s）よりかなり小さく（実測 86.5-100.5 req/s）、案 C の必要性はタスク 1.4 時点の判定より強まったと言える。
+
+## 測定後の復帰確認
+
+- オリジン直（SSH トンネル経由、生存中に確認）: `curl http://localhost:18090/api/globals/festival_meta?depth=1` → `200`
+- Cloudflare 経由: `curl https://cms.aramakisai.com/api/globals/festival_meta?depth=1` → `200`
+- `make kubectl ARGS="get pods -n prod -o wide"`: 全 Pod `Running`、CMS `RESTARTS 0`（測定前後で変化なし）、`describe pod` の Events にも OOMKilled 等の異常イベントなし
+- CMS Pod メモリは測定後 98Mi まで減衰（アイドルベースラインに復帰）
+- 測定に使用した SSH トンネルプロセスは確認後に `kill` 済み（プロセス残存なし）
+
+## 未確認・未解決の点
+
+- CPU 使用率が 2000m に到達せず 1166m で頭打ちになった直接原因（イベントループ、DB コネクションプールサイズ、keep-alive 等）は未特定。Node.js プロセス内部のプロファイリング（`--prof`、clinic.js 等）が必要。
+- 測定 5・測定 6 は同一 SSH トンネル経路を使っており、トンネル自体のスループット上限（カーネルレベルの TCP 転送処理能力）が独立した律速要因として混入している可能性を完全には排除できていない。ただしトンネルプロセス自体はテスト後も生存・応答しておりクラッシュはしていない（`dial tcp: connect: connection refused` が 0 件）。
+- 案 C（レプリカ分散）実施後の合算スループットは本タスクでは未測定（クラスタ変更を伴わない負荷測定に限定したため）。
+- p99 レスポンスタイムは k6 既定のサマリ出力に含まれず未取得（タスク 1.2 と同様の制約）。
