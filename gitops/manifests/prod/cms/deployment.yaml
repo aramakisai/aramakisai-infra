@@ -63,7 +63,8 @@ spec:
               # 管理画面 15 回 + REST 30 回のアクセス後で 192MiB。
               # sharp の画像変換ピークだけ未計測のため Directus と同じ 512Mi から始める
               memory: "512Mi"
-              cpu: "500m"
+              # namespace-config/limit-range.yaml の max.cpu と同値(この namespace での上限)
+              cpu: "2000m"
           readinessProbe:
             httpGet:
               path: /admin/login
