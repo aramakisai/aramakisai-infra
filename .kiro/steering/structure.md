@@ -28,7 +28,7 @@ variables.tf / outputs.tf  ← 変数・出力
 **目的**: K3s クラスターのブートストラップと構成管理  
 **構造**: `inventory/` + `playbooks/` + `roles/`  
 - インベントリは Tailscale MagicDNS 名を使用 (IP ではなくホスト名)
-- ロールは `k3s-server`、`swap`（全ノード共通のホスト側 OOM 安全弁）、および `k3s-agent` (現状 agent は未使用)
+- ロールは `k3s-server`（K3s インストール・設定）、`swap`（全ノード共通のホスト側 OOM 安全弁）、`os-auto-update`（ホスト OS 自動更新設定の配布・結果通知）、`zitadel-bootstrap`（Zitadel リソース管理）、`zitadel-cutover`（Zitadel カットオーバーの事前条件確認・検証）で構成する
 - K3s 設定フラグは `k3s-server` ロールの `k3s_extra_args` で渡す
 
 ### GitOps (`gitops/`)
