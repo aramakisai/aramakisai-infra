@@ -10,6 +10,12 @@ concurrency:
   group: dr-trigger
   cancel-in-progress: false
 
+env:
+  # 現行のdr-trigger.shはprod-node-1決め打ちでetcdクォーラムを考慮しないため、
+  # 複数ノード稼働中はfalseにして定期実行による誤検知でのノード再作成を防ぐ。
+  # 切替はこの行の変更としてコミットに残す (GitHub UI上のworkflow無効化は使わない)。
+  DR_TRIGGER_ENABLED: "true"
+
 # repository_dispatch (POST /repos/{owner}/{repo}/dispatches) には
 # Contents: write が必要 (GitHub公式ドキュメント: Fine-grained token permission set)。
 # Issue 作成・コメント・クローズには Issues: write が必要。
@@ -26,12 +32,14 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Install Infisical CLI
+        if: env.DR_TRIGGER_ENABLED == 'true' || github.event_name == 'workflow_dispatch'
         run: |
           # Cloudsmithは2026-09-16でLinux配信終了のためartifacts-cli.infisical.comへ移行済み
           curl -1sLf 'https://artifacts-cli.infisical.com/setup.deb.sh' | sudo -E bash
           sudo apt-get install -y infisical
 
       - name: Run DR trigger detection
+        if: env.DR_TRIGGER_ENABLED == 'true' || github.event_name == 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
