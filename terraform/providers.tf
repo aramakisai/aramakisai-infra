@@ -22,10 +22,6 @@ terraform {
       source  = "hashicorp/random"
       version = "~> 3.6"
     }
-    authentik = {
-      source  = "goauthentik/authentik"
-      version = ">= 2026.5.0" # grant_types 属性サポートに必要 (Authentik server 2026.5.x の grant_types 必須化対応)
-    }
     uptimerobot = {
       source  = "uptimerobot/uptimerobot"
       version = "~> 1.8"
@@ -68,11 +64,6 @@ provider "null" {}
 
 provider "random" {}
 
-provider "authentik" {
-  url = var.authentik_url
-  # 空文字の場合は AUTHENTIK_TOKEN 環境変数にフォールバックさせる
-  token = var.authentik_token != "" ? var.authentik_token : null
-}
 
 provider "uptimerobot" {
   api_key = var.uptimerobot_api_key != "" ? var.uptimerobot_api_key : null
