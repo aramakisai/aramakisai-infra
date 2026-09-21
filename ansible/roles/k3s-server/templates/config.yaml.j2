@@ -32,16 +32,17 @@ kubelet-arg:
 # private network 経由になり、パブリック IPv6 に余分なトラフィックが流れない
 node-ip: "{{ k3s_private_ip }}"
 
-{% if k3s_cluster_init | default(false) %}
-# etcd クラスタ初期化 (最初の1台 cp-node のみ true)
-cluster-init: true
-
 # TLS SAN: kubeconfig を Tailscale 経由で使う場合に TLS エラーを防ぐ
 # K3s デフォルトの証明書は 127.0.0.1 のみ SAN に含まれるため、
-# Tailscale MagicDNS と private IP を追加する
+# Tailscale MagicDNS と private IP を追加する。各 server ノードが自身の
+# API エンドポイントとして到達可能である必要があるため、初期化ノードに限らず適用する
 tls-san:
   - "{{ ansible_host }}"    # Tailscale MagicDNS (外部 kubectl 用)
   - "{{ k3s_private_ip }}"  # private network IP (ノード間 API アクセス用)
+
+{% if k3s_cluster_init | default(false) %}
+# etcd クラスタ初期化 (最初の1台 cp-node のみ true)
+cluster-init: true
 {% else %}
 # 追加 server として cp-node のクラスタに参加する
 # K3S_URL 環境変数ではなくここで指定することで server モード (k3s.service) でインストールされる
