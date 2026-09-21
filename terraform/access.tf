@@ -43,21 +43,16 @@ resource "cloudflare_zero_trust_access_identity_provider" "zitadel" {
 # ============================================================
 
 resource "cloudflare_zero_trust_access_application" "aramakisai_web_workers_dev" {
-  account_id       = var.cloudflare_account_id
-  name             = "aramakisai-web (workers.dev)"
-  domain           = "aramakisai-web.aramakisai.workers.dev"
+  account_id = var.cloudflare_account_id
+  name       = "aramakisai-web (workers.dev)"
+  # wrangler versions upload が発行するPRプレビューURLはバージョンID由来の
+  # ラベルがデプロイごとに変わるため、完全一致では捕捉できない。
+  # 基底URL (aramakisai-web.aramakisai.workers.dev) は workers_dev = false により
+  # 実体がなく、保護対象に含めると認証後のコールバックが404へ落ちる
+  domain           = "*-aramakisai-web.aramakisai.workers.dev"
   type             = "self_hosted"
   session_duration = "24h"
 
-  # destinations を指定する場合、domain の値も列挙しないと API が
-  # access.api.error.invalid_request (12130) を返す
-  destinations {
-    type = "public"
-    uri  = "aramakisai-web.aramakisai.workers.dev"
-  }
-
-  # wrangler versions upload が発行するPRプレビューURLはバージョンID由来の
-  # ラベルがデプロイごとに変わるため、完全一致のdomainだけでは捕捉できない
   destinations {
     type = "public"
     uri  = "*-aramakisai-web.aramakisai.workers.dev"
