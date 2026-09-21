@@ -1,9 +1,10 @@
 locals {
-  # ノード定義: 名前 → プライベート IP のマッピング
-  # シングルノード構成 (CX33 8GB)
-  # HA 復帰時は prod-node-2, prod-node-3 を追加する
+  # ノード定義: 名前 → { private_ip, server_type }
+  # prod-node-2/3 はイベント期間中のみ一時的に追加する (festival-peak-scaleout)
   nodes = {
-    "prod-node-1" = { private_ip = "10.0.1.1" }
+    "prod-node-1" = { private_ip = "10.0.1.1", server_type = "cx33" }
+    "prod-node-2" = { private_ip = "10.0.1.2", server_type = "cx33" }
+    "prod-node-3" = { private_ip = "10.0.1.3", server_type = "cx33" }
   }
 }
 
@@ -38,12 +39,13 @@ resource "hcloud_ssh_key" "ci" {
 resource "hcloud_server" "nodes" {
   for_each = local.nodes
 
-  name         = each.key
-  server_type  = "cx33"
-  image        = var.hcloud_image
-  location     = var.hcloud_location
-  ssh_keys     = [hcloud_ssh_key.default.id, hcloud_ssh_key.ci.id]
-  firewall_ids = [hcloud_firewall.k3s_nodes.id]
+  name               = each.key
+  server_type        = each.value.server_type
+  image              = var.hcloud_image
+  location           = var.hcloud_location
+  ssh_keys           = [hcloud_ssh_key.default.id, hcloud_ssh_key.ci.id]
+  firewall_ids       = [hcloud_firewall.k3s_nodes.id]
+  placement_group_id = hcloud_placement_group.k3s_nodes.id
 
   # パブリックネットワーク設定を明示する
   # IPv4 を有効化。ダウンロードなど GitHub へのアクセスに必要。
