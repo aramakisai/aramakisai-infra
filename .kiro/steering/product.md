@@ -6,7 +6,7 @@
 ## Core Capabilities
 
 - **クラウドプロビジョニング**: Terraform で Hetzner Cloud・Cloudflare・Tailscale を宣言的に管理
-- **K3s シングルノード**: prod-node-1 が etcd + ワークロードを担う。HA 復旧は `.kiro/specs/ha-improvement` で計画中
+- **K3s シングルノード**: prod-node-1 が etcd + ワークロードを担う
 - **GitOps 運用**: ArgoCD の App of Apps パターンで Git の状態がそのままクラスターの状態になる
 - **セキュアなシークレット管理**: マニフェストにシークレットを書かず、Infisical + ESO で全注入
 - **外部アクセス管理**: Cloudflare Tunnel + Access で VPN 不要の安全な公開 / 保護
