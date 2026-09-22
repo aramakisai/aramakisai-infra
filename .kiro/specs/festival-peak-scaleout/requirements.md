@@ -162,3 +162,19 @@
 3. The インフラ担当者 shall `.kiro/steering/structure.md` が言及する存在しない Ansible ロールの記述を実態と一致させる
 4. The インフラ担当者 shall 確立した縮退手順を `docs/` 配下の運用ドキュメントへ反映する
 5. The ドキュメント shall 来場者数・アクセス数などの実測値を含めず、手順と構成のみを記載する
+
+### Requirement 9: 画像配信エンドポイントのエッジキャッシュ
+
+**Objective:** As an インフラ担当者, I want CMS の画像配信 endpoint `/api/media/serve/*` が返す 302 レスポンスを Cloudflare のエッジでキャッシュしたい, so that 構内マップでの区画タップが生む画像リクエストの増幅を CMS へ到達させずに吸収できる
+
+#### Acceptance Criteria
+
+1. The Cache Rule shall `cms.aramakisai.com` の `/api/media/serve/` 配下への GET リクエストが返す 302 レスポンスをキャッシュ対象とする
+2. The Cache Rule shall オリジンが送出する `Cache-Control` や `Set-Cookie` の有無に依存せず、エッジ TTL を独立して適用する
+3. The インフラ担当者 shall `/api/media/file/*` (実ファイル本体) の既存のキャッシュ挙動を変更しない
+4. When 同一の fileId とサイズへ再度アクセスしたとき、the レスポンス shall `cf-cache-status: HIT` を返す
+5. When キャッシュされた 302 をブラウザが辿ったとき、the 画像 shall 正常に表示される
+6. When 構内マップの区画をタップしたとき、the CMS shall 表示済みサムネイル枚数に比例したリクエスト増加を受けない
+7. The インフラ担当者 shall `Location` 先 URL が有効期限つきの署名付き URL であるかを確認し、該当する場合はエッジ TTL をその有効期限未満に設定する
+8. The インフラ担当者 shall キャッシュされた内容を即時に無効化する手段 (Cloudflare のキャッシュパージ) を確認しておく
+9. The インフラ担当者 shall 本対策を要件 2〜6 のノード増減作業と独立に適用できる状態にする

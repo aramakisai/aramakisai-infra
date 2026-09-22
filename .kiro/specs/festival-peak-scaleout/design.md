@@ -14,6 +14,7 @@
 - 測定に基づいてステートレスワークロードの分散要否を判断し、実測の裏付けがない作業を持ち込まない
 - ノード増減の双方を検証済みの手順に沿って実行し、恒常的なコスト増を残さない
 - 期間中に DR 自動復旧が誤発火して構成を破壊しない状態を保証する
+- 画像配信 endpoint `/api/media/serve/*` の 302 レスポンスを Cloudflare のエッジでキャッシュし、構内マップの区画タップが生む画像リクエストの増幅を CMS へ到達させずに吸収する
 
 ### Non-Goals
 
@@ -37,6 +38,7 @@
 - 稼働中 CNPG クラスタ (cms-db・zitadel-db) のインスタンス数と配置制約
 - スケールアウトおよび縮退の作業手順と、その検証
 - 開催期間中の DR 自動復旧の停止と復帰の判断および記録
+- `terraform/cloudflare_media_cache.tf` の `/api/media/serve/` 向けキャッシュ設定
 
 ### Out of Boundary
 
@@ -179,8 +181,11 @@ docs/
 - `gitops/manifests/prod/cms/db-cluster.yaml` — `instances` を 3 へ変更し、インスタンスを別ノードへ配置する制約を加える
 - `gitops/manifests/prod/zitadel/db-cluster.yaml` — 同上
 - `.github/workflows/dr-trigger.yml` — 発火を停止するフラグまたは条件分岐を追加する
+- `terraform/cloudflare_media_cache.tf` — 既存の `cloudflare_ruleset.directus_assets_cache` が持つ `/api/media/` 向けルールを、`/api/media/serve/` の 302 応答に実効させるよう `origin_cache_control` を明示し、ルール一致順を見直す
 
 ステートレスワークロードのレプリカ数を変更する場合は `gitops/manifests/prod/cms/deployment.yaml` を対象とするが、要件 1.5 の判定が必要性を示した場合に限る。nginx-ingress と mailserver のマニフェストは変更しない。
+
+`cloudflare_media_cache.tf` の変更はノード数に依存せず、Cloudflare アカウント単体で完結する。要件 2〜6 のノード増減作業を待たず先行して適用できる。
 
 ## System Flows
 
@@ -310,6 +315,11 @@ sequenceDiagram
 | 7.9, 7.10, 7.11 | mailserver・nginx-ingress・停止中ワークロードの据え置き | ステートレス分散 | 対象外リスト | — |
 | 7.12, 7.13 | 復元、GitOps 経由 | データ層冗長化、ステートレス分散、縮退手順 | GitOps コミット | 縮退の実行順序 |
 | 8.1, 8.2, 8.3, 8.4, 8.5 | ドキュメント同期 | ドキュメント同期 | 更新対象一覧 | — |
+| 9.1, 9.2, 9.3 | `/api/media/serve/` の 302 応答をキャッシュ対象とする Cache Rule、`/api/media/file/*` の現状維持 | 画像配信キャッシュ | `cloudflare_ruleset.directus_assets_cache` | — |
+| 9.4, 9.5, 9.6 | HIT 確認・画像の正常表示・CMS への到達抑制 | 画像配信キャッシュ | `cf-cache-status` ヘッダ | — |
+| 9.7 | 署名付き URL の場合の TTL 制約 | 画像配信キャッシュ | `edge_ttl` | — |
+| 9.8 | キャッシュパージ手段の確認 | 画像配信キャッシュ | Cloudflare キャッシュパージ | — |
+| 9.9 | ノード増減と独立した適用 | 画像配信キャッシュ | — | — |
 
 ## Components and Interfaces
 
@@ -327,8 +337,9 @@ sequenceDiagram
 | データ層冗長化 | Workload | 稼働中 DB を複数ノードへ冗長化しフェイルオーバーを可能にする | 5.2, 5.3, 7.1-7.5, 7.12, 7.13 | CNPG Operator (P0)、ArgoCD (P0) | State |
 | ステートレス分散 | Workload | 測定結果が示した場合にレプリカを分散し処理能力を確保する | 1.5, 4.4, 7.6-7.13 | 負荷テストハーネス (P0)、ArgoCD (P0) | State |
 | ドキュメント同期 | Documentation | 構成の実態と記述を一致させる | 8.1-8.5 | steering 各文書 (P2) | — |
+| 画像配信キャッシュ | Infrastructure | 画像配信 endpoint の 302 応答を Cloudflare のエッジでキャッシュし、CMS への到達自体を減らす | 9.1-9.9 | Cloudflare zone `cms.aramakisai.com` (P0) | State |
 
-依存方向は Measurement から Workload へ、および Infrastructure から Configuration を経て Operations へ向かう。Verification は Operations の縮退手順に前提条件を与える。データ層冗長化は測定結果に依存せず、ステートレス分散のみが Measurement の出力を入力とする。逆方向の依存は許容しない。
+依存方向は Measurement から Workload へ、および Infrastructure から Configuration を経て Operations へ向かう。Verification は Operations の縮退手順に前提条件を与える。データ層冗長化は測定結果に依存せず、ステートレス分散のみが Measurement の出力を入力とする。逆方向の依存は許容しない。画像配信キャッシュはノード構成のいずれにも依存せず独立して適用できる。
 
 ### Measurement
 
@@ -403,6 +414,39 @@ sequenceDiagram
 - Integration: `hcloud_server` のネットワーク接続はリソース内の `network` ブロックであり、追加リソースを要しない。private IP は `10.0.1.0/24` から割り当てる。`lifecycle.ignore_changes` が `user_data` を対象に含むため、`tailscale_tailnet_key` の再生成は既存ノードを再作成しない
 - Validation: `placement_group_id` は provider の `resourceServerUpdate` が in-place で処理するため、サーバーの再作成を伴わない。plan が prod-node-1 の再作成を示した場合は apply を中止する。ただし Hetzner は既存サーバーの placement group 追加にサーバーがオフラインであることを要求するため、prod-node-1 への適用は停止を伴う
 - Risks: `firewall.tf` のルールがノード種別を区別しないため、追加ノードにもメール関連ポートが開放される。mailserver が `prod-node-1` 固定であることから実害は限定的だが、一時ノードの稼働期間が短いことを前提とする
+
+#### 画像配信キャッシュ
+
+| Field | Detail |
+|-------|--------|
+| Intent | 画像配信 endpoint `/api/media/serve/*` の 302 応答を Cloudflare のエッジでキャッシュし、構内マップの区画タップが生む画像リクエストの増幅を CMS へ到達させない |
+| Requirements | 9.1, 9.2, 9.3, 9.4, 9.5, 9.6, 9.7, 9.8, 9.9 |
+
+**Responsibilities & Constraints**
+
+- `cms.aramakisai.com` の `/api/media/serve/` 配下への GET リクエストが返す 302 を、オリジンが送出する `Cache-Control` の有無に依存せずキャッシュ対象とする
+- fileId は同一 ID が別の画像を指すことがなく、`/api/media/serve/:id/:size` の 302 の飛び先 (`Location`) は Payload 自身の `/api/media/file/:filename` への相対パスであり、有効期限つきの署名付き URL ではない。この性質を根拠にエッジ TTL を長期に設定する
+- 既存の `cloudflare_ruleset.directus_assets_cache` (`terraform/cloudflare_media_cache.tf`) が `/api/media/` 配下全体を対象に `cache = true` / `edge_ttl` 30 日を既に宣言しているが、本 spec の設計時点で `/api/media/serve/*` への実リクエストは `cf-cache-status: BYPASS` であり、宣言どおりキャッシュされていないことを確認済みである。原因は同一ルールセット内の他ルールとの一致順、または `origin_cache_control` 未指定によりオリジン側のヘッダ不在時の挙動が定まらないことのいずれかと推定するが、適用時に実機で切り分ける
+- 対応は新規ルールの追加ではなく、既存ルールを `/api/media/serve/` に対して実効させる調整を優先する。`/api/media/file/*` (実ファイル本体、既に `cf-cache-status: MISS` からキャッシュ可能な状態にあり `Cache-Control: max-age=14400` をオリジンが送出済み) の挙動は変更しない
+
+**Dependencies**
+
+- Outbound: Cloudflare zone `cms.aramakisai.com` — Cache Rule の適用先 (P0)
+- Outbound: `terraform/cloudflare_media_cache.tf` の `cloudflare_ruleset.directus_assets_cache` — 変更対象リソース (P0)
+
+**Contracts**: Service [ ] / API [ ] / Event [ ] / Batch [ ] / State [x]
+
+##### State Management
+
+- State model: Cache Rule の `cache` 真偽値と `edge_ttl` が状態を構成する。`/api/media/serve/` は cache=true・edge_ttl override_origin、`/api/media/file/*` は既存のオリジン `Cache-Control` (4 時間) を尊重する現状維持とする
+- Persistence & consistency: state は Terraform Cloud ワークスペース `aramakisai-infra` が保持する。ノード関連リソースとは独立した `-target` で apply でき、ノード増減の完了を待たない
+- Concurrency strategy: 該当なし。他コンポーネントの状態に依存しない
+
+**Implementation Notes**
+
+- Integration: 画像の差し替えは fileId の発行し直しとして扱われる運用のため、通常運用でキャッシュ済み 302 が古い画像を指す事態は生じない。運用上どうしても即時反映が必要になった場合に備え、Cloudflare のキャッシュパージ (URL 指定または zone 単位) による無効化手段を確認しておく
+- Validation: 変更適用後、`/api/media/serve/{id}/{size}` への 2 回目以降のリクエストで `cf-cache-status: HIT` を返すこと、および該当 URL をブラウザで開いて画像が正常表示されることを確認する。構内マップで同一区画を複数回タップしても CMS 側のアクセスログでリクエスト数が画像枚数に比例して増えないことをあわせて確認する
+- Risks: `Location` の性質が将来変わり署名付き URL 化された場合、長期 TTL のキャッシュが期限切れの URL を配り続ける。`edge_ttl` を署名の有効期限未満に短縮する必要が生じる。この spec の設計時点ではその性質を持たないことを確認済みである
 
 ### Configuration
 
