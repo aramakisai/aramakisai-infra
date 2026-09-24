@@ -36,7 +36,7 @@ spec:
           emptyDir: {}
       containers:
         - name: zitadel
-          image: ghcr.io/zitadel/zitadel:v4.12.3
+          image: ghcr.io/zitadel/zitadel:v4.19.1
           command: ["/app/zitadel"]
           args:
             - start-from-init
