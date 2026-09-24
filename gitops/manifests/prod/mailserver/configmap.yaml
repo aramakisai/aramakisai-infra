@@ -324,11 +324,6 @@ data:
     www@aramakisai.com permit_sasl_authenticated
   sender-login-maps.cf: |
     noreply@aramakisai.com noreply@aramakisai.com
-  # smtp_header_checks (配送側のみ、smtpd 受信には作用しない) で結線する。
-  # DKIM は smtpd 側の milter で署名済みのため、ここで空 Cc を落としても
-  # 署名対象ヘッダの削除は DKIM 検証上許容される (RFC 6376 は追加検知のみで削除は検知しない)。
-  sender_header_filter.pcre: |
-    /^Cc:\s*$/ IGNORE
   # DMS 公式の拡張フック (_setup 完了後に実行)。DMS の spoofing.sh が設定する
   # smtpd_sender_login_maps (FILE provisioner では「From と同名のログインなら許可」する
   # pcre を含み、個人アドレスでの送信を許してしまう) をここで上書きする。
@@ -345,7 +340,6 @@ data:
     postconf 'always_add_missing_headers = yes'
     # Gmail は Hetzner の IPv6 送信元を厳しく評価するため、送信は IPv4 を優先する。
     postconf 'smtp_address_preference = ipv4'
-    postconf 'smtp_header_checks = pcre:/tmp/docker-mailserver/sender_header_filter.pcre'
     # shellcheck disable=SC2016
     postconf 'mua_sender_restrictions = check_sender_access texthash:/tmp/docker-mailserver/ml-sender-access.cf, reject_authenticated_sender_login_mismatch, $dms_smtpd_sender_restrictions'
     # DMS の master.cf は submission/submissions で smtpd_reject_unlisted_recipient=no にしており、

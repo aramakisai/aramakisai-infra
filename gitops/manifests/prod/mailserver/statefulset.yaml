@@ -137,10 +137,6 @@ spec:
               mountPath: /tmp/docker-mailserver/user-patches.sh
               subPath: user-patches.sh
               readOnly: true
-            - name: dms-config
-              mountPath: /tmp/docker-mailserver/sender_header_filter.pcre
-              subPath: sender_header_filter.pcre
-              readOnly: true
             - name: dovecot-oauth2
               mountPath: /etc/dovecot/dovecot-oauth2.conf.ext
               subPath: dovecot-oauth2.conf.ext
@@ -211,8 +207,6 @@ spec:
                 path: sender-login-maps.cf
               - key: user-patches.sh
                 path: user-patches.sh
-              - key: sender_header_filter.pcre
-                path: sender_header_filter.pcre
               - key: opendkim-keytable
                 path: opendkim-keytable
               - key: opendkim-signingtable
