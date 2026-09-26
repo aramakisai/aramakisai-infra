@@ -1,0 +1,53 @@
+name: Infra Health Check
+
+# CNPG WALアーカイブ失敗・ノードルートディスク使用率超過を検知するcron。
+# dr-trigger.yml と異なり自動復旧アクションは発火せず、Discord通知 + GitHub Issueのみ行う。
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: infra-health-check
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install tools
+        run: |
+          KUBECTL_VERSION=$(curl -Ls https://dl.k8s.io/release/stable.txt)
+          curl -LO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+          chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+
+          # Cloudsmithは2026-09-16でLinux配信終了のためartifacts-cli.infisical.comへ移行済み
+          curl -1sLf 'https://artifacts-cli.infisical.com/setup.deb.sh' | sudo -E bash
+          sudo apt-get install -y infisical
+
+      - name: Run infra health check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          INFISICAL_CLIENT_ID: ${{ secrets.INFISICAL_CLIENT_ID }}
+          INFISICAL_CLIENT_SECRET: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+          INFISICAL_PROJECT_ID: ${{ secrets.INFISICAL_PROJECT_ID }}
+        run: |
+          # infisical run はUniversal Auth環境変数を自動認識しないため、
+          # 明示的にlogin --method=universal-authでトークンを取得し --token で渡す。
+          # トークンはログに出力されうるため ::add-mask:: で確実にマスクする。
+          INFISICAL_TOKEN=$(infisical login --method=universal-auth \
+            --client-id="${INFISICAL_CLIENT_ID}" \
+            --client-secret="${INFISICAL_CLIENT_SECRET}" \
+            --silent --plain)
+          echo "::add-mask::${INFISICAL_TOKEN}"
+
+          infisical run --token="${INFISICAL_TOKEN}" --projectId="${INFISICAL_PROJECT_ID}" --env=prod -- bash .github/scripts/infra-health-check.sh

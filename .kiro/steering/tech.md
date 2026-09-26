@@ -119,12 +119,18 @@ email claim を読むため、`ansible/roles/zitadel-bootstrap/vars/resources.ym
 
 ## 監視スタック
 
-| コンポーネント | 役割 | 状態 |
-|--------------|------|------|
-| Grafana Alloy (DaemonSet) | Pod ログ + ノードメトリクス収集 | `shared/monitoring/alloy.yaml` (未デプロイ) |
-| Grafana Cloud Loki / Prometheus | ログ/メトリクス保存・アラート (外部) | 接続用シークレット登録後に有効化 |
+Grafana Cloud は解約済みで使用しない。単一ノード (CX33) のメモリ予算内で収まる軽量な構成に置き換えている。クラスター内には Prometheus 等のメトリクス保存基盤を置かず、各コンポーネントが外部 SaaS または GitHub Actions 完結で完結する。
 
-Alloy が収集したログ/メトリクスを Grafana Cloud にリモート送信する構成。クラスター内に Prometheus サーバーは不要。
+| コンポーネント | 役割 | 通知先 |
+|--------------|------|--------|
+| Netdata (child agent, `gitops/apps/prod/netdata.yaml`) | btop 相当の即時メトリクス可視化 (Netdata Cloud経由で閲覧) | なし (`[health]`/`[ml]` 無効、閲覧のみ) |
+| Falco + Falcosidekick (`gitops/apps/prod/falco.yaml`) | eBPF ランタイム侵入検知 | Discord (`DISCORD_OPS_WEBHOOK_URL`) |
+| UptimeRobot (`terraform/uptimerobot.tf`) | 公開エンドポイントの外形監視 | UptimeRobot 通知設定 |
+| Healthchecks.io (`terraform/healthchecksio.tf`) | mailserver バックアップ (VolSync) の dead man's switch | Healthchecks.io 通知設定 |
+| DR Trigger (`.github/workflows/dr-trigger.yml`, 5分毎cron) | Tailscale 疎通 + idp/argocd/webmail 複合検出によるノード障害判定 | Discord、猶予期間経過後は自動復旧ワークフローへ引き継ぎ |
+| Infra Health Check (`.github/workflows/infra-health-check.yml`, 15分毎cron) | CNPG WAL アーカイブ失敗 (`Cluster.status.conditions` の `ContinuousArchiving`)、ノードルートディスク使用率 (閾値 85%、`kubectl get --raw /api/v1/nodes/<node>/proxy/stats/summary`) | Discord。状態は GitHub Issue (ラベル `infra-alert`) で管理し、解消時に自動クローズ |
+
+Netdata・Falco はいずれもリソース予算 (requests/limits) を明示的に絞ってデプロイしている。値を変更する際は `make kubectl ARGS="top pod -n monitoring"` で実メモリを確認すること。
 
 ### 監視の誤検知除外設定 (Falco カスタムルール)
 eBPF ランタイム侵入検知（Falco）において、コントロールプレーン連携やコンテナ固有の正常な動作によるアラート誤検知を回避するため、以下の除外ルール（`gitops/helm-values/prod/falco.yaml`）を適用している：

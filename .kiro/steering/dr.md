@@ -86,6 +86,14 @@ make kubectl ARGS="delete cluster <name> -n prod"
 移行初期は旧クラスターからの WAL アーカイブが存在しなかったため `initdb` で起動していましたが、現在は B2 に WAL バックアップが蓄積されています。  
 **DR 時は `bootstrap.recovery` で B2 から自動復元される**設計（`gitops/manifests/prod/directus/db-cluster.yaml` 参照）に更新されました。これにより、コンテンツの再投入は原則不要となっています。
 
+### WAL アーカイブ失敗とディスク肥大化
+
+`hetzner-os-credentials`（`gitops/manifests/shared/eso/hetzner-os-external-secret.yaml`）は `prod` namespace 向けにのみ定義されている（namespace-scoped ExternalSecret）。CNPG クラスターを `prod` 以外の namespace に置く場合（例: `zitadel` namespace の `zitadel-db`）は、そのクラスターと同じ namespace に同名の ExternalSecret を別途配置する必要がある。存在しない場合、`backup.barmanObjectStore` を設定していても Secret 未検出でバックアップ処理自体が起動できない。
+
+WAL アーカイブが失敗し続けると、アーカイブ未完了の WAL セグメントは削除されずにインスタンスの `pg_wal` へ蓄積し続ける。StorageClass が `local-path` の場合 PVC の容量上限（`spec.storage.size`）はホストのボリュームサイズを制限しないため、蓄積した WAL はそのままノードのルートファイルシステムを消費し続け、放置するとノード全体のディスクフルに至る。ルートファイルシステムには root 予約領域があるため kubelet の `DiskPressure` 条件は立たず、この経路では検知できない。
+
+アーカイブ失敗の有無は `kubectl get cluster <name> -n <namespace> -o jsonpath='{.status.conditions}'` の `ContinuousArchiving` 条件（`status: "False"` で失敗、`.message` に失敗理由）で確認できる。この条件とノードルートディスク使用率は `.github/workflows/infra-health-check.yml`（cron）が定期監視し、閾値超過時に Discord へ通知する。
+
 ---
 
 ## メールサーバー (Docker Mailserver) の注意事項
