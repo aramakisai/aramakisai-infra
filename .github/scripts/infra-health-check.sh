@@ -114,12 +114,14 @@ ensure_alert_label() {
 
 # 引数: key
 # 出力: マッチしたIssue番号 (なければ空)
+# gh issue list の --jq は jq 本体の --arg のような追加フラグを受け付けないため、
+# 素の jq へパイプして --arg で安全にキーを渡す
 find_open_alert() {
   local key="$1"
   # shellcheck disable=SC2016 # $k は jq 側の --arg 変数 (シェル展開ではない)
-  gh issue list --repo "${REPO}" --label "${ALERT_LABEL}" --state open \
-    --json number,body --jq --arg k "infra-alert-key: ${key}" \
-    '[.[] | select(.body | contains($k))] | .[0].number // empty'
+  gh issue list --repo "${REPO}" --label "${ALERT_LABEL}" --state open --json number,body \
+    | jq -r --arg k "infra-alert-key: ${key}" \
+      '[.[] | select(.body | contains($k))] | .[0].number // empty'
 }
 
 # 引数: key, title, message
