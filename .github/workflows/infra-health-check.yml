@@ -18,10 +18,19 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
 
     steps:
       - uses: actions/checkout@v7
+
+      # KUBECONFIGのserverはTailscale MagicDNS名 (prod-node-1) のため、
+      # ランナーをtailnetに参加させないとkubectlが名前解決できない (k3s-upgrade.ymlと同じ理由)
+      - name: Setup Tailscale
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
 
       - name: Install tools
         run: |
