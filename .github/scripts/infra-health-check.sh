@@ -149,7 +149,7 @@ sync_breach() {
 sync_recovered() {
   local key="$1" existing
   existing=$(find_open_alert "${key}")
-  [[ -n "${existing}" ]] || return
+  [[ -n "${existing}" ]] || return 0
   gh issue close "${existing}" --repo "${REPO}" --comment "状態が正常に戻ったため、このインシデントをクローズします。"
   notify_discord "$(printf '✅ **Infra Health Check**: 復旧を確認しました (key=%s)\nIssue: https://github.com/%s/issues/%s' \
     "${key}" "${REPO}" "${existing}")"
@@ -208,6 +208,8 @@ main() {
         ;;
     esac
   done < <(check_cnpg_archiving)
+
+  return 0
 }
 
 if [[ "${BASH_SOURCE[0]:-$0}" == "${0}" ]]; then
