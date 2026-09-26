@@ -1,0 +1,17 @@
+---
+# Zitadel DB 日次フルバックアップ (毎日 02:00 UTC)
+# WAL archiving は継続的に行われるため、フルバックアップ間の変更も
+# WAL再生によりPITR可能 (retentionPolicy: 14d で2世代分のフルバックアップを保持)
+# immediate: true でリソース作成直後に初回のベースバックアップを実行する
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: zitadel-db-daily
+  namespace: zitadel
+spec:
+  schedule: "0 0 2 * * *"
+  immediate: true
+  backupOwnerReference: self
+  cluster:
+    name: zitadel-db
+  target: prefer-standby
