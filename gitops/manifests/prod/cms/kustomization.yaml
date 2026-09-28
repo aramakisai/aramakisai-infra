@@ -15,6 +15,6 @@ resources:
 # 実行用とマイグレーション用は同一コミットから作るため常に同じ値を持つ
 images:
   - name: ghcr.io/aramakisai/aramakisai-cms
-    newTag: e175cb7589496ec5e67c9b802defabd7d383b71b
+    newTag: aad34206ae628e629e41ac139cbb173bc77bd93a
   - name: ghcr.io/aramakisai/aramakisai-cms-migrate
-    newTag: e175cb7589496ec5e67c9b802defabd7d383b71b
+    newTag: aad34206ae628e629e41ac139cbb173bc77bd93a
