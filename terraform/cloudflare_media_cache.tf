@@ -44,6 +44,19 @@ resource "cloudflare_ruleset" "directus_assets_cache" {
       edge_ttl {
         mode    = "override_origin"
         default = 2592000 # 30日。アップロード時変換済みで実体は不変、差替え時は id 自体が変わる想定
+        # serve の 302 はオリジンが Cache-Control を返さず、status_code_ttl で明示しないとキャッシュされない
+        status_code_ttl {
+          status_code = 302
+          value       = 2592000
+        }
+        # 4xx/5xx は一時エラーの長期固着を防ぐため短く保つ
+        status_code_ttl {
+          status_code_range {
+            from = 400
+            to   = 599
+          }
+          value = 60
+        }
       }
     }
   }
