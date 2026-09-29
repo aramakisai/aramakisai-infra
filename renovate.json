@@ -22,5 +22,14 @@
     "managerFilePatterns": [
       "gitops/manifests/**/*.yaml"
     ]
-  }
+  },
+  "packageRules": [
+    {
+      "matchPackageNames": [
+        "ghcr.io/zitadel/zitadel",
+        "ghcr.io/zitadel/zitadel-login"
+      ],
+      "groupName": "zitadel"
+    }
+  ]
 }

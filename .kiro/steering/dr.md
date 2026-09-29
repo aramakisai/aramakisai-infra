@@ -94,6 +94,12 @@ WAL アーカイブが失敗し続けると、アーカイブ未完了の WAL �
 
 アーカイブ失敗の有無は `kubectl get cluster <name> -n <namespace> -o jsonpath='{.status.conditions}'` の `ContinuousArchiving` 条件（`status: "False"` で失敗、`.message` に失敗理由）で確認できる。この条件とノードルートディスク使用率は `.github/workflows/infra-health-check.yml`（cron）が定期監視し、閾値超過時に Discord へ通知する。
 
+### Zitadel login の PAT 依存
+
+login v4.18 以降は PAT 未発行だと CrashLoop する。新規構築や DR 時の `zitadel-bootstrap` で
+`kubectl exec -c login` を使う PAT 回収は、login が起動しないと実行できないため影響しうる。
+`ZITADEL_LOGIN_SESSION_COOKIE_SECRET` も Infisical に存在しないと login が ready にならない。
+
 ---
 
 ## メールサーバー (Docker Mailserver) の注意事項
