@@ -25,8 +25,9 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
-      - RespectIgnoreDifferences=true
       - ServerSideApply=true
+      # RespectIgnoreDifferences は配列要素パスの ignore と併用すると、apply 時に配列が live の長さに
+      # 丸められ追加要素が落ちるため付けない
   ignoreDifferences:
     - group: external-secrets.io
       kind: ExternalSecret
