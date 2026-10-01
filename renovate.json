@@ -30,6 +30,20 @@
         "ghcr.io/zitadel/zitadel-login"
       ],
       "groupName": "zitadel"
+    },
+    {
+      "description": "Vaultwarden は replicas:0 で凍結運用中のため更新不要",
+      "matchPackageNames": [
+        "vaultwarden/server"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "Authentik は Zitadel へ移行済みのため LDAP outpost の更新不要",
+      "matchPackageNames": [
+        "ghcr.io/goauthentik/ldap"
+      ],
+      "enabled": false
     }
   ]
 }
