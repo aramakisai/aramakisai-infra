@@ -1,0 +1,8 @@
+# 本番 k3s-bootstrap.yml の Play 1/2 と同一のロール・同一の serial 構成。swap/os-auto-update と Cilium 以降は含めない。
+- hosts: k3s_server
+  become: true
+  roles: [k3s-server]
+- hosts: k3s_server_worker
+  become: true
+  serial: 1
+  roles: [k3s-server]
