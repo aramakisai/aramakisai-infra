@@ -9,21 +9,25 @@
 # 実行フロー:
 #   1. 必須環境変数チェック・進捗記録先 (dr-incident Issue) の確定
 #   2. 生存確認ゲート (読み取り専用)。生存を示すシグナルが 1 つでもあれば停止 (DR_FORCE=1 でのみ上書き)
-#   3. Hetzner のサーバー状態で復旧モードを決定
-#        absent  : Tailscale 旧デバイス削除 → Terraform (対象ノードのみ -target, plan 検査後 apply)
-#        off     : 電源投入 (デバイスは消さない。削除すると再接続できなくなる)
-#        その他  : DR_FORCE 時のみ。インフラ操作はせず Ansible から再実行
-#   4. Tailscale 登録待機 → Ansible (対象ノード限定)
-#   5. ArgoCD / 稼働中 CNPG クラスターの healthy 待機 (タイムアウトは失敗)
-#   6. infisical-auth / Deploy Key 空チェック・mail-tls 自己修復
-#   7. mailserver データの VolSync リストア (DR_RESTORE_MAIL=1 の明示 opt-in、未リストアの PVC のみ)
+#   3. Hetzner のサーバー状態 (不在は TFC state と突き合わせ) で復旧モードを決定
+#        absent  : Terraform (対象サーバーのみ -target, plan 検査後 apply) → メール DNS/rDNS だけの 2 回目の run
+#                  → Ansible。Tailscale 旧デバイスは plan 検査後・apply 直前に削除
+#        off     : 電源投入 → k3s の Ready 確認のみ (Ansible は流さない。デバイスも消さない)
+#        その他  : DR_FORCE 時のみ。インフラ操作なしで Ansible から再実行
+#   4. bootstrap Secret の自己修復 → ArgoCD / 稼働中 CNPG の healthy 待機 (タイムアウトは失敗)
+#
+# Ansible を流す経路は冪等化済みの playbook (ansible/playbooks/tasks/ensure_secret.yml) が前提。
+# 無ければ破壊的操作の前に停止する。
+#
+# Infisical は DR 専用 machine identity (DR_INFISICAL_CLIENT_ID/SECRET: prod 読取 + KUBECONFIG 書込) を使う。
+# メールデータのリストアは自動化しない (docs/dr-runbook.md)。
 #
 # 必須入力: DR_TARGET_NODE (例: prod-node-1)
-# 任意入力: DR_FORCE=1 / DR_RESTORE_MAIL=1
+# 任意入力: DR_FORCE=1
 #
 # ローカルテスト用フラグ:
 #   DR_LOCAL_TEST=1  : 生存確認ゲートとインフラ操作 (Tailscale/Terraform/Ansible) を全てスキップし、
-#                      既存 k3d クラスター上で手順 5 以降のみ実行する
+#                      既存 k3d クラスター上で待機・自己修復のみ実行する
 #   DR_SKIP_INFRA=1  : DR_LOCAL_TEST と同様にゲートとインフラ操作をスキップするが Ansible は実行する
 #                      (KVM テスト向け。DR_ANSIBLE_INVENTORY で inventory を差し替える)
 
@@ -39,7 +43,6 @@ INCIDENT_LABEL="dr-incident"
 
 DR_TARGET_NODE="${DR_TARGET_NODE:-}"
 DR_FORCE="${DR_FORCE:-0}"
-DR_RESTORE_MAIL="${DR_RESTORE_MAIL:-0}"
 DR_LOCAL_TEST="${DR_LOCAL_TEST:-0}"
 DR_SKIP_INFRA="${DR_SKIP_INFRA:-0}"
 DR_ANSIBLE_INVENTORY="${DR_ANSIBLE_INVENTORY:-${REPO_ROOT}/ansible/inventory/tailscale.yml}"
@@ -55,6 +58,17 @@ ENDPOINTS=(
 )
 
 DR_ISSUE=""
+TFC_PENDING_RUN=""
+TFC_SCOPE_NODE=""
+TFC_RESULT=""
+
+# サーバー作成後に追従が必要な (prod-node-1 のアドレスを参照する) メール用リソース
+MAIL_DNS_ADDRS=(
+  "cloudflare_record.mail_prod_node_1"
+  "cloudflare_record.mail_prod_node_1_ipv4"
+  "hcloud_rdns.mail_ipv4"
+  "hcloud_rdns.mail_ipv6"
+)
 
 kubectl_r() { kubectl --kubeconfig="${KUBECONFIG_FILE}" "$@"; }
 
@@ -77,7 +91,7 @@ init_record() {
       --body "dr-recovery の実行記録です。run: ${GITHUB_SERVER_URL:-https://github.com}/${REPO}/actions/runs/${GITHUB_RUN_ID:-unknown}" \
       2>/dev/null | grep -oE '[0-9]+$' || true)
   fi
-  record "復旧開始: target=${DR_TARGET_NODE} force=${DR_FORCE} restore_mail=${DR_RESTORE_MAIL} run=${GITHUB_RUN_ID:-local}"
+  record "復旧開始: target=${DR_TARGET_NODE} force=${DR_FORCE} run=${GITHUB_RUN_ID:-local}"
 }
 
 record() {
@@ -128,7 +142,7 @@ ts_device_ids() {
   local json="$1" node="$2" state="${3:-any}"
   echo "${json}" | jq -r --arg n "${node}" --arg s "${state}" '
     .devices[]
-    | select(.hostname | test("^" + $n + "(-[0-9]+)?$"))
+    | select((.hostname // "") | test("^" + $n + "(-[0-9]+)?$"))
     | select($s == "any" or ($s == "online" and .connectedToControl == true)
                          or ($s == "offline" and .connectedToControl != true))
     | .id'
@@ -137,7 +151,7 @@ ts_device_ids() {
 # hostname が完全一致で接続中のデバイスがあるか (新ノードの登録確認)
 ts_node_registered() {
   echo "$1" | jq -e --arg n "$2" \
-    '[.devices[] | select(.hostname == $n and .connectedToControl == true)] | length > 0' >/dev/null
+    '[.devices[] | select((.hostname // "") == $n and .connectedToControl == true)] | length > 0' >/dev/null
 }
 
 # ============================================================
@@ -160,22 +174,51 @@ hcloud_peer_servers() {
   echo "${response}" | jq -r --arg n "${node}" '.servers[] | select(.name != $n) | .name'
 }
 
+# TFC の state に対象サーバーが記録されているか。戻り値: 0=ある / 1=ない / 2=取得失敗
+# ノード名や API 障害の取り違えで「不在」と誤判定しないための突き合わせに使う。
+tfc_server_in_state() {
+  local node="$1" json
+  json=$(tfc_api GET "/workspaces/${TFC_WORKSPACE_ID}/resources?page%5Bsize%5D=100") || return 2
+  echo "${json}" | jq -e --arg n "${node}" --arg addr "hcloud_server.nodes[\"${node}\"]" '
+    any(.data[]?.attributes;
+      (.address // "") == $addr
+      or ((.name // "") == "nodes" and (.["name-index"] // "") == $n
+          and ((.["provider-type"] // .type // "") | test("hcloud"))))' >/dev/null
+  case $? in 0) return 0 ;; 1) return 1 ;; *) return 2 ;; esac
+}
+
+# Hetzner API の状態に TFC state との整合を加えた判定。
+# 出力: running 等 / off / absent (Hetzner 不在かつ state にある) / unknown (取得失敗・不整合)
+server_state() {
+  local node="$1" status rc=0
+  status=$(hcloud_server_status "${node}")
+  if [[ "${status}" == "absent" ]]; then
+    tfc_server_in_state "${node}" || rc=$?
+    if [[ "${rc}" != "0" ]]; then
+      log "Hetzner 上に ${node} は無いが TFC state で確認できません (rc=${rc})。判定不能として扱います"
+      status="unknown"
+    fi
+  fi
+  echo "${status}"
+}
+
 endpoint_up() { curl -sf -o /dev/null --max-time 10 "$1"; }
 
 # 各シグナルを "名前=alive|dead|unknown" で出力する。
 # unknown (API 失敗) は生存の否定にならないため、ゲートでは alive と同様に停止要因として扱う。
 collect_signals() {
-  local node="$1" status ts_json ts_tok url any_up
+  local node="$1" status ts_json ts_tok online_ids url any_up
 
-  status=$(hcloud_server_status "${node}")
+  status=$(server_state "${node}")
   case "${status}" in
     off | absent) echo "hetzner=dead (${status})" ;;
     unknown) echo "hetzner=unknown" ;;
     *) echo "hetzner=alive (${status})" ;;
   esac
 
-  if ts_tok=$(ts_token) && [[ -n "${ts_tok}" ]] && ts_json=$(ts_devices "${ts_tok}"); then
-    if [[ -n "$(ts_device_ids "${ts_json}" "${node}" online)" ]]; then
+  if ts_tok=$(ts_token) && [[ -n "${ts_tok}" ]] && ts_json=$(ts_devices "${ts_tok}") \
+    && online_ids=$(ts_device_ids "${ts_json}" "${node}" online); then
+    if [[ -n "${online_ids}" ]]; then
       echo "tailscale=alive"
     else
       echo "tailscale=dead"
@@ -220,20 +263,29 @@ tfc_api() {
 }
 
 tfc_create_run() {
-  local node="$1" payload
-  payload=$(jq -n --arg ws "${TFC_WORKSPACE_ID}" --arg addr "hcloud_server.nodes[\"${node}\"]" '{
+  local message="$1" payload
+  shift
+  payload=$(jq -n --arg ws "${TFC_WORKSPACE_ID}" --arg msg "${message}" '{
     data: {
       type: "runs",
       attributes: {
         "is-destroy": false,
         "auto-apply": false,
-        "target-addrs": [$addr],
-        message: "DR recovery (target only, apply after plan scope check)"
+        "target-addrs": $ARGS.positional,
+        message: $msg
       },
       relationships: { workspace: { data: { type: "workspaces", id: $ws } } }
     }
-  }')
+  }' --args "$@")
   tfc_api POST /runs "${payload}" | jq -r '.data.id // empty'
+}
+
+# apply 前に異常終了したとき planned のまま残る run がワークスペースをロックし続けないよう破棄する
+tfc_discard_pending() {
+  [[ -n "${TFC_PENDING_RUN}" ]] || return 0
+  tfc_api POST "/runs/${TFC_PENDING_RUN}/actions/discard" '{"comment":"recovery.sh stopped before apply"}' >/dev/null 2>&1 || true
+  log "未 apply の TFC run ${TFC_PENDING_RUN} を discard しました"
+  TFC_PENDING_RUN=""
 }
 
 # plan が確認可能 (または変更なし) になるまで待つ。出力: confirmable | no-changes
@@ -268,10 +320,28 @@ plan_scope_ok() {
   ' >/dev/null
 }
 
+# plan の変更が指定アドレス (と依存する auth key) の create/update/置換だけで、純粋な削除を含まないかを検査する。
+# 引数: plan JSON, 許可アドレス...
+plan_scope_addrs() {
+  local json="$1" allowed
+  shift
+  allowed=$(printf '%s\n' "$@" | jq -R . | jq -cs .)
+  echo "${json}" | jq -e --argjson allowed "${allowed}" '
+    [.resource_changes[] | select(.change.actions != ["no-op"] and .change.actions != ["read"])] as $c
+    | ([$c[] | select(((.address as $a | $allowed | index($a)) == null)
+                      and .address != "tailscale_tailnet_key.k3s_nodes")] | length == 0)
+      and ([$c[] | select(.change.actions == ["delete"])] | length == 0)
+  ' >/dev/null
+}
+
+scope_server_create() { plan_scope_ok "$1" "${TFC_SCOPE_NODE}"; }
+scope_mail_dns() { plan_scope_addrs "$1" "${MAIL_DNS_ADDRS[@]}"; }
+
+# redacted 版でも resource_changes のアドレスと actions は含まれ、機微な値は含まれない
 tfc_plan_json() {
   local run_id="$1" plan_id
   plan_id=$(tfc_api GET "/runs/${run_id}" | jq -r '.data.relationships.plan.data.id')
-  curl -sfL -H "Authorization: Bearer ${TFC_API_TOKEN}" "${TFC_API}/plans/${plan_id}/json-output"
+  curl -sfL -H "Authorization: Bearer ${TFC_API_TOKEN}" "${TFC_API}/plans/${plan_id}/json-output-redacted"
 }
 
 tfc_wait_applied() {
@@ -289,35 +359,70 @@ tfc_wait_applied() {
   done
 }
 
-recreate_node() {
-  local node="$1" run_id plan_kind plan_json token devices id
+# 対象限定の run を作り、plan がスコープ内であることを検査してから apply する。
+# 引数: ラベル, スコープ検査関数, apply 直前フック (空可), 対象アドレス...
+# 結果: TFC_RESULT=applied | no-changes
+tfc_target_apply() {
+  local label="$1" scope_fn="$2" pre_apply="$3" run_id plan_kind plan_json
+  shift 3
 
-  run_id=$(tfc_create_run "${node}")
+  trap tfc_discard_pending EXIT
+  run_id=$(tfc_create_run "DR recovery: ${label}" "$@")
   [[ -n "${run_id}" ]] || die "TFC run の作成に失敗しました"
-  record "TFC run 作成 (-target=${node}, auto-apply 無効): ${run_id}"
+  TFC_PENDING_RUN="${run_id}"
+  record "TFC run 作成 (${label}, target=$*, auto-apply 無効): ${run_id}"
 
   plan_kind=$(tfc_wait_plan "${run_id}")
-  [[ "${plan_kind}" == "confirmable" ]] || die "plan に変更がありません。サーバーは存在するはずです (run: ${run_id})"
+  if [[ "${plan_kind}" == "no-changes" ]]; then
+    TFC_PENDING_RUN=""
+    TFC_RESULT="no-changes"
+    record "plan に変更なし (${label}, run: ${run_id})"
+    return 0
+  fi
 
   plan_json=$(tfc_plan_json "${run_id}")
-  if ! plan_scope_ok "${plan_json}" "${node}"; then
-    tfc_api POST "/runs/${run_id}/actions/discard" '{"comment":"plan scope check failed"}' >/dev/null || true
-    die "plan に ${node} の作成以外の変更が含まれるため run を破棄しました (run: ${run_id})。手動で plan を確認してください"
-  fi
-  record "plan 検査 OK (${node} の作成のみ)。Tailscale 旧デバイスを削除して apply します"
+  "${scope_fn}" "${plan_json}" \
+    || die "plan にスコープ外の変更が含まれるため停止します (${label}, run: ${run_id} は discard)。手動で plan を確認してください"
+  record "plan 検査 OK (${label})"
 
+  [[ -z "${pre_apply}" ]] || "${pre_apply}"
+
+  tfc_api POST "/runs/${run_id}/actions/apply" '{"comment":"DR recovery apply"}' >/dev/null \
+    || die "apply の開始に失敗しました (run: ${run_id})"
+  TFC_PENDING_RUN=""
+  tfc_wait_applied "${run_id}"
+  TFC_RESULT="applied"
+  record "Terraform apply 完了 (${label}, run: ${run_id})"
+}
+
+# 非 ephemeral のため再作成すると旧デバイスと `<name>-N` で重複する。
+# plan 検査を通った後・apply の直前に、対象名一致 かつ offline のものだけ ID 指定で削除する。
+delete_stale_tailscale_devices() {
+  local token devices id
   token=$(ts_token) || die "Tailscale OAuth token の取得に失敗しました"
   devices=$(ts_devices "${token}") || die "Tailscale デバイス一覧の取得に失敗しました"
-  for id in $(ts_device_ids "${devices}" "${node}" offline); do
+  for id in $(ts_device_ids "${devices}" "${TFC_SCOPE_NODE}" offline); do
     log "Tailscale 旧デバイス削除: ${id}"
     curl -sf -X DELETE -H "Authorization: Bearer ${token}" "${TS_API}/device/${id}" >/dev/null \
       || die "デバイス削除に失敗しました (${id})。OAuth クライアントに devices:core の書込スコープが必要です"
   done
+}
 
-  tfc_api POST "/runs/${run_id}/actions/apply" '{"comment":"DR recovery apply"}' >/dev/null \
-    || die "apply の開始に失敗しました (run: ${run_id})"
-  tfc_wait_applied "${run_id}"
-  record "Terraform apply 完了 (run: ${run_id})"
+recreate_node() {
+  TFC_SCOPE_NODE="$1"
+  tfc_target_apply "server ${TFC_SCOPE_NODE}" scope_server_create delete_stale_tailscale_devices \
+    "hcloud_server.nodes[\"${TFC_SCOPE_NODE}\"]"
+  [[ "${TFC_RESULT}" == "applied" ]] || die "plan に変更がありません。サーバーは存在するはずです"
+}
+
+# 新サーバーの IP に A/AAAA と rDNS を追従させる。メール用リソースだけを対象にした別 run にする。
+update_mail_dns() {
+  local node="$1"
+  if [[ "${node}" != "prod-node-1" ]]; then
+    log "${node} はメール用アドレスの対象ではないため DNS/rDNS 更新をスキップします"
+    return 0
+  fi
+  tfc_target_apply "mail DNS/rDNS" scope_mail_dns "" "${MAIL_DNS_ADDRS[@]}"
 }
 
 poweron_node() {
@@ -344,27 +449,66 @@ wait_tailscale_registered() {
   done
 }
 
+# 冪等化済みの playbook でないと、再作成後の bootstrap が稼働中 Secret の空上書きや
+# 入力不足のまま進みうる。破壊的操作の前に存在で検知する。
+ansible_ready() {
+  [[ -f "${REPO_ROOT}/ansible/playbooks/tasks/ensure_secret.yml" ]]
+}
+
+# DR 専用 identity で Infisical のアクセストークンを取得する。失敗は呼び出し側で fail にする。
+dr_infisical_token() {
+  local token
+  token=$(infisical login --method=universal-auth \
+    --client-id="${DR_INFISICAL_CLIENT_ID}" --client-secret="${DR_INFISICAL_CLIENT_SECRET}" \
+    --silent --plain 2>/dev/null) || return 1
+  [[ -n "${token}" ]] || return 1
+  echo "::add-mask::${token}" >&2
+  echo "${token}"
+}
+
+# bootstrap が Infisical に登録した kubeconfig を取得し直す。値は変数に受けるだけで出力しない。
+refresh_kubeconfig() {
+  local token kubeconfig
+  token=$(dr_infisical_token) || die "DR 用 Infisical identity でのログインに失敗しました"
+  kubeconfig=$(infisical secrets get KUBECONFIG --env=prod --projectId="${INFISICAL_PROJECT_ID}" \
+    --token="${token}" --plain 2>/dev/null) || die "Infisical から KUBECONFIG を取得できませんでした"
+  [[ -n "${kubeconfig}" ]] || die "Infisical の KUBECONFIG が空です"
+  echo "${kubeconfig}" > "${KUBECONFIG_FILE}"
+  chmod 600 "${KUBECONFIG_FILE}"
+}
+
 run_ansible() {
   local node="$1"
   record "Ansible k3s-bootstrap を ${node} に限定して実行します"
-  # cluster-init を含む bootstrap は空の etcd から作り直す。残存メンバーがいないことは呼び出し側で確認済み。
+  # playbook 内の Infisical 書込 (KUBECONFIG 登録) は INFISICAL_CLIENT_ID/SECRET でログインするため
+  # DR 専用 identity を渡す。ESO 用の認証情報 (ESO_INFISICAL_CLIENT_ID/SECRET) は prod から注入済みの値を使う。
   ANSIBLE_HOST_KEY_CHECKING=False \
     K3S_TOKEN="${K3S_TOKEN}" \
     CLOUDFLARE_TUNNEL_TOKEN="${CLOUDFLARE_TUNNEL_TOKEN}" \
     CLOUDFLARE_TUNNEL_ID="${CLOUDFLARE_TUNNEL_ID}" \
-    INFISICAL_CLIENT_ID="${INFISICAL_CLIENT_ID}" \
-    INFISICAL_CLIENT_SECRET="${INFISICAL_CLIENT_SECRET}" \
+    INFISICAL_CLIENT_ID="${DR_INFISICAL_CLIENT_ID}" \
+    INFISICAL_CLIENT_SECRET="${DR_INFISICAL_CLIENT_SECRET}" \
+    INFISICAL_PROJECT_ID="${INFISICAL_PROJECT_ID}" \
     ARGOCD_GITHUB_DEPLOY_KEY="${ARGOCD_GITHUB_DEPLOY_KEY}" \
-    ansible-playbook -i "${DR_ANSIBLE_INVENTORY}" --limit "${node}" \
+    timeout 2400 ansible-playbook -i "${DR_ANSIBLE_INVENTORY}" --limit "${node}" \
     "${REPO_ROOT}/ansible/playbooks/k3s-bootstrap.yml"
 
-  # bootstrap が新しい kubeconfig を Infisical に登録するため、手元の kubeconfig を差し替える。
-  # 値はシェル変数に受けるだけで出力しない。
-  if [[ "${DR_SKIP_INFRA}" != "1" ]]; then
-    local new_kubeconfig
-    new_kubeconfig=$(infisical secrets get KUBECONFIG --env=prod --plain 2>/dev/null || true)
-    [[ -n "${new_kubeconfig}" ]] && echo "${new_kubeconfig}" > "${KUBECONFIG_FILE}"
-  fi
+  [[ "${DR_SKIP_INFRA}" == "1" ]] || refresh_kubeconfig
+}
+
+# 電源投入のみの経路。k3s と etcd のデータはディスクに残っているため bootstrap は流さず、
+# ノードが Ready に戻るかだけを確認する。戻らなければ人が force で Ansible 再実行を判断する。
+wait_k3s_ready() {
+  local node="$1" elapsed=0 timeout=600 ready
+  while true; do
+    ready=$(kubectl_r get node "${node}" \
+      -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)
+    [[ "${ready}" == "True" ]] && { record "${node} が Ready に戻りました"; return 0; }
+    ((elapsed >= timeout)) && die "${node} が Ready に戻りません (${timeout}s)。状態を確認し、必要なら force で Ansible から再実行してください"
+    log "${node} Ready 待機中 (${elapsed}s)"
+    sleep 15
+    elapsed=$((elapsed + 15))
+  done
 }
 
 # ============================================================
@@ -388,14 +532,45 @@ cnpg_unhealthy() {
     | "\(.metadata.namespace)/\(.metadata.name)"'
 }
 
+# 引数: Application 一覧 JSON。出力: 未 Healthy な Application 名
+argocd_unhealthy_apps() {
+  echo "$1" | jq -r '.items[] | select(.status.health.status != "Healthy") | .metadata.name'
+}
+
+# 引数: Application 一覧 JSON, Application 名。出力: 管理下の Deployment/StatefulSet ("kind ns name")
+app_workloads() {
+  echo "$1" | jq -r --arg a "$2" '
+    .items[] | select(.metadata.name == $a) | .status.resources[]?
+    | select(.kind == "Deployment" or .kind == "StatefulSet")
+    | "\(.kind) \(.namespace) \(.name)"'
+}
+
+# 管理下のワークロードが全て replicas=0 なら凍結中とみなす (ワークロードの無い Application は凍結扱いにしない)
+app_is_frozen() {
+  local json="$1" app="$2" kind ns name replicas found=0
+  while read -r kind ns name; do
+    [[ -n "${kind}" ]] || continue
+    found=1
+    replicas=$(kubectl_r get "${kind}" "${name}" -n "${ns}" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "?")
+    [[ "${replicas}" == "0" ]] || return 1
+  done < <(app_workloads "${json}" "${app}")
+  [[ "${found}" == "1" ]]
+}
+
 wait_argocd_healthy() {
-  local elapsed=0 timeout=1200 not_healthy
+  local elapsed=0 timeout=1200 json app pending
   while true; do
-    not_healthy=$(kubectl_r get applications -n argocd -o json 2>/dev/null \
-      | jq '[.items[] | select(.status.health.status != "Healthy")] | length' 2>/dev/null || echo 99)
-    [[ "${not_healthy}" -eq 0 ]] && { log "全 ArgoCD Application が Healthy です"; return 0; }
-    ((elapsed >= timeout)) && die "ArgoCD の Healthy 待機がタイムアウトしました (未 Healthy: ${not_healthy} 件)"
-    log "Healthy でない Application: ${not_healthy} 件 (${elapsed}s)"
+    json=$(kubectl_r get applications -n argocd -o json 2>/dev/null || echo '{"items":[]}')
+    pending=()
+    for app in $(argocd_unhealthy_apps "${json}"); do
+      app_is_frozen "${json}" "${app}" || pending+=("${app}")
+    done
+    [[ "${#pending[@]}" -eq 0 && "$(echo "${json}" | jq '.items | length')" -gt 0 ]] \
+      && { log "凍結中を除く全 ArgoCD Application が Healthy です"; return 0; }
+    # mail-tls は cert-manager の sync 順に依存して欠け、mailserver が止まることがある
+    repair_mail_tls
+    ((elapsed >= timeout)) && die "ArgoCD の Healthy 待機がタイムアウトしました (未 Healthy: ${pending[*]:-なし})"
+    log "Healthy でない Application: ${pending[*]:-(一覧取得待ち)} (${elapsed}s)"
     sleep 30
     elapsed=$((elapsed + 30))
   done
@@ -419,29 +594,41 @@ wait_cnpg_healthy() {
   done
 }
 
+# 待機より前に実行する。ESO が動かないと ArgoCD/CNPG の healthy 待機自体が成立しないため。
+# infisical-auth は ESO 専用の認証情報 (ESO_INFISICAL_CLIENT_ID/SECRET) から作る。
+# DR 専用 identity (DR_INFISICAL_*) は ESO に渡さない。
 repair_bootstrap_secrets() {
-  local client_id key_len needs_repair=false
+  local client_id key_len
   client_id=$(kubectl_r get secret infisical-auth -n argocd -o jsonpath='{.data.clientId}' 2>/dev/null | base64 -d || true)
   key_len=$(kubectl_r get secret aramakisai-infra-repo -n argocd -o jsonpath='{.data.sshPrivateKey}' 2>/dev/null | base64 -d | wc -c || echo 0)
 
-  [[ -z "${client_id}" ]] && { log "警告: infisical-auth.clientId が空です"; needs_repair=true; }
-  [[ "${key_len}" -lt 100 ]] && { log "警告: aramakisai-infra-repo.sshPrivateKey が空または短すぎます"; needs_repair=true; }
-
-  if [[ "${needs_repair}" == "true" ]]; then
-    record "infisical-auth を Infisical の認証情報から修復します"
+  if [[ -z "${client_id}" ]]; then
+    [[ -n "${ESO_INFISICAL_CLIENT_ID:-}" && -n "${ESO_INFISICAL_CLIENT_SECRET:-}" ]] \
+      || die "infisical-auth が空ですが ESO_INFISICAL_CLIENT_ID/SECRET が未設定のため修復できません"
+    record "infisical-auth が空のため ESO 用認証情報から修復します"
     kubectl_r create secret generic infisical-auth \
-      --from-literal=clientId="${INFISICAL_CLIENT_ID}" \
-      --from-literal=clientSecret="${INFISICAL_CLIENT_SECRET}" \
+      --from-literal=clientId="${ESO_INFISICAL_CLIENT_ID}" \
+      --from-literal=clientSecret="${ESO_INFISICAL_CLIENT_SECRET}" \
       -n argocd --dry-run=client -o yaml | kubectl_r apply -f -
-    kubectl_r annotate externalsecret --all -A "force-sync=$(date +%s)" --overwrite
-  else
-    log "infisical-auth と Deploy Key は正常です"
+    kubectl_r annotate externalsecret --all -A "force-sync=$(date +%s)" --overwrite || true
+  fi
+
+  if [[ "${key_len}" -lt 100 ]]; then
+    [[ -n "${ARGOCD_GITHUB_DEPLOY_KEY:-}" ]] || die "Deploy Key が空ですが ARGOCD_GITHUB_DEPLOY_KEY が未設定のため修復できません"
+    record "ArgoCD の Deploy Key が空のため修復します"
+    kubectl_r create secret generic aramakisai-infra-repo \
+      --from-literal=type=git \
+      --from-literal=url=git@github.com:aramakisai/aramakisai-infra.git \
+      --from-file=sshPrivateKey=<(printf '%s\n' "${ARGOCD_GITHUB_DEPLOY_KEY}") \
+      -n argocd --dry-run=client -o yaml \
+      | kubectl_r label --local -f - argocd.argoproj.io/secret-type=repository -o yaml \
+      | kubectl_r apply -f -
   fi
 }
 
 # cert-manager の sync タイミングで mail-tls が作られず mailserver が ContainerCreating で止まることがある。
 repair_mail_tls() {
-  local reason start_epoch stuck
+  local reason start_epoch stuck f
   reason=$(kubectl_r get pod -n prod -l app=mailserver \
     -o jsonpath='{.items[0].status.containerStatuses[0].state.waiting.reason}' 2>/dev/null || true)
   [[ "${reason}" == "ContainerCreating" ]] || return 0
@@ -452,74 +639,10 @@ repair_mail_tls() {
 
   if [[ -z "$(kubectl_r get secret mail-tls -n prod --ignore-not-found 2>/dev/null)" ]]; then
     record "mail-tls が無く mailserver が ${stuck}s 停止しているため certificate 関連を apply します"
-    local f
     for f in certificate external-secret restic-external-secret; do
       kubectl_r apply -f "${REPO_ROOT}/gitops/manifests/prod/mailserver/${f}.yaml"
     done
   fi
-}
-
-# ============================================================
-# mailserver リストア (opt-in)
-# ============================================================
-
-MAIL_RESTORED_ANNOTATION="dr.aramakisai.com/restored-at"
-
-# 再実行で最新のメールを古いスナップショットで上書きしないよう、リストア済み PVC は対象外にする。
-# 戻り値: 0=リストアしてよい / 1=スキップ
-mail_restore_needed() {
-  local restored
-  [[ "${DR_RESTORE_MAIL}" == "1" ]] || { log "DR_RESTORE_MAIL が未指定のため mailserver のリストアをスキップします"; return 1; }
-  restored=$(kubectl_r get pvc mailserver-data -n prod \
-    -o jsonpath="{.metadata.annotations.dr\.aramakisai\.com/restored-at}" 2>/dev/null || true)
-  if [[ -n "${restored}" ]]; then
-    log "mailserver-data は ${restored} にリストア済みのためスキップします"
-    return 1
-  fi
-  return 0
-}
-
-restore_mailserver() {
-  local trigger result elapsed=0 timeout=1800
-  trigger="dr-$(date +%Y%m%dT%H%M%S)"
-  record "mailserver を停止して VolSync リストアを開始します"
-  kubectl_r scale statefulset mailserver -n prod --replicas=0
-  kubectl_r wait pod -n prod -l app=mailserver --for=delete --timeout=60s || true
-
-  kubectl_r apply -f - <<EOF
-apiVersion: volsync.backube/v1alpha1
-kind: ReplicationDestination
-metadata:
-  name: mailserver-restore
-  namespace: prod
-spec:
-  trigger:
-    manual: "${trigger}"
-  restic:
-    repository: mailserver-restic-secret
-    destinationPVC: mailserver-data
-    copyMethod: Direct
-    moverSecurityContext:
-      runAsUser: 0
-      runAsGroup: 0
-      fsGroup: 0
-EOF
-
-  while true; do
-    result=$(kubectl_r get replicationdestination/mailserver-restore -n prod \
-      -o jsonpath='{.status.latestMoverStatus.result}' 2>/dev/null || true)
-    [[ "${result}" == "Successful" ]] && break
-    [[ "${result}" == "Failed" ]] && die "VolSync リストアが失敗しました"
-    ((elapsed >= timeout)) && die "VolSync リストアがタイムアウトしました (${timeout}s)"
-    sleep 15
-    elapsed=$((elapsed + 15))
-  done
-
-  kubectl_r annotate pvc mailserver-data -n prod "${MAIL_RESTORED_ANNOTATION}=$(date -u '+%Y-%m-%dT%H:%M:%SZ')" --overwrite
-  kubectl_r delete replicationdestination mailserver-restore -n prod
-  kubectl_r scale statefulset mailserver -n prod --replicas=1
-  kubectl_r wait pod -n prod -l app=mailserver --for=condition=Ready --timeout=120s
-  record "mailserver のリストア完了"
 }
 
 report_cnpg_recovery_points() {
@@ -538,9 +661,10 @@ report_cnpg_recovery_points() {
 # ============================================================
 
 main() {
-  local vars=(INFISICAL_CLIENT_ID INFISICAL_CLIENT_SECRET)
+  local vars=()
   if [[ "${DR_LOCAL_TEST}" != "1" ]]; then
-    vars+=(DR_TARGET_NODE K3S_TOKEN ARGOCD_GITHUB_DEPLOY_KEY CLOUDFLARE_TUNNEL_TOKEN CLOUDFLARE_TUNNEL_ID)
+    vars+=(DR_TARGET_NODE K3S_TOKEN ARGOCD_GITHUB_DEPLOY_KEY CLOUDFLARE_TUNNEL_TOKEN CLOUDFLARE_TUNNEL_ID
+      DR_INFISICAL_CLIENT_ID DR_INFISICAL_CLIENT_SECRET INFISICAL_PROJECT_ID)
   fi
   if [[ "${DR_SKIP_INFRA}" != "1" ]]; then
     vars+=(HCLOUD_TOKEN TAILSCALE_OAUTH_CLIENT_ID TAILSCALE_OAUTH_CLIENT_SECRET TAILSCALE_TAILNET TFC_API_TOKEN TFC_WORKSPACE_ID KUBECONFIG)
@@ -560,6 +684,9 @@ main() {
   fi
   [[ -f "${KUBECONFIG_FILE}" ]] || die "KUBECONFIG または KUBECONFIG_FILE が必要です"
 
+  local need_ansible=0
+  [[ "${DR_LOCAL_TEST}" == "1" ]] || need_ansible=1
+
   if [[ "${DR_SKIP_INFRA}" != "1" ]]; then
     init_record
 
@@ -575,28 +702,35 @@ main() {
     peers=$(hcloud_peer_servers "${DR_TARGET_NODE}") || die "Hetzner のサーバー一覧を取得できません"
     [[ -z "${peers}" ]] || die "残存サーバーがあり etcd が分断されるおそれがあるため中止しました: $(echo "${peers}" | tr '\n' ' ') (docs/dr-runbook.md)"
 
-    status=$(hcloud_server_status "${DR_TARGET_NODE}")
+    status=$(server_state "${DR_TARGET_NODE}")
+    [[ "${status}" != "unknown" ]] || die "サーバー状態を確認できません (Hetzner / TFC state の取得失敗または不整合)"
+    [[ "${status}" != "off" ]] && need_ansible=1 || need_ansible=0
+
+    if [[ "${need_ansible}" == "1" ]]; then
+      ansible_ready || die "冪等化済みの k3s-bootstrap.yml (ansible/playbooks/tasks/ensure_secret.yml) がありません。Ansible を流す経路は停止します"
+      [[ -n "${ESO_INFISICAL_CLIENT_ID:-}" && -n "${ESO_INFISICAL_CLIENT_SECRET:-}" ]] \
+        || die "ESO_INFISICAL_CLIENT_ID/SECRET が未設定です (infisical-auth の作成に必要)"
+    fi
+
     case "${status}" in
-      absent) recreate_node "${DR_TARGET_NODE}" ;;
+      absent)
+        recreate_node "${DR_TARGET_NODE}"
+        update_mail_dns "${DR_TARGET_NODE}"
+        ;;
       off) poweron_node "${DR_TARGET_NODE}" ;;
-      unknown) die "Hetzner のサーバー状態を取得できません" ;;
       *) log "サーバー状態 ${status}: DR_FORCE のためインフラ操作なしで Ansible から再実行します" ;;
     esac
     wait_tailscale_registered "${DR_TARGET_NODE}"
+    [[ "${status}" != "off" ]] || wait_k3s_ready "${DR_TARGET_NODE}"
   fi
 
-  if [[ "${DR_LOCAL_TEST}" != "1" ]]; then
+  if [[ "${need_ansible}" == "1" ]]; then
     run_ansible "${DR_TARGET_NODE}"
   fi
 
+  repair_bootstrap_secrets
   wait_argocd_healthy
   wait_cnpg_healthy
-  repair_bootstrap_secrets
-  repair_mail_tls
-
-  if mail_restore_needed; then
-    restore_mailserver
-  fi
 
   report_cnpg_recovery_points
   record "復旧完了"
