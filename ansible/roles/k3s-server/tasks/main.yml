@@ -71,6 +71,7 @@
   # stdin は module_args に出るため no_log とし、失敗時の出力 (トークンを含まない) は fail タスクで表示する。
   ansible.builtin.shell:
     cmd: |
+      set -o pipefail
       IFS= read -r K3S_TOKEN
       export K3S_TOKEN
       curl -sfL https://raw.githubusercontent.com/k3s-io/k3s/{{ k3s_version | urlencode }}/install.sh | sh -
@@ -90,6 +91,14 @@
   ansible.builtin.fail:
     msg: "K3s のインストールに失敗しました (rc={{ k3s_install_result.rc }}): {{ (k3s_install_result.stdout_lines + k3s_install_result.stderr_lines)[-8:] | join(' | ') }}"
   when: not ansible_check_mode and k3s_install_result.rc != 0
+
+- name: インストール後の K3s バージョンを確認
+  # インストーラ出力の取りこぼし (空入力のスクリプトなど) を成功扱いにしない
+  ansible.builtin.command: /usr/local/bin/k3s --version
+  register: k3s_post_version
+  changed_when: false
+  failed_when: k3s_version not in k3s_post_version.stdout
+  when: not ansible_check_mode
 
 # 5. config.yaml の変更を K3s に反映させる (wait_for より前にハンドラーを実行)
 - name: ハンドラーを即時実行 (config 変更を反映)

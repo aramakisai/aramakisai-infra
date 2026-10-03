@@ -94,18 +94,30 @@
         name: k3s-server
         tasks_from: token.yml
 
+    - name: 先頭 server の既存トークンを取得
+      # --limit で先頭 server が play 外でも比較できるよう、委譲して直接読む
+      ansible.builtin.slurp:
+        src: /var/lib/rancher/k3s/server/token
+      delegate_to: "{{ groups['k3s_server'][0] }}"
+      register: k3s_first_token_raw
+      failed_when: false
+      check_mode: false
+      no_log: true
+      when: inventory_hostname != groups['k3s_server'][0]
+
     - name: join 先クラスタと既存トークンの CA が一致することを確認
       # 旧クラスタの /var/lib/rancher が残るノードは古いトークンを優先するため、
       # 別クラスタの CA を持ったまま join して失敗する。インストーラ実行前に原因を示す
       ansible.builtin.assert:
         that: >-
-          k3s_file_token_ca == ''
-          or hostvars[groups['k3s_server'][0]].k3s_file_token_ca == ''
-          or k3s_file_token_ca == hostvars[groups['k3s_server'][0]].k3s_file_token_ca
+          k3s_file_token_ca == '' or first_ca == '' or k3s_file_token_ca == first_ca
         fail_msg: >-
           {{ inventory_hostname }} の既存 K3s トークンの CA が {{ groups['k3s_server'][0] }} と一致しません。
           旧クラスタの残骸です。/usr/local/bin/k3s-uninstall.sh を実行してから再実行してください。
         quiet: true
+      vars:
+        first_token: "{{ (k3s_first_token_raw.content | b64decode | trim) if k3s_first_token_raw.content is defined else '' }}"
+        first_ca: "{{ first_token.split('::server:')[0] if '::server:' in first_token else '' }}"
       when: inventory_hostname != groups['k3s_server'][0]
 
 
@@ -549,9 +561,10 @@
           rc=${rc:-0}
           if [ "$rc" != 0 ]; then
             echo "infisical rc=$rc"
-            # stderr には値が混じりうるため、値を含まないと分かっている API エラー行だけを通す。
-            grep -a -E -i 'status-code|request-id|message=|unsuccessful|unauthor|forbidden|not found|denied|permission|project|error' "$d/err" \
-              | cut -c1-200 | head -8 || true
+            # stderr には値が混じりうるため、既知の API エラー語に一致した断片だけを出す。
+            # 一致が無ければ詳細は出さない (ローカルで infisical を直接実行して確認する)
+            m=$(grep -a -o -i -E 'status-code=[0-9]+|request-id=[A-Za-z0-9-]+|unauthorized|forbidden|permission denied|not found' "$d/err" | sort -u | head -6 || true)
+            echo "${m:-詳細はローカルで確認してください}"
           fi
           exit $rc
         executable: /bin/bash
