@@ -14,7 +14,7 @@ env:
   # 現行のdr-trigger.shはprod-node-1決め打ちでetcdクォーラムを考慮しないため、
   # 複数ノード稼働中はfalseにして定期実行による誤検知でのノード再作成を防ぐ。
   # 切替はこの行の変更としてコミットに残す (GitHub UI上のworkflow無効化は使わない)。
-  DR_TRIGGER_ENABLED: "false"
+  DR_TRIGGER_ENABLED: "true"
 
 # repository_dispatch (POST /repos/{owner}/{repo}/dispatches) には
 # Contents: write が必要 (GitHub公式ドキュメント: Fine-grained token permission set)。
