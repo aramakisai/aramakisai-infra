@@ -1,8 +1,27 @@
 name: DR Recovery
 
 on:
-  repository_dispatch:
-    types: [dr-recovery]
+  workflow_dispatch:
+    inputs:
+      target_node:
+        description: "復旧対象ノード名 (例: prod-node-1)"
+        required: true
+        type: string
+      force:
+        description: "生存確認ゲートを上書きする (ノードが生きていないことを人が確認した場合のみ)"
+        required: false
+        type: boolean
+        default: false
+      restore_mail:
+        description: "mailserver データを VolSync スナップショットでリストアする (未リストアの PVC のみ)"
+        required: false
+        type: boolean
+        default: false
+
+# Issue への進捗記録に issues: write が必要
+permissions:
+  contents: read
+  issues: write
 
 # 同時に複数の復旧が走るのを防ぐ
 concurrency:
@@ -13,6 +32,8 @@ jobs:
   recover:
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    # required reviewers を設定した Environment。承認されるまでジョブは開始されない
+    environment: dr-recovery
 
     steps:
       - uses: actions/checkout@v7
@@ -45,6 +66,10 @@ jobs:
           INFISICAL_CLIENT_ID: ${{ secrets.INFISICAL_CLIENT_ID }}
           INFISICAL_CLIENT_SECRET: ${{ secrets.INFISICAL_CLIENT_SECRET }}
           INFISICAL_PROJECT_ID: ${{ secrets.INFISICAL_PROJECT_ID }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DR_TARGET_NODE: ${{ inputs.target_node }}
+          DR_FORCE: ${{ inputs.force && '1' || '0' }}
+          DR_RESTORE_MAIL: ${{ inputs.restore_mail && '1' || '0' }}
         run: |
           # infisical run はUniversal Auth環境変数を自動認識しないため、
           # 明示的にlogin --method=universal-authでトークンを取得し --token で渡す。
