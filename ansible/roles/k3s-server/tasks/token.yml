@@ -10,6 +10,7 @@
   register: k3s_existing_token_raw
   failed_when: false
   check_mode: false
+  no_log: true
 
 - name: インストーラが書いた env ファイルを確認
   ansible.builtin.slurp:
@@ -17,13 +18,16 @@
   register: k3s_env_file_raw
   failed_when: false
   check_mode: false
+  no_log: true
 
 - name: 使用するトークンを決定 (既存クラスタは実トークン優先、新規は変数値)
-  # 実トークンは "K10<hash>::server:<secret>" 形式で保存され、初回は <secret> だけを渡している。
+  # 実トークンは "K10<CA ハッシュ>::server:<secret>" 形式で保存され、初回は <secret> だけを渡している。
   # env ファイルの値が実トークンと等価ならそのまま使い、インストーラに env ファイルの
   # 書き換え (= k3s 再起動) をさせない。
   ansible.builtin.set_fact:
     k3s_effective_token: "{{ k3s_env_token if k3s_env_token_matches else (k3s_file_token if k3s_file_token else k3s_token) }}"
+    k3s_env_token_differs: "{{ k3s_file_token != '' and not k3s_env_token_matches }}"
+    k3s_file_token_ca: "{{ k3s_file_token.split('::server:')[0] if '::server:' in k3s_file_token else '' }}"
   vars:
     k3s_file_token: "{{ (k3s_existing_token_raw.content | b64decode | trim) if k3s_existing_token_raw.content is defined else '' }}"
     k3s_env_token: >-

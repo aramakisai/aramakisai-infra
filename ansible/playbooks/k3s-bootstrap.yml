@@ -8,19 +8,20 @@
 #   2. prod-node-1/2 に K3s をローリングでインストール (etcd 参加 + ワークロード)
 #   3. Cilium をインストール (flannel-backend: none のため CNI が必須 / ノードを Ready にする)
 #   4. cloudflared を事前インストール (ArgoCD への外部アクセス経路を確保)
-#   5. kubeconfig を Infisical に登録
-#   6. ArgoCD をインストール・App of Apps を適用
+#   5. ArgoCD をインストール・App of Apps を適用
+#   6. kubeconfig を Infisical に登録 (失敗してもクラスタ復旧を止めないよう最後に置く)
 #
 # bootstrap Secret (cloudflared-token / infisical-auth / aramakisai-infra-repo) は
-# 既存の非空値を保持する。上書きするときだけ -e rotate_bootstrap_secrets=true を付ける。
+# 既存の非空値を保持する。上書きするときだけ -e rotate_bootstrap_secrets=true (全件) か
+# -e '{"rotate_bootstrap_secrets": ["infisical-auth"]}' (個別) を付ける。
 
 
 # ============================================================
 # 事前検査: 何かを変更する前に、入力の不足と古いチェックアウトからの適用を止める
 # ============================================================
 - name: 事前検査 (制御ノード)
-  hosts: localhost
-  connection: local
+  # hosts: all + delegate_to + run_once: --limit で対象ノードを絞っても検査が必ず走る
+  hosts: all
   gather_facts: false
   vars:
     repo_root: "{{ playbook_dir }}/../.."
@@ -28,44 +29,49 @@
       - gitops/manifests/prod/cloudflared
       - gitops/root.yaml
   tasks:
-    - name: infisical run 配下で実行されていることを確認
-      # DISCORD_OPS_WEBHOOK_URL は os-auto-update が必須とする値で、Infisical 経由の
-      # 注入有無の目印を兼ねる。KUBECONFIG の差分判定も注入された値に依存する
-      ansible.builtin.assert:
-        that: lookup('env', 'DISCORD_OPS_WEBHOOK_URL') | length > 0
-        fail_msg: DISCORD_OPS_WEBHOOK_URL が空です。infisical run --env=prod -- ansible-playbook ... で実行してください。
-        quiet: true
+    - name: 制御ノードの検査
+      delegate_to: localhost
+      run_once: true
+      become: false
+      block:
+        - name: infisical run 配下で実行されていることを確認
+          # DISCORD_OPS_WEBHOOK_URL は os-auto-update が必須とする値で、Infisical 経由の
+          # 注入有無の目印を兼ねる。KUBECONFIG の差分判定も注入された値に依存する
+          ansible.builtin.assert:
+            that: lookup('env', 'DISCORD_OPS_WEBHOOK_URL') | length > 0
+            fail_msg: DISCORD_OPS_WEBHOOK_URL が空です。infisical run --env=prod -- ansible-playbook ... で実行してください。
+            quiet: true
 
-    - name: origin/main を取得
-      ansible.builtin.command:
-        argv: [git, -C, "{{ repo_root }}", fetch, --quiet, origin, main]
-      changed_when: false
-      check_mode: false
+        - name: origin/main を取得
+          ansible.builtin.command:
+            argv: [git, -C, "{{ repo_root }}", fetch, --quiet, origin, main]
+          changed_when: false
+          check_mode: false
 
-    - name: チェックアウトの HEAD と origin/main を取得
-      ansible.builtin.command:
-        argv: [git, -C, "{{ repo_root }}", rev-parse, HEAD, FETCH_HEAD]
-      register: git_revs
-      changed_when: false
-      check_mode: false
+        - name: チェックアウトの HEAD と origin/main を取得
+          ansible.builtin.command:
+            argv: [git, -C, "{{ repo_root }}", rev-parse, HEAD, FETCH_HEAD]
+          register: git_revs
+          changed_when: false
+          check_mode: false
 
-    - name: 適用元マニフェストの未コミット変更を取得
-      ansible.builtin.command:
-        argv: "{{ ['git', '-C', repo_root, 'status', '--porcelain', '--untracked-files=all', '--'] + git_applied_paths }}"
-      register: git_dirty
-      changed_when: false
-      check_mode: false
+        - name: 適用元マニフェストの未コミット変更を取得
+          ansible.builtin.command:
+            argv: "{{ ['git', '-C', repo_root, 'status', '--porcelain', '--untracked-files=all', '--'] + git_applied_paths }}"
+          register: git_dirty
+          changed_when: false
+          check_mode: false
 
-    - name: 制御ノードのチェックアウトが origin/main と一致することを確認
-      # gitops/ を本番へ直接 apply するため、古いブランチや手元の変更で本番を巻き戻さない
-      ansible.builtin.assert:
-        that:
-          - git_revs.stdout_lines[0] == git_revs.stdout_lines[1]
-          - git_dirty.stdout | length == 0
-        fail_msg: >-
-          HEAD が origin/main と一致しないか、{{ git_applied_paths | join(', ') }} に未コミット変更があります。
-          main をチェックアウトして実行してください。
-        quiet: true
+        - name: 制御ノードのチェックアウトが origin/main と一致することを確認
+          # gitops/ を本番へ直接 apply するため、古いブランチや手元の変更で本番を巻き戻さない
+          ansible.builtin.assert:
+            that:
+              - git_revs.stdout_lines[0] == git_revs.stdout_lines[1]
+              - git_dirty.stdout | length == 0
+            fail_msg: >-
+              HEAD が origin/main と一致しないか、{{ git_applied_paths | join(', ') }} に未コミット変更があります。
+              main をチェックアウトして実行してください。
+            quiet: true
 
 
 - name: 事前検査 (K3s トークン)
@@ -77,6 +83,20 @@
       ansible.builtin.include_role:
         name: k3s-server
         tasks_from: token.yml
+
+    - name: join 先クラスタと既存トークンの CA が一致することを確認
+      # 旧クラスタの /var/lib/rancher が残るノードは古いトークンを優先するため、
+      # 別クラスタの CA を持ったまま join して失敗する。インストーラ実行前に原因を示す
+      ansible.builtin.assert:
+        that: >-
+          k3s_file_token_ca == ''
+          or hostvars[groups['k3s_server'][0]].k3s_file_token_ca == ''
+          or k3s_file_token_ca == hostvars[groups['k3s_server'][0]].k3s_file_token_ca
+        fail_msg: >-
+          {{ inventory_hostname }} の既存 K3s トークンの CA が {{ groups['k3s_server'][0] }} と一致しません。
+          旧クラスタの残骸です。/usr/local/bin/k3s-uninstall.sh を実行してから再実行してください。
+        quiet: true
+      when: inventory_hostname != groups['k3s_server'][0]
 
 
 - name: 事前検査 (bootstrap Secret の入力)
@@ -93,9 +113,9 @@
       - name: infisical-auth
         namespace: argocd
         data:
-          clientId: "{{ lookup('env', 'INFISICAL_CLIENT_ID') }}"
-          clientSecret: "{{ lookup('env', 'INFISICAL_CLIENT_SECRET') }}"
-        hint: INFISICAL_CLIENT_ID / INFISICAL_CLIENT_SECRET
+          clientId: "{{ lookup('env', 'ESO_INFISICAL_CLIENT_ID') }}"
+          clientSecret: "{{ lookup('env', 'ESO_INFISICAL_CLIENT_SECRET') }}"
+        hint: ESO_INFISICAL_CLIENT_ID / ESO_INFISICAL_CLIENT_SECRET
       - name: aramakisai-infra-repo
         namespace: argocd
         data:
@@ -104,6 +124,15 @@
           sshPrivateKey: "{{ lookup('env', 'ARGOCD_GITHUB_DEPLOY_KEY') }}"
         hint: ARGOCD_GITHUB_DEPLOY_KEY
   tasks:
+    - name: rotate_bootstrap_secrets の指定が既知の Secret 名であることを確認
+      ansible.builtin.assert:
+        that: >-
+          rotate_bootstrap_secrets | default(false) is not iterable
+          or rotate_bootstrap_secrets is string
+          or rotate_bootstrap_secrets | difference(bootstrap_secrets | map(attribute='name') | list) | length == 0
+        fail_msg: "rotate_bootstrap_secrets に未知の Secret 名があります (指定可能: {{ bootstrap_secrets | map(attribute='name') | join(', ') }})"
+        quiet: true
+
     - name: Secret ごとに入力を検査
       ansible.builtin.include_tasks: tasks/ensure_secret.yml
       vars:
@@ -277,10 +306,26 @@
         bs_hint: CLOUDFLARE_TUNNEL_TOKEN
         bs_dry: false
 
-    - name: cloudflared マニフェストを適用
-      ansible.builtin.include_tasks: tasks/apply_manifests.yml
-      vars:
-        am_stdin: "{{ cloudflared_manifests }}"
+    - name: cloudflared Deployment の存在確認
+      ansible.builtin.command: kubectl get deployment cloudflared -n cloudflared -o name
+      register: cloudflared_deploy
+      failed_when: cloudflared_deploy.rc != 0 and 'NotFound' not in cloudflared_deploy.stderr
+      changed_when: false
+      check_mode: false
+
+    - name: cloudflared マニフェストを初回のみ適用
+      # Deployment 以降は ArgoCD が同じファイルを adopt して管理する。
+      # 稼働後に別の field manager (ansible) が同じフィールドを所有するとドリフトが残るため、
+      # 存在するときは触らない (差分の反映は ArgoCD / Git の責務)
+      ansible.builtin.command: kubectl apply -f -
+      args:
+        stdin: "{{ cloudflared_manifests }}"
+      when: cloudflared_deploy.rc != 0
+
+    - name: cloudflared のトンネル token 更新を反映 (rollout restart)
+      # restartedAt annotation を載せるだけなので ArgoCD の管理フィールドとは衝突しない
+      ansible.builtin.command: kubectl rollout restart deployment/cloudflared -n cloudflared
+      when: cloudflared_deploy.rc == 0 and bs_last_changed | default(false)
 
     - name: cloudflared の rollout 条件を取得
       ansible.builtin.command: >-
@@ -306,7 +351,113 @@
 
 
 # ============================================================
-# Play 5: kubeconfig を Infisical に登録
+# Play 5: ArgoCD の初期 bootstrap
+# ============================================================
+- name: ArgoCD の初期 bootstrap
+  hosts: k3s_server
+  run_once: true
+  become: true
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  vars:
+    # stable は移動タグのため再実行ごとに無意識アップグレードされる。
+    # 2026-06-19: stable 経由で v3.4.4 に上がり configmap informer のラベル要件変更で
+    # argocd-cm/argocd-rbac-cm が見えなくなり全コンポーネントが crash した実績あり
+    argocd_version: v3.4.4
+    root_manifest: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../gitops/root.yaml') }}"
+  tasks:
+    - name: ArgoCD namespace 作成
+      ansible.builtin.include_tasks: tasks/ensure_namespace.yml
+      vars:
+        ns_name: argocd
+
+    - name: 稼働中の ArgoCD のイメージを取得
+      ansible.builtin.command: >-
+        kubectl get deployment argocd-server -n argocd
+        -o jsonpath='{.spec.template.spec.containers[0].image}'
+      register: argocd_running_image
+      failed_when: argocd_running_image.rc != 0 and 'NotFound' not in argocd_running_image.stderr
+      changed_when: false
+      check_mode: false
+
+    - name: 稼働中の ArgoCD が固定バージョンより新しければ中断 (ダウングレード防止)
+      # 判定できないタグ (digest 参照・非 semver) は安全側に倒して中断する
+      ansible.builtin.assert:
+        that:
+          - argocd_running_tag is match('^v[0-9]+\.[0-9]+\.[0-9]+$')
+          - argocd_running_tag | regex_replace('^v') is version(argocd_version | regex_replace('^v'), '<=')
+        fail_msg: >-
+          稼働中の ArgoCD ({{ argocd_running_image.stdout }}) が固定バージョン {{ argocd_version }} より新しいか、
+          タグから版を判定できないため、ダウングレードを避けて中断します。
+          argocd_version を稼働中以上に更新してください。
+        quiet: true
+      vars:
+        argocd_running_tag: "{{ argocd_running_image.stdout.split('@')[0].rsplit(':', 1)[-1] }}"
+      when: argocd_running_image.rc == 0
+
+    - name: ArgoCD インストール
+      # --server-side: ArgoCD の CRD が大きく last-applied-configuration アノテーションが
+      # 262144 バイト制限を超えるため、Server-Side Apply を使用する。
+      # field manager は既存の ownership を引き継ぐため kubectl のまま (初回 client-side apply
+      # との競合は force-conflicts で解消する)
+      ansible.builtin.include_tasks: tasks/apply_manifests.yml
+      vars:
+        am_source: "https://raw.githubusercontent.com/argoproj/argo-cd/{{ argocd_version }}/manifests/install.yaml"
+        am_namespace: argocd
+        am_field_manager: kubectl
+
+    - name: ArgoCD が Ready になるまで待機
+      ansible.builtin.command: >-
+        kubectl rollout status deployment/argocd-server
+        -n argocd --timeout=300s
+      changed_when: false
+      check_mode: false
+
+    - name: infisical-auth Secret を作成 (ESO を経由しない唯一の Secret)
+      # この Secret だけは ESO を経由せず直接作成する。
+      # ClusterSecretStore (universalAuthCredentials) に合わせて
+      # clientId / clientSecret キーで登録する (serviceToken 形式ではない)
+      ansible.builtin.include_tasks: tasks/ensure_secret.yml
+      vars:
+        bs_name: infisical-auth
+        bs_namespace: argocd
+        bs_data:
+          clientId: "{{ lookup('env', 'ESO_INFISICAL_CLIENT_ID') }}"
+          clientSecret: "{{ lookup('env', 'ESO_INFISICAL_CLIENT_SECRET') }}"
+        bs_hint: ESO_INFISICAL_CLIENT_ID / ESO_INFISICAL_CLIENT_SECRET
+        bs_dry: false
+
+    - name: GitHub Deploy Key を ArgoCD Repository Secret として登録
+      # プライベートリポジトリへのアクセスに必要。秘密鍵は Infisical の
+      # ARGOCD_GITHUB_DEPLOY_KEY に保存する。root.yaml は SSH URL
+      # (git@github.com:aramakisai/aramakisai-infra.git) を使うこと
+      ansible.builtin.include_tasks: tasks/ensure_secret.yml
+      vars:
+        bs_name: aramakisai-infra-repo
+        bs_namespace: argocd
+        bs_data:
+          type: git
+          url: git@github.com:aramakisai/aramakisai-infra.git
+          sshPrivateKey: "{{ lookup('env', 'ARGOCD_GITHUB_DEPLOY_KEY') }}"
+        bs_labels:
+          argocd.argoproj.io/secret-type: repository
+        bs_hint: ARGOCD_GITHUB_DEPLOY_KEY
+        bs_dry: false
+
+    - name: App of Apps (root.yaml) を適用
+      # 適用後は ArgoCD が自律的に sync を開始:
+      #   wave: -1  ESO (Helm Chart) + ClusterSecretStore
+      #   wave: 0   Directus, mailserver, cloudflared (adopt), ...
+      # cloudflared は既に稼働しているため ArgoCD が同名リソースを adopt する
+      ansible.builtin.include_tasks: tasks/apply_manifests.yml
+      vars:
+        am_stdin: "{{ root_manifest }}"
+        am_namespace: argocd
+
+
+# ============================================================
+# Play 6: kubeconfig を Infisical に登録
+# 登録失敗でクラスタの復旧 (ArgoCD の bootstrap) が止まらないよう最後に実行する。失敗自体は fail のまま
 # ============================================================
 - name: kubeconfig を Infisical に登録
   hosts: k3s_server
@@ -344,137 +495,62 @@
       when: ansible_check_mode and kubeconfig_pending
       changed_when: true
 
+    - name: 登録に必要な資格情報があることを確認
+      ansible.builtin.assert:
+        that:
+          - lookup('env', 'OPS_INFISICAL_CLIENT_ID') | length > 0
+          - lookup('env', 'OPS_INFISICAL_CLIENT_SECRET') | length > 0
+          - lookup('env', 'INFISICAL_PROJECT_ID') | length > 0
+        fail_msg: >-
+          kubeconfig が Infisical の登録値と異なるため書き込みが必要ですが、OPS_INFISICAL_CLIENT_ID /
+          OPS_INFISICAL_CLIENT_SECRET (運用用 identity: prod 読取 + KUBECONFIG 書込) または
+          INFISICAL_PROJECT_ID が未設定です。CI 用の読取専用 identity は 403 になります。
+        quiet: true
+      delegate_to: localhost
+      become: false
+      when: kubeconfig_pending and not ansible_check_mode
+
     - name: kubeconfig を Infisical に登録 (Single Source of Truth)
       delegate_to: localhost
       become: false
-      # no_log は使わない。値は stdin でしか渡らず argv にも環境変数にも載らない。
-      # 逆に no_log で全出力を隠すと Infisical 側の API エラーが一切読めず障害調査が不能になる。
+      # 値は stdin でしか渡らず argv にも環境変数にも載らないが、-vvv の module_args に stdin が出るため
+      # no_log: true とし、失敗理由は下の fail タスクが安全な行だけ表示する。
       # secrets set は --file が .yaml 拡張子のときだけ YAML として読む (複数行の値を渡せる)。
-      # --file は machine identity (--token) 経路でも有効で、KEY=@file は人間ログイン経路でしか
-      # 展開されないため、拡張子付きの symlink 経由で stdin を読ませる。
+      # KEY=@file は machine identity (--token) 経路では展開されないため、拡張子付きの
+      # symlink 経由で stdin を読ませる。.infisical.json は CI / DR / worktree に無いため
+      # --projectId を必ず明示する。
       ansible.builtin.shell:
         cmd: |
           set -u
           d=$(mktemp -d)
           trap 'rm -rf "$d"' EXIT
           ln -s /dev/stdin "$d/kubeconfig.yaml"
-          # CI環境(INFISICAL_CLIENT_ID/SECRETが設定済み)はUniversal Authでトークンを取得して使う。
-          # ローカル実行時は対話ログイン済みセッションをそのまま使う。
-          # トークンとクライアント資格情報は argv ではなく環境変数で渡す。
-          if [ -n "${INFISICAL_CLIENT_ID:-}" ] && [ -n "${INFISICAL_CLIENT_SECRET:-}" ]; then
-            INFISICAL_TOKEN=$(INFISICAL_UNIVERSAL_AUTH_CLIENT_ID="$INFISICAL_CLIENT_ID" \
-              INFISICAL_UNIVERSAL_AUTH_CLIENT_SECRET="$INFISICAL_CLIENT_SECRET" \
-              infisical login --method=universal-auth --silent --plain </dev/null)
+          # 資格情報とトークンは argv ではなく環境変数で渡す。
+          INFISICAL_TOKEN=$(INFISICAL_UNIVERSAL_AUTH_CLIENT_ID="$OPS_INFISICAL_CLIENT_ID" \
+            INFISICAL_UNIVERSAL_AUTH_CLIENT_SECRET="$OPS_INFISICAL_CLIENT_SECRET" \
+            infisical login --method=universal-auth --silent --plain </dev/null 2>"$d/err") || rc=$?
+          if [ "${rc:-0}" = 0 ]; then
             export INFISICAL_TOKEN
+            infisical secrets set --env=prod --projectId="$INFISICAL_PROJECT_ID" \
+              --file="$d/kubeconfig.yaml" >/dev/null 2>"$d/err" || rc=$?
           fi
-          rc=0
-          infisical secrets set --env=prod --file="$d/kubeconfig.yaml" >/dev/null 2>"$d/err" || rc=$?
-          # stderr には値が混じりうるため、値を含まないと分かっている API エラー行だけを通す。
-          grep -a -E -i 'status-code|request-id|message=|unsuccessful|unauthor|forbidden|not found|denied|permission' "$d/err" | head -5 >&2 || true
+          rc=${rc:-0}
+          if [ "$rc" != 0 ]; then
+            echo "infisical rc=$rc"
+            # stderr には値が混じりうるため、値を含まないと分かっている API エラー行だけを通す。
+            grep -a -E -i 'status-code|request-id|message=|unsuccessful|unauthor|forbidden|not found|denied|permission|project|error' "$d/err" \
+              | cut -c1-200 | head -8 || true
+          fi
           exit $rc
         executable: /bin/bash
         stdin: "{{ {'KUBECONFIG': kubeconfig_fetched} | to_json }}"
+      register: kubeconfig_register
+      failed_when: false
+      changed_when: kubeconfig_register.rc == 0
+      no_log: true
       when: kubeconfig_pending
 
-
-# ============================================================
-# Play 6: ArgoCD の初期 bootstrap
-# ============================================================
-- name: ArgoCD の初期 bootstrap
-  hosts: k3s_server
-  run_once: true
-  become: true
-  environment:
-    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
-  vars:
-    # stable は移動タグのため再実行ごとに無意識アップグレードされる。
-    # 2026-06-19: stable 経由で v3.4.4 に上がり configmap informer のラベル要件変更で
-    # argocd-cm/argocd-rbac-cm が見えなくなり全コンポーネントが crash した実績あり
-    argocd_version: v3.4.4
-    root_manifest: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../gitops/root.yaml') }}"
-  tasks:
-    - name: ArgoCD namespace 作成
-      ansible.builtin.include_tasks: tasks/ensure_namespace.yml
-      vars:
-        ns_name: argocd
-
-    - name: 稼働中の ArgoCD のイメージを取得
-      ansible.builtin.command: >-
-        kubectl get deployment argocd-server -n argocd
-        -o jsonpath='{.spec.template.spec.containers[0].image}'
-      register: argocd_running_image
-      failed_when: argocd_running_image.rc != 0 and 'NotFound' not in argocd_running_image.stderr
-      changed_when: false
-      check_mode: false
-
-    - name: 稼働中の ArgoCD が固定バージョンより新しければ中断 (ダウングレード防止)
-      ansible.builtin.assert:
-        that: >-
-          argocd_running_tag is not match('^v[0-9]+\.[0-9]+\.[0-9]+$')
-          or (argocd_running_tag | regex_replace('^v') is version(argocd_version | regex_replace('^v'), '<='))
-        fail_msg: >-
-          稼働中の ArgoCD ({{ argocd_running_tag }}) が固定バージョン {{ argocd_version }} より新しいため、
-          ダウングレードを避けて中断します。argocd_version を稼働中以上に更新してください。
-        quiet: true
-      vars:
-        argocd_running_tag: "{{ argocd_running_image.stdout.rsplit(':', 1)[-1] }}"
-      when: argocd_running_image.rc == 0
-
-    - name: ArgoCD インストール
-      # --server-side: ArgoCD の CRD が大きく last-applied-configuration アノテーションが
-      # 262144 バイト制限を超えるため、Server-Side Apply を使用する。
-      # field manager は既存の ownership を引き継ぐため kubectl のまま (初回 client-side apply
-      # との競合は force-conflicts で解消する)
-      ansible.builtin.include_tasks: tasks/apply_manifests.yml
-      vars:
-        am_source: "https://raw.githubusercontent.com/argoproj/argo-cd/{{ argocd_version }}/manifests/install.yaml"
-        am_namespace: argocd
-        am_field_manager: kubectl
-
-    - name: ArgoCD が Ready になるまで待機
-      ansible.builtin.command: >-
-        kubectl rollout status deployment/argocd-server
-        -n argocd --timeout=300s
-      changed_when: false
-      check_mode: false
-
-    - name: infisical-auth Secret を作成 (ESO を経由しない唯一の Secret)
-      # この Secret だけは ESO を経由せず直接作成する。
-      # ClusterSecretStore (universalAuthCredentials) に合わせて
-      # clientId / clientSecret キーで登録する (serviceToken 形式ではない)
-      ansible.builtin.include_tasks: tasks/ensure_secret.yml
-      vars:
-        bs_name: infisical-auth
-        bs_namespace: argocd
-        bs_data:
-          clientId: "{{ lookup('env', 'INFISICAL_CLIENT_ID') }}"
-          clientSecret: "{{ lookup('env', 'INFISICAL_CLIENT_SECRET') }}"
-        bs_hint: INFISICAL_CLIENT_ID / INFISICAL_CLIENT_SECRET
-        bs_dry: false
-
-    - name: GitHub Deploy Key を ArgoCD Repository Secret として登録
-      # プライベートリポジトリへのアクセスに必要。秘密鍵は Infisical の
-      # ARGOCD_GITHUB_DEPLOY_KEY に保存する。root.yaml は SSH URL
-      # (git@github.com:aramakisai/aramakisai-infra.git) を使うこと
-      ansible.builtin.include_tasks: tasks/ensure_secret.yml
-      vars:
-        bs_name: aramakisai-infra-repo
-        bs_namespace: argocd
-        bs_data:
-          type: git
-          url: git@github.com:aramakisai/aramakisai-infra.git
-          sshPrivateKey: "{{ lookup('env', 'ARGOCD_GITHUB_DEPLOY_KEY') }}"
-        bs_labels:
-          argocd.argoproj.io/secret-type: repository
-        bs_hint: ARGOCD_GITHUB_DEPLOY_KEY
-        bs_dry: false
-
-    - name: App of Apps (root.yaml) を適用
-      # 適用後は ArgoCD が自律的に sync を開始:
-      #   wave: -1  ESO (Helm Chart) + ClusterSecretStore
-      #   wave: 0   Directus, mailserver, cloudflared (adopt), ...
-      # cloudflared は既に稼働しているため ArgoCD が同名リソースを adopt する
-      ansible.builtin.include_tasks: tasks/apply_manifests.yml
-      vars:
-        am_stdin: "{{ root_manifest }}"
-        am_namespace: argocd
+    - name: kubeconfig の登録失敗を報告
+      ansible.builtin.fail:
+        msg: "kubeconfig の Infisical 登録に失敗しました: {{ kubeconfig_register.stdout_lines | default([]) | join(' | ') }}"
+      when: kubeconfig_pending and not ansible_check_mode and kubeconfig_register.rc != 0
