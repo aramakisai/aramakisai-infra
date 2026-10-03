@@ -7,21 +7,32 @@
 
 ## DR の基本方針
 
-- **自動復旧が前提**: `dr-trigger.yml` (クラスター外部完結・5分毎cron) が複合検出
-  (Tailscaleオフライン、または idp/argocd/webmail のうち2つ以上が同時応答なし) でノード障害と
-  判定し、Discord通知 + 猶予期間 (既定10分) オプトアウトを経て `repository_dispatch` →
-  `.github/workflows/dr-recovery.yml` が無人で復旧する。Grafana Cloud解約に伴いこの起点を
-  GitHub Actions完結型へ引き継いだ (`.kiro/specs/observability-v2` 参照)
-- **idp単体障害ではノード再作成しない**: 1エンドポイントのみ応答なしでTailscaleオンラインの場合は
-  単体サービス障害 (SingleEndpointDown) と判定しDiscord通知のみ行う (誤ったノード再作成を防ぐ)
-- **誤検知時は人手で中止できる**: 猶予期間中にOWNER/MEMBER/COLLABORATOR権限を持つアカウントが
-  `dr-incident`ラベルのIssueへ`abort`/`中止`を含むコメントを付ける、またはIssueをクローズすると
-  `repository_dispatch`は発火しない (権限のないコメントは無視される)
-- **人手は復旧後確認、または猶予期間中の中止操作のみ**: `docs/dr-runbook.md` の「復旧後の確認」
-  「dr-trigger.yml の運用」セクションを参照
+- **検知は通知のみ、復旧は人の承認付き**: `dr-trigger.yml` (クラスター外部完結・5分毎cron) が
+  Tailscale 上の実在ノード (`prod-node-N`) の接続状態と idp/argocd/webmail の疎通を複合判定し、
+  1回の実行内で障害判定が3回連続したときだけ Discord 通知と `dr-incident` Issue 起票/追記を行う。
+  復旧ワークフローの自動起動はしない。open な `dr-incident` Issue があれば追記のみ (重複起票しない)
+- **復旧は `dr-recovery.yml` を `workflow_dispatch` で人が起動**: GitHub Environment `dr-recovery`
+  の required reviewers の承認後にジョブが始まる。入力は `target_node` (必須)・`force`・`restore_mail`
+- **生存確認ゲート**: `recovery.sh` は冒頭で Hetzner サーバー状態・Tailscale・公開エンドポイント・
+  `kubectl get nodes` を読み取り専用で確認し、生存または判定不能を示すシグナルが1つでもあれば停止する
+  (`force` でのみ上書き)
+- **対象は単一ノード構成のみ**: 他の Hetzner サーバー (残存 etcd メンバー候補) があるときや、
+  inventory の cluster-init ホスト以外が対象のときは自動復旧せず停止し、手動手順に委ねる
+- **idp単体障害ではノード扱いしない**: 1エンドポイントのみ応答なしでTailscaleオンラインの場合は
+  SingleEndpointDown、一部ノードのみ切断でクォーラム維持なら NodeDegraded とし通知のみ
+- **Terraform は対象ノードに -target 限定・auto-apply 無効**: plan が「対象サーバー作成 + auth key 置換」
+  だけであることを機械検査してから apply する。逸脱した plan は discard して停止する
+- **Tailscale は OAuth クライアント統一**: `TAILSCALE_OAUTH_CLIENT_ID/SECRET` (devices:core 書込 +
+  auth_keys 書込)。旧デバイスは「対象ノード名一致 かつ offline」のものだけ ID 指定で削除。
+  サーバー停止のみのときはデバイスを消さず電源投入だけ行う
+- **mailserver リストアは `restore_mail` の明示 opt-in**: PVC に `dr.aramakisai.com/restored-at`
+  annotation があれば再実行でも上書きしない
 - **手動手順は例外**: ワークフローが失敗した場合のフォールバックとして `docs/dr-runbook.md` の「手動フォールバック」を使う
-- **検出スクリプト**: `.github/scripts/dr-trigger.sh` (複合検出・通知・猶予期間・dispatch、ユニットテスト: `scripts/test-dr-trigger-logic.sh`)
-- **復旧スクリプト**: `.github/scripts/recovery.sh` (旧 `raspberry-pi/recovery/recovery.sh` から移動、内部ロジックは変更なし)
+- **検出スクリプト**: `.github/scripts/dr-trigger.sh` (ユニットテスト: `scripts/test-dr-trigger-logic.sh`)
+- **復旧スクリプト**: `.github/scripts/recovery.sh` (ユニットテスト: `scripts/test-dr-recovery-logic.sh`)
+- **zitadel-db は `bootstrap.recovery`**: `s3://aramakisai-backups/cnpg/zitadel-db` から復元する。稼働中クラスターの
+  `spec.bootstrap` 変更は CNPG operator が無視する (v1.23.3 の webhook に bootstrap 変更検証が無く、
+  primary 生成は PVC 不在かつ `LatestGeneratedNode=0` のときだけ)
 
 ---
 
@@ -164,17 +175,8 @@ Zitadel からの SMTP 送信も失敗→認証失敗で再 BAN のループに�
 `ephemeral: false` のため Hetzner でノードが削除されても Tailscale デバイスが残存する。  
 **terraform apply より前に必ず削除すること**（残っていると新ノードが `prod-node-1-1` として登録されて Ansible が接続できなくなる）。
 
-これは `recovery.sh` のステップ 1 で自動化済み。手動で行う場合：
-
-```bash
-infisical run -- bash -c '
-ID=$(curl -sf -H "Authorization: Bearer $TAILSCALE_API_KEY" \
-  "https://api.tailscale.com/api/v2/tailnet/$TAILSCALE_TAILNET/devices" \
-  | jq -r '"'"'.devices[] | select(.hostname == "prod-node-1") | .id'"'"')
-[ -n "$ID" ] && curl -sf -X DELETE -H "Authorization: Bearer $TAILSCALE_API_KEY" \
-  "https://api.tailscale.com/api/v2/device/$ID"
-'
-```
+`recovery.sh` が Terraform apply の直前に自動で行う (対象ノード名一致 かつ offline のデバイスのみ、ID指定)。
+手動で行う場合は `docs/dr-runbook.md` の手動フォールバックを参照。
 
 ---
 
@@ -187,7 +189,7 @@ ID=$(curl -sf -H "Authorization: Bearer $TAILSCALE_API_KEY" \
   1. forensics: `kubectl logs`・`kubectl get events`・`kubectl get networkpolicy` を GitHub Actions Artifacts に保存 (90日保持)
   2. isolate: 指定 namespace に egress/ingress 全拒否 NetworkPolicy を適用
   3. notify: Discord に全シークレット一覧とローテーション手順を通知
-- **再構築は手動**: シークレットローテーション完了後に人間が手動で `dr-recovery` を dispatch する。ローテーション前の自動再構築は行わない
+- **再構築は手動**: シークレットローテーション完了後に人間が `dr-recovery` を `workflow_dispatch` で起動し承認する。ローテーション前の再構築は行わない
 
 ---
 
