@@ -7,10 +7,11 @@ K3s embedded etcd のメンバー増減と CNPG インスタンス増減の手�
 | 記号 | 環境 | 範囲 |
 |------|------|------|
 | L | ローカル Docker 検証環境 (`verify/`) | 本番と同一の `k3s-server` ロールを、systemd 入り privileged Debian 13 コンテナ 3 台 (`10.0.1.0/24`、`node-ip` を private IP に固定) へ適用。K3s v1.35.5+k3s1、Cilium 1.17.3、CNPG operator chart 0.21.6 / PostgreSQL 16.8 |
-| H | Hetzner 実環境の最小構成 | タスク 3.5。未実施 |
+| H | Hetzner 実環境の最小構成 | タスク 3.5。使い捨ての追加ノード 1 台を作成・削除して確認 |
 | - | 未検証 | どの環境でも確認していない |
 
 k3d は systemd を持たず Ansible ロール (apt / systemd 前提) を適用できないため使っていない。コンテナ上の embedded etcd は実 VM と同じ手順 (ロール適用による join、`kubectl delete node` による member 除去、`--cluster-reset`) で増減でき、再現性の問題は見つかっていない。
+H で確認したもの: cloud-init、private IP 割当、Tailscale 登録、デバイス残存と再作成時の名前、サーバー削除の Terraform 手順。
 L が再現しないもの: Hetzner private network、Tailscale、cloud-init、placement group、実ディスク・実ネットワーク障害、CPU / メモリ資源の差。
 
 ### 検証環境の再現
@@ -57,7 +58,7 @@ Cilium は Helm で別途入れる (`k8sServiceHost=10.0.1.1`)。コンテナ再
 |---|------|------|----------|
 | C1 | `spec.instances` を 1 → 3 に変更 (GitOps ではコミット) | L | 3 インスタンスが Ready になるまで 43〜85 秒 (空に近い DB)。3 つとも別ノードに配置された。レプリケーションは async |
 | C2 | Standby の配置確認 | L | 既定の `podAntiAffinityType: preferred` は強制ではない。ノード数が足りる場合は分散したが、ノード障害後の再作成時に同居しうる。同居を許さないなら `required` が必要 (L では未検証) |
-| C3 | prod-node-1 停止を伴う placement group 追加 | H / - | **未検証** (Hetzner 固有) |
+| C3 | prod-node-1 停止を伴う placement group 追加 | - | **未検証** (Hetzner 固有。-target なしの適用は禁止、上記参照) |
 
 ## 縮退 (3 → 2 → 1)
 
@@ -105,12 +106,34 @@ kubectl delete node <失われたノード>
 
 停止したノードが戻せるなら、起動するだけでクォーラムは復帰する (E3 参照)。
 
-### 縮退後 (一部 L / 一部 -)
+### 縮退後 (一部 L / 一部 H / 一部 -)
 
 | 工程 | 環境 |
 |------|------|
-| Terraform でサーバー削除、Tailscale デバイス削除、`dr-trigger` 再有効化、inventory からのエントリ除去 | H / **未検証** (3.5) |
+| Terraform でサーバー削除、Tailscale デバイス削除 (下記) | H |
+| `dr-trigger` 再有効化、inventory からのエントリ除去 | - |
 | Pod のレプリカ数・配置制約を元に戻す (GitOps) | - (L ではアプリ未デプロイ) |
+
+### サーバーと Tailscale デバイスの削除 (H で確認)
+
+1. `local.nodes` から該当エントリを外し、`terraform apply -target='hcloud_server.nodes["<node>"]'` でサーバーを削除する。plan の削除対象が当該サーバー 1 件のみであることを必ず確認する。
+   - **`terraform destroy -target='hcloud_server.nodes["<node>"]'` は使用しない。** `dns.tf` のメール用 `cloudflare_record` 2 件と `hcloud_rdns` 2 件が `hcloud_server.nodes["prod-node-1"]` を参照しており、for_each の依存はリソース単位で追跡されるため、任意ノードの destroy -target でこれらも削除対象に入る。apply の -target は依存元を含まない。
+2. サーバー削除の直後に、該当 Tailscale デバイスを id 指定で削除し、`hostname` で選択して 0 件になることを確認してから再作成する。
+   - デバイスはサーバー削除後も残る (tailnet key が非 ephemeral のため)。残したまま同名で再作成すると、新デバイスは `<name>-1.<tailnet>.ts.net` として登録され、`ssh root@<name>` は旧デバイスに解決されて接続できない。`select(.hostname=="<name>")` (`recovery.sh` と同じ選択) も新旧 2 件にヒットする。デバイス削除後の再作成では `-1` なしで登録された。
+   - デバイス削除には書き込み権限のある資格情報が必要。terraform 用 OAuth クライアント (`TAILSCALE_OAUTH_CLIENT_ID` / `SECRET`) は一覧のみ可で、DELETE は 403 になる。API キーを使う。
+   - 環境変数 `TAILSCALE_API_KEY` が terraform 実行環境にあると、tailscale provider が `api_key conflicts with oauth_*` で失敗する。terraform 実行時はこの変数を除外する (`env -u TAILSCALE_API_KEY`)。
+3. 再作成したノードは SSH ホスト鍵が変わるため、手元の known_hosts の旧エントリを `ssh-keygen -R <name>` で消してから接続する。
+4. `recovery.sh` は `prod-node-1` のみを対象とし、追加ノードのデバイス後始末は扱わない。追加ノードのデバイス削除は本手順で行う。
+
+### 追加ノード作成直後の状態 (H で確認)
+
+- 作成から約 30〜40 秒で cloud-init の apply が完了し、`cloud-init status` は done になる。hostname は指定名、private IF (`enp7s0`) に `10.0.1.2/32` が付与される。
+- Tailscale に `tag:k3s-node` で登録される (tailnet key は reusable / 非 ephemeral / preauthorized)。
+
+### Terraform 実行時の制約 (H で確認)
+
+- placement group 導入以降、-target なしの plan / apply は `prod-node-1` の placement group 所属変更 (停止を伴う) と未作成ノードの作成を含むため実行しない。
+- 空の placement group は destroy しない。全ノードが依存先として巻き込まれる。
 
 ## CNPG の障害時挙動 (L で確認)
 
@@ -126,7 +149,7 @@ kubectl delete node <失われたノード>
 
 ## 未検証の工程
 
-- Hetzner 固有 (3.5): Tailscale デバイス削除と次回作成時の名前、`recovery.sh` の削除実装との一致、private IP 割当と cloud-init、placement group 追加に伴う prod-node-1 停止。
+- Hetzner 固有: placement group 追加に伴う prod-node-1 停止。
 - 実クラスタのアプリ (cms-db / zitadel-db のサイズ・WAL アーカイブ・バックアップ) を伴う CNPG 増減。
 - スナップショットの退避先 (オブジェクトストレージ等) と、退避したスナップショットからの復元。
 - 強制停止時の CNPG failover 短縮。
