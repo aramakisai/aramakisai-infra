@@ -120,6 +120,7 @@ email claim を読むため、`ansible/roles/zitadel-bootstrap/vars/resources.ym
 - **Cache Rule が必要な理由**: Directus の asset URL は `/assets/<uuid>` で拡張子を持たず、Cloudflare の既定キャッシュルール（拡張子ベース）の対象外になる。`api.aramakisai.com` / `stg-api.aramakisai.com` の `/assets/*` を明示的にキャッシュ対象にする Cache Rule (`cloudflare_ruleset`, phase `http_request_cache_settings`) が別途必要。
 
 ### ホストOS自動更新・K3sバージョン追従の設計判断
+- 自動再起動時刻は `os_auto_update_reboot_time`（03:30）を基準に、`groups['all']` 内の順序 × `os_auto_update_reboot_stagger_minutes`（30 分）ずつ後ろへずらす（先頭ノードは基準のまま）。server 複数台の同時再起動による etcd クォーラム喪失を避けるため。30 分は 1 台の再起動・k3s の etcd 復帰・Pod 再スケジュールに十分な余裕として置いた値。
 - ホストOSパッケージ更新は Debian 標準機能(`unattended-upgrades` + `apt-daily-upgrade.timer` + `Automatic-Reboot`)に完全委任し、Ansibleロール `os-auto-update` は設定ファイル配布と結果通知のみを担う(独自の適用/再起動ロジックは実装しない)。
 - **既知の落とし穴**: Debian 13 (trixie) の `unattended-upgrades` 2.12 では `Unattended-Upgrade::Allowed-Origins` は非推奨のlegacyキー名で、実機では `get_allowed_origins_legacy()` 内でクラッシュする。正しいキー名は `Unattended-Upgrade::Origins-Pattern` で、security origin行は `"origin=Debian,codename=${distro_codename}-security,label=Debian-Security";` の形式(`-security` サフィックス必須)。実機検証(prod-node-1)で発見・修正済み。
 - **既知の落とし穴**: Ansible `template` モジュール(Jinja2)でbashスクリプトを配布する際、bashのパラメータ展開 `${#変数名}`(文字列長取得)の `{#` がJinja2のコメント開始タグと誤認識され `Missing end of comment tag` エラーになる。文字列長取得は `wc -c` 等で代替する。
