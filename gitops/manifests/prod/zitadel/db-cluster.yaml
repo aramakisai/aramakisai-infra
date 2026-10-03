@@ -1,11 +1,12 @@
 ---
-# Zitadel 用 PostgreSQL クラスター (CloudNativePG)
+# Zitadel 用 PostgreSQL クラスター (CloudNativePG)。
 # CNPG operator (wave: -1) が先にインストールされている前提。
-# authentik-db (gitops/manifests/prod/authentik/db-cluster.yaml) と同水準の
-# instances/storage/resourcesを踏襲する。新規アプリのため既存バックアップが存在せず、
-# bootstrap は (authentikの初回投入時と同じく) initdb を使う。backup.barmanObjectStore は
-# 稼働開始後のバックアップ取得先として day 1 から設定するが、bootstrap.recovery による
-# 復元は初回投入時点では対象外 (取得済みバックアップが無いため)。
+# bootstrap.recovery は PVC が無い状態で Cluster が作られるとき (ノード全喪失後の DR) にだけ
+# 参照される。稼働中クラスターの spec.bootstrap 変更は operator が無視する
+# (webhook に変更検証が無く、primary 生成は PVC 不在かつ LatestGeneratedNode=0 のときだけ)。
+# 取得済みバックアップが無い完全な新規構築では recovery が失敗するため、その場合のみ
+# initdb (database/owner/secret は下記 recovery と同じ値) に差し替えて投入する。
+# serverName が backup 先と同一なので WAL アーカイブ空チェックは skipEmptyWalArchiveCheck で外す。
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
@@ -31,11 +32,33 @@ spec:
   enableSuperuserAccess: true
 
   bootstrap:
-    initdb:
+    recovery:
+      source: zitadel-db
       database: zitadel
       owner: zitadel
       secret:
         name: zitadel-db-credentials   # ESO が生成する Secret (external-secret.yaml)
+
+  externalClusters:
+    - name: zitadel-db
+      barmanObjectStore:
+        destinationPath: "s3://aramakisai-backups/cnpg/zitadel-db"
+        endpointURL: "https://fsn1.your-objectstorage.com"
+        serverName: zitadel-db
+        s3Credentials:
+          accessKeyId:
+            name: hetzner-os-credentials
+            key: ACCESS_KEY_ID
+          secretAccessKey:
+            name: hetzner-os-credentials
+            key: SECRET_ACCESS_KEY
+          region:
+            name: hetzner-os-credentials
+            key: REGION
+        wal:
+          compression: gzip
+        data:
+          compression: gzip
 
   backup:
     barmanObjectStore:
