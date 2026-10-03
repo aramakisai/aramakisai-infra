@@ -4,17 +4,17 @@
 
 ---
 
-- [ ] 0. 画像配信エンドポイントのエッジキャッシュ
+- [x] 0. 画像配信エンドポイントのエッジキャッシュ
   - ノード数に依存せず、本番構成への影響も小さい。ノード増設 (タスク 3 以降) を待たずに先行して適用できる
   - _Requirements: 9.9_
 
-- [ ] 0.1 Cache Rule を `/api/media/serve/` に対して実効させるようコードを変更する
+- [x] 0.1 Cache Rule を `/api/media/serve/` に対して実効させるようコードを変更する
   - `terraform/cloudflare_media_cache.tf` の `cloudflare_ruleset.directus_assets_cache` を対象に、`/api/media/serve/` への 302 が `Cache-Control` や `Set-Cookie` の有無によらず確実にキャッシュされるよう `action_parameters` を調整する (`origin_cache_control` の明示、ルール一致順の見直し等)
   - `/api/media/file/*` (実ファイル本体) の既存のキャッシュ挙動を変更しない
   - 完了状態: 変更がコミットされ、対象を限定した plan で該当ルールの差分のみが示されること
   - _Requirements: 9.1, 9.2, 9.3_
 
-- [ ] 0.2 適用しキャッシュが有効であることを検証する
+- [x] 0.2 適用しキャッシュが有効であることを検証する
   - 対象を限定して apply する
   - `/api/media/serve/{id}/{size}` への 2 回目以降のリクエストで `cf-cache-status: HIT` を確認する
   - キャッシュされた 302 をブラウザで開き、画像が正常に表示されることを確認する
