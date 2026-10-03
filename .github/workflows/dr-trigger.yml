@@ -23,6 +23,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # 最終通知時刻と連続 Healthy 回数を実行間で引き継ぐ。キャッシュが失効しても
+      # 初期状態に戻るだけ (再通知が早まる側) で、検知自体は止まらない
+      - name: Restore state
+        uses: actions/cache/restore@v4
+        with:
+          path: .dr-trigger-state.json
+          key: dr-trigger-state-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: dr-trigger-state-
+
       - name: Install Infisical CLI
         run: |
           # Cloudsmithは2026-09-16でLinux配信終了のためartifacts-cli.infisical.comへ移行済み
@@ -36,6 +45,7 @@ jobs:
           INFISICAL_CLIENT_ID: ${{ secrets.INFISICAL_CLIENT_ID }}
           INFISICAL_CLIENT_SECRET: ${{ secrets.INFISICAL_CLIENT_SECRET }}
           INFISICAL_PROJECT_ID: ${{ secrets.INFISICAL_PROJECT_ID }}
+          DR_STATE_FILE: .dr-trigger-state.json
         run: |
           # infisical run はUniversal Auth環境変数を自動認識しないため、
           # 明示的にlogin --method=universal-authでトークンを取得し --token で渡す。
@@ -47,3 +57,10 @@ jobs:
           echo "::add-mask::${INFISICAL_TOKEN}"
 
           infisical run --token="${INFISICAL_TOKEN}" --projectId="${INFISICAL_PROJECT_ID}" --env=prod -- bash .github/scripts/dr-trigger.sh
+
+      - name: Save state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .dr-trigger-state.json
+          key: dr-trigger-state-${{ github.run_id }}-${{ github.run_attempt }}
