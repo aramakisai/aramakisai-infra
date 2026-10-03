@@ -10,6 +10,7 @@
       - nfs-common   # NFS マウント用
     state: present
     update_cache: true
+    cache_valid_time: 3600
 
 # 2. K3s 設定ディレクトリを作成
 - name: K3s 設定ディレクトリを作成
@@ -35,31 +36,24 @@
 # k3s-agent.service をインストールする (agent モード) ため、server モードにならない。
 # join 先の URL は config.yaml の server: キーで指定する。
 
-# 既存クラスタのトークンを検出する。
-# etcd の bootstrap データは初回ブートストラップ時のトークンで暗号化されており、
-# 異なるトークンでインストーラを走らせると k3s.service.env が上書きされ
-# "bootstrap data already found and encrypted with different token" で起動不能になる
-# (2026-08-12 に本番障害として発生)。既存トークンを常に正としてそれを使う。
-- name: 既存の K3s サーバートークンを確認
-  ansible.builtin.slurp:
-    src: /var/lib/rancher/k3s/server/token
-  register: k3s_existing_token_raw
-  failed_when: false
+# 既存クラスタのトークン (常に正) を使う。詳細は token.yml
+- name: 使用する K3s サーバートークンを決定
+  ansible.builtin.include_tasks: token.yml
 
-- name: 使用するトークンを決定 (既存クラスタは実トークン優先、新規は変数値)
-  ansible.builtin.set_fact:
-    k3s_effective_token: >-
-      {{ (k3s_existing_token_raw.content | b64decode | trim)
-         if (k3s_existing_token_raw.content is defined)
-         else k3s_token }}
-  no_log: true
+- name: K3s の導入済みバージョンを取得
+  ansible.builtin.command: /usr/local/bin/k3s --version
+  register: k3s_installed_version
+  failed_when: false
+  changed_when: ansible_check_mode and k3s_version not in k3s_installed_version.stdout | default('')
+  check_mode: false
 
 - name: K3s をインストール
   # creates: /usr/local/bin/k3s は使わない。
   # 既にk3sがインストール済みの場合にタスク自体をスキップしてしまい、
   # k3s_versionを変更してもバージョンアップグレードが一切適用されなくなるため。
-  # get.k3s.io インストーラ自身がバージョン一致時は "Skipping installation" を出し
-  # 冪等に振る舞うため、changed_when でAnsible側の変化検知だけそれに合わせる。
+  # インストーラはバイナリ・systemd unit・env ファイルのハッシュが変わらなければ
+  # "No change detected so skipping service start" を出して再起動しない。
+  # changed はこの文言の有無で判定する。
   ansible.builtin.shell: curl -sfL https://get.k3s.io | sh -
   environment:
     INSTALL_K3S_VERSION: "{{ k3s_version }}"
@@ -68,7 +62,7 @@
   until: k3s_install_result is succeeded
   retries: 3
   delay: 10
-  changed_when: "'Skipping installation' not in k3s_install_result.stdout"
+  changed_when: "'No change detected so skipping service start' not in k3s_install_result.stdout"
 
 # 5. config.yaml の変更を K3s に反映させる (wait_for より前にハンドラーを実行)
 - name: ハンドラーを即時実行 (config 変更を反映)

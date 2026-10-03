@@ -1,0 +1,42 @@
+---
+# 既存クラスタのトークンを検出する。
+# etcd の bootstrap データは初回ブートストラップ時のトークンで暗号化されており、
+# 異なるトークンでインストーラを走らせると k3s.service.env が上書きされ
+# "bootstrap data already found and encrypted with different token" で起動不能になる
+# (2026-08-12 に本番障害として発生)。既存トークンを常に正としてそれを使う。
+- name: 既存の K3s サーバートークンを確認
+  ansible.builtin.slurp:
+    src: /var/lib/rancher/k3s/server/token
+  register: k3s_existing_token_raw
+  failed_when: false
+  check_mode: false
+
+- name: インストーラが書いた env ファイルを確認
+  ansible.builtin.slurp:
+    src: /etc/systemd/system/k3s.service.env
+  register: k3s_env_file_raw
+  failed_when: false
+  check_mode: false
+
+- name: 使用するトークンを決定 (既存クラスタは実トークン優先、新規は変数値)
+  # 実トークンは "K10<hash>::server:<secret>" 形式で保存され、初回は <secret> だけを渡している。
+  # env ファイルの値が実トークンと等価ならそのまま使い、インストーラに env ファイルの
+  # 書き換え (= k3s 再起動) をさせない。
+  ansible.builtin.set_fact:
+    k3s_effective_token: "{{ k3s_env_token if k3s_env_token_matches else (k3s_file_token if k3s_file_token else k3s_token) }}"
+  vars:
+    k3s_file_token: "{{ (k3s_existing_token_raw.content | b64decode | trim) if k3s_existing_token_raw.content is defined else '' }}"
+    k3s_env_token: >-
+      {{ ((k3s_env_file_raw.content | b64decode) | regex_findall("K3S_TOKEN='([^']*)'") | list | first | default(''))
+         if k3s_env_file_raw.content is defined else '' }}
+    k3s_env_token_matches: >-
+      {{ k3s_file_token != '' and k3s_env_token != ''
+         and (k3s_env_token == k3s_file_token or k3s_file_token.endswith('::server:' ~ k3s_env_token)) }}
+  no_log: true
+
+- name: トークンが空でないことを確認
+  # 既存トークンが無いノードで K3S_TOKEN も空だと、空トークンでクラスタを作る/参加する
+  ansible.builtin.assert:
+    that: k3s_effective_token | length > 0
+    fail_msg: "{{ inventory_hostname }} には既存の K3s トークンがありません。K3S_TOKEN を設定してください (infisical run 配下で実行)。"
+    quiet: true
