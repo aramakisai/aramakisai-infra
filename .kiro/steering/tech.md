@@ -59,7 +59,7 @@ Authentik 時代の定義は `terraform/authentik_*.tf.disabled` として残す
 ### シークレット管理
 - **ルール**: マニフェストに平文シークレットを書かない
 - **方法**: `ExternalSecret` リソースで Infisical から取得
-- **唯一の例外**: `infisical-auth` Secret のみ Ansible が直接 `kubectl apply` (ESO 自体の起動に必要なため)
+- **唯一の例外**: `infisical-auth` Secret のみ Ansible が直接作成 (ESO 自体の起動に必要なため)。同様に `cloudflared-token` と ArgoCD repo Secret (`aramakisai-infra-repo`) も Ansible が bootstrap 時に作成する
 - **既知問題への対処**: ArgoCD が「sync成功」と報告しても `ExternalSecret` の `spec.data` 配列に新規追加した要素が実際にはクラスター側で反映されない場合がある（directus/vaultwarden で複数回再発、原因未解明）。全 `ExternalSecret` に `metadata.annotations: {argocd.argoproj.io/sync-options: Replace=true}` を付与済みだが、**これ単体では直らない**（ArgoCDの差分検出自体が新規配列要素を見逃し、selfHealが同期処理を一切起動しないケースがあるため）。`spec.data` を追加・変更した場合は必ず push 後に `kubectl get externalsecret <name> -n <ns> -o jsonpath='{.metadata.generation}'` 等で実反映を確認し、未反映なら Application オブジェクトへ直接 operation patch で強制sync（[[project_argocd_stale_apply_externalsecret]] 参照）。
 
 ### ブートストラップ順序
@@ -97,6 +97,15 @@ email claim を読むため、`ansible/roles/zitadel-bootstrap/vars/resources.ym
 ### Ansible 実行タイミング
 - `null_resource` + `local-exec` は HCP Terraform リモート実行非対応のため `main.tf` でコメントアウト済み。
 - **Terraform 完了後、常に手動で Ansible を実行する**（設定変更のみの場合も同様）。
+
+### k3s-bootstrap.yml の再実行安全性
+- 稼働中クラスタに対し inventory 全ホスト・無引数で再実行でき、差分があるものだけを適用する（差分なしなら 2 回目は changed=0）。`--limit` / タグ / `--start-at-task` で非冪等タスクを避ける運用はしない。
+- 事前検査（何も変更する前に失敗する）: `DISCORD_OPS_WEBHOOK_URL` が空でない（`infisical run` 配下の目印を兼ねる）、制御ノードの HEAD が `git fetch origin main` 直後の origin/main と一致し `gitops/manifests/prod/cloudflared` と `gitops/root.yaml` に未コミット変更がない、全ノードに既存 K3s トークンがあるか `K3S_TOKEN` がある、bootstrap Secret が未作成/空なら対応する env がある。
+- bootstrap Secret（`cloudflared-token` / `infisical-auth` / `aramakisai-infra-repo`）は既存の非空値を保持する。上書きは `-e rotate_bootstrap_secrets=true` のときだけ。値は `environment:` 経由で渡し、シェル文字列に埋め込まない。
+- cloudflared と root.yaml は制御ノードの Git チェックアウトを stdin で渡して server-side apply（field manager `ansible-bootstrap`、`--force-conflicts`）し、`kubectl diff --server-side` に差分があるときだけ適用する。ArgoCD は `argocd_version` 固定で、稼働中のイメージタグがそれより新しければダウングレード防止のため中断する。
+- Cilium は `helm list` / `helm get values` の chart バージョンと values が一致すれば `helm` を実行しない。values は `cilium_values` が正本。
+- kubeconfig は `slurp` でメモリ上に受け取り、`infisical run` が注入した `$KUBECONFIG` と異なるときだけ `infisical secrets set --file`（stdin・YAML）で書く。ディスクにも argv にも載せない。リポジトリ直下の `kubeconfig` は追跡済みの無効化スタブで、playbook は触らない。
+- `--check --diff` で、K3s バージョン・Cilium・Secret 作成・マニフェスト差分・kubeconfig 登録が「changed」として見える。
 
 ### Directus schema PR の staging 事前検証 (ApplicationSet)
 - **背景**: `gitops/apps/staging/directus.yaml` は `targetRevision: main` のため、staging は PR マージ後にしかスキーマを受け取れない。一方 infra PR のマージ前チェックリスト（`aramakisai-web/.github/workflows/directus-schema-sync.yml` が生成、`scripts/check_staging_gate.py` が必須 status check として強制）は「staging での確認」を要求しており、マージ前に検証不能な構造的デッドロックがあった。

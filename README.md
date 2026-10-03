@@ -39,7 +39,7 @@ Terraform でクラウドリソースを定義し、Ansible で K3s クラスタ
 ├── terraform/          クラウドリソース定義 (Hetzner / Cloudflare / Tailscale)
 ├── ansible/            K3s クラスター初期化
 │   ├── inventory/      Tailscale MagicDNS ベースのホスト定義
-│   ├── playbooks/      k3s-bootstrap.yml (ブートストラップ手順)
+│   ├── playbooks/      k3s-bootstrap.yml (ブートストラップ手順・再実行安全) / tasks/ (共通タスク)
 │   └── roles/          k3s-server / swap (ホスト側の OOM 安全弁)
 └── gitops/             ArgoCD が管理するすべてのマニフェスト
     ├── root.yaml        App of Apps エントリーポイント

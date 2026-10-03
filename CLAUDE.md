@@ -35,6 +35,12 @@ infisical run --env=prod -- terraform apply
 # K3s ブートストラップ実行 (Terraform適用後に手動実行)
 infisical run -- ansible-playbook -i ansible/inventory/tailscale.yml ansible/playbooks/k3s-bootstrap.yml
 
+# 稼働中クラスタへの再実行前に差分を確認 (main をチェックアウトして実行。差分は changed として表示される)
+infisical run -- ansible-playbook -i ansible/inventory/tailscale.yml ansible/playbooks/k3s-bootstrap.yml --check --diff
+
+# bootstrap Secret (cloudflared-token / infisical-auth / ArgoCD repo 鍵) の上書きが必要なときだけ
+#   -e rotate_bootstrap_secrets=true を付ける (既定は既存の非空値を保持)
+
 # K3s バージョンアップ
 infisical run -- ansible-playbook -i ansible/inventory/tailscale.yml ansible/playbooks/k3s-bootstrap.yml -e "k3s_version=v1.32.3+k3s1"
 
