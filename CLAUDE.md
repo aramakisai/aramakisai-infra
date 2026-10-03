@@ -49,7 +49,14 @@ gh workflow run k3s-version-check.yml
 gh workflow run k3s-upgrade.yml
 ```
 
-### 3. K3s 操作・検証
+### 3. DR 復旧 (人の承認付き)
+```bash
+# dr-trigger は通知のみ。復旧は人が起動し、Environment `dr-recovery` の reviewer が承認する
+gh workflow run dr-recovery.yml --repo aramakisai/aramakisai-infra -f target_node=prod-node-1
+```
+`force` (生存確認ゲート上書き) は既定で無効。mailserver データのリストアは自動化していない。手順は [docs/dr-runbook.md](docs/dr-runbook.md)。
+
+### 4. K3s 操作・検証
 ```bash
 # ノード接続 (Tailscale SSH)
 ssh root@prod-node-1

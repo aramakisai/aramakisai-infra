@@ -1,0 +1,43 @@
+# mailserver データのリストア用雛形 (docs/dr-runbook.md「mailserver のリストア」)
+# ArgoCD の対象パス外に置いている。使うときは次の3つを置換し、
+# gitops/manifests/prod/mailserver/ にコピーしてコミットする。
+#   YYYYMMDD   : 新 PVC 名の日付
+#   RESTORE_ID : 過去に使っていない一意の値 (同じ値だと再リストアされない)
+#   RESTORE_AS_OF : 障害発生時刻 (RFC3339、例 2026-10-04T03:00:00Z)。必須。
+#     この時刻以前で最新のスナップショットを戻す。新クラスターの ReplicationSource が先に
+#     空のスナップショットを作っていても、それを戻さないための指定。
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mailserver-data-YYYYMMDD
+  namespace: prod
+  annotations:
+    # local-path は WaitForFirstConsumer のため、使用中の Pod が無いと mover が任意ノードに載り
+    # PV がそのノードに固定される。mailserver の nodeSelector と同じノードに先に固定する
+    volume.kubernetes.io/selected-node: prod-node-1
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: volsync.backube/v1alpha1
+kind: ReplicationDestination
+metadata:
+  name: mailserver-restore
+  namespace: prod
+spec:
+  trigger:
+    manual: RESTORE_ID
+  restic:
+    repository: mailserver-restic-secret
+    restoreAsOf: "RESTORE_AS_OF"
+    copyMethod: Direct
+    destinationPVC: mailserver-data-YYYYMMDD
+    moverSecurityContext:
+      runAsUser: 0
+      runAsGroup: 0
+      fsGroup: 0

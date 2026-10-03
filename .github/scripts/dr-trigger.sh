@@ -1,14 +1,12 @@
 #!/usr/bin/env bash
-# DR 自動復旧トリガー判定スクリプト
+# DR 障害検知スクリプト (通知のみ。復旧は dr-recovery ワークフローを人が承認付きで実行する)
 #
 # .github/workflows/dr-trigger.yml (5分毎 cron) から実行される。
-# Tailscale デバイス状態 + 複数サービスエンドポイントの疎通を複合的に評価し、
-# ノード障害と判定した場合のみ「通知 + 猶予期間オプトアウト」方式で
-# repository_dispatch (event_type: dr-recovery) を発火する。
+# Tailscale 上の実在ノードの接続状態と複数サービスエンドポイントの疎通を複合的に評価し、
+# ノード障害と判定した場合は Discord 通知と dr-incident Issue の起票/追記のみを行う。
 #
 # 単体テスト: ./scripts/test-dr-trigger-logic.sh
-#   (このファイルを source し、classify_state / is_abort_comment のみを
-#    ネットワークアクセスなしで検証する)
+#   (このファイルを source し、判定ロジックのみをネットワークアクセスなしで検証する)
 
 set -uo pipefail
 
@@ -16,9 +14,19 @@ log() { echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') [dr-trigger] $*" >&2; }
 die() { log "ERROR: $*"; exit 1; }
 
 REPO="${GITHUB_REPOSITORY:-aramakisai/aramakisai-infra}"
-TARGET_HOSTNAME="${DR_TRIGGER_TARGET_HOSTNAME:-prod-node-1}"
+# 実在ノード判定に使うホスト名パターン。Terraform/inventory の定義ではなく Tailscale 上の実デバイスを見る
+NODE_HOSTNAME_REGEX='^prod-node-[0-9]+$'
 INCIDENT_LABEL="dr-incident"
-GRACE_PERIOD_MINUTES="${DR_TRIGGER_GRACE_MINUTES:-10}"
+# 1回の実行内で連続して障害と判定された回数がこの値に達したときだけ障害として扱う
+PROBE_COUNT="${DR_TRIGGER_PROBES:-3}"
+PROBE_INTERVAL_SECONDS="${DR_TRIGGER_PROBE_INTERVAL:-30}"
+# この日数以上前に最後に見えたまま切断中のデバイスは、再作成前の残骸とみなして実在ノードに数えない
+STALE_DEVICE_SECONDS="${DR_TRIGGER_STALE_SECONDS:-172800}"
+# 継続中の障害・単体ダウンの再通知間隔と、Issue をクローズするまでの連続 Healthy 回数
+RENOTIFY_SECONDS="${DR_TRIGGER_RENOTIFY_SECONDS:-3600}"
+HEALTHY_TICKS="${DR_TRIGGER_HEALTHY_TICKS:-3}"
+# 実行間で保持する状態 (最終通知時刻・連続 Healthy 回数)。未指定なら毎回初期状態として動く
+STATE_FILE="${DR_STATE_FILE:-}"
 CURL_TIMEOUT_SECONDS=10
 CURL_RETRIES=2
 ENDPOINTS=(
@@ -28,20 +36,42 @@ ENDPOINTS=(
 )
 
 # ============================================================
-# 複合検出ロジック (Requirement 1 AC1-3, ネットワークアクセスなしでテスト可能)
+# 複合検出ロジック (ネットワークアクセスなしでテスト可能)
 # ============================================================
 
-# 引数: tailscale_online (1=オンライン / 0=オフライン / unknown=判定不能), down_count (応答なしエンドポイント数)
-# 出力: NodeFailureSuspected | SingleEndpointDown | Healthy
-# tailscale_online=unknown の場合、Tailscaleシグナルを判定から除外し
-# down_count のみで判定する (API疎通不良を誤ってノード障害扱いしないため)
-classify_state() {
-  local tailscale_online="$1" down_count="$2"
+# 実在ノードの接続状態を集約する。
+# 引数: devices API の JSON
+# 出力: 1=全ノード接続 / degraded=一部のみ切断でクォーラム (過半数) 維持 /
+#       0=全断・クォーラム喪失・ノード未検出
+# 非 ephemeral のため再作成前の旧デバイスが残るが、lastSeen が古いものは数えない。
+# スケールインで外したノードの切断デバイスは STALE_DEVICE_SECONDS 経過まで数えられるため、
+# 手順に Tailscale デバイスの削除を含めること。
+tailscale_state_from_devices() {
+  echo "$1" | jq -r --arg re "${NODE_HOSTNAME_REGEX}" --argjson stale "${STALE_DEVICE_SECONDS}" '
+    [.devices[]
+      | select((.hostname // "") | test($re))
+      | select(.connectedToControl == true
+               or ((try (now - (.lastSeen | fromdateiso8601)) catch 0) < $stale))] as $n
+    | ($n | length) as $total
+    | ([$n[] | select(.connectedToControl == true)] | length) as $online
+    | if $total == 0 or $online * 2 <= $total then "0"
+      elif $online < $total then "degraded"
+      else "1" end'
+}
 
-  if [[ "${tailscale_online}" == "0" ]]; then
+# 引数: tailscale_state (1 / degraded / 0 / unknown), down_count (応答なしエンドポイント数)
+# 出力: NodeFailureSuspected | NodeDegraded | SingleEndpointDown | Healthy
+# unknown の場合は Tailscale シグナルを除外し down_count のみで判定する
+# (API 疎通不良を誤ってノード障害扱いしないため)
+classify_state() {
+  local tailscale_state="$1" down_count="$2"
+
+  if [[ "${tailscale_state}" == "0" ]]; then
     echo "NodeFailureSuspected"
   elif [[ "${down_count}" -ge 2 ]]; then
     echo "NodeFailureSuspected"
+  elif [[ "${tailscale_state}" == "degraded" ]]; then
+    echo "NodeDegraded"
   elif [[ "${down_count}" -eq 1 ]]; then
     echo "SingleEndpointDown"
   else
@@ -49,21 +79,19 @@ classify_state() {
   fi
 }
 
-# ============================================================
-# 中止操作の権限フィルタ (Requirement 1.6, ネットワークアクセスなしでテスト可能)
-# ============================================================
-
-# 引数: author_association (OWNER/MEMBER/COLLABORATOR/NONE等), コメント本文
-# 戻り値: 0=中止操作として有効 / 1=無効
-is_abort_comment() {
-  local association="$1" body="$2"
-
-  case "${association}" in
-    OWNER | MEMBER | COLLABORATOR) ;;
-    *) return 1 ;;
-  esac
-
-  echo "${body}" | grep -qiE 'abort|中止'
+# 連続 probe の判定結果から最終状態を決める。
+# 引数: probe ごとの classify_state 結果 (古い順)
+# 出力: 最後が障害でなければその状態。障害が PROBE_COUNT 回連続したときだけ NodeFailureSuspected。
+#       それ以外 (障害が続いているが回数不足) は Pending。
+decide_final_state() {
+  local last="${!#}"
+  if [[ "${last}" != "NodeFailureSuspected" ]]; then
+    echo "${last}"
+  elif (($# >= PROBE_COUNT)); then
+    echo "NodeFailureSuspected"
+  else
+    echo "Pending"
+  fi
 }
 
 # ============================================================
@@ -81,9 +109,9 @@ fetch_tailscale_access_token() {
   echo "${response}" | jq -r '.access_token // empty'
 }
 
-# 出力: 1=オンライン / 0=オフライン・デバイス未検出 / unknown=API呼び出し失敗 (判定不能)
-check_tailscale_online() {
-  local token response online
+# 出力: tailscale_state_from_devices の値 / unknown=API呼び出し失敗 (判定不能)
+check_tailscale_state() {
+  local token response
 
   token=$(fetch_tailscale_access_token)
   if [[ -z "${token}" ]]; then
@@ -101,14 +129,8 @@ check_tailscale_online() {
     return
   fi
 
-  online=$(echo "${response}" | jq -r --arg h "${TARGET_HOSTNAME}" \
-    '[.devices[] | select(.hostname == $h) | .connectedToControl] | first // false')
-
-  if [[ "${online}" == "true" ]]; then
-    echo 1
-  else
-    echo 0
-  fi
+  # jq の失敗 (想定外の応答形式) は判定不能として扱い、障害判定に倒さない
+  tailscale_state_from_devices "${response}" || echo "unknown"
 }
 
 # 出力: 1=到達可能 / 0=到達不可 (タイムアウト+リトライ込み)
@@ -124,6 +146,20 @@ check_endpoint_up() {
   echo 0
 }
 
+# 1回分の観測。出力: "<state>|<tailscale_state>|<down_list>"
+probe_once() {
+  local tailscale_state down_count=0 down_list=() endpoint state
+  tailscale_state=$(check_tailscale_state)
+  for endpoint in "${ENDPOINTS[@]}"; do
+    if [[ "$(check_endpoint_up "${endpoint}")" -eq 0 ]]; then
+      down_count=$((down_count + 1))
+      down_list+=("${endpoint}")
+    fi
+  done
+  state=$(classify_state "${tailscale_state}" "${down_count}")
+  echo "${state}|${tailscale_state}|$(IFS=', '; echo "${down_list[*]:-}")"
+}
+
 # ============================================================
 # Discord 通知
 # ============================================================
@@ -137,23 +173,8 @@ notify_discord() {
     || log "警告: Discord 通知に失敗しました"
 }
 
-notify_discord_single_endpoint_down() {
-  local down_list="$1"
-  notify_discord "$(printf '⚠️ **DR Trigger**: 単体サービス障害を検知しました (ノード障害ではありません)\n応答なし: %s\nTailscale: オンライン\n人間による確認をお願いします (アプリ再起動など)。' "${down_list}")"
-}
-
-notify_discord_tailscale_degraded() {
-  notify_discord "⚠️ **DR Trigger**: Tailscale Devices API の呼び出しに失敗しています (TAILSCALE_API_KEY の期限切れなどをご確認ください)。判定はエンドポイント疎通のみで継続します。"
-}
-
-notify_discord_node_failure() {
-  local issue_number="$1" reason="$2"
-  # shellcheck disable=SC2016 # バッククォートはMarkdown装飾の文字リテラル (展開不要)
-  notify_discord "$(printf '🚨 **DR Trigger**: ノード障害疑いを検知しました\n理由: %s\nIssue: https://github.com/%s/issues/%s\n猶予期間 (%s分) 経過後、自動で復旧ワークフロー (repository_dispatch: dr-recovery) を発火します。\n中止する場合はIssueに `abort` または `中止` を含むコメントを付けてください (OWNER/MEMBER/COLLABORATOR 権限が必要です)。' "${reason}" "${REPO}" "${issue_number}" "${GRACE_PERIOD_MINUTES}")"
-}
-
 # ============================================================
-# GitHub Issue による状態管理 (Requirement 1.5-1.8, 単一インシデント保証)
+# GitHub Issue による記録 (open な dr-incident があれば追記のみ)
 # ============================================================
 
 ensure_incident_label() {
@@ -161,7 +182,7 @@ ensure_incident_label() {
   gh api "repos/${REPO}/labels" \
     -f name="${INCIDENT_LABEL}" \
     -f color="d73a4a" \
-    -f description="DR自動復旧トリガー: ノード障害疑いインシデント" >/dev/null
+    -f description="DR: ノード障害疑いインシデント" >/dev/null
 }
 
 find_open_incident() {
@@ -170,108 +191,47 @@ find_open_incident() {
 }
 
 create_incident_issue() {
-  local reason="$1"
-  local now
+  local detail="$1" now body
   now="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-  local title="DR: ${TARGET_HOSTNAME} ノード障害疑い (${now})"
-  local body
   # shellcheck disable=SC2016 # バッククォートはMarkdown装飾の文字リテラル (展開不要)
-  body=$(printf '## ノード障害疑い検知\n\n- 理由: %s\n- 検知時刻 (UTC): %s\n- 猶予期間: %s分\n\n猶予期間経過後、運用者の中止操作がない場合は自動で `repository_dispatch` (event_type: `dr-recovery`) を発火します。\n\n**中止する場合**: このIssueに `abort` または `中止` を含むコメントを付けるか、Issueをクローズしてください (OWNER/MEMBER/COLLABORATOR 権限が必要です)。' \
-    "${reason}" "${now}" "${GRACE_PERIOD_MINUTES}")
-
+  body=$(printf '## ノード障害疑い検知\n\n- 内容: %s\n- 検知時刻 (UTC): %s\n\n検知は通知のみです。復旧する場合は Actions の `DR Recovery` を `workflow_dispatch` で実行し、required reviewers の承認を受けてください (手順: docs/dr-runbook.md)。復旧ワークフローは冒頭で生存確認を行い、ノードが生きていれば停止します。' \
+    "${detail}" "${now}")
   ensure_incident_label
-  gh issue create --repo "${REPO}" --title "${title}" --body "${body}" \
-    --label "${INCIDENT_LABEL}" \
-    | grep -oE '[0-9]+$'
+  gh issue create --repo "${REPO}" --title "DR: ノード障害疑い (${now})" --body "${body}" \
+    --label "${INCIDENT_LABEL}" | grep -oE '[0-9]+$'
+}
+
+comment_issue() {
+  gh issue comment "$1" --repo "${REPO}" --body "$2" >/dev/null
 }
 
 close_issue_recovered() {
-  local issue_number="$1"
-  gh issue close "${issue_number}" --repo "${REPO}" \
-    --comment "全シグナルが猶予期間内に復旧したため、このインシデントをクローズします。"
+  gh issue close "$1" --repo "${REPO}" \
+    --comment "全シグナルが ${HEALTHY_TICKS} 回連続で正常だったため、このインシデントをクローズします。"
 }
 
-close_issue_aborted() {
-  local issue_number="$1"
-  gh issue close "${issue_number}" --repo "${REPO}" \
-    --comment "運用者の中止操作を確認したため、repository_dispatch を発火せずこのインシデントをクローズします。"
+state_get() {
+  local value=""
+  [[ -n "${STATE_FILE}" && -f "${STATE_FILE}" ]] && value=$(jq -r --arg k "$1" '.[$k] // empty' "${STATE_FILE}" 2>/dev/null)
+  echo "${value:-$2}"
 }
 
-close_issue_dispatched() {
-  local issue_number="$1"
-  gh issue close "${issue_number}" --repo "${REPO}" \
-    --comment "猶予期間が経過し中止操作がなかったため、repository_dispatch (dr-recovery) を発火しました。"
+state_set() {
+  [[ -n "${STATE_FILE}" ]] || return 0
+  local current='{}'
+  [[ -f "${STATE_FILE}" ]] && current=$(cat "${STATE_FILE}")
+  echo "${current}" | jq --arg k "$1" --arg v "$2" '.[$k] = $v' > "${STATE_FILE}.tmp" 2>/dev/null \
+    && mv "${STATE_FILE}.tmp" "${STATE_FILE}"
 }
 
-# author_association によるコメントベースの中止操作検出
-comment_abort_found() {
-  local issue_number="$1" comments_json count i assoc body
-  comments_json=$(gh api "repos/${REPO}/issues/${issue_number}/comments" --paginate) || return 1
-  count=$(echo "${comments_json}" | jq 'length')
-
-  for ((i = 0; i < count; i++)); do
-    assoc=$(echo "${comments_json}" | jq -r ".[${i}].author_association")
-    body=$(echo "${comments_json}" | jq -r ".[${i}].body")
-    if is_abort_comment "${assoc}" "${body}"; then
-      return 0
-    fi
-  done
-  return 1
+# 最終通知時刻からの経過で再通知を間引く (cron の遅延・欠落で分判定がずれるのを避ける)
+should_notify() {
+  local last
+  last=$(state_get "notified_$1" 0)
+  (($(date -u +%s) - last >= RENOTIFY_SECONDS))
 }
 
-# Issue クローズによる中止操作検出。
-# GitHub API は close 操作の actor に author_association を直接提供しないため、
-# 同等の権限判定として collaborator permission (admin/write) を使う。
-issue_closed_by_authorized_user() {
-  local issue_number="$1" issue_json state closer permission
-  issue_json=$(gh api "repos/${REPO}/issues/${issue_number}") || return 1
-  state=$(echo "${issue_json}" | jq -r '.state')
-  [[ "${state}" == "closed" ]] || return 1
-
-  closer=$(echo "${issue_json}" | jq -r '.closed_by.login // empty')
-  [[ -n "${closer}" ]] || return 1
-  [[ "${closer}" == "github-actions[bot]" ]] && return 1
-
-  permission=$(gh api "repos/${REPO}/collaborators/${closer}/permission" --jq '.permission' 2>/dev/null || echo "none")
-  [[ "${permission}" == "admin" || "${permission}" == "write" ]]
-}
-
-abort_requested() {
-  local issue_number="$1"
-  comment_abort_found "${issue_number}" || issue_closed_by_authorized_user "${issue_number}"
-}
-
-elapsed_minutes_since() {
-  local created_at="$1"
-  echo $(( ($(date -u +%s) - $(date -u -d "${created_at}" +%s)) / 60 ))
-}
-
-dispatch_recovery() {
-  gh api "repos/${REPO}/dispatches" -f event_type="dr-recovery" >/dev/null
-}
-
-# 既に open な dr-incident Issue を、猶予期間判定・中止判定の対象として処理する
-process_existing_incident() {
-  local issue_number="$1"
-
-  if abort_requested "${issue_number}"; then
-    log "中止操作を検出しました (Issue #${issue_number})。dispatch を発火しません。"
-    close_issue_aborted "${issue_number}"
-    return
-  fi
-
-  local created_at elapsed
-  created_at=$(gh issue view "${issue_number}" --repo "${REPO}" --json createdAt --jq '.createdAt')
-  elapsed=$(elapsed_minutes_since "${created_at}")
-
-  if ((elapsed >= GRACE_PERIOD_MINUTES)); then
-    log "猶予期間 (${GRACE_PERIOD_MINUTES}分) が経過しました (経過: ${elapsed}分)。repository_dispatch を発火します。"
-    dispatch_recovery
-    close_issue_dispatched "${issue_number}"
-  else
-    log "猶予期間内です (経過: ${elapsed}分 / ${GRACE_PERIOD_MINUTES}分)。待機します。"
-  fi
-}
+mark_notified() { state_set "notified_$1" "$(date -u +%s)"; }
 
 # ============================================================
 # メイン処理
@@ -284,54 +244,71 @@ main() {
     [[ -n "${!var:-}" ]] || die "必須環境変数が未設定です: ${var}"
   done
 
-  local tailscale_online down_count=0 down_list=()
-  tailscale_online=$(check_tailscale_online)
-
-  # Tailscale API障害はActionsログにしか残らず気づきにくいため通知する。
-  # cronは5分毎なので毎回通知するとスパムになるため、毎時1回程度に間引く。
-  if [[ "${tailscale_online}" == "unknown" && "$(date -u +%-M)" -lt 5 ]]; then
-    notify_discord_tailscale_degraded
-  fi
-
-  local endpoint up
-  for endpoint in "${ENDPOINTS[@]}"; do
-    up=$(check_endpoint_up "${endpoint}")
-    if [[ "${up}" -eq 0 ]]; then
-      down_count=$((down_count + 1))
-      down_list+=("${endpoint}")
-    fi
+  local states=() result state ts_state down_list i
+  for ((i = 1; i <= PROBE_COUNT; i++)); do
+    result=$(probe_once)
+    state="${result%%|*}"
+    ts_state=$(echo "${result}" | cut -d'|' -f2)
+    down_list="${result##*|}"
+    states+=("${state}")
+    log "probe ${i}/${PROBE_COUNT}: ${state} (tailscale=${ts_state}, down=[${down_list}])"
+    [[ "${state}" == "NodeFailureSuspected" ]] || break
+    ((i < PROBE_COUNT)) && sleep "${PROBE_INTERVAL_SECONDS}"
   done
 
-  local state down_list_str
-  down_list_str=$(IFS=', '; echo "${down_list[*]}")
-  state=$(classify_state "${tailscale_online}" "${down_count}")
-  log "判定結果: ${state} (tailscale_online=${tailscale_online}, down_count=${down_count}, down=[${down_list_str}])"
+  # Tailscale API障害はActionsログにしか気づけないため通知する (再通知は間引く)
+  if [[ "${ts_state}" == "unknown" ]] && should_notify tailscale_unknown; then
+    notify_discord "⚠️ **DR Trigger**: Tailscale Devices API の呼び出しに失敗しています (OAuth クライアントの失効などをご確認ください)。判定はエンドポイント疎通のみで継続します。"
+    mark_notified tailscale_unknown
+  fi
 
-  local existing_issue
-  existing_issue=$(find_open_incident)
+  local final existing_issue detail lookup_ok=1
+  final=$(decide_final_state "${states[@]}")
+  detail="state=${final}, tailscale=${ts_state}, down_endpoints=[${down_list}]"
+  log "最終判定: ${final} (${detail})"
 
-  case "${state}" in
+  # 一覧取得の失敗を「Issue なし」と取り違えると重複起票になるため、失敗時は起票・クローズしない
+  existing_issue=$(find_open_incident) || { lookup_ok=0; existing_issue=""; log "警告: dr-incident Issue の検索に失敗しました。起票・クローズを行いません"; }
+
+  if [[ "${final}" != "Healthy" ]]; then
+    state_set healthy_streak 0
+  fi
+
+  case "${final}" in
     Healthy)
-      if [[ -n "${existing_issue}" ]]; then
+      local streak=$(($(state_get healthy_streak 0) + 1))
+      state_set healthy_streak "${streak}"
+      if [[ -n "${existing_issue}" ]] && ((streak >= HEALTHY_TICKS)); then
         close_issue_recovered "${existing_issue}"
       fi
-      log "正常: 何もしません"
       ;;
 
-    SingleEndpointDown)
-      notify_discord_single_endpoint_down "${down_list_str}"
-      if [[ -n "${existing_issue}" ]]; then
-        process_existing_incident "${existing_issue}"
+    Pending)
+      log "障害判定が ${PROBE_COUNT} 回連続に達していないため通知しません"
+      ;;
+
+    SingleEndpointDown | NodeDegraded)
+      if should_notify "${final}"; then
+        notify_discord "$(printf '⚠️ **DR Trigger**: ノード全体の障害ではありません (%s)\n%s\n人間による確認をお願いします。' "${final}" "${detail}")"
+        mark_notified "${final}"
       fi
       ;;
 
     NodeFailureSuspected)
-      if [[ -z "${existing_issue}" ]]; then
-        existing_issue=$(create_incident_issue "Tailscale offline=$((1 - tailscale_online)), down_endpoints=[${down_list_str}]")
-        notify_discord_node_failure "${existing_issue}" "Tailscaleオフラインまたは複数エンドポイント同時ダウン"
-        log "新規インシデントを作成し、猶予期間を開始しました (Issue #${existing_issue})"
-      else
-        process_existing_incident "${existing_issue}"
+      if [[ "${lookup_ok}" == "0" ]]; then
+        if should_notify node_failure; then
+          notify_discord "$(printf '🚨 **DR Trigger**: ノード障害疑いを検知しました (%s)\nIssue の検索に失敗したため起票していません。Actions のログを確認してください。' "${detail}")"
+          mark_notified node_failure
+        fi
+      elif [[ -z "${existing_issue}" ]]; then
+        existing_issue=$(create_incident_issue "${detail}")
+        notify_discord "$(printf '🚨 **DR Trigger**: ノード障害疑いを検知しました (%s)\nIssue: https://github.com/%s/issues/%s\n自動復旧は行いません。復旧する場合は Actions の DR Recovery を実行し承認してください (docs/dr-runbook.md)。' "${detail}" "${REPO}" "${existing_issue}")"
+        mark_notified node_failure
+        log "新規インシデントを作成しました (Issue #${existing_issue})"
+      elif should_notify node_failure; then
+        comment_issue "${existing_issue}" "障害継続中: ${detail} ($(date -u '+%Y-%m-%dT%H:%M:%SZ'))"
+        notify_discord "$(printf '🚨 **DR Trigger**: ノード障害疑いが継続しています (%s)\nIssue: https://github.com/%s/issues/%s' "${detail}" "${REPO}" "${existing_issue}")"
+        mark_notified node_failure
       fi
       ;;
   esac
