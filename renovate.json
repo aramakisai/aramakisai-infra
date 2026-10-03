@@ -44,6 +44,13 @@
         "ghcr.io/goauthentik/ldap"
       ],
       "enabled": false
+    },
+    {
+      "description": "CNPG Cluster は PostgreSQL 16 で稼働しておりメジャーアップグレードは別途計画するため、クライアントイメージも 16 系に留める",
+      "matchPackageNames": [
+        "ghcr.io/cloudnative-pg/postgresql"
+      ],
+      "allowedVersions": "<17"
     }
   ]
 }
