@@ -1,0 +1,15 @@
+# 検証専用。docker connection でコンテナに直接入る。ansible_host はコンテナ名 (docker network 内で名前解決でき、MagicDNS の代用)。
+all:
+  children:
+    k3s_server:
+      hosts:
+        sv-node-1: {ansible_host: sv-node-1, k3s_role: server, k3s_cluster_init: true, k3s_private_ip: 10.0.1.1}
+    k3s_server_worker:
+      hosts:
+        sv-node-2: {ansible_host: sv-node-2, k3s_role: server, k3s_private_ip: 10.0.1.2}
+        sv-node-3: {ansible_host: sv-node-3, k3s_role: server, k3s_private_ip: 10.0.1.3}
+  vars:
+    ansible_connection: community.docker.docker
+    ansible_python_interpreter: /usr/bin/python3
+    k3s_version: v1.35.5+k3s1
+    k3s_token: "{{ lookup('env', 'K3S_TOKEN') }}"
