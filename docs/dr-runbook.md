@@ -88,7 +88,7 @@ Actions の実行画面で reviewer が **Review deployments** から承認す�
      停止からの復帰: Ansible は流さず、ノードが k3s で Ready に戻るまで待機 (最大10分)
 5. 不在・force の経路のみ: ansible-playbook k3s-bootstrap.yml を対象ノードに限定して実行 (最大40分)
      (cluster-init は空の etcd から作り直す。etcd スナップショットは取得していない)
-     Ansible の Infisical 書込 (KUBECONFIG 登録) は DR 専用 identity で行い、完了後に Infisical から
+     Ansible の Infisical 書込 (KUBECONFIG 登録) は運用用 identity (OPS_INFISICAL_*) で行い、完了後に Infisical から
      kubeconfig を取得し直す (取得失敗は停止)
 6. infisical-auth / Deploy Key の空チェックと自己修復 (ESO 用の認証情報から作成)
 7. ArgoCD の Application が Healthy になるまで待機 (replicas=0 のワークロードだけを持つ凍結中アプリは除外、最大20分、
@@ -344,16 +344,17 @@ Terraform provider・dr-trigger・recovery.sh は同じキー名の OAuth クラ
 
 ACL を Terraform で管理する場合は `policy_file` スコープも必要。Admin console の Settings → OAuth clients で作成し、値を Infisical (`prod`) の同名キーへ投入する。`tailscale_oauth_client` による Terraform 管理は、provider 自身の認証に使うクライアントを自身で作る鶏卵問題があり、発行されたシークレットが state に残るため採用していない (最初の1つは手動作成が必須)。
 
-### DR 専用 Infisical machine identity
+### 運用用 Infisical machine identity (OPS_INFISICAL_*)
 
 `k3s-bootstrap.yml` は新しい kubeconfig を Infisical の KUBECONFIG に書き込む。既存の CI 用 identity は
-prod 読取専用で書込が 403 になり、再作成時に bootstrap が最後まで進まない。復旧ワークフローだけが使う
-専用の machine identity (Universal Auth) を作る。Infisical の identity は Terraform 管理外のため手動で作成する。
+prod 読取専用で書込が 403 になり、再作成時に bootstrap が最後まで進まない。kubeconfig の書込は、DR と
+k3s-upgrade で共用する運用用の machine identity (Universal Auth) で行う。`INFISICAL_CLIENT_ID/SECRET` は
+Infisical からの読取用 CI identity のまま。Infisical の identity は Terraform 管理外のため手動で作成する。
 
 - 権限: prod の全シークレット読取 (復旧が `infisical run` で注入する) + `KUBECONFIG` の作成・更新のみ。それ以外の書込は付けない。
-- GitHub Secrets に `DR_INFISICAL_CLIENT_ID` / `DR_INFISICAL_CLIENT_SECRET` として登録する (dr-recovery.yml だけが参照)。
+- GitHub Secrets に `OPS_INFISICAL_CLIENT_ID` / `OPS_INFISICAL_CLIENT_SECRET` として登録する (dr-recovery.yml と k3s-upgrade.yml が参照)。
 - ESO 用の認証情報 (`ESO_INFISICAL_CLIENT_ID` / `ESO_INFISICAL_CLIENT_SECRET`、Infisical `prod` に保存) とは分ける。
-  infisical-auth Secret はこの ESO 用の値から作り、DR 専用 identity は ESO に渡さない。
+  infisical-auth Secret はこの ESO 用の値から作り、運用用 identity は ESO に渡さない。
 
 ### GitHub Actions Secrets (要設定)
 
@@ -363,8 +364,8 @@ prod 読取専用で書込が 403 になり、再作成時に bootstrap が最�
 |-----------|------|------------------|
 | `INFISICAL_CLIENT_ID` | Infisical Machine Identity Client ID (CI 用、読取) | dr-trigger.yml |
 | `INFISICAL_CLIENT_SECRET` | Infisical Machine Identity Client Secret (CI 用、読取) | dr-trigger.yml |
-| `DR_INFISICAL_CLIENT_ID` | DR 専用 Machine Identity Client ID (prod 読取 + KUBECONFIG 書込) | dr-recovery.yml |
-| `DR_INFISICAL_CLIENT_SECRET` | DR 専用 Machine Identity Client Secret | dr-recovery.yml |
+| `OPS_INFISICAL_CLIENT_ID` | 運用用 Machine Identity Client ID (prod 読取 + KUBECONFIG 書込のみ。DR と k3s-upgrade で共用) | dr-recovery.yml / k3s-upgrade.yml |
+| `OPS_INFISICAL_CLIENT_SECRET` | 運用用 Machine Identity Client Secret | dr-recovery.yml / k3s-upgrade.yml |
 | `INFISICAL_PROJECT_ID` | Infisical プロジェクト ID | dr-trigger.yml / dr-recovery.yml |
 | `TS_OAUTH_CLIENT_ID` | Tailscale OAuth Client ID (tag:ci 用、ランナーの tailnet 参加) | dr-recovery.yml |
 | `TS_OAUTH_SECRET` | Tailscale OAuth Client Secret (tag:ci 用) | dr-recovery.yml |

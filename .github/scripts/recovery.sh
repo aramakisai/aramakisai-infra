@@ -19,7 +19,7 @@
 # Ansible を流す経路は冪等化済みの playbook (ansible/playbooks/tasks/ensure_secret.yml) が前提。
 # 無ければ破壊的操作の前に停止する。
 #
-# Infisical は DR 専用 machine identity (DR_INFISICAL_CLIENT_ID/SECRET: prod 読取 + KUBECONFIG 書込) を使う。
+# Infisical は運用用 machine identity (OPS_INFISICAL_CLIENT_ID/SECRET: prod 読取 + KUBECONFIG 書込) を使う。
 # メールデータのリストアは自動化しない (docs/dr-runbook.md)。
 #
 # 必須入力: DR_TARGET_NODE (例: prod-node-1)
@@ -455,11 +455,11 @@ ansible_ready() {
   [[ -f "${REPO_ROOT}/ansible/playbooks/tasks/ensure_secret.yml" ]]
 }
 
-# DR 専用 identity で Infisical のアクセストークンを取得する。失敗は呼び出し側で fail にする。
+# 運用用 identity で Infisical のアクセストークンを取得する。失敗は呼び出し側で fail にする。
 dr_infisical_token() {
   local token
   token=$(infisical login --method=universal-auth \
-    --client-id="${DR_INFISICAL_CLIENT_ID}" --client-secret="${DR_INFISICAL_CLIENT_SECRET}" \
+    --client-id="${OPS_INFISICAL_CLIENT_ID}" --client-secret="${OPS_INFISICAL_CLIENT_SECRET}" \
     --silent --plain 2>/dev/null) || return 1
   [[ -n "${token}" ]] || return 1
   echo "::add-mask::${token}" >&2
@@ -469,7 +469,7 @@ dr_infisical_token() {
 # bootstrap が Infisical に登録した kubeconfig を取得し直す。値は変数に受けるだけで出力しない。
 refresh_kubeconfig() {
   local token kubeconfig
-  token=$(dr_infisical_token) || die "DR 用 Infisical identity でのログインに失敗しました"
+  token=$(dr_infisical_token) || die "運用用 Infisical identity でのログインに失敗しました"
   kubeconfig=$(infisical secrets get KUBECONFIG --env=prod --projectId="${INFISICAL_PROJECT_ID}" \
     --token="${token}" --plain 2>/dev/null) || die "Infisical から KUBECONFIG を取得できませんでした"
   [[ -n "${kubeconfig}" ]] || die "Infisical の KUBECONFIG が空です"
@@ -480,14 +480,15 @@ refresh_kubeconfig() {
 run_ansible() {
   local node="$1"
   record "Ansible k3s-bootstrap を ${node} に限定して実行します"
-  # playbook 内の Infisical 書込 (KUBECONFIG 登録) は INFISICAL_CLIENT_ID/SECRET でログインするため
-  # DR 専用 identity を渡す。ESO 用の認証情報 (ESO_INFISICAL_CLIENT_ID/SECRET) は prod から注入済みの値を使う。
+  # playbook 内の Infisical 書込 (KUBECONFIG 登録) は運用用 identity (OPS_INFISICAL_*) でログインする。
+  # INFISICAL_CLIENT_ID/SECRET は prod から注入済みの読取用 CI identity のまま、
+  # ESO 用の認証情報 (ESO_INFISICAL_CLIENT_ID/SECRET) も注入済みの値を使う。
   ANSIBLE_HOST_KEY_CHECKING=False \
     K3S_TOKEN="${K3S_TOKEN}" \
     CLOUDFLARE_TUNNEL_TOKEN="${CLOUDFLARE_TUNNEL_TOKEN}" \
     CLOUDFLARE_TUNNEL_ID="${CLOUDFLARE_TUNNEL_ID}" \
-    INFISICAL_CLIENT_ID="${DR_INFISICAL_CLIENT_ID}" \
-    INFISICAL_CLIENT_SECRET="${DR_INFISICAL_CLIENT_SECRET}" \
+    OPS_INFISICAL_CLIENT_ID="${OPS_INFISICAL_CLIENT_ID}" \
+    OPS_INFISICAL_CLIENT_SECRET="${OPS_INFISICAL_CLIENT_SECRET}" \
     INFISICAL_PROJECT_ID="${INFISICAL_PROJECT_ID}" \
     ARGOCD_GITHUB_DEPLOY_KEY="${ARGOCD_GITHUB_DEPLOY_KEY}" \
     timeout 2400 ansible-playbook -i "${DR_ANSIBLE_INVENTORY}" --limit "${node}" \
@@ -596,7 +597,7 @@ wait_cnpg_healthy() {
 
 # 待機より前に実行する。ESO が動かないと ArgoCD/CNPG の healthy 待機自体が成立しないため。
 # infisical-auth は ESO 専用の認証情報 (ESO_INFISICAL_CLIENT_ID/SECRET) から作る。
-# DR 専用 identity (DR_INFISICAL_*) は ESO に渡さない。
+# 運用用 identity (OPS_INFISICAL_*) は ESO に渡さない。
 repair_bootstrap_secrets() {
   local client_id key_len
   client_id=$(kubectl_r get secret infisical-auth -n argocd -o jsonpath='{.data.clientId}' 2>/dev/null | base64 -d || true)
@@ -664,7 +665,7 @@ main() {
   local vars=()
   if [[ "${DR_LOCAL_TEST}" != "1" ]]; then
     vars+=(DR_TARGET_NODE K3S_TOKEN ARGOCD_GITHUB_DEPLOY_KEY CLOUDFLARE_TUNNEL_TOKEN CLOUDFLARE_TUNNEL_ID
-      DR_INFISICAL_CLIENT_ID DR_INFISICAL_CLIENT_SECRET INFISICAL_PROJECT_ID)
+      OPS_INFISICAL_CLIENT_ID OPS_INFISICAL_CLIENT_SECRET INFISICAL_PROJECT_ID)
   fi
   if [[ "${DR_SKIP_INFRA}" != "1" ]]; then
     vars+=(HCLOUD_TOKEN TAILSCALE_OAUTH_CLIENT_ID TAILSCALE_OAUTH_CLIENT_SECRET TAILSCALE_TAILNET TFC_API_TOKEN TFC_WORKSPACE_ID KUBECONFIG)

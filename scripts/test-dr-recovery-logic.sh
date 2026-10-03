@@ -213,8 +213,8 @@ assert_eq "メール DNS run のスコープ逸脱 -> discard し apply しな�
 assert_eq "prod-node-1 以外は DNS 更新しない" "" "$(calls)"
 
 echo ""
-echo "=== Infisical (DR identity)・kubeconfig 取得は失敗で止まる ==="
-DR_INFISICAL_CLIENT_ID=id DR_INFISICAL_CLIENT_SECRET=sec INFISICAL_PROJECT_ID=proj
+echo "=== Infisical (運用用 identity)・kubeconfig 取得は失敗で止まる ==="
+OPS_INFISICAL_CLIENT_ID=id OPS_INFISICAL_CLIENT_SECRET=sec INFISICAL_PROJECT_ID=proj
 infisical() {
   echo "infisical $1 $2" >>"${CALLS}"
   case "$1" in
@@ -269,8 +269,8 @@ assert_eq "正常な Secret は触らない" "0" "$(grep -c "create secret" "${C
 assert_eq "infisical-auth が空で ESO_* 未設定 -> 修復せず異常終了" 1 $?
 : >"${CALLS}"; ESO_INFISICAL_CLIENT_ID=eso-id ESO_INFISICAL_CLIENT_SECRET=eso-sec INFISICAL_CLIENT_ID=ci-id
 (repair_bootstrap_secrets) >/dev/null 2>&1
-assert_eq "ESO 用の値で作成し DR identity / CI identity は使わない" "1" "$(grep -c "clientId=eso-id" "${CALLS}")"
-assert_eq "DR identity の値を infisical-auth に使わない" "0" "$(grep -c "clientId=id " "${CALLS}")"
+assert_eq "ESO 用の値で作成し 運用用 identity / CI identity は使わない" "1" "$(grep -c "clientId=eso-id" "${CALLS}")"
+assert_eq "運用用 identity の値を infisical-auth に使わない" "0" "$(grep -c "clientId=id " "${CALLS}")"
 
 echo ""
 echo "=== main: 経路ごとの実行順 ==="
@@ -288,7 +288,7 @@ hcloud_peer_servers() { echo "${PEERS}"; }
 ansible_ready() { return "${ANSIBLE_READY_RC}"; }
 ANSIBLE_READY_RC=0
 export DR_TARGET_NODE=prod-node-1 K3S_TOKEN=x ARGOCD_GITHUB_DEPLOY_KEY=x CLOUDFLARE_TUNNEL_TOKEN=x CLOUDFLARE_TUNNEL_ID=x
-export DR_INFISICAL_CLIENT_ID=x DR_INFISICAL_CLIENT_SECRET=x INFISICAL_PROJECT_ID=x HCLOUD_TOKEN=x
+export OPS_INFISICAL_CLIENT_ID=x OPS_INFISICAL_CLIENT_SECRET=x INFISICAL_PROJECT_ID=x HCLOUD_TOKEN=x
 export TAILSCALE_OAUTH_CLIENT_ID=x TAILSCALE_OAUTH_CLIENT_SECRET=x TAILSCALE_TAILNET=x TFC_API_TOKEN=x TFC_WORKSPACE_ID=x KUBECONFIG=x
 export GH_TOKEN=dummy ESO_INFISICAL_CLIENT_ID=eso ESO_INFISICAL_CLIENT_SECRET=eso
 DR_ANSIBLE_INVENTORY="${ROOT}/ansible/inventory/tailscale.yml"
