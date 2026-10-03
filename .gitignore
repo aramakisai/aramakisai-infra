@@ -32,9 +32,6 @@ __pycache__/
 
 # Kubernetes
 
-# Infisical
-.infisical.json
-
 # Antigravity
 .antigravitycli/
 

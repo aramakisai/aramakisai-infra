@@ -103,7 +103,7 @@ curl
 # ログイン (ブラウザが開くので認証します)
 infisical login
 
-# プロジェクトID等はリポジトリ直下の .infisical.json から自動的に読み込まれます
+# プロジェクトID・既定環境(prod)はコミット済みの .infisical.json (資格情報なし) から読み込まれるため infisical init は不要
 ```
 
 ### 2. Terraform Cloud 設定
