@@ -38,6 +38,9 @@ infisical run -- ansible-playbook -i ansible/inventory/tailscale.yml ansible/pla
 # 稼働中クラスタへの再実行前に差分を確認 (main をチェックアウトして実行。差分は changed として表示される)
 infisical run -- ansible-playbook -i ansible/inventory/tailscale.yml ansible/playbooks/k3s-bootstrap.yml --check --diff
 
+# kubeconfig の Infisical 登録には OPS_INFISICAL_CLIENT_ID/SECRET (運用用 identity、Infisical prod にも保存) が必要。
+#   プロジェクト ID は env INFISICAL_PROJECT_ID 優先、無ければ .infisical.json の workspaceId
+
 # bootstrap Secret (cloudflared-token / infisical-auth / ArgoCD repo 鍵) の上書きが必要なときだけ
 #   -e rotate_bootstrap_secrets=true (全件) または -e '{"rotate_bootstrap_secrets": ["infisical-auth"]}' (個別) を付ける
 #   (既定は既存の非空値を保持)

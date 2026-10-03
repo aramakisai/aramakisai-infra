@@ -25,6 +25,10 @@
   gather_facts: false
   vars:
     repo_root: "{{ playbook_dir }}/../.."
+    # env を優先し、無ければコミット済みの .infisical.json (資格情報なし) を使う
+    infisical_project_id: >-
+      {{ lookup('env', 'INFISICAL_PROJECT_ID')
+         or ((lookup('ansible.builtin.file', playbook_dir ~ '/../../.infisical.json', errors='ignore') or '{}') | from_json).workspaceId | default('') }}
     git_applied_paths:
       - gitops/manifests/prod/cloudflared
       - gitops/root.yaml
@@ -40,6 +44,12 @@
           ansible.builtin.assert:
             that: lookup('env', 'DISCORD_OPS_WEBHOOK_URL') | length > 0
             fail_msg: DISCORD_OPS_WEBHOOK_URL が空です。infisical run --env=prod -- ansible-playbook ... で実行してください。
+            quiet: true
+
+        - name: Infisical プロジェクト ID が解決できることを確認
+          ansible.builtin.assert:
+            that: infisical_project_id | length > 0
+            fail_msg: INFISICAL_PROJECT_ID も .infisical.json の workspaceId も取得できません。
             quiet: true
 
         - name: origin/main を取得
@@ -463,6 +473,10 @@
   hosts: k3s_server
   run_once: true
   become: true
+  vars:
+    infisical_project_id: >-
+      {{ lookup('env', 'INFISICAL_PROJECT_ID')
+         or ((lookup('ansible.builtin.file', playbook_dir ~ '/../../.infisical.json', errors='ignore') or '{}') | from_json).workspaceId | default('') }}
   tasks:
     - name: kubeconfig を取得 (メモリ上のみ。cluster-admin 資格情報をディスクに残さない)
       ansible.builtin.slurp:
@@ -500,11 +514,9 @@
         that:
           - lookup('env', 'OPS_INFISICAL_CLIENT_ID') | length > 0
           - lookup('env', 'OPS_INFISICAL_CLIENT_SECRET') | length > 0
-          - lookup('env', 'INFISICAL_PROJECT_ID') | length > 0
         fail_msg: >-
           kubeconfig が Infisical の登録値と異なるため書き込みが必要ですが、OPS_INFISICAL_CLIENT_ID /
-          OPS_INFISICAL_CLIENT_SECRET (運用用 identity: prod 読取 + KUBECONFIG 書込) または
-          INFISICAL_PROJECT_ID が未設定です。CI 用の読取専用 identity は 403 になります。
+          OPS_INFISICAL_CLIENT_SECRET (運用用 identity: prod 読取 + KUBECONFIG 書込) が未設定です。CI 用の読取専用 identity は 403 になります。
         quiet: true
       delegate_to: localhost
       become: false
@@ -544,6 +556,8 @@
           exit $rc
         executable: /bin/bash
         stdin: "{{ {'KUBECONFIG': kubeconfig_fetched} | to_json }}"
+      environment:
+        INFISICAL_PROJECT_ID: "{{ infisical_project_id }}"
       register: kubeconfig_register
       failed_when: false
       changed_when: kubeconfig_register.rc == 0
