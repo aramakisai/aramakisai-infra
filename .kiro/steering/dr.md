@@ -32,7 +32,9 @@
 - **Infisical の書込は運用用 machine identity (DR と k3s-upgrade で共用)** (`OPS_INFISICAL_CLIENT_ID/SECRET`: prod 読取 + KUBECONFIG 書込)。
   infisical-auth は ESO 用 (`ESO_INFISICAL_CLIENT_ID/SECRET`) から作り、運用用 identity は ESO に渡さない
 - **メールデータのリストアは自動化しない**: mailserver Application の selfHeal が replicas=0 を戻して稼働中 PVC に書込むため。
-  人が判断して `docs/dr-runbook.md` の手順で実施する
+  稼働中 PVC には書かず、新名の plain PVC + ReplicationDestination (`copyMethod: Direct`) へリストアし、RD 削除 →
+  `claimName` / `sourcePVC` の切替をコミットだけで行う (`docs/dr-runbook.md`、雛形は `docs/templates/mailserver-restore.yaml`)。
+  RD を常設しない (再作成で `lastManualSync` が失われ再リストアが走る)。volume populator は VolSync 0.9.1 + local-path では不可
 - **手動手順は例外**: ワークフローが失敗した場合のフォールバックとして `docs/dr-runbook.md` の「手動フォールバック」を使う
 - **検出スクリプト**: `.github/scripts/dr-trigger.sh` (ユニットテスト: `scripts/test-dr-trigger-logic.sh`)
 - **復旧スクリプト**: `.github/scripts/recovery.sh` (ユニットテスト: `scripts/test-dr-recovery-logic.sh`)

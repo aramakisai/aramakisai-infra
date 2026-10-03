@@ -229,21 +229,62 @@ kubectl --kubeconfig=/tmp/kubeconfig-dr \
 '
 ```
 
-### ステップ 6: mailserver のリストア (人が判断して実施)
+### ステップ 6: mailserver のリストア (人が判断して実施、コミットだけで完結)
 
-自動化していない。mailserver Application は `automated.selfHeal` のため、`kubectl scale` で停止しても ArgoCD が
-replicas を戻し、稼働中の PVC に VolSync が書き込んでしまう。実施する場合は次を守る。
+自動化していない。稼働中の PVC には書き込まない。**新名の PVC** にリストアしてから StatefulSet の参照を切り替える。
+クラスタへの直接操作 (scale / patch / Application の sync 停止) は不要で、すべて Git のコミットと ArgoCD の sync で進める。
+`mailserver` Application は `automated.selfHeal` のため、`kubectl scale` や稼働中 PVC への直接リストアは使わない。
 
-1. 空の PVC で mailserver が起動し、新着メールを受け始めていないか確認する (受けていれば、その分はリストアで失われる)。
-2. `mailserver` Application の自動 sync を止める (`argocd app set mailserver --sync-policy none`)。App of Apps 側の selfHeal が戻す場合があるため、戻っていないことを `argocd app get mailserver` で確認する。
-3. StatefulSet を replicas=0 にして Pod の終了を確認してから、`ReplicationDestination` (`copyMethod: Direct`、
-   `destinationPVC: mailserver-data`、`repository: mailserver-restic-secret`、`trigger.manual` に新しい値) を適用し、
-   `status.latestMoverStatus.result` が `Successful` になるまで待つ。
-4. `ReplicationDestination` を削除し、replicas を戻し、自動 sync を戻す (`argocd app set mailserver --sync-policy automated --self-heal`)。
+雛形: `docs/templates/mailserver-restore.yaml` (PVC + ReplicationDestination。ArgoCD の対象パス外)。
+mailserver の PVC 名は `gitops/manifests/prod/mailserver/` の3か所 (`pvc.yaml` の名前、`statefulset.yaml` の `claimName`、
+`replication-source.yaml` の `sourcePVC`) で参照されている。以降、現在の名前を `<旧>`、新しい名前を
+`mailserver-data-<YYYYMMDD>` (`<新>`) と書く。
 
-PVC 作成時に VolSync の volume populator (`dataSourceRef`) で中身を入れる GitOps 方式は、既存の稼働中 PVC に
-`dataSourceRef` を足せない (PVC の spec は作成後に変更不可で ArgoCD の sync が失敗する) うえ、StorageClass が `local-path` で
-populator の対象になるか未確認のため、現状の構成では導入していない。
+**手順 (各行が1コミット、sync 後に確認してから次へ)**
+
+1. **PVC と RD を追加**: 雛形の PVC (`<新>`) と ReplicationDestination (`destinationPVC: <新>`、`trigger.manual` に過去に
+   使っていない一意の値) を `gitops/manifests/prod/mailserver/` に追加してコミットする。StatefulSet は変更しないため
+   sync-wave の指定は不要 (RD の mover Pod が PVC の最初の consumer になって bind される)。RD に `Prune=false` は付けない
+   (手順3で prune により削除するため)。稼働中の mailserver と `<旧>` には触れない。
+2. **完了を確認**: RD の `status.lastManualSync` が `spec.trigger.manual` と一致し、`status.latestMoverStatus.result` が
+   `Successful` になるまで待つ (`make kubectl ARGS="get replicationdestination mailserver-restore -n prod -o yaml"`、読み取りのみ)。
+   Failed の場合は原因 (restic リポジトリの Secret、`privileged-movers` annotation) を直して `trigger.manual` を新しい値に変えてコミットする。
+3. **RD を削除するコミット**: リストア完了後、StatefulSet を切り替える前に RD を削除する。理由: RD が残っている間に
+   RD が再作成される (手動削除と selfHeal、Replace 同期など) と `status.lastManualSync` が失われ、同じ `trigger.manual` でも
+   未実行とみなされて再リストアが走る。切替後に残すと、その再リストアが稼働中の PVC を上書きする。切替前なら
+   `<新>` は未使用なので影響しない。RD の削除は mover Job とキャッシュなど RD 自身の子リソースを消すだけで、
+   `destinationPVC` の PVC は RD の所有物ではないため残る (restic restore は上書きのみで、削除では何も実行されない)。
+4. **参照を切り替えるコミット**: `statefulset.yaml` の `claimName` と `replication-source.yaml` の `sourcePVC` を `<新>` にする。
+   `claimName` は Pod テンプレートの値で更新可能 (volumeClaimTemplates ではない)。Pod が再作成され、`<新>` のデータで起動する。
+   `<旧>` の PVC マニフェストは残す (prune されて消えないように)。バックアップは同じ restic リポジトリに続けて記録される。
+5. **確認**: mailserver が Ready で、`doveadm user` と webmail でメールが見えること。次の `ReplicationSource` の実行が成功すること。
+
+**ロールバック**: 手順4のコミットを revert して `claimName` / `sourcePVC` を `<旧>` に戻す。`<旧>` は削除していないため、
+切替前の状態で起動する。切替後に `<新>` が受信したメールは `<旧>` には無い。
+
+**旧 PVC の扱い**: 切替後も `<旧>` を残し、問題が無いと確認できてから (目安は1週間) 別コミットでマニフェストから外す。
+外すと prune で PVC が削除され、local-path の reclaimPolicy が Delete のため **データも消える (戻せない)**。
+削除前に人が確認する。切替の間に `<旧>` が受けたメールは `<新>` に入らないため、必要なら削除前に `<旧>` を別の Pod にマウントして
+`rsync -a` (`--delete` は付けない) で `<新>` にマージする。
+
+**DR (新クラスタ) の場合**: GitOps が現在の名前の PVC を空で作り、mailserver は空の PVC で起動する。復旧後に上記の手順1〜5を
+新しい名前で行う (空の PVC への切替までの間に受けたメールは `<旧>` 側に残り、削除しなければ失われない)。
+
+**名前の扱い**: PVC は改名できないため、リストアのたびに名前が変わる。`pvc.yaml` には現在使う PVC (切替後は `<新>`) だけを定義し、
+`<旧>` は上記の保持期間が終わったら外す。名前は日付付きのまま運用し、固定名 `mailserver-data` には戻さない。
+
+**検証済み範囲** (ローカル検証、本番では未実行):
+- `copyMethod: Direct` + `destinationPVC: <通常の PVC>` のリストアが成功し、sha256 一致、uid/gid 5000、mode 700 が保持された。
+- VolSync 0.9.1 + local-path では volume populator (PVC の `dataSourceRef` → RD) は使えない。`Direct` は latestImage が PVC 種別で
+  populator 非対応、`Snapshot` は local-path が非 CSI で snapshot 不可。どちらもエラーにならず空の PVC が bind される。
+- 本番の mailserver バックアップは、namespace `prod` の `volsync.backube/privileged-movers: "true"` により稼働している。
+
+**未検証範囲**:
+- 本番クラスタでの手順全体 (コミットから sync、切替まで)。
+- RD 削除が PVC に影響しないこと、削除で再リストアが走らないことは、VolSync の所有関係と挙動の説明に基づく (実測していない)。
+- `ReplicationSource` の `sourcePVC` 変更が既存の RS に適用でき、バックアップが連続すること。
+- local-path の PV はノードに固定されるため、複数ノード構成ではリストア用の mover Pod と mailserver Pod が同じノードに載ること。
+- `<旧>` と `<新>` の同時存在時のディスク容量。
 
 ---
 

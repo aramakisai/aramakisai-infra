@@ -1,0 +1,34 @@
+# mailserver データのリストア用雛形 (docs/dr-runbook.md「mailserver のリストア」)
+# ArgoCD の対象パス外に置いている。使うときは YYYYMMDD と RESTORE_ID を置換し、
+# gitops/manifests/prod/mailserver/ にコピーしてコミットする。
+# RESTORE_ID は過去に使っていない一意の値にする (同じ値だと再リストアされない)。
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mailserver-data-YYYYMMDD
+  namespace: prod
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: volsync.backube/v1alpha1
+kind: ReplicationDestination
+metadata:
+  name: mailserver-restore
+  namespace: prod
+spec:
+  trigger:
+    manual: RESTORE_ID
+  restic:
+    repository: mailserver-restic-secret
+    copyMethod: Direct
+    destinationPVC: mailserver-data-YYYYMMDD
+    moverSecurityContext:
+      runAsUser: 0
+      runAsGroup: 0
+      fsGroup: 0
