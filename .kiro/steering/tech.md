@@ -59,7 +59,7 @@ Authentik 時代の定義は `terraform/authentik_*.tf.disabled` として残す
 ### シークレット管理
 - **ルール**: マニフェストに平文シークレットを書かない
 - **方法**: `ExternalSecret` リソースで Infisical から取得
-- **唯一の例外**: `infisical-auth` Secret のみ Ansible が直接 `kubectl apply` (ESO 自体の起動に必要なため)
+- **唯一の例外**: `infisical-auth` Secret のみ Ansible が直接作成 (ESO 自体の起動に必要なため)。同様に `cloudflared-token` と ArgoCD repo Secret (`aramakisai-infra-repo`) も Ansible が bootstrap 時に作成する
 - **既知問題への対処**: ArgoCD が「sync成功」と報告しても `ExternalSecret` の `spec.data` 配列に新規追加した要素が実際にはクラスター側で反映されない場合がある（directus/vaultwarden で複数回再発、原因未解明）。全 `ExternalSecret` に `metadata.annotations: {argocd.argoproj.io/sync-options: Replace=true}` を付与済みだが、**これ単体では直らない**（ArgoCDの差分検出自体が新規配列要素を見逃し、selfHealが同期処理を一切起動しないケースがあるため）。`spec.data` を追加・変更した場合は必ず push 後に `kubectl get externalsecret <name> -n <ns> -o jsonpath='{.metadata.generation}'` 等で実反映を確認し、未反映なら Application オブジェクトへ直接 operation patch で強制sync（[[project_argocd_stale_apply_externalsecret]] 参照）。
 
 ### ブートストラップ順序
@@ -98,6 +98,15 @@ email claim を読むため、`ansible/roles/zitadel-bootstrap/vars/resources.ym
 - `null_resource` + `local-exec` は HCP Terraform リモート実行非対応のため `main.tf` でコメントアウト済み。
 - **Terraform 完了後、常に手動で Ansible を実行する**（設定変更のみの場合も同様）。
 
+### k3s-bootstrap.yml の再実行安全性
+- 稼働中クラスタに対し inventory 全ホスト・無引数で再実行でき、差分があるものだけを適用する（差分なしなら 2 回目は changed=0）。`--limit` / タグ / `--start-at-task` で非冪等タスクを避ける運用はしない。
+- 事前検査（何も変更する前に失敗する。`--limit` を付けても実行される）: `DISCORD_OPS_WEBHOOK_URL` が空でない（`infisical run` 配下の目印を兼ねる）、制御ノードの HEAD が `git fetch origin main` 直後の origin/main と一致し `gitops/manifests/prod/cloudflared` と `gitops/root.yaml` に未コミット変更がない、全ノードに既存 K3s トークンがあるか `K3S_TOKEN` がある、join 先と既存トークンの CA が一致する（不一致は旧クラスタの残骸なので `k3s-uninstall.sh` を促して停止）、bootstrap Secret が未作成/空/ラベル欠落なら対応する env がある。
+- bootstrap Secret（`cloudflared-token` / `infisical-auth` / `aramakisai-infra-repo`）は既存の非空値（空白のみは空扱い）とラベルを保持・修復する。上書きは `-e rotate_bootstrap_secrets=true`（全件）か `-e '{"rotate_bootstrap_secrets": ["infisical-auth"]}'`（個別）のときだけ。`cloudflared-token` を更新したときは cloudflared を `rollout restart` する。`infisical-auth` の素材は ESO 専用 identity の `ESO_INFISICAL_CLIENT_ID` / `ESO_INFISICAL_CLIENT_SECRET`。値は `environment:` 経由で渡し、シェル文字列に埋め込まない。
+- cloudflared は Deployment が存在しないとき（初回）だけ `kubectl apply` する。以降は ArgoCD が管理するため触らない（別 field manager との共同所有によるドリフトを避ける）。root.yaml と ArgoCD は stdin / URL を server-side apply（`--force-conflicts`）し、`kubectl diff --server-side` に差分があるときだけ適用する。ArgoCD は `argocd_version` 固定で、稼働中のイメージタグがそれより新しいか判定できない（digest・非 semver）場合は中断する。K3s インストーラは `k3s_version` のタグに固定した `install.sh` を使い、server 1 台ごとに etcd の readyz と Node Ready（Cilium 導入済みのとき）を待ってから次へ進む。
+- Cilium は `helm list` / `helm get values` の chart バージョンと values が一致すれば `helm` を実行しない。values は `cilium_values` が正本。
+- kubeconfig の Infisical 登録は最後の play（失敗してもクラスタ復旧を止めない）。`slurp` でメモリ上に受け取り、`infisical run` が注入した `$KUBECONFIG` と異なるときだけ、運用用 identity（`OPS_INFISICAL_CLIENT_ID` / `OPS_INFISICAL_CLIENT_SECRET`: prod 読取 + `KUBECONFIG` 書込のみ）で login し `infisical secrets set --projectId=<プロジェクト ID> --file`（プロジェクト ID は env `INFISICAL_PROJECT_ID` を優先し、無ければコミット済み `.infisical.json` の `workspaceId`。どちらも無ければ事前検査で停止）（stdin・YAML）で書く。ディスクにも argv にも載せず、タスクは `no_log`。`OPS_INFISICAL_CLIENT_ID/SECRET` は Infisical prod にも保存しており、手元実行（`infisical run -- ansible-playbook ...`）では注入される。CI の読取専用 identity は 403 になるため、`k3s-upgrade.yml` は GitHub secrets の `OPS_*` で login して実行する。リポジトリ直下の `kubeconfig` は追跡済みの無効化スタブで、playbook は触らない。
+- `--check --diff` で、K3s バージョン・Cilium・Secret 作成・マニフェスト差分・kubeconfig 登録が「changed」として見える。
+
 ### Directus schema PR の staging 事前検証 (ApplicationSet)
 - **背景**: `gitops/apps/staging/directus.yaml` は `targetRevision: main` のため、staging は PR マージ後にしかスキーマを受け取れない。一方 infra PR のマージ前チェックリスト（`aramakisai-web/.github/workflows/directus-schema-sync.yml` が生成、`scripts/check_staging_gate.py` が必須 status check として強制）は「staging での確認」を要求しており、マージ前に検証不能な構造的デッドロックがあった。
 - **解決**: `gitops/apps/staging/directus-schema-preview-appset.yaml` の ApplicationSet(`pullRequest` generator)が、open な `directus-schema-*` PR ごとに ephemeral Application `directus-schema-preview-<PR番号>` を自動生成し、PR ブランチの `gitops/manifests/staging/directus-schema-preview/`(schema-configmap・migrations-configmap・schema-apply-job のみの kustomize overlay)を実 staging DB に適用する。`kustomize.nameSuffix: "-pr-<PR番号>"` でリソース名をユニーク化し、main を追跡する `directus-staging` Application(Deployment/DB/Service 等を専有管理)とのリソース競合を回避している。PR が閉じられると生成物は自動削除される。
@@ -111,6 +120,7 @@ email claim を読むため、`ansible/roles/zitadel-bootstrap/vars/resources.ym
 - **Cache Rule が必要な理由**: Directus の asset URL は `/assets/<uuid>` で拡張子を持たず、Cloudflare の既定キャッシュルール（拡張子ベース）の対象外になる。`api.aramakisai.com` / `stg-api.aramakisai.com` の `/assets/*` を明示的にキャッシュ対象にする Cache Rule (`cloudflare_ruleset`, phase `http_request_cache_settings`) が別途必要。
 
 ### ホストOS自動更新・K3sバージョン追従の設計判断
+- 自動再起動時刻は `os_auto_update_reboot_time`（03:30）を基準に、`groups['all']` 内の順序 × `os_auto_update_reboot_stagger_minutes`（30 分）ずつ後ろへずらす（先頭ノードは基準のまま）。server 複数台の同時再起動による etcd クォーラム喪失を避けるため。30 分は 1 台の再起動・k3s の etcd 復帰・Pod 再スケジュールに十分な余裕として置いた値。
 - ホストOSパッケージ更新は Debian 標準機能(`unattended-upgrades` + `apt-daily-upgrade.timer` + `Automatic-Reboot`)に完全委任し、Ansibleロール `os-auto-update` は設定ファイル配布と結果通知のみを担う(独自の適用/再起動ロジックは実装しない)。
 - **既知の落とし穴**: Debian 13 (trixie) の `unattended-upgrades` 2.12 では `Unattended-Upgrade::Allowed-Origins` は非推奨のlegacyキー名で、実機では `get_allowed_origins_legacy()` 内でクラッシュする。正しいキー名は `Unattended-Upgrade::Origins-Pattern` で、security origin行は `"origin=Debian,codename=${distro_codename}-security,label=Debian-Security";` の形式(`-security` サフィックス必須)。実機検証(prod-node-1)で発見・修正済み。
 - **既知の落とし穴**: Ansible `template` モジュール(Jinja2)でbashスクリプトを配布する際、bashのパラメータ展開 `${#変数名}`(文字列長取得)の `{#` がJinja2のコメント開始タグと誤認識され `Missing end of comment tag` エラーになる。文字列長取得は `wc -c` 等で代替する。
@@ -171,7 +181,7 @@ ssh root@prod-node-1 "systemctl status os-update-notify.timer; cat /var/run/rebo
 
 ### Infisical で管理するシークレット一覧
 - **IaC & 認証**: `HCLOUD_TOKEN`, `CLOUDFLARE_API_TOKEN`, `TAILSCALE_OAUTH_CLIENT_ID`, `TAILSCALE_OAUTH_CLIENT_SECRET`, `TF_VAR_k3s_token`, `TF_VAR_tailscale_api_key`, `TF_VAR_authentik_cf_client_id`, `TF_VAR_authentik_cf_client_secret`, `TF_VAR_zitadel_cf_access_client_id`, `TF_VAR_zitadel_cf_access_client_secret`（`terraform/access.tf`のCloudflare Access向けZitadel OIDC IdP登録用。`ansible/roles/zitadel-bootstrap`が作成するcloudflare-access OIDC Applicationの発行値を登録する、`authentik_cf_client_id`と同じチキンエッグ回避パターン）
-- **Ansible & 復旧**: `K3S_TOKEN`, `CLOUDFLARE_TUNNEL_TOKEN`, `CLOUDFLARE_TUNNEL_ID`, `INFISICAL_CLIENT_ID`, `INFISICAL_CLIENT_SECRET`, `ARGOCD_GITHUB_DEPLOY_KEY`, `TFC_API_TOKEN`, `TFC_WORKSPACE_ID`, `TAILSCALE_API_KEY`, `TAILSCALE_TAILNET`
+- **Ansible & 復旧**: `K3S_TOKEN`, `ESO_INFISICAL_CLIENT_ID`, `ESO_INFISICAL_CLIENT_SECRET`, `OPS_INFISICAL_CLIENT_ID`, `OPS_INFISICAL_CLIENT_SECRET`, `CLOUDFLARE_TUNNEL_TOKEN`, `CLOUDFLARE_TUNNEL_ID`, `INFISICAL_CLIENT_ID`, `INFISICAL_CLIENT_SECRET`, `ARGOCD_GITHUB_DEPLOY_KEY`, `TFC_API_TOKEN`, `TFC_WORKSPACE_ID`, `TAILSCALE_API_KEY`, `TAILSCALE_TAILNET`
 - **Cloudflare Access (E2E CI)**: `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET`（`aramakisai-web` の Playwright E2E テストが Cloudflare Access の Authentik ログインを迂回するための Service Token。`terraform/access.tf` の `cloudflare_zero_trust_access_service_token.e2e_ci` が発行元。`aramakisai-web` 側 `staging-e2e-verification` spec が前提としていた secret 名と一致しており乖離なし）
 - **アプリ用シークレット**:
   - **Authentik**: `AUTHENTIK_SECRET_KEY`, `AUTHENTIK_DB_PASSWORD`, `NOREPLY_SMTP_PASSWORD`（`noreply@aramakisai.com` 用 SMTP パスワード。Vaultwarden・Directus の SMTP 設定でも同一キーを再利用） <!-- confidential:allow -->

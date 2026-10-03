@@ -3,6 +3,13 @@
 # 目的: Debian 13ホスト(prod-node-1)のOSセキュリティパッチ適用をunattended-upgrades標準機能に完全委任し、適用結果のみDiscordへ通知する。
 # Ansible/自作スクリプトはapt update/upgrade/reboot操作を一切実行しない(すべて設定ファイル配布のみ)。
 
+- name: 通知先 webhook URL が設定されていることを確認
+  # 空のまま配布すると通知が無言で失敗し続ける
+  ansible.builtin.assert:
+    that: discord_ops_webhook_url | length > 0
+    fail_msg: discord_ops_webhook_url (DISCORD_OPS_WEBHOOK_URL) が空です。infisical run 配下で実行してください。
+    quiet: true
+
 - name: 必要なパッケージをインストール
   ansible.builtin.apt:
     name:
@@ -12,6 +19,7 @@
       - jq
     state: present
     update_cache: true
+    cache_valid_time: 3600
 
 - name: 50unattended-upgrades の設定を配布
   ansible.builtin.template:
@@ -52,6 +60,8 @@
     mode: '0600'
     owner: root
     group: root
+  # --diff に webhook URL が出るのを防ぐ
+  diff: false
 
 - name: 通知スクリプトの systemd サービスを配布
   ansible.builtin.template:

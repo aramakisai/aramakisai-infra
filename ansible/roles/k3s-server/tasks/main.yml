@@ -10,6 +10,7 @@
       - nfs-common   # NFS マウント用
     state: present
     update_cache: true
+    cache_valid_time: 3600
 
 # 2. K3s 設定ディレクトリを作成
 - name: K3s 設定ディレクトリを作成
@@ -35,40 +36,69 @@
 # k3s-agent.service をインストールする (agent モード) ため、server モードにならない。
 # join 先の URL は config.yaml の server: キーで指定する。
 
-# 既存クラスタのトークンを検出する。
-# etcd の bootstrap データは初回ブートストラップ時のトークンで暗号化されており、
-# 異なるトークンでインストーラを走らせると k3s.service.env が上書きされ
-# "bootstrap data already found and encrypted with different token" で起動不能になる
-# (2026-08-12 に本番障害として発生)。既存トークンを常に正としてそれを使う。
-- name: 既存の K3s サーバートークンを確認
-  ansible.builtin.slurp:
-    src: /var/lib/rancher/k3s/server/token
-  register: k3s_existing_token_raw
-  failed_when: false
+# 既存クラスタのトークン (常に正) を使う。詳細は token.yml
+- name: 使用する K3s サーバートークンを決定
+  ansible.builtin.include_tasks: token.yml
 
-- name: 使用するトークンを決定 (既存クラスタは実トークン優先、新規は変数値)
+- name: K3s の導入済みバージョンを取得
+  ansible.builtin.command: /usr/local/bin/k3s --version
+  register: k3s_installed_version
+  failed_when: false
+  check_mode: false
+  changed_when: false
+
+- name: K3s インストーラが変更を加える見込みか判定
+  # インストーラは版・トークン (env ファイル) の変化でバイナリ/env/unit を更新して再起動する。
+  # check mode でもその再起動が changed として見えるようにする
   ansible.builtin.set_fact:
-    k3s_effective_token: >-
-      {{ (k3s_existing_token_raw.content | b64decode | trim)
-         if (k3s_existing_token_raw.content is defined)
-         else k3s_token }}
-  no_log: true
+    k3s_install_pending: "{{ k3s_version not in k3s_installed_version.stdout | default('') or k3s_env_token_differs | bool }}"
+
+- name: K3s インストール (または再起動) が必要 (check mode のみ表示)
+  ansible.builtin.debug:
+    msg: "{{ inventory_hostname }}: K3s {{ k3s_version }} のインストーラが変更を加えます"
+  when: ansible_check_mode and k3s_install_pending
+  changed_when: true
 
 - name: K3s をインストール
   # creates: /usr/local/bin/k3s は使わない。
   # 既にk3sがインストール済みの場合にタスク自体をスキップしてしまい、
   # k3s_versionを変更してもバージョンアップグレードが一切適用されなくなるため。
-  # get.k3s.io インストーラ自身がバージョン一致時は "Skipping installation" を出し
-  # 冪等に振る舞うため、changed_when でAnsible側の変化検知だけそれに合わせる。
-  ansible.builtin.shell: curl -sfL https://get.k3s.io | sh -
+  # インストーラはバイナリ・systemd unit・env ファイルのハッシュが変わらなければ
+  # "No change detected so skipping service start" を出して再起動しない。
+  # changed はこの文言の有無で判定する。
+  # get.k3s.io は常に最新を返すため、k3s_version のタグに固定したスクリプトを使う
+  # トークンは environment ではなく stdin で渡す: environment は -vvv の接続ログ (EXEC) に平文で出る。
+  # stdin は module_args に出るため no_log とし、失敗時の出力 (トークンを含まない) は fail タスクで表示する。
+  ansible.builtin.shell:
+    cmd: |
+      set -o pipefail
+      IFS= read -r K3S_TOKEN
+      export K3S_TOKEN
+      curl -sfL https://raw.githubusercontent.com/k3s-io/k3s/{{ k3s_version | urlencode }}/install.sh | sh -
+    executable: /bin/bash
+    stdin: "{{ k3s_effective_token }}"
   environment:
     INSTALL_K3S_VERSION: "{{ k3s_version }}"
-    K3S_TOKEN: "{{ k3s_effective_token }}"
   register: k3s_install_result
-  until: k3s_install_result is succeeded
+  until: k3s_install_result.rc == 0
   retries: 3
   delay: 10
-  changed_when: "'Skipping installation' not in k3s_install_result.stdout"
+  failed_when: false
+  changed_when: "k3s_install_result.rc == 0 and 'No change detected so skipping service start' not in k3s_install_result.stdout"
+  no_log: true
+
+- name: K3s インストール失敗を報告
+  ansible.builtin.fail:
+    msg: "K3s のインストールに失敗しました (rc={{ k3s_install_result.rc }}): {{ (k3s_install_result.stdout_lines + k3s_install_result.stderr_lines)[-8:] | join(' | ') }}"
+  when: not ansible_check_mode and k3s_install_result.rc != 0
+
+- name: インストール後の K3s バージョンを確認
+  # インストーラ出力の取りこぼし (空入力のスクリプトなど) を成功扱いにしない
+  ansible.builtin.command: /usr/local/bin/k3s --version
+  register: k3s_post_version
+  changed_when: false
+  failed_when: k3s_version not in k3s_post_version.stdout
+  when: not ansible_check_mode
 
 # 5. config.yaml の変更を K3s に反映させる (wait_for より前にハンドラーを実行)
 - name: ハンドラーを即時実行 (config 変更を反映)
@@ -82,3 +112,34 @@
     timeout: 180
     state: started
     delay: 10
+
+# 7. 次のノードへ進む前に etcd の健全性とこのノードの Ready を確認する。
+# server が 3 台のときに 1 台が復帰しないまま次を再起動するとクォーラムを失う。
+# 新規構築直後は CNI (Cilium) が無く Ready にならないため、Cilium が稼働しているときだけ Ready を待つ。
+- name: etcd が健全になるまで待機
+  ansible.builtin.command: k3s kubectl get --raw=/readyz/etcd
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  register: k3s_etcd_ready
+  until: k3s_etcd_ready.rc == 0
+  retries: 30
+  delay: 10
+  changed_when: false
+  check_mode: false
+
+- name: クラスタに Cilium が導入済みか確認
+  ansible.builtin.command: k3s kubectl get daemonset cilium -n kube-system -o name
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  register: k3s_cni_present
+  failed_when: false
+  changed_when: false
+  check_mode: false
+
+- name: このノードが Ready になるまで待機
+  ansible.builtin.command: k3s kubectl wait node/{{ ansible_facts['hostname'] | lower }} --for=condition=Ready --timeout=300s
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  changed_when: false
+  check_mode: false
+  when: k3s_cni_present.rc == 0

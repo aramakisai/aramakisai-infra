@@ -1,0 +1,11 @@
+---
+- name: "namespace {{ ns_name }} の存在確認"
+  ansible.builtin.command: kubectl get namespace {{ ns_name | quote }} -o name
+  register: ns_probe
+  failed_when: ns_probe.rc != 0 and 'NotFound' not in ns_probe.stderr
+  changed_when: ansible_check_mode and ns_probe.rc != 0
+  check_mode: false
+
+- name: "namespace {{ ns_name }} を作成"
+  ansible.builtin.command: kubectl create namespace {{ ns_name | quote }}
+  when: ns_probe.rc != 0

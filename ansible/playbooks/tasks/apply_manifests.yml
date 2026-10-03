@@ -1,0 +1,35 @@
+---
+# 差分があるときだけ server-side apply する。
+# ArgoCD が既に同じリソースを管理しているため、force-conflicts で Git の内容を正として
+# フィールド所有権を取り、live が Git と一致していれば何も書かない。
+#
+# 入力: am_stdin (multi-doc YAML) / am_source (-f に渡す URL 等。am_stdin と排他) /
+#       am_namespace (任意) / am_field_manager (任意)
+- name: マニフェストの差分を確認
+  ansible.builtin.command:
+    argv: >-
+      {{ ['kubectl', 'diff', '--server-side', '--force-conflicts',
+          '--field-manager=' ~ (am_field_manager | default('ansible-bootstrap'))]
+         + (['-n', am_namespace] if am_namespace is defined else [])
+         + ['-f', am_source | default('-')] }}
+    stdin: "{{ am_stdin | default(omit) }}"
+  register: am_diff
+  # kubectl diff: 0=差分なし 1=差分あり 2以上=エラー
+  failed_when: am_diff.rc not in [0, 1]
+  changed_when: ansible_check_mode and am_diff.rc == 1
+  check_mode: false
+
+- name: 差分を表示 (check mode のみ)
+  ansible.builtin.debug:
+    msg: "{{ am_diff.stdout_lines }}"
+  when: ansible_check_mode and am_diff.rc == 1
+
+- name: マニフェストを適用
+  ansible.builtin.command:
+    argv: >-
+      {{ ['kubectl', 'apply', '--server-side', '--force-conflicts',
+          '--field-manager=' ~ (am_field_manager | default('ansible-bootstrap'))]
+         + (['-n', am_namespace] if am_namespace is defined else [])
+         + ['-f', am_source | default('-')] }}
+    stdin: "{{ am_stdin | default(omit) }}"
+  when: am_diff.rc == 1
