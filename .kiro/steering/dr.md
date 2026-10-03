@@ -34,7 +34,9 @@
 - **メールデータのリストアは自動化しない**: mailserver Application の selfHeal が replicas=0 を戻して稼働中 PVC に書込むため。
   稼働中 PVC には書かず、新名の plain PVC + ReplicationDestination (`copyMethod: Direct`) へリストアし、RD 削除 →
   `claimName` / `sourcePVC` の切替をコミットだけで行う (`docs/dr-runbook.md`、雛形は `docs/templates/mailserver-restore.yaml`)。
-  RD を常設しない (再作成で `lastManualSync` が失われ再リストアが走る)。volume populator は VolSync 0.9.1 + local-path では不可
+  RD を常設しない (再作成で `lastManualSync` が失われ再リストアが走る)。RD には障害発生時刻の `restoreAsOf` を必須とする。
+  DR の新クラスターでは ReplicationSource が作成直後に空 PVC をバックアップしてしまうため、起動前に `spec.paused: true` をコミットしておく
+  (`recovery.sh` が検査して止める)。新 PVC には `volume.kubernetes.io/selected-node: prod-node-1` を付ける。volume populator は VolSync 0.9.1 + local-path では不可
 - **手動手順は例外**: ワークフローが失敗した場合のフォールバックとして `docs/dr-runbook.md` の「手動フォールバック」を使う
 - **検出スクリプト**: `.github/scripts/dr-trigger.sh` (ユニットテスト: `scripts/test-dr-trigger-logic.sh`)
 - **復旧スクリプト**: `.github/scripts/recovery.sh` (ユニットテスト: `scripts/test-dr-recovery-logic.sh`)

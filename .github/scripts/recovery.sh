@@ -16,8 +16,9 @@
 #        その他  : DR_FORCE 時のみ。インフラ操作なしで Ansible から再実行
 #   4. bootstrap Secret の自己修復 → ArgoCD / 稼働中 CNPG の healthy 待機 (タイムアウトは失敗)
 #
-# Ansible を流す経路は冪等化済みの playbook (ansible/playbooks/tasks/ensure_secret.yml) が前提。
-# 無ければ破壊的操作の前に停止する。
+# Ansible を流す経路は冪等化済みの playbook (ansible/playbooks/tasks/ensure_secret.yml) と、
+# HEAD が origin/main と一致し未コミット変更が無いことが前提。満たさなければ破壊的操作の前に停止する。
+# サーバーを作り直す経路は、メールの ReplicationSource が spec.paused: true であることも前提とする。
 #
 # Infisical は運用用 machine identity (OPS_INFISICAL_CLIENT_ID/SECRET: prod 読取 + KUBECONFIG 書込) を使う。
 # メールデータのリストアは自動化しない (docs/dr-runbook.md)。
@@ -59,6 +60,7 @@ ENDPOINTS=(
 
 DR_ISSUE=""
 TFC_PENDING_RUN=""
+SSH_KEY_FILE=""
 TFC_SCOPE_NODE=""
 TFC_RESULT=""
 
@@ -288,6 +290,12 @@ tfc_discard_pending() {
   TFC_PENDING_RUN=""
 }
 
+# 異常終了時に、未 apply の run の破棄と SSH 鍵の一時ファイル削除を行う
+cleanup_all() {
+  tfc_discard_pending
+  [[ -z "${SSH_KEY_FILE}" ]] || rm -f "${SSH_KEY_FILE}"
+}
+
 # plan が確認可能 (または変更なし) になるまで待つ。出力: confirmable | no-changes
 tfc_wait_plan() {
   local run_id="$1" elapsed=0 timeout=900 json status confirmable
@@ -366,7 +374,7 @@ tfc_target_apply() {
   local label="$1" scope_fn="$2" pre_apply="$3" run_id plan_kind plan_json
   shift 3
 
-  trap tfc_discard_pending EXIT
+  trap cleanup_all EXIT
   run_id=$(tfc_create_run "DR recovery: ${label}" "$@")
   [[ -n "${run_id}" ]] || die "TFC run の作成に失敗しました"
   TFC_PENDING_RUN="${run_id}"
@@ -449,6 +457,22 @@ wait_tailscale_registered() {
   done
 }
 
+# 承認待ちや Terraform 実行中に main が進むと、Ansible 側の「HEAD が origin/main と一致」検査で
+# 作り直し後に止まる。破壊的操作の前に同じ条件を確認して早期に止める。
+# 戻り値: 0=一致・未コミット変更なし / 1=不一致または変更あり / 2=fetch 失敗
+git_in_sync() {
+  git -C "${REPO_ROOT}" fetch -q origin main || return 2
+  [[ "$(git -C "${REPO_ROOT}" rev-parse HEAD)" == "$(git -C "${REPO_ROOT}" rev-parse origin/main)" ]] || return 1
+  [[ -z "$(git -C "${REPO_ROOT}" status --porcelain)" ]]
+}
+
+# 新クラスターでは空の mailserver-data を sourcePVC とする ReplicationSource が最初に同期し、
+# 同じ restic リポジトリの最新スナップショットが空になり、保持ポリシーの prune で障害前のものも消える。
+# 作成直後に backup Job が走らないよう、DR の前にコミットで spec.paused: true にしておく必要がある。
+mail_rs_paused() {
+  grep -qE '^[[:space:]]+paused:[[:space:]]*true' "${REPO_ROOT}/gitops/manifests/prod/mailserver/replication-source.yaml"
+}
+
 # 冪等化済みの playbook でないと、再作成後の bootstrap が稼働中 Secret の空上書きや
 # 入力不足のまま進みうる。破壊的操作の前に存在で検知する。
 ansible_ready() {
@@ -483,7 +507,15 @@ run_ansible() {
   # playbook 内の Infisical 書込 (KUBECONFIG 登録) は運用用 identity (OPS_INFISICAL_*) でログインする。
   # INFISICAL_CLIENT_ID/SECRET は prod から注入済みの読取用 CI identity のまま、
   # ESO 用の認証情報 (ESO_INFISICAL_CLIENT_ID/SECRET) も注入済みの値を使う。
+  # cloud-init は tailscale up に --ssh を付けないため、k3s-upgrade.yml と同じ CI 専用デプロイ鍵で接続する。
+  # 鍵は 0600 の一時ファイルに書き出し、終了時に削除する。
+  SSH_KEY_FILE=$(mktemp)
+  trap cleanup_all EXIT
+  chmod 600 "${SSH_KEY_FILE}"
+  printf '%s\n' "${CI_SSH_PRIVATE_KEY}" > "${SSH_KEY_FILE}"
+
   ANSIBLE_HOST_KEY_CHECKING=False \
+    ANSIBLE_PRIVATE_KEY_FILE="${SSH_KEY_FILE}" \
     K3S_TOKEN="${K3S_TOKEN}" \
     CLOUDFLARE_TUNNEL_TOKEN="${CLOUDFLARE_TUNNEL_TOKEN}" \
     CLOUDFLARE_TUNNEL_ID="${CLOUDFLARE_TUNNEL_ID}" \
@@ -662,10 +694,11 @@ report_cnpg_recovery_points() {
 # ============================================================
 
 main() {
+  trap cleanup_all EXIT
   local vars=()
   if [[ "${DR_LOCAL_TEST}" != "1" ]]; then
     vars+=(DR_TARGET_NODE K3S_TOKEN ARGOCD_GITHUB_DEPLOY_KEY CLOUDFLARE_TUNNEL_TOKEN CLOUDFLARE_TUNNEL_ID
-      OPS_INFISICAL_CLIENT_ID OPS_INFISICAL_CLIENT_SECRET INFISICAL_PROJECT_ID)
+      OPS_INFISICAL_CLIENT_ID OPS_INFISICAL_CLIENT_SECRET INFISICAL_PROJECT_ID CI_SSH_PRIVATE_KEY)
   fi
   if [[ "${DR_SKIP_INFRA}" != "1" ]]; then
     vars+=(HCLOUD_TOKEN TAILSCALE_OAUTH_CLIENT_ID TAILSCALE_OAUTH_CLIENT_SECRET TAILSCALE_TAILNET TFC_API_TOKEN TFC_WORKSPACE_ID KUBECONFIG)
@@ -708,9 +741,17 @@ main() {
     [[ "${status}" != "off" ]] && need_ansible=1 || need_ansible=0
 
     if [[ "${need_ansible}" == "1" ]]; then
+      local sync_rc=0
+      git_in_sync || sync_rc=$?
+      [[ "${sync_rc}" == "0" ]] \
+        || die "リポジトリが origin/main と一致しない、または未コミットの変更があります (rc=${sync_rc})。最新の main でワークフローを起動し直してください"
       ansible_ready || die "冪等化済みの k3s-bootstrap.yml (ansible/playbooks/tasks/ensure_secret.yml) がありません。Ansible を流す経路は停止します"
       [[ -n "${ESO_INFISICAL_CLIENT_ID:-}" && -n "${ESO_INFISICAL_CLIENT_SECRET:-}" ]] \
         || die "ESO_INFISICAL_CLIENT_ID/SECRET が未設定です (infisical-auth の作成に必要)"
+    fi
+
+    if [[ "${status}" == "absent" ]]; then
+      mail_rs_paused || die "gitops/manifests/prod/mailserver/replication-source.yaml が spec.paused: true ではありません。新クラスターの最初のバックアップで restic の最新・過去スナップショットを失わないよう、先に paused: true をコミットしてから起動し直してください (docs/dr-runbook.md)"
     fi
 
     case "${status}" in

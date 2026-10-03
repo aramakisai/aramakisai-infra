@@ -74,8 +74,10 @@ Actions の実行画面で reviewer が **Review deployments** から承認す�
      - 公開エンドポイントのどれかが応答
      - kubectl get nodes が成功
 2. 他に Hetzner サーバー (role=server) が残っている、対象が cluster-init ホストでない、
-   Ansible を流す経路で冪等化済み playbook (ansible/playbooks/tasks/ensure_secret.yml) が無い、
-   ESO_INFISICAL_CLIENT_ID/SECRET が未設定、のいずれかなら破壊的操作の前に停止
+   Ansible を流す経路で HEAD が origin/main と一致しない・未コミット変更がある・冪等化済み playbook
+   (ansible/playbooks/tasks/ensure_secret.yml) が無い・ESO_INFISICAL_CLIENT_ID/SECRET が未設定、
+   サーバー再作成の経路でメールの ReplicationSource が `spec.paused: true` でない、のいずれかなら破壊的操作の前に停止
+   (checkout は承認後の main を使う)
 3. サーバー状態で分岐
      不在: plan 作成 (-target=対象サーバーのみ, auto-apply 無効)
            → plan の変更が「対象サーバー作成 + Tailscale auth key 置換」だけか機械検査
@@ -86,7 +88,8 @@ Actions の実行画面で reviewer が **Review deployments** から承認す�
      停止: 電源投入のみ (Tailscale デバイスは消さない。消すと再接続できなくなる)。IP は変わらない
 4. 対象ノードが Tailscale に接続するまで待機 (最大10分)
      停止からの復帰: Ansible は流さず、ノードが k3s で Ready に戻るまで待機 (最大10分)
-5. 不在・force の経路のみ: ansible-playbook k3s-bootstrap.yml を対象ノードに限定して実行 (最大40分)
+5. 不在・force の経路のみ: ansible-playbook k3s-bootstrap.yml を対象ノードに限定して実行 (最大40分。SSH は
+     CI 専用デプロイ鍵 `CI_SSH_PRIVATE_KEY` を 0600 の一時ファイルに書き出して使い、終了時に削除する)
      (cluster-init は空の etcd から作り直す。etcd スナップショットは取得していない)
      Ansible の Infisical 書込 (KUBECONFIG 登録) は運用用 identity (OPS_INFISICAL_*) で行い、完了後に Infisical から
      kubeconfig を取得し直す (取得失敗は停止)
@@ -97,7 +100,7 @@ Actions の実行画面で reviewer が **Review deployments** から承認す�
 ```
 
 実行中の run は apply の前に異常終了しても、未 apply の TFC run を discard してワークスペースのロックを残さない。
-ワークフローのジョブ上限は各段階の最大待機の合計 (115分) より長い130分。
+ワークフローのジョブ上限は各段階の最大待機の合計 (TFC run 2 回分を含む145分) より長い165分。
 
 メールデータのリストアは自動化していない。ノード再作成後の `mailserver-data` は空の PVC で始まる。手順は「手動フォールバック」を参照。
 
@@ -240,24 +243,45 @@ mailserver の PVC 名は `gitops/manifests/prod/mailserver/` の3か所 (`pvc.y
 `replication-source.yaml` の `sourcePVC`) で参照されている。以降、現在の名前を `<旧>`、新しい名前を
 `mailserver-data-<YYYYMMDD>` (`<新>`) と書く。
 
+**事前 (DR の新クラスターでは必須): ReplicationSource を paused にしておく**
+
+新クラスターでは GitOps が空の PVC を作り、`mailserver-backup` (ReplicationSource) が同じ restic リポジトリへ
+最初のバックアップを取る。VolSync 0.9.1 のソース (`controllers/statemachine/machine.go`) では、一度も同期していない
+ReplicationSource は schedule を待たず **作成直後に同期を開始する**。これにより (a) 最新のスナップショットが空になり、
+(b) 保持ポリシー (hourly 12 / daily 7、prune 7日) で障害前のスナップショットが時間とともに消える。
+
+- `spec.paused: true` の ReplicationSource は backup Job の parallelism が 0 になり、スナップショットを作らず prune もしない。
+- GitOps 上で「DR のときだけ paused」にする仕組みは作れないため、手順で担保する。**`dr-recovery` を起動する前に**
+  `replication-source.yaml` へ `spec.paused: true` を入れたコミットを main に入れる。`recovery.sh` は新規作成の経路でこれを検査し、
+  無ければ破壊的操作の前に停止する。
+- paused の間は mailserver のバックアップが取られず、バックアップ監視 (Healthchecks.io) は猶予後にアラートする (想定内)。
+- 切替が済んだら手順6で `paused: true` を外す。外した直後に初回の同期が (schedule を待たず) 始まり、リストア済みのデータをバックアップする。
+
+**通常時 (クラスターが健在な部分リストア) も `restoreAsOf` を指定する**。最新のスナップショットに破損した状態が含まれうるため、
+戻したい時点より前で最新のものを選ぶ。
+
 **手順 (各行が1コミット、sync 後に確認してから次へ)**
 
-1. **PVC と RD を追加**: 雛形の PVC (`<新>`) と ReplicationDestination (`destinationPVC: <新>`、`trigger.manual` に過去に
-   使っていない一意の値) を `gitops/manifests/prod/mailserver/` に追加してコミットする。StatefulSet は変更しないため
-   sync-wave の指定は不要 (RD の mover Pod が PVC の最初の consumer になって bind される)。RD に `Prune=false` は付けない
-   (手順3で prune により削除するため)。稼働中の mailserver と `<旧>` には触れない。
+0. (DR のみ) 上記の `paused: true` のコミットを、`dr-recovery` の起動前に main へ入れる。
+1. **PVC と RD を追加**: 雛形の PVC (`<新>`、annotation `volume.kubernetes.io/selected-node: prod-node-1` を維持) と
+   ReplicationDestination (`destinationPVC: <新>`、`trigger.manual` に過去に使っていない一意の値、`restic.restoreAsOf` に
+   **障害発生時刻**) を `gitops/manifests/prod/mailserver/` に追加してコミットする。StatefulSet は変更しないため
+   sync-wave の指定は不要。`selected-node` は mailserver の `nodeSelector` (`prod-node-1`) と一致させ、mover が別ノードに載って
+   PV が固定されるのを防ぐ。RD に `Prune=false` は付けない (手順3で prune により削除するため)。稼働中の mailserver と `<旧>` には触れない。
 2. **完了を確認**: RD の `status.lastManualSync` が `spec.trigger.manual` と一致し、`status.latestMoverStatus.result` が
    `Successful` になるまで待つ (`make kubectl ARGS="get replicationdestination mailserver-restore -n prod -o yaml"`、読み取りのみ)。
+   復元されたスナップショットが `restoreAsOf` 以前のものか、mover Pod (名前に `volsync-dst-mailserver-restore` を含む) のログで確認する。
    Failed の場合は原因 (restic リポジトリの Secret、`privileged-movers` annotation) を直して `trigger.manual` を新しい値に変えてコミットする。
 3. **RD を削除するコミット**: リストア完了後、StatefulSet を切り替える前に RD を削除する。理由: RD が残っている間に
    RD が再作成される (手動削除と selfHeal、Replace 同期など) と `status.lastManualSync` が失われ、同じ `trigger.manual` でも
    未実行とみなされて再リストアが走る。切替後に残すと、その再リストアが稼働中の PVC を上書きする。切替前なら
    `<新>` は未使用なので影響しない。RD の削除は mover Job とキャッシュなど RD 自身の子リソースを消すだけで、
    `destinationPVC` の PVC は RD の所有物ではないため残る (restic restore は上書きのみで、削除では何も実行されない)。
-4. **参照を切り替えるコミット**: `statefulset.yaml` の `claimName` と `replication-source.yaml` の `sourcePVC` を `<新>` にする。
-   `claimName` は Pod テンプレートの値で更新可能 (volumeClaimTemplates ではない)。Pod が再作成され、`<新>` のデータで起動する。
-   `<旧>` の PVC マニフェストは残す (prune されて消えないように)。バックアップは同じ restic リポジトリに続けて記録される。
-5. **確認**: mailserver が Ready で、`doveadm user` と webmail でメールが見えること。次の `ReplicationSource` の実行が成功すること。
+4. **参照を切り替えるコミット**: `statefulset.yaml` の `claimName` と `replication-source.yaml` の `sourcePVC` を `<新>` にする
+   (DR では `paused: true` は維持)。`claimName` は Pod テンプレートの値で更新可能 (volumeClaimTemplates ではない)。
+   Pod が再作成され、`<新>` のデータで起動する。`<旧>` の PVC マニフェストは残す (prune されて消えないように)。
+5. **確認**: mailserver が Ready で、`doveadm user` と webmail でメールが見えること。
+6. (DR のみ) **`paused: true` を外すコミット**: 5 を確認してから外す。初回の同期がすぐ走り、次の ReplicationSource の実行成功を確認する。
 
 **ロールバック**: 手順4のコミットを revert して `claimName` / `sourcePVC` を `<旧>` に戻す。`<旧>` は削除していないため、
 切替前の状態で起動する。切替後に `<新>` が受信したメールは `<旧>` には無い。
@@ -283,7 +307,9 @@ mailserver の PVC 名は `gitops/manifests/prod/mailserver/` の3か所 (`pvc.y
 - 本番クラスタでの手順全体 (コミットから sync、切替まで)。
 - RD 削除が PVC に影響しないこと、削除で再リストアが走らないことは、VolSync の所有関係と挙動の説明に基づく (実測していない)。
 - `ReplicationSource` の `sourcePVC` 変更が既存の RS に適用でき、バックアップが連続すること。
-- local-path の PV はノードに固定されるため、複数ノード構成ではリストア用の mover Pod と mailserver Pod が同じノードに載ること。
+- 新 PVC に `volume.kubernetes.io/selected-node` を事前に付けると local-path が consumer 無しで指定ノードに PV を作ること (mover Pod と mailserver Pod が同じノードに載ること)。
+- `restoreAsOf` の指定が実際にそれ以前のスナップショットを選ぶこと (VolSync 0.9.1 の API 仕様に基づく、実測していない)。
+- `paused: true` の ReplicationSource が backup Job を作っても実行せず、`paused` を外すと初回同期が始まること (ソースの読解に基づく、実測していない)。
 - `<旧>` と `<新>` の同時存在時のディスク容量。
 
 ---

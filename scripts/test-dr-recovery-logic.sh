@@ -25,6 +25,14 @@ for cmd in curl gh kubectl infisical ansible-playbook terraform; do
   printf '#!/bin/sh\necho "%s $*" >>"$STUB_LOG"\nexit 99\n' "${cmd}" >"${WORK}/bin/${cmd}"
   chmod +x "${WORK}/bin/${cmd}"
 done
+# run_ansible が渡す SSH 鍵の状態を、ansible-playbook の代わりに呼ばれる timeout ダミーで記録する
+export KEY_INFO="${WORK}/key-info"
+cat >"${WORK}/bin/timeout" <<'STUB'
+#!/bin/sh
+{ echo "path=$ANSIBLE_PRIVATE_KEY_FILE"; stat -c 'mode=%a' "$ANSIBLE_PRIVATE_KEY_FILE"; echo "content=$(cat "$ANSIBLE_PRIVATE_KEY_FILE")"; echo "args=$*"; } >"$KEY_INFO"
+exit 0
+STUB
+chmod +x "${WORK}/bin/timeout"
 export PATH="${WORK}/bin:${PATH}"
 
 # shellcheck source=/dev/null
@@ -253,6 +261,47 @@ app_is_frozen "${APPS}" mailserver; assert_eq "稼働中のワークロードあ
 app_is_frozen "${APPS}" empty; assert_eq "ワークロード不明 -> 凍結扱いにしない" 1 $?
 
 echo ""
+echo "=== run_ansible: SSH 鍵を 0600 の一時ファイルで渡し、終了時に削除する ==="
+CI_SSH_PRIVATE_KEY="-----KEY-----" K3S_TOKEN=x CLOUDFLARE_TUNNEL_TOKEN=x CLOUDFLARE_TUNNEL_ID=x ARGOCD_GITHUB_DEPLOY_KEY=x
+DR_SKIP_INFRA=1
+(run_ansible prod-node-1) >/dev/null 2>&1
+DR_SKIP_INFRA=0
+KEY_PATH=$(sed -n 's/^path=//p' "${KEY_INFO}")
+assert_eq "ANSIBLE_PRIVATE_KEY_FILE が設定され権限 600" "mode=600" "$(grep '^mode=' "${KEY_INFO}")"
+assert_eq "鍵の内容が書き出される" "content=-----KEY-----" "$(grep '^content=' "${KEY_INFO}")"
+assert_eq "対象ノードに --limit される" "1" "$(grep -c -- '--limit prod-node-1' "${KEY_INFO}")"
+assert_eq "終了後に鍵ファイルが残らない" "gone" "$([[ -e "${KEY_PATH}" ]] && echo exists || echo gone)"
+
+echo ""
+echo "=== git_in_sync / mail_rs_paused ==="
+REAL_ROOT="${REPO_ROOT}"
+GITT="${WORK}/git"; mkdir -p "${GITT}"
+git init -q --bare --initial-branch=main "${GITT}/origin.git"
+git clone -q "${GITT}/origin.git" "${GITT}/work" 2>/dev/null
+git -C "${GITT}/work" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
+git -C "${GITT}/work" push -q origin HEAD:main 2>/dev/null
+git -C "${GITT}/work" branch -q -M main 2>/dev/null
+git -C "${GITT}/work" branch -q --set-upstream-to=origin/main main 2>/dev/null
+REPO_ROOT="${GITT}/work"
+git_in_sync >/dev/null 2>&1; assert_eq "origin/main と一致・変更なし -> 0" 0 $?
+touch "${GITT}/work/dirty"
+git_in_sync >/dev/null 2>&1; assert_eq "未コミット (untracked) の変更あり -> 1" 1 $?
+rm -f "${GITT}/work/dirty"
+git clone -q "${GITT}/origin.git" "${GITT}/other" 2>/dev/null
+git -C "${GITT}/other" -c user.email=t@t -c user.name=t commit -q --allow-empty -m next
+git -C "${GITT}/other" push -q origin HEAD:main 2>/dev/null
+git_in_sync >/dev/null 2>&1; assert_eq "main が進んで HEAD と不一致 -> 1" 1 $?
+git -C "${GITT}/work" remote set-url origin "${GITT}/missing.git"
+git_in_sync >/dev/null 2>&1; assert_eq "fetch 失敗 -> 2" 2 $?
+mkdir -p "${GITT}/work/gitops/manifests/prod/mailserver"
+printf 'spec:\n  paused: true\n' >"${GITT}/work/gitops/manifests/prod/mailserver/replication-source.yaml"
+mail_rs_paused; assert_eq "paused: true -> 0" 0 $?
+printf 'spec:\n  sourcePVC: x\n' >"${GITT}/work/gitops/manifests/prod/mailserver/replication-source.yaml"
+mail_rs_paused; assert_eq "paused 無し -> 1" 1 $?
+REPO_ROOT="${REAL_ROOT}"
+mail_rs_paused; assert_eq "リポジトリ現状の replication-source.yaml は paused でない (通常時は常に同期)" 1 $?
+
+echo ""
 echo "=== bootstrap Secret 修復は ESO 用認証情報から作る ==="
 kubectl_r() {
   echo "kubectl $*" >>"${CALLS}"
@@ -287,10 +336,14 @@ report_cnpg_recovery_points() { :; }
 hcloud_peer_servers() { echo "${PEERS}"; }
 ansible_ready() { return "${ANSIBLE_READY_RC}"; }
 ANSIBLE_READY_RC=0
+git_in_sync() { return "${GIT_SYNC_RC}"; }
+mail_rs_paused() { return "${MAIL_PAUSED_RC}"; }
+GIT_SYNC_RC=0
+MAIL_PAUSED_RC=0
 export DR_TARGET_NODE=prod-node-1 K3S_TOKEN=x ARGOCD_GITHUB_DEPLOY_KEY=x CLOUDFLARE_TUNNEL_TOKEN=x CLOUDFLARE_TUNNEL_ID=x
 export OPS_INFISICAL_CLIENT_ID=x OPS_INFISICAL_CLIENT_SECRET=x INFISICAL_PROJECT_ID=x HCLOUD_TOKEN=x
 export TAILSCALE_OAUTH_CLIENT_ID=x TAILSCALE_OAUTH_CLIENT_SECRET=x TAILSCALE_TAILNET=x TFC_API_TOKEN=x TFC_WORKSPACE_ID=x KUBECONFIG=x
-export GH_TOKEN=dummy ESO_INFISICAL_CLIENT_ID=eso ESO_INFISICAL_CLIENT_SECRET=eso
+export GH_TOKEN=dummy ESO_INFISICAL_CLIENT_ID=eso ESO_INFISICAL_CLIENT_SECRET=eso CI_SSH_PRIVATE_KEY=key
 DR_ANSIBLE_INVENTORY="${ROOT}/ansible/inventory/tailscale.yml"
 # errexit が効く別プロセス相当の環境で main を実行する (途中の失敗が後続段階を止めることまで検証)
 run_main() { : >"${CALLS}"; (set -e; main) >/dev/null 2>&1; echo "rc=$? $(calls)"; }
@@ -315,6 +368,21 @@ set_world off "${OFFLINE}" 1 1
 assert_eq "電源投入だけの経路は playbook 未冪等化でも進める" \
   "rc=0 poweron_node wait_tailscale_registered wait_k3s_ready ${TAIL}" "$(run_main)"
 ANSIBLE_READY_RC=0
+set_world absent "${OFFLINE}" 1 1
+GIT_SYNC_RC=1
+assert_eq "HEAD が origin/main と不一致 -> 破壊的操作の前に停止" "rc=1 " "$(run_main)"
+GIT_SYNC_RC=2
+assert_eq "git fetch 失敗 -> 停止" "rc=1 " "$(run_main)"
+GIT_SYNC_RC=0
+MAIL_PAUSED_RC=1
+assert_eq "再作成の経路で mail RS が paused でない -> 停止" "rc=1 " "$(run_main)"
+set_world off "${OFFLINE}" 1 1
+assert_eq "電源投入のみの経路は mail RS の paused を要求しない" \
+  "rc=0 poweron_node wait_tailscale_registered wait_k3s_ready ${TAIL}" "$(run_main)"
+GIT_SYNC_RC=1
+assert_eq "電源投入のみの経路は git 同期も要求しない (Ansible を流さない)" \
+  "rc=0 poweron_node wait_tailscale_registered wait_k3s_ready ${TAIL}" "$(run_main)"
+GIT_SYNC_RC=0; MAIL_PAUSED_RC=0
 DR_TARGET_NODE=prod-node-2
 assert_eq "cluster-init ホスト以外は自動復旧しない" "rc=1 " "$(run_main)"
 DR_TARGET_NODE=prod-node-1

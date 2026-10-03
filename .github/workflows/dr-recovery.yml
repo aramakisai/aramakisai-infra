@@ -28,9 +28,10 @@ concurrency:
 jobs:
   recover:
     runs-on: ubuntu-latest
-    # 各段階の最大待機の合計 (plan 15 + apply 15 + Tailscale 10 + Ansible 40 + ArgoCD 20 + CNPG 15 = 115分)
-    # にセットアップ時間を足した上限。段階側で必ず失敗するよう、ジョブ上限はこれより長くする
-    timeout-minutes: 130
+    # 各段階の最大待機の合計 (TFC run 2 回 = plan 15 + apply 15 を 2 回 + Tailscale 10 + Ansible 40
+    # + ArgoCD 20 + CNPG 15 = 145分) にセットアップ時間を足した上限。段階側で必ず失敗するよう、
+    # ジョブ上限はこれより長くする
+    timeout-minutes: 165
     # main 以外のブランチのワークフロー定義で復旧を起動させない
     if: github.ref == 'refs/heads/main'
     # required reviewers を設定した Environment。承認されるまでジョブは開始されない
@@ -51,7 +52,10 @@ jobs:
             exit 1
           fi
 
+      # 承認待ちの間に main が進んでも、起動時点ではなく承認後の main を使う
       - uses: actions/checkout@v7
+        with:
+          ref: main
 
       # GitHub Actions ランナーを tailnet に参加させる (Ansible SSH 経路の確保)
       # 前提: Tailscale ACL に tag:ci が定義されていること
