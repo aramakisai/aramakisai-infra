@@ -25,14 +25,19 @@
 
   判定:
     - (a) が障害、または (b) で2つ以上が同時に応答なし → NodeFailureSuspected
-    - (b) で1つのみ応答なし、または (a) が NodeDegraded → 通知のみ (毎時1回に間引き)
+    - (b) で1つのみ応答なし、または (a) が NodeDegraded → 通知のみ (最終通知から1時間は再通知しない)
   NodeFailureSuspected は1回の実行内で3回連続 (30秒間隔) したときだけ障害として扱う。
     1. open な `dr-incident` Issue が無ければ起票し Discord へ通知
-    2. open な Issue があれば追記のみ (毎時1回の再通知)。重複起票しない
-    3. 全シグナルが正常に戻ると Issue を自動クローズ
+    2. open な Issue があれば追記のみ (最終通知から1時間後に再通知)。重複起票しない。
+       Issue の検索に失敗した場合は起票せず Discord 通知のみ
+    3. 全シグナルが3回連続 (15分) で正常だった場合に Issue を自動クローズ
+  最終通知時刻と連続 Healthy 回数は Actions のキャッシュ (`.dr-trigger-state.json`) で実行間に引き継ぐ。
+  キャッシュが失効しても初期状態に戻るだけで、検知は止まらない (再通知が早まる側)。
 ```
 
-Tailscale は非 ephemeral のため、停止済みの旧デバイスが残ると実在ノード数に数えられクォーラム判定が厳しめ (誤検知側) に出る。再作成後は旧デバイスを削除しておく。
+Tailscale は非 ephemeral のため旧デバイスが残る。lastSeen が2日以上前の切断デバイスは実在ノードに数えない。
+ノードを外すスケールインでは、Terraform の `local.nodes` から外すのと同時に Tailscale のデバイスも削除する
+(2日間は切断デバイスが数えられ、クォーラム判定が厳しめ = 誤検知側に出るため)。
 
 ---
 
@@ -49,8 +54,6 @@ Tailscale は非 ephemeral のため、停止済みの旧デバイスが残る�
 gh workflow run dr-recovery.yml --repo aramakisai/aramakisai-infra -f target_node=prod-node-1
 # 生存確認ゲートを上書きする場合 (ノードが生きていないことを人が確認した場合のみ)
 #   -f force=true
-# mailserver データを VolSync スナップショットからリストアする場合 (最大6時間前の状態になる)
-#   -f restore_mail=true
 ```
 
 Actions の実行画面で reviewer が **Review deployments** から承認すると、ジョブが始まる。
@@ -58,8 +61,7 @@ Actions の実行画面で reviewer が **Review deployments** から承認す�
 | 入力 | 既定 | 意味 |
 |------|------|------|
 | `target_node` | (必須) | 復旧対象。terraform `local.nodes` に定義済みで、inventory の cluster-init ホストであること |
-| `force` | false | 生存確認ゲートの上書き。サーバーが稼働中の場合は Terraform・電源操作を行わず Ansible から再実行する |
-| `restore_mail` | false | mailserver-data の VolSync リストア。`dr.aramakisai.com/restored-at` annotation が付いた PVC は再実行でも上書きしない |
+| `force` | false | 生存確認ゲートの上書き。サーバーが稼働中の場合は Terraform・電源操作を行わず Ansible から再実行する (冪等化済みの `k3s-bootstrap.yml` が前提) |
 
 ### 処理の流れ
 
@@ -67,24 +69,37 @@ Actions の実行画面で reviewer が **Review deployments** から承認す�
 0. 進捗記録: open な dr-incident Issue (無ければ作成) に各段階と TFC run ID を追記
 1. 生存確認ゲート (読み取り専用)。次のいずれかで停止 (force でのみ上書き)
      - Hetzner のサーバー状態が off / 不在以外 (running, starting など)、または取得失敗
-     - Tailscale 上で対象ノードが接続中、または API 失敗
+     - Hetzner 上に不在でも TFC state に対象サーバーの記録が無い、または state を取得できない (不整合は停止)
+     - Tailscale 上で対象ノードが接続中、または API 失敗・想定外の応答
      - 公開エンドポイントのどれかが応答
      - kubectl get nodes が成功
-2. 他に Hetzner サーバー (role=server) が残っている、または対象が cluster-init ホストでなければ停止
+2. 他に Hetzner サーバー (role=server) が残っている、対象が cluster-init ホストでない、
+   Ansible を流す経路で冪等化済み playbook (ansible/playbooks/tasks/ensure_secret.yml) が無い、
+   ESO_INFISICAL_CLIENT_ID/SECRET が未設定、のいずれかなら破壊的操作の前に停止
 3. サーバー状態で分岐
-     不在: plan 作成 (-target=対象ノードのみ, auto-apply 無効)
+     不在: plan 作成 (-target=対象サーバーのみ, auto-apply 無効)
            → plan の変更が「対象サーバー作成 + Tailscale auth key 置換」だけか機械検査
               (placement group・DNS・RDNS・他ノードの変更が混ざれば run を discard して停止)
            → Tailscale の旧デバイス (名前一致 かつ offline) を ID 指定で削除 → apply
-     停止: 電源投入 (Tailscale デバイスは消さない。消すと再接続できなくなる)
+           → メール用 A/AAAA と rDNS (mail_prod_node_1, mail_prod_node_1_ipv4, mail_ipv4, mail_ipv6)
+              だけを target にした2回目の run。この4アドレスの create/update/置換以外が混ざれば discard して停止
+     停止: 電源投入のみ (Tailscale デバイスは消さない。消すと再接続できなくなる)。IP は変わらない
 4. 対象ノードが Tailscale に接続するまで待機 (最大10分)
-5. ansible-playbook k3s-bootstrap.yml を対象ノードに限定して実行
+     停止からの復帰: Ansible は流さず、ノードが k3s で Ready に戻るまで待機 (最大10分)
+5. 不在・force の経路のみ: ansible-playbook k3s-bootstrap.yml を対象ノードに限定して実行 (最大40分)
      (cluster-init は空の etcd から作り直す。etcd スナップショットは取得していない)
-6. ArgoCD 全 Application の Healthy と、稼働中の全 CNPG クラスターの healthy を待機 (タイムアウトは失敗)
-     instances=0 や hibernation 中のクラスターは対象外
-7. infisical-auth / Deploy Key の空チェックと自己修復、mail-tls の自己修復
-8. restore_mail=true かつ未リストアの PVC のみ: mailserver 停止 → VolSync リストア → 再起動
+     Ansible の Infisical 書込 (KUBECONFIG 登録) は DR 専用 identity で行い、完了後に Infisical から
+     kubeconfig を取得し直す (取得失敗は停止)
+6. infisical-auth / Deploy Key の空チェックと自己修復 (ESO 用の認証情報から作成)
+7. ArgoCD の Application が Healthy になるまで待機 (replicas=0 のワークロードだけを持つ凍結中アプリは除外、最大20分、
+   待機中に mail-tls の自己修復も試行) と、稼働中の全 CNPG クラスターの healthy 待機 (最大15分)。
+   instances=0 や hibernation 中のクラスターは対象外。タイムアウトは失敗
 ```
+
+実行中の run は apply の前に異常終了しても、未 apply の TFC run を discard してワークスペースのロックを残さない。
+ワークフローのジョブ上限は各段階の最大待機の合計 (115分) より長い130分。
+
+メールデータのリストアは自動化していない。ノード再作成後の `mailserver-data` は空の PVC で始まる。手順は「手動フォールバック」を参照。
 
 CNPG は Hetzner Object Storage から WAL リストアされる (Authentik / Directus は `bootstrap.recovery`、Zitadel も同様)。
 
@@ -138,7 +153,7 @@ dig mail.aramakisai.com AAAA
 
 | 事象 | 理由 | 対処 |
 |------|------|------|
-| mailserver のメールが最大 6 時間分消失 | VolSync スナップショット間隔 | 許容範囲内 |
+| 再作成後の mailserver が空の PVC で起動する | メールのリストアは自動化していない | 「手動フォールバック」のメールリストアを人が判断して実施 |
 | infisical-auth / Deploy Key が空 | ArgoCD sync タイミング問題 | **自動修復済み** (recovery.sh) |
 | mailserver TLS (`mail-tls`) がない | cert-manager sync タイミング問題 | **自動修復済み** (recovery.sh) |
 | `tailscale_tailnet_key.k3s_nodes` の置換が plan に出る | auth key は expiry 1時間の設計 | plan 検査で許可済み |
@@ -203,8 +218,8 @@ echo "$KUBECONFIG" > /tmp/kubeconfig-dr && chmod 600 /tmp/kubeconfig-dr
 
 kubectl --kubeconfig=/tmp/kubeconfig-dr \
   create secret generic infisical-auth \
-  --from-literal=clientId="$INFISICAL_CLIENT_ID" \
-  --from-literal=clientSecret="$INFISICAL_CLIENT_SECRET" \
+  --from-literal=clientId="$ESO_INFISICAL_CLIENT_ID" \
+  --from-literal=clientSecret="$ESO_INFISICAL_CLIENT_SECRET" \
   -n argocd --dry-run=client -o yaml \
   | kubectl --kubeconfig=/tmp/kubeconfig-dr apply -f -
 
@@ -214,36 +229,23 @@ kubectl --kubeconfig=/tmp/kubeconfig-dr \
 '
 ```
 
-### ステップ 6: mailserver VolSync リストア (必要な場合のみ)
+### ステップ 6: mailserver のリストア (人が判断して実施)
 
-PVC に `dr.aramakisai.com/restored-at` annotation がある場合は既にリストア済みのため実施しない。
+自動化していない。mailserver Application は `automated.selfHeal` のため、`kubectl scale` で停止しても ArgoCD が
+replicas を戻し、稼働中の PVC に VolSync が書き込んでしまう。実施する場合は次を守る。
 
-```bash
-make kubectl ARGS="scale statefulset mailserver -n prod --replicas=0"
-make kubectl ARGS="apply -f - <<'EOF'
-apiVersion: volsync.backube/v1alpha1
-kind: ReplicationDestination
-metadata:
-  name: mailserver-restore
-  namespace: prod
-spec:
-  trigger:
-    manual: dr-manual-$(date +%Y%m%dT%H%M%S)
-  restic:
-    repository: mailserver-restic-secret
-    destinationPVC: mailserver-data
-    copyMethod: Direct
-    moverSecurityContext:
-      runAsUser: 0
-      runAsGroup: 0
-      fsGroup: 0
-EOF"
-make kubectl ARGS="wait replicationdestination/mailserver-restore \
-  -n prod --for=condition=Reconciled --timeout=30m"
-make kubectl ARGS="annotate pvc mailserver-data -n prod dr.aramakisai.com/restored-at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-make kubectl ARGS="scale statefulset mailserver -n prod --replicas=1"
-make kubectl ARGS="delete replicationdestination mailserver-restore -n prod"
-```
+1. 空の PVC で mailserver が起動し、新着メールを受け始めていないか確認する (受けていれば、その分はリストアで失われる)。
+2. `mailserver` Application の自動 sync を止める (`argocd app set mailserver --sync-policy none`)。App of Apps 側の selfHeal が戻す場合があるため、戻っていないことを `argocd app get mailserver` で確認する。
+3. StatefulSet を replicas=0 にして Pod の終了を確認してから、`ReplicationDestination` (`copyMethod: Direct`、
+   `destinationPVC: mailserver-data`、`repository: mailserver-restic-secret`、`trigger.manual` に新しい値) を適用し、
+   `status.latestMoverStatus.result` が `Successful` になるまで待つ。
+4. `ReplicationDestination` を削除し、replicas を戻し、自動 sync を戻す (`argocd app set mailserver --sync-policy automated --self-heal`)。
+
+PVC 作成時に VolSync の volume populator (`dataSourceRef`) で中身を入れる GitOps 方式は、既存の稼働中 PVC に
+`dataSourceRef` を足せない (PVC の spec は作成後に変更不可で ArgoCD の sync が失敗する) うえ、StorageClass が `local-path` で
+populator の対象になるか未確認のため、現状の構成では導入していない。
+
+---
 
 ### 複数ノード構成 (ノード追加期間中) の復旧
 
@@ -329,7 +331,7 @@ gh workflow run dr-trigger.yml --repo aramakisai/aramakisai-infra
 3. 必要に応じて **Prevent self-review** を有効化する
 4. Deployment branches は `main` のみに制限する
 
-Environment が無いまま実行すると GitHub が自動作成して承認なしで実行してしまうため、先に作成しておくこと。
+Environment が無いまま実行すると GitHub が承認なしの Environment を自動作成してしまう。ワークフローは冒頭の検査で止まるが、先に作成しておくこと。
 
 ### Tailscale OAuth クライアント (TAILSCALE_OAUTH_CLIENT_ID / SECRET)
 
@@ -342,21 +344,35 @@ Terraform provider・dr-trigger・recovery.sh は同じキー名の OAuth クラ
 
 ACL を Terraform で管理する場合は `policy_file` スコープも必要。Admin console の Settings → OAuth clients で作成し、値を Infisical (`prod`) の同名キーへ投入する。`tailscale_oauth_client` による Terraform 管理は、provider 自身の認証に使うクライアントを自身で作る鶏卵問題があり、発行されたシークレットが state に残るため採用していない (最初の1つは手動作成が必須)。
 
+### DR 専用 Infisical machine identity
+
+`k3s-bootstrap.yml` は新しい kubeconfig を Infisical の KUBECONFIG に書き込む。既存の CI 用 identity は
+prod 読取専用で書込が 403 になり、再作成時に bootstrap が最後まで進まない。復旧ワークフローだけが使う
+専用の machine identity (Universal Auth) を作る。Infisical の identity は Terraform 管理外のため手動で作成する。
+
+- 権限: prod の全シークレット読取 (復旧が `infisical run` で注入する) + `KUBECONFIG` の作成・更新のみ。それ以外の書込は付けない。
+- GitHub Secrets に `DR_INFISICAL_CLIENT_ID` / `DR_INFISICAL_CLIENT_SECRET` として登録する (dr-recovery.yml だけが参照)。
+- ESO 用の認証情報 (`ESO_INFISICAL_CLIENT_ID` / `ESO_INFISICAL_CLIENT_SECRET`、Infisical `prod` に保存) とは分ける。
+  infisical-auth Secret はこの ESO 用の値から作り、DR 専用 identity は ESO に渡さない。
+
 ### GitHub Actions Secrets (要設定)
 
 その他の認証情報は Infisical から注入する。ワークフローが直接参照する GitHub Secrets は次のとおり。
 
 | Secret 名 | 内容 | 使用ワークフロー |
 |-----------|------|------------------|
-| `INFISICAL_CLIENT_ID` | Infisical Machine Identity Client ID | dr-trigger.yml / dr-recovery.yml |
-| `INFISICAL_CLIENT_SECRET` | Infisical Machine Identity Client Secret | dr-trigger.yml / dr-recovery.yml |
+| `INFISICAL_CLIENT_ID` | Infisical Machine Identity Client ID (CI 用、読取) | dr-trigger.yml |
+| `INFISICAL_CLIENT_SECRET` | Infisical Machine Identity Client Secret (CI 用、読取) | dr-trigger.yml |
+| `DR_INFISICAL_CLIENT_ID` | DR 専用 Machine Identity Client ID (prod 読取 + KUBECONFIG 書込) | dr-recovery.yml |
+| `DR_INFISICAL_CLIENT_SECRET` | DR 専用 Machine Identity Client Secret | dr-recovery.yml |
 | `INFISICAL_PROJECT_ID` | Infisical プロジェクト ID | dr-trigger.yml / dr-recovery.yml |
 | `TS_OAUTH_CLIENT_ID` | Tailscale OAuth Client ID (tag:ci 用、ランナーの tailnet 参加) | dr-recovery.yml |
 | `TS_OAUTH_SECRET` | Tailscale OAuth Client Secret (tag:ci 用) | dr-recovery.yml |
 
-Infisical (`prod`) から注入する主なキー: `HCLOUD_TOKEN` (Hetzner サーバー状態の確認・電源投入)、`TAILSCALE_OAUTH_CLIENT_ID/SECRET`、`TAILSCALE_TAILNET`、`TFC_API_TOKEN`、`TFC_WORKSPACE_ID`、`DISCORD_OPS_WEBHOOK_URL`、`K3S_TOKEN` ほか Ansible 用。
+Infisical (`prod`) から注入する主なキー: `ESO_INFISICAL_CLIENT_ID/SECRET`、 `HCLOUD_TOKEN` (Hetzner サーバー状態の確認・電源投入)、`TAILSCALE_OAUTH_CLIENT_ID/SECRET`、`TAILSCALE_TAILNET`、`TFC_API_TOKEN`、`TFC_WORKSPACE_ID`、`DISCORD_OPS_WEBHOOK_URL`、`K3S_TOKEN` ほか Ansible 用。
 
-`GITHUB_TOKEN` は Issue 操作のため `issues: write` を各ワークフローの `permissions` で付与している。新規 PAT は不要。
+`GITHUB_TOKEN` は Issue 操作のため `issues: write` を、dr-recovery.yml では Environment の保護ルール検査のため `actions: read` を `permissions` で付与している。新規 PAT は不要。
+dr-recovery.yml は冒頭で Environment `dr-recovery` の required reviewers を検査し、未設定なら失敗する。`main` 以外の ref では起動しない。
 
 **Tailscale 前提 (dr-recovery.yml)**: Tailscale ACL に `tag:ci` タグを定義し、`TS_OAUTH_*` のクライアントがそのタグでデバイスを登録できること。
 

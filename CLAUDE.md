@@ -54,7 +54,7 @@ gh workflow run k3s-upgrade.yml
 # dr-trigger は通知のみ。復旧は人が起動し、Environment `dr-recovery` の reviewer が承認する
 gh workflow run dr-recovery.yml --repo aramakisai/aramakisai-infra -f target_node=prod-node-1
 ```
-`force` (生存確認ゲート上書き) と `restore_mail` (mailserver データのリストア) は既定で無効。手順は [docs/dr-runbook.md](docs/dr-runbook.md)。
+`force` (生存確認ゲート上書き) は既定で無効。mailserver データのリストアは自動化していない。手順は [docs/dr-runbook.md](docs/dr-runbook.md)。
 
 ### 4. K3s 操作・検証
 ```bash

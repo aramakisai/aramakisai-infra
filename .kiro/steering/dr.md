@@ -12,7 +12,7 @@
   1回の実行内で障害判定が3回連続したときだけ Discord 通知と `dr-incident` Issue 起票/追記を行う。
   復旧ワークフローの自動起動はしない。open な `dr-incident` Issue があれば追記のみ (重複起票しない)
 - **復旧は `dr-recovery.yml` を `workflow_dispatch` で人が起動**: GitHub Environment `dr-recovery`
-  の required reviewers の承認後にジョブが始まる。入力は `target_node` (必須)・`force`・`restore_mail`
+  の required reviewers の承認後にジョブが始まる。入力は `target_node` (必須)・`force`。冒頭で Environment の required reviewers を検査し、`main` 以外では起動しない
 - **生存確認ゲート**: `recovery.sh` は冒頭で Hetzner サーバー状態・Tailscale・公開エンドポイント・
   `kubectl get nodes` を読み取り専用で確認し、生存または判定不能を示すシグナルが1つでもあれば停止する
   (`force` でのみ上書き)
@@ -25,8 +25,14 @@
 - **Tailscale は OAuth クライアント統一**: `TAILSCALE_OAUTH_CLIENT_ID/SECRET` (devices:core 書込 +
   auth_keys 書込)。旧デバイスは「対象ノード名一致 かつ offline」のものだけ ID 指定で削除。
   サーバー停止のみのときはデバイスを消さず電源投入だけ行う
-- **mailserver リストアは `restore_mail` の明示 opt-in**: PVC に `dr.aramakisai.com/restored-at`
-  annotation があれば再実行でも上書きしない
+- **電源投入のみの経路は Ansible を流さない**: サーバーが停止しているだけなら起動して k3s の Ready を確認するだけ。
+  Ansible を流す経路 (再作成・force) は冪等化済みの `k3s-bootstrap.yml` (`tasks/ensure_secret.yml` の存在) が前提
+- **再作成後はメール DNS/rDNS を別 run で追従**: `mail_prod_node_1` / `mail_prod_node_1_ipv4` / `mail_ipv4` / `mail_ipv6`
+  の4アドレスだけを target にし、plan がこの範囲を出れば停止する
+- **Infisical は DR 専用 machine identity** (`DR_INFISICAL_CLIENT_ID/SECRET`: prod 読取 + KUBECONFIG 書込)。
+  infisical-auth は ESO 用 (`ESO_INFISICAL_CLIENT_ID/SECRET`) から作り、DR identity は ESO に渡さない
+- **メールデータのリストアは自動化しない**: mailserver Application の selfHeal が replicas=0 を戻して稼働中 PVC に書込むため。
+  人が判断して `docs/dr-runbook.md` の手順で実施する
 - **手動手順は例外**: ワークフローが失敗した場合のフォールバックとして `docs/dr-runbook.md` の「手動フォールバック」を使う
 - **検出スクリプト**: `.github/scripts/dr-trigger.sh` (ユニットテスト: `scripts/test-dr-trigger-logic.sh`)
 - **復旧スクリプト**: `.github/scripts/recovery.sh` (ユニットテスト: `scripts/test-dr-recovery-logic.sh`)
@@ -120,7 +126,7 @@ Stalwart から Docker Mailserver (DMS) v14 に移行済み。管理 CLI やア�
 ### メールデータのバックアップ・復元
 
 メールデータは VolSync (ReplicationSource) で Backblaze B2 に定期バックアップ。  
-DR 時は `recovery.sh` が自動で VolSync リストアを行う。  
+DR 時の VolSync リストアは自動化していない (`docs/dr-runbook.md` の手動手順)。  
 手動で行う場合は `gitops/manifests/prod/mailserver/replication-source.yaml` を参照。
 
 ### DKIM / TLS の注意事項
