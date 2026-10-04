@@ -14,6 +14,7 @@ concurrency:
 permissions:
   contents: read
   issues: write
+  id-token: write
 
 jobs:
   check:
@@ -23,8 +24,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # KUBECONFIGのserverはTailscale MagicDNS名 (prod-node-1) のため、
-      # ランナーをtailnetに参加させないとkubectlが名前解決できない (k3s-upgrade.ymlと同じ理由)
+      # 接続先はTailscale MagicDNS名 (prod-node-1) のため、
+      # ランナーをtailnetに参加させないとkubectl・kubeletへ到達できない (k3s-upgrade.ymlと同じ理由)
       - name: Setup Tailscale
         uses: tailscale/github-action@v3
         with:
@@ -50,6 +51,7 @@ jobs:
           INFISICAL_CLIENT_SECRET: ${{ secrets.INFISICAL_CLIENT_SECRET }}
           INFISICAL_PROJECT_ID: ${{ secrets.INFISICAL_PROJECT_ID }}
         run: |
+          # Infisicalから読むのはDiscord webhookのみ (Viewer)。kube認証はOIDCで、共有kubeconfigは使わない。
           # infisical run はUniversal Auth環境変数を自動認識しないため、
           # 明示的にlogin --method=universal-authでトークンを取得し --token で渡す。
           # トークンはログに出力されうるため ::add-mask:: で確実にマスクする。

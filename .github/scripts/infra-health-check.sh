@@ -2,7 +2,7 @@
 # インフラヘルスチェック: CNPG WAL アーカイブ失敗 + ノードルートディスク使用率
 #
 # .github/workflows/infra-health-check.yml (cron) から実行される。
-# KUBECONFIG は Infisical から注入される (make kubectl と同じ値)。
+# kubectl は kube-oidc.sh が生成する OIDC kubeconfig で認証する (ジョブに id-token: write が必要)。
 # 状態の持続化は GitHub Issue (ラベル infra-alert) で行う。dr-trigger.sh と異なり
 # 自動復旧アクションは発火しない (通知のみ)。同一問題での cron 実行毎の再通知を
 # 避けるため、Issue 本文に埋め込んだキーで既存インシデントを識別し、
@@ -19,19 +19,35 @@ NODE_NAME="${INFRA_HEALTH_NODE_NAME:-prod-node-1}"
 DISK_THRESHOLD_PERCENT="${INFRA_HEALTH_DISK_THRESHOLD_PERCENT:-85}"
 
 # ============================================================
-# kubectl (KUBECONFIG は Infisical run 経由で環境変数として注入済み)
+# kubectl / kubelet (どちらも GitHub OIDC トークンで認証)
 # ============================================================
 
-KUBECTL_CONF="/tmp/kubeconfig-infra-health-check"
+KUBECTL_CONF="${INFRA_HEALTH_KUBECONFIG:-/tmp/kubeconfig-infra-health-check}"
+KUBE_OIDC="$(dirname "${BASH_SOURCE[0]}")/kube-oidc.sh"
 
 setup_kubeconfig() {
-  [[ -n "${KUBECONFIG:-}" ]] || die "KUBECONFIG が未設定です"
-  echo "${KUBECONFIG}" >"${KUBECTL_CONF}"
-  chmod 600 "${KUBECTL_CONF}"
+  # Infisical run が注入する共有 kubeconfig を kubectl が拾わないようにする
+  unset KUBECONFIG
+  bash "${KUBE_OIDC}" kubeconfig "${KUBECTL_CONF}" || die "OIDC kubeconfig の生成に失敗しました"
 }
 
 kc() {
   kubectl --kubeconfig="${KUBECTL_CONF}" "$@"
+}
+
+# nodes/proxy 権限を持たないため API サーバーの node proxy は使えない。
+# nodes/stats だけで通る kubelet (10250) を、kubeconfig と同じ CA で検証して直接呼ぶ
+kubelet_stats() {
+  local ca token rc
+  ca="$(mktemp)"
+  kc config view --raw --minify -o jsonpath='{.clusters[0].cluster.certificate-authority-data}' | base64 -d >"${ca}"
+  token="$(bash "${KUBE_OIDC}" token | jq -r '.status.token')" || { rm -f "${ca}"; return 1; }
+  # トークンを argv に出さないよう設定を stdin から渡す
+  printf 'header = "Authorization: Bearer %s"\n' "${token}" \
+    | curl -sf --max-time 30 --cacert "${ca}" -K - "https://${NODE_NAME}:10250/stats/summary"
+  rc=$?
+  rm -f "${ca}"
+  return "${rc}"
 }
 
 # ============================================================
@@ -41,7 +57,7 @@ kc() {
 # 出力: "breach|<usage_percent>" または "ok|<usage_percent>"
 check_disk_usage() {
   local stats used capacity percent
-  stats=$(kc get --raw "/api/v1/nodes/${NODE_NAME}/proxy/stats/summary") \
+  stats=$(kubelet_stats) \
     || { log "警告: ${NODE_NAME} の stats/summary 取得に失敗しました"; echo "unknown|0"; return; }
 
   used=$(echo "${stats}" | jq -r '.node.fs.usedBytes // empty')
@@ -161,7 +177,7 @@ sync_recovered() {
 # ============================================================
 
 main() {
-  local required_vars=(KUBECONFIG DISCORD_OPS_WEBHOOK_URL GH_TOKEN)
+  local required_vars=(DISCORD_OPS_WEBHOOK_URL GH_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN)
   local var
   for var in "${required_vars[@]}"; do
     [[ -n "${!var:-}" ]] || die "必須環境変数が未設定です: ${var}"

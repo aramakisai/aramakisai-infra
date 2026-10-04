@@ -5,6 +5,7 @@
 #
 # 使い方:
 #   ./scripts/verify-k3s-authn-disposable.sh
+# 4.1 の kube-oidc.sh もここで検証する (kubectl が必要)。
 # 前提: docker (sudo 不要)、ansible-playbook、python3 (PyYAML・PyJWT・cryptography)、openssl、jq、curl
 
 # ok/ng は常に成功するため A && ok || ng は if-else として安全。jq の式は意図して単一引用符で渡す
@@ -26,9 +27,11 @@ TAG="k3s-authn-verify-$$"
 NET="${TAG}-net"
 CONTAINERS=()
 MOCK_PID=""
+EXTRA_PIDS=()
 
 cleanup() {
   [[ -n "${MOCK_PID}" ]] && kill "${MOCK_PID}" 2>/dev/null
+  for p in "${EXTRA_PIDS[@]}"; do kill "${p}" 2>/dev/null; done
   for c in "${CONTAINERS[@]}"; do docker rm -fv "${c}" >/dev/null 2>&1; done
   docker network rm "${NET}" >/dev/null 2>&1
   rm -rf "${WORK}"
@@ -140,6 +143,47 @@ echo "--- OIDC 判定 (許可と違反の全ケース) ---"
 if python3 "${PY}" judge "${JUDGE_ARGS[@]}" --issuer "${ISSUER}" --api "127.0.0.1:${PORT_A}" | tee "${WORK}/judge.log"; then
   ok "OIDC 判定がすべて期待どおり ($(tail -1 "${WORK}/judge.log"))"
 else ng "OIDC 判定に不一致あり"; fi
+
+echo "--- 4.1 kube-oidc.sh (kubeconfig 生成と exec プラグイン) ---"
+KO="${ROOT}/.github/scripts/kube-oidc.sh"
+REQ_TOKEN="req-$$-secret"
+TOK_PORT="$(python3 -c 'import socket;s=socket.socket();s.bind(("",0));print(s.getsockname()[1])')"
+python3 "${PY}" tokensrv "${JUDGE_ARGS[@]}" --issuer "${ISSUER}" --port "${TOK_PORT}" --request-token "${REQ_TOKEN}" &
+EXTRA_PIDS+=($!)
+for _ in $(seq 1 20); do curl -s -o /dev/null "http://127.0.0.1:${TOK_PORT}/" && break; sleep 0.5; done
+GH_ENV=(ACTIONS_ID_TOKEN_REQUEST_URL="http://127.0.0.1:${TOK_PORT}/token?api-version=2.0" ACTIONS_ID_TOKEN_REQUEST_TOKEN="${REQ_TOKEN}")
+KO_ENV=(KUBE_API_HOST=127.0.0.1 KUBE_API_PORT="${PORT_A}")
+KCFG="${WORK}/ko-kubeconfig"
+if env "${KO_ENV[@]}" "${GH_ENV[@]}" bash "${KO}" kubeconfig "${KCFG}" >"${WORK}/ko.out" 2>&1; then
+  ok "kubeconfig 生成が成功する"
+  [[ "$(stat -c %a "${KCFG}")" == 600 ]] && ok "kubeconfig が 0600" || ng "kubeconfig のパーミッション"
+  grep -q 'insecure-skip-tls-verify' "${KCFG}" && ng "TLS 検証が無効化されている" || ok "TLS 検証を無効化していない"
+  who="$(env "${GH_ENV[@]}" kubectl --kubeconfig "${KCFG}" auth whoami -o jsonpath='{.status.userInfo.username}' 2>/dev/null)"
+  [[ "${who}" == "gha:infra-health-check" ]] && ok "生成した kubeconfig の kubectl が gha:infra-health-check として認証される" || ng "gha: ユーザーとして認証されない (${who})"
+  env "${GH_ENV[@]}" bash "${KO}" token >"${WORK}/ko.cred" 2>/dev/null
+  jq -e '.apiVersion=="client.authentication.k8s.io/v1" and .kind=="ExecCredential" and (.status.token|length>0) and (.status.expirationTimestamp|test("^[0-9]{4}-.*Z$"))' "${WORK}/ko.cred" >/dev/null \
+    && ok "token モードが有効期限付き ExecCredential を返す" || ng "ExecCredential の形式"
+  tok="$(jq -r .status.token "${WORK}/ko.cred")"
+  { grep -qF "${tok}" "${KCFG}" "${WORK}/ko.out" && ng "トークンが kubeconfig/ログに書かれている"; } || ok "トークンが kubeconfig・ログに書かれない"
+  grep -qF "${REQ_TOKEN}" "${KCFG}" "${WORK}/ko.out" && ng "要求トークンが kubeconfig/ログに書かれている" || ok "要求トークンが kubeconfig・ログに書かれない"
+else ng "kubeconfig 生成"; cat "${WORK}/ko.out"; fi
+env KUBE_API_HOST=127.0.0.1 KUBE_API_PORT="${DEAD_PORT}" "${GH_ENV[@]}" bash "${KO}" kubeconfig "${WORK}/ko-dead" >"${WORK}/ko-dead.out" 2>&1 \
+  && ng "CA 取得不可で成功してしまった" || { grep -q 'server CA を取得できません' "${WORK}/ko-dead.out" && ok "CA 取得不可で非 0 終了" || ng "CA 取得不可の失敗理由が違う"; }
+[[ -e "${WORK}/ko-dead" ]] && ng "CA 取得不可で kubeconfig が残った" || ok "CA 取得不可で kubeconfig を書かない"
+openssl req -x509 -newkey rsa:2048 -nodes -days 1 -keyout "${WORK}/other.key" -out "${WORK}/other.pem" -subj "/CN=other-ca" 2>/dev/null
+MIS_PORT="$(python3 -c 'import socket;s=socket.socket();s.bind(("",0));print(s.getsockname()[1])')"
+python3 "${PY}" serve --issuer "${ISSUER}" --bind "${GW}" --port "${MIS_PORT}" --cert "${WORK}/srv.pem" \
+  --tls-key "${WORK}/srv.key" --key "${WORK}/sign.key" --cacerts "${WORK}/other.pem" &
+EXTRA_PIDS+=($!)
+sleep 1
+env KUBE_API_HOST="${GW}" KUBE_API_PORT="${MIS_PORT}" "${GH_ENV[@]}" bash "${KO}" kubeconfig "${WORK}/ko-mis" >"${WORK}/ko-mis.out" 2>&1 \
+  && ng "CA と提示証明書の不一致で成功してしまった" || { grep -q 'TLS 検証が通りません' "${WORK}/ko-mis.out" && ok "CA と提示証明書の不一致で非 0 終了" || ng "不一致の失敗理由が違う"; }
+env "${KO_ENV[@]}" ACTIONS_ID_TOKEN_REQUEST_URL="" ACTIONS_ID_TOKEN_REQUEST_TOKEN="" bash "${KO}" kubeconfig "${WORK}/ko-noenv" >"${WORK}/ko-noenv.out" 2>&1 \
+  && ng "kubeconfig モードが環境変数なしで成功した" || { grep -q 'が未設定です' "${WORK}/ko-noenv.out" && ok "kubeconfig モードが環境変数なしで非 0 終了" || ng "環境変数欠如の失敗理由が違う"; }
+env ACTIONS_ID_TOKEN_REQUEST_URL="" ACTIONS_ID_TOKEN_REQUEST_TOKEN="" bash "${KO}" token >/dev/null 2>&1 \
+  && ng "token モードが環境変数なしで成功した" || ok "token モードが環境変数なしで非 0 終了"
+env ACTIONS_ID_TOKEN_REQUEST_URL="http://127.0.0.1:${TOK_PORT}/token?api-version=2.0" ACTIONS_ID_TOKEN_REQUEST_TOKEN=wrong bash "${KO}" token >/dev/null 2>&1 \
+  && ng "要求トークン不正で成功した" || ok "トークン取得失敗で非 0 終了"
 
 echo "--- 3.6 CSR の署名期間 ---"
 mkreq() { # mkreq <name> <subj> <expirationSeconds|""> -> stdout: CSR manifest。鍵は ${WORK}/<name>.key

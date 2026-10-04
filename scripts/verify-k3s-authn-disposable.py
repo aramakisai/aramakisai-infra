@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """verify-k3s-authn-disposable.sh の補助。OIDC 発行者のモック、自前署名トークンの判定、監査ログの総量負荷を担う。
 
-serve  : discovery と JWKS を返す HTTPS サーバ
+serve  : discovery と JWKS を返す HTTPS サーバ (--cacerts 指定時は /cacerts も返す)
+tokensrv: GitHub の ID トークン要求エンドポイントのモック (HTTP)。要求トークン一致時に audience 指定のトークンを返す
 patch  : 描画済み認証設定の issuer URL と CA だけをテスト用に差し替える (照合規則は触らない)
 judge  : 許可・違反の全ケースを API サーバに提示して判定する
 probe  : 有効なトークンが 401 になることを確認する (発行者に到達できない状態用)
 flood  : 有効なトークンで大量に要求を送り、監査ログを増やす
 """
 import argparse, http.client, json, ssl, sys, threading, time
+from urllib.parse import parse_qs, urlparse
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import jwt
@@ -31,11 +33,14 @@ def serve(a):
                                               "id_token_signing_alg_values_supported": ["RS256"]},
         "/jwks": {"keys": [jwk]},
     }
+    cacerts = open(a.cacerts, "rb").read() if a.cacerts else None
 
     class H(BaseHTTPRequestHandler):
         def do_GET(self):
             d = docs.get(self.path)
             body = json.dumps(d or {}).encode()
+            if cacerts is not None and self.path == "/cacerts":
+                d, body = True, cacerts
             self.send_response(200 if d else 404)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
@@ -50,6 +55,29 @@ def serve(a):
     srv = HTTPServer((a.bind, a.port), H)
     srv.socket = ctx.wrap_socket(srv.socket, server_side=True)
     srv.serve_forever()
+
+
+def tokensrv(a):
+    x = Ctx(a)
+
+    class H(BaseHTTPRequestHandler):
+        def do_GET(self):
+            q = parse_qs(urlparse(self.path).query)
+            if self.headers.get("Authorization") != f"bearer {a.request_token}" or q.get("api-version") != ["2.0"]:
+                self.send_response(401)
+                self.end_headers()
+                return
+            aud = (q.get("audience") or [None])[0]
+            body = json.dumps({"value": x.sign(dict(x.base(), exp=int(time.time()) + 300), aud=aud)}).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_):
+            pass
+
+    HTTPServer(("127.0.0.1", a.port), H).serve_forever()
 
 
 def patch(a):
@@ -199,7 +227,16 @@ def main():
     s.add_argument("--cert", required=True)
     s.add_argument("--tls-key", required=True)
     s.add_argument("--key", required=True)
+    s.add_argument("--cacerts")
     s.set_defaults(f=serve)
+    s = sp.add_parser("tokensrv")
+    s.add_argument("--defaults", required=True)
+    s.add_argument("--issuer", required=True)
+    s.add_argument("--key", required=True)
+    s.add_argument("--port", type=int, required=True)
+    s.add_argument("--request-token", required=True)
+    s.add_argument("--api", default="0:0")
+    s.set_defaults(f=tokensrv)
     s = sp.add_parser("patch")
     s.add_argument("--inp", required=True)
     s.add_argument("--out", required=True)

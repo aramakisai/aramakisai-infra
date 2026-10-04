@@ -10,7 +10,7 @@
 
 ---
 
-- [ ] 1. P0: 進行中 PR との Infisical 認証情報の整合とマージ
+- [x] 1. P0: 進行中 PR との Infisical 認証情報の整合とマージ
 
 - [x] 1.1 PR #288 (k3s-bootstrap 冪等化) から作成できない認証情報の前提と kubeconfig 登録を外す
   - kubeconfig を取得して Infisical へ登録する Play を削除する
@@ -51,7 +51,7 @@
   - 完了状態: main に両 PR が入り、本仕様のブランチでマニフェスト適用タスクと再起動後の待機タスクを使える
   - _Requirements: 8.5, 10.1, 10.2, 10.3_
 
-- [ ] 2. P1: kube-access による RBAC の定義
+- [x] 2. P1: kube-access による RBAC の定義
 
 - [x] 2.1 RBAC の正本として `kube-access` Application を追加する
   - sync-wave -1、prune と selfHeal を有効にし、kube-access のマニフェストのディレクトリを管理させる
@@ -91,7 +91,7 @@
   - 完了状態: ArgoCD 上で `kube-access` の同期が成功している
   - _Requirements: 2.8, 9.1_
 
-- [ ] 3. P2: 認証設定・署名期間上限・監査ログのノード構成
+- [x] 3. P2: 認証設定・署名期間上限・監査ログのノード構成
 
 - [x] 3.1 k3s-server ロールに GitHub OIDC 認証と証明書・監査ログの変数を定義する
   - audience、組織とリポジトリの数値 ID (GitHub API で取得する公開情報)、ワークフローごとの許可イベントと Environment の対応表、クライアント証明書の署名期間上限 (168h)、監査ログのローテーション上限を定義する
@@ -148,7 +148,7 @@
   - 完了状態: 署名期間・拒否・監査ログの 3 点が期待どおりであることが記録されている
   - _Requirements: 3.7, 12.3_
 
-- [ ] 3.7 【本番・ユーザー承認】ノード構成の PR をマージし、ユーザーが k3s-bootstrap を実行して認証設定を本番に入れる
+- [x] 3.7 【本番・ユーザー承認】ノード構成の PR をマージし、ユーザーが k3s-bootstrap を実行して認証設定を本番に入れる
   - 前提条件: 2.5・3.5・3.6 が完了し、CNPG のバックアップが正常で、k3s の再起動 1 回を許容できる時間帯である。マージ後は k3s-upgrade と DR の実行でもこの変更が適用されることを周知する
   - 実行: ユーザーが playbook を実行する (出力はファイルへリダイレクトする)
   - 確認項目: `/readyz` が ok、匿名の `/version` が 401、共有 kubeconfig と `make kubectl` がこれまでどおり使える、GitHub の JWKS 取得が成功していることをメトリクスで確認、2 回目の実行で変更が 0 件になり再起動されない、監査ログの実際の書込量がディスク予算に収まる
@@ -158,7 +158,7 @@
 
 - [ ] 4. P3: CI 共通の OIDC 部品と infra-health-check の移行
 
-- [ ] 4.1 CI・DR が共通で使う OIDC kubeconfig 生成部品を作る
+- [x] 4.1 CI・DR が共通で使う OIDC kubeconfig 生成部品を作る
   - kubeconfig を生成するモード: 接続先 (既定は MagicDNS 名 `prod-node-1`) から server CA を tailnet 経由で取得し、取得した CA で同じエンドポイントの TLS 検証が通ることを確認する。そのうえで、所有者だけが読める kubeconfig に、exec プラグインでトークンを得るユーザーを書き出す。TLS 検証は無効にしない
   - トークンを返すモード: audience を 3.1 と同じ固定値にして GitHub OIDC トークンを要求し、有効期限付きの ExecCredential を返す
   - CA が取得できない、CA と提示された証明書が一致しない、トークンを要求するための環境変数がない、のいずれかの場合は非 0 で終了する
@@ -166,7 +166,7 @@
   - 完了状態: shellcheck が通る。3.5 の使い捨て k3s とトークン要求エンドポイントのモックを使って、生成した kubeconfig で kubectl が `gha:` ユーザーとして認証され、CA を取得できないときは非 0 で終了する
   - _Requirements: 1.9, 7.1, 7.2, 7.4, 13.5_
 
-- [ ] 4.2 infra-health-check を OIDC 認証に移行する
+- [x] 4.2 infra-health-check を OIDC 認証に移行する
   - ジョブに `id-token: write` を与え、4.1 の部品で kubeconfig を生成する。共有 kubeconfig は取得しない
   - CNPG の状態は kubectl で取得する。ディスク使用率は kubelet の stats summary を OIDC トークンで直接取得する
   - Discord webhook の Infisical からの読取 (Viewer) は残す
