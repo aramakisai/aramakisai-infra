@@ -36,7 +36,8 @@ jwt:
       # <owner>/<repo>/.github/workflows/<file>@refs/heads/main の形に限る。サブディレクトリや
       # 別 ref のファイルは split の要素数と末尾の照合で落ちる
       - expression: >-
-          claims.?job_workflow_ref.orValue('').endsWith("@refs/heads/main") &&
+          claims.?job_workflow_ref.orValue('').startsWith({{ (k3s_github_oidc_repository ~ "/.github/workflows/") | to_json }}) &&
+          claims.job_workflow_ref.endsWith("@refs/heads/main") &&
           claims.job_workflow_ref.split("@")[0].split("/").size() == 5 &&
           claims.job_workflow_ref.split("@")[0].split("/")[2] == ".github" &&
           claims.job_workflow_ref.split("@")[0].split("/")[3] == "workflows" &&

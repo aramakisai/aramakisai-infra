@@ -5,6 +5,8 @@ k3s_github_oidc_audience: aramakisai-kube-prod
 
 # GitHub が不変の ID で発行する claim。改名・移転でも一致し続け、再取得されたリポジトリは別 ID になる
 # (gh api repos/aramakisai/aramakisai-infra --jq '.id, .owner.id')。公開情報
+# job_workflow_ref の前置照合に使う。外部リポジトリの reusable workflow の同名ファイルを拒否する
+k3s_github_oidc_repository: aramakisai/aramakisai-infra
 k3s_github_oidc_repository_id: "1234302830"
 k3s_github_oidc_repository_owner_id: "280745886"
 

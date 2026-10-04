@@ -68,6 +68,7 @@ for want in ["repository_owner_id", "repository_id", "refs/heads/main", "job_wor
     need(want in ex, f"規則に {want}")
 need("k3s-upgrade" not in ex and "pull_request" not in ex, "k3s-upgrade / pull_request 系を含まない")
 need("claims.?environment" in ex, "environment は optional 参照")
+need('startsWith("aramakisai/aramakisai-infra/.github/workflows/")' in ex, "job_workflow_ref の <owner>/<repo> 前置照合")
 need(len(rules) == 7, f"規則数 7 (実際 {len(rules)})")
 cm = j["claimMappings"]
 need(set(cm) == {"username"}, "claimMappings は username のみ (group/extra なし)")
