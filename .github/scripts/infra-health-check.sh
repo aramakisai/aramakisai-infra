@@ -39,9 +39,15 @@ EXPECTED_KUBE_USER="gha:infra-health-check"
 
 # 認証が壊れたまま続行すると全チェックが取得失敗になり、監視停止に誰も気付けない
 check_kube_auth() {
-  local user
-  user=$(kc auth whoami -o jsonpath='{.status.userInfo.username}' 2>&1) \
-    || { echo "::error::kube への認証に失敗しました (OIDC 拒否または到達不能): ${user}"; return 1; }
+  # exec プラグインは stderr に ::add-mask::<token> を出すため stdout と混ぜない
+  local user err_file rc err
+  err_file="$(mktemp)"
+  user=$(kc auth whoami -o jsonpath='{.status.userInfo.username}' 2>"${err_file}")
+  rc=$?
+  err=$(grep -v '^::add-mask::' "${err_file}")
+  rm -f "${err_file}"
+  ((rc == 0)) \
+    || { echo "::error::kube への認証に失敗しました (OIDC 拒否または到達不能): ${err}"; return 1; }
   [[ "${user}" == "${EXPECTED_KUBE_USER}" ]] \
     || { echo "::error::kube 認証ユーザーが想定と異なります (expected=${EXPECTED_KUBE_USER}, actual=${user})"; return 1; }
 }
