@@ -235,7 +235,7 @@
   - _Requirements: 1.9, 2.4, 8.2_
   - _Boundary: IntrusionResponseMigration_
 
-- [ ] 6.2 (P) DR 復旧ワークフローと復旧スクリプトを OIDC 認証に移行する
+- [x] 6.2 (P) DR 復旧ワークフローと復旧スクリプトを OIDC 認証に移行する
   - ワークフローに `id-token: write` を与え、Environment `dr-recovery` で実行する。EnvironmentGuard が、1.4 で確認したフィールド名で保護設定 (required reviewers が 1 件以上、管理者 bypass が無効、deployment branch が main だけ) を検査し、満たさなければ DR を開始しない。自己承認の可否は検査しない
   - 復旧の開始時と k3s-bootstrap の後に、4.1 の部品で kubeconfig を生成する。クラスタの再作成で CA が変わるため、bootstrap 後に作り直す
   - 旧クラスタの生存確認では、CA が取得できない場合と kubectl が失敗した場合を停止扱いにする

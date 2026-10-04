@@ -20,7 +20,9 @@
 # HEAD が origin/main と一致し未コミット変更が無いことが前提。満たさなければ破壊的操作の前に停止する。
 # サーバーを作り直す経路は、メールの ReplicationSource が spec.paused: true であることも前提とする。
 #
-# Infisical は読取用の CI machine identity (INFISICAL_CLIENT_ID/SECRET) を使う。
+# kube-apiserver へは GitHub Actions OIDC (kube-oidc.sh) で認証する。kubeconfig は開始時と、
+# クラスター再作成で CA が変わる bootstrap 後の 2 回生成する。
+# Infisical は読取用の CI machine identity (INFISICAL_CLIENT_ID/SECRET) だけを使う。
 # メールデータのリストアは自動化しない (docs/dr-runbook.md)。
 #
 # 必須入力: DR_TARGET_NODE (例: prod-node-1)
@@ -39,6 +41,7 @@ die() { log "ERROR: $*"; exit 1; }
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 KUBECONFIG_FILE="${KUBECONFIG_FILE:-/tmp/kubeconfig-recovery}"
+KUBE_OIDC="${KUBE_OIDC:-${REPO_ROOT}/.github/scripts/kube-oidc.sh}"
 REPO="${GITHUB_REPOSITORY:-aramakisai/aramakisai-infra}"
 INCIDENT_LABEL="dr-incident"
 
@@ -235,7 +238,8 @@ collect_signals() {
   done
   if [[ "${any_up}" == "1" ]]; then echo "endpoints=alive"; else echo "endpoints=dead"; fi
 
-  if [[ -f "${KUBECONFIG_FILE}" ]] && kubectl_r --request-timeout=10s get nodes >/dev/null 2>&1; then
+  # CA を取得できない (到達不能) か kubectl が失敗すれば dead。復旧は旧クラスターが無いことを前提に進む
+  if refresh_kubeconfig 2>/dev/null && kubectl_r --request-timeout=10s get nodes >/dev/null 2>&1; then
     echo "kubectl=alive"
   else
     echo "kubectl=dead"
@@ -479,26 +483,10 @@ ansible_ready() {
   [[ -f "${REPO_ROOT}/ansible/playbooks/tasks/ensure_secret.yml" ]]
 }
 
-# CI identity で Infisical のアクセストークンを取得する。失敗は呼び出し側で fail にする。
-dr_infisical_token() {
-  local token
-  token=$(infisical login --method=universal-auth \
-    --client-id="${INFISICAL_CLIENT_ID}" --client-secret="${INFISICAL_CLIENT_SECRET}" \
-    --silent --plain 2>/dev/null) || return 1
-  [[ -n "${token}" ]] || return 1
-  echo "::add-mask::${token}" >&2
-  echo "${token}"
-}
-
-# bootstrap が Infisical に登録した kubeconfig を取得し直す。値は変数に受けるだけで出力しない。
+# OIDC kubeconfig を生成する。失敗時は旧ファイルを残して return 1 (生存確認では dead として扱うため die しない)。
 refresh_kubeconfig() {
-  local token kubeconfig
-  token=$(dr_infisical_token) || die "Infisical へのログインに失敗しました"
-  kubeconfig=$(infisical secrets get KUBECONFIG --env=prod --projectId="${INFISICAL_PROJECT_ID}" \
-    --token="${token}" --plain 2>/dev/null) || die "Infisical から KUBECONFIG を取得できませんでした"
-  [[ -n "${kubeconfig}" ]] || die "Infisical の KUBECONFIG が空です"
-  echo "${kubeconfig}" > "${KUBECONFIG_FILE}"
-  chmod 600 "${KUBECONFIG_FILE}"
+  bash "${KUBE_OIDC}" kubeconfig "${KUBECONFIG_FILE}.new" || { rm -f "${KUBECONFIG_FILE}.new"; return 1; }
+  mv "${KUBECONFIG_FILE}.new" "${KUBECONFIG_FILE}"
 }
 
 run_ansible() {
@@ -522,8 +510,6 @@ run_ansible() {
     ARGOCD_GITHUB_DEPLOY_KEY="${ARGOCD_GITHUB_DEPLOY_KEY}" \
     timeout 2400 ansible-playbook -i "${DR_ANSIBLE_INVENTORY}" --limit "${node}" \
     "${REPO_ROOT}/ansible/playbooks/k3s-bootstrap.yml"
-
-  [[ "${DR_SKIP_INFRA}" == "1" ]] || refresh_kubeconfig
 }
 
 # 電源投入のみの経路。k3s と etcd のデータはディスクに残っているため bootstrap は流さず、
@@ -694,7 +680,7 @@ main() {
       INFISICAL_CLIENT_ID INFISICAL_CLIENT_SECRET INFISICAL_PROJECT_ID CI_SSH_PRIVATE_KEY)
   fi
   if [[ "${DR_SKIP_INFRA}" != "1" ]]; then
-    vars+=(HCLOUD_TOKEN TAILSCALE_OAUTH_CLIENT_ID TAILSCALE_OAUTH_CLIENT_SECRET TAILSCALE_TAILNET TFC_API_TOKEN TFC_WORKSPACE_ID KUBECONFIG)
+    vars+=(HCLOUD_TOKEN TAILSCALE_OAUTH_CLIENT_ID TAILSCALE_OAUTH_CLIENT_SECRET TAILSCALE_TAILNET TFC_API_TOKEN TFC_WORKSPACE_ID)
   fi
   local v
   for v in "${vars[@]}"; do
@@ -705,11 +691,10 @@ main() {
     validate_target_node "${DR_TARGET_NODE}" || die "DR_TARGET_NODE が不正です: ${DR_TARGET_NODE}"
   fi
 
-  if [[ -n "${KUBECONFIG:-}" && ( "${DR_SKIP_INFRA}" != "1" || ! -f "${KUBECONFIG_FILE}" ) ]]; then
-    echo "${KUBECONFIG}" > "${KUBECONFIG_FILE}"
-    chmod 600 "${KUBECONFIG_FILE}"
+  # ローカルテスト (k3d・KVM) は事前に用意した kubeconfig を使う。実運用は collect_signals と bootstrap 後に生成する
+  if [[ "${DR_SKIP_INFRA}" == "1" ]]; then
+    [[ -f "${KUBECONFIG_FILE}" ]] || die "KUBECONFIG_FILE が必要です"
   fi
-  [[ -f "${KUBECONFIG_FILE}" ]] || die "KUBECONFIG または KUBECONFIG_FILE が必要です"
 
   local need_ansible=0
   [[ "${DR_LOCAL_TEST}" == "1" ]] || need_ansible=1
@@ -759,6 +744,8 @@ main() {
 
   if [[ "${need_ansible}" == "1" ]]; then
     run_ansible "${DR_TARGET_NODE}"
+    # クラスター再作成で CA が変わるため作り直す
+    [[ "${DR_SKIP_INFRA}" == "1" ]] || refresh_kubeconfig || die "bootstrap 後の OIDC kubeconfig の生成に失敗しました"
   fi
 
   repair_bootstrap_secrets
