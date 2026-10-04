@@ -256,7 +256,7 @@ spec:
 ## 注意事項
 
 - `.env`, `.env.app-secrets`, `terraform/secrets.tfvars`, `kubeconfig` などのローカルシークレットファイルはすべて無効化されています。
-- シークレットおよび `kubeconfig` は Infisical から取得します（`ansible/kubeconfig` は Git 管理から除外されています）。
+- シークレットおよび `kubeconfig` は Infisical から取得します（`ansible/kubeconfig` は Git 管理から除外されています）。playbook は kubeconfig を Infisical へ登録しません。
 - tfstate は Terraform Cloud で管理 (ローカルに置かない)
 - ポート 22 は公開しない (Tailscale SSH を使用)
 - staging から prod の DB へのアクセス禁止 (別 Namespace / 別 CNPG Cluster)

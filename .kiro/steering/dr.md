@@ -35,7 +35,7 @@ make kubectl ARGS="get pods -n prod"
 make kubectl ARGS="get applications -n argocd"
 ```
 
-内部的に Infisical から KUBECONFIG を取得して `/tmp/kubeconfig-aramakisai` に書き出す。
+内部的に Infisical から KUBECONFIG を取得して `/tmp/kubeconfig-aramakisai` に書き出す (読取のみ。playbook は登録しない)。
 
 ---
 

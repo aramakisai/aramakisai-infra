@@ -93,7 +93,6 @@ argocd app sync <app-name> --server-side --force
    - K3s (`--cluster-init`, `fail-swap-on=false`) インストール。
    - Cilium CNI を Helm でデプロイ (ノードが Ready になるまで待機)。
    - cloudflared の事前インストール (ArgoCDへの外部アクセス経路確保)。
-   - kubeconfig を手元に取得し、Tailscale IP に書き換え、Infisical へ登録。
    - ArgoCD インストール ＆ `infisical-auth` Secret の直接作成。
    - GitHub Deploy Key 登録 ＆ `root.yaml` (App of Apps) 適用。
 3. **ESO同期**: `sync-wave: "-1"` により ESO と ClusterSecretStore が先行起動し、`wave: 0` の各アプリ（Authentik, Directus, DMS, Vaultwarden 等）に必要なシークレットを自動注入。
