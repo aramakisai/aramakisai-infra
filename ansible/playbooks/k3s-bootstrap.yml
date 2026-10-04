@@ -26,6 +26,7 @@
     repo_root: "{{ playbook_dir }}/../.."
     git_applied_paths:
       - gitops/manifests/prod/cloudflared
+      - gitops/manifests/prod/argocd
       - gitops/root.yaml
   tasks:
     - name: 制御ノードの検査
@@ -376,6 +377,9 @@
     # argocd-cm/argocd-rbac-cm が見えなくなり全コンポーネントが crash した実績あり
     argocd_version: v3.4.4
     root_manifest: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../gitops/root.yaml') }}"
+    # argocd-config (ArgoCD Application) が Git から管理する upstream 同名の ConfigMap
+    argocd_cm_file: "{{ playbook_dir }}/../../gitops/manifests/prod/argocd/argocd-cm.yaml"
+    argocd_rbac_cm_file: "{{ playbook_dir }}/../../gitops/manifests/prod/argocd/argocd-rbac-cm.yaml"
   tasks:
     - name: ArgoCD namespace 作成
       ansible.builtin.include_tasks: tasks/ensure_namespace.yml
@@ -406,6 +410,45 @@
         argocd_running_tag: "{{ argocd_running_image.stdout.split('@')[0].rsplit(':', 1)[-1] }}"
       when: argocd_running_image.rc == 0
 
+    - name: argocd-cm の存在確認
+      ansible.builtin.command: kubectl get configmap argocd-cm -n argocd -o name
+      register: argocd_cm_probe
+      failed_when: argocd_cm_probe.rc != 0 and 'NotFound' not in argocd_cm_probe.stderr
+      changed_when: ansible_check_mode and argocd_cm_probe.rc != 0
+      check_mode: false
+
+    - name: argocd-cm / argocd-rbac-cm を新規構築時のみ Git から適用
+      # 稼働後は argocd-config が Git の内容で管理する。install.yaml や ansible が
+      # 同じ ConfigMap を書くと upstream 既定値が Git にないキーとして残るため、
+      # 存在するときは触らない。ArgoCD は起動時にこの 2 つを要求する
+      ansible.builtin.command: kubectl apply -n argocd -f -
+      args:
+        stdin: "{{ lookup('ansible.builtin.file', argocd_cm_file) }}\n---\n{{ lookup('ansible.builtin.file', argocd_rbac_cm_file) }}"
+      when: argocd_cm_probe.rc != 0
+
+    - name: ArgoCD の install.yaml を取得 (制御ノード)
+      ansible.builtin.uri:
+        url: "https://raw.githubusercontent.com/argoproj/argo-cd/{{ argocd_version }}/manifests/install.yaml"
+        return_content: true
+      register: argocd_install
+      delegate_to: localhost
+      become: false
+      check_mode: false
+
+    - name: Git 管理の ConfigMap を除いた ArgoCD マニフェストを生成 (制御ノード)
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ playbook_dir }}/../../scripts/exclude-git-managed-manifests.py"
+          - "{{ argocd_cm_file }}"
+          - "{{ argocd_rbac_cm_file }}"
+        stdin: "{{ argocd_install.content }}"
+      register: argocd_filtered
+      changed_when: false
+      delegate_to: localhost
+      become: false
+      check_mode: false
+
     - name: ArgoCD インストール
       # --server-side: ArgoCD の CRD が大きく last-applied-configuration アノテーションが
       # 262144 バイト制限を超えるため、Server-Side Apply を使用する。
@@ -413,7 +456,7 @@
       # との競合は force-conflicts で解消する)
       ansible.builtin.include_tasks: tasks/apply_manifests.yml
       vars:
-        am_source: "https://raw.githubusercontent.com/argoproj/argo-cd/{{ argocd_version }}/manifests/install.yaml"
+        am_stdin: "{{ argocd_filtered.stdout }}"
         am_namespace: argocd
         am_field_manager: kubectl
 
