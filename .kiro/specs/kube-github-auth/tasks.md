@@ -158,7 +158,7 @@
 
 - [ ] 4. P3: CI 共通の OIDC 部品と infra-health-check の移行
 
-- [ ] 4.1 CI・DR が共通で使う OIDC kubeconfig 生成部品を作る
+- [x] 4.1 CI・DR が共通で使う OIDC kubeconfig 生成部品を作る
   - kubeconfig を生成するモード: 接続先 (既定は MagicDNS 名 `prod-node-1`) から server CA を tailnet 経由で取得し、取得した CA で同じエンドポイントの TLS 検証が通ることを確認する。そのうえで、所有者だけが読める kubeconfig に、exec プラグインでトークンを得るユーザーを書き出す。TLS 検証は無効にしない
   - トークンを返すモード: audience を 3.1 と同じ固定値にして GitHub OIDC トークンを要求し、有効期限付きの ExecCredential を返す
   - CA が取得できない、CA と提示された証明書が一致しない、トークンを要求するための環境変数がない、のいずれかの場合は非 0 で終了する
@@ -166,7 +166,7 @@
   - 完了状態: shellcheck が通る。3.5 の使い捨て k3s とトークン要求エンドポイントのモックを使って、生成した kubeconfig で kubectl が `gha:` ユーザーとして認証され、CA を取得できないときは非 0 で終了する
   - _Requirements: 1.9, 7.1, 7.2, 7.4, 13.5_
 
-- [ ] 4.2 infra-health-check を OIDC 認証に移行する
+- [x] 4.2 infra-health-check を OIDC 認証に移行する
   - ジョブに `id-token: write` を与え、4.1 の部品で kubeconfig を生成する。共有 kubeconfig は取得しない
   - CNPG の状態は kubectl で取得する。ディスク使用率は kubelet の stats summary を OIDC トークンで直接取得する
   - Discord webhook の Infisical からの読取 (Viewer) は残す

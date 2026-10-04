@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC2034,SC2317,SC2329 # kc()の再定義/上書きはソース先の関数からのみ参照されるため誤検知する
+# shellcheck disable=SC2034,SC2317,SC2329 # kc()/kubelet_stats()の再定義/上書きはソース先の関数からのみ参照されるため誤検知する
 # infra-health-check.sh の判定ロジック (check_disk_usage / check_cnpg_archiving) を
-# 実際のクラスターに接続せず、kc() をスタブして検証するユニットテスト。
+# 実際のクラスターに接続せず、kubelet_stats() / kc() をスタブして検証するユニットテスト。
 #
 # 使い方:
 #   ./scripts/test-infra-health-check-logic.sh
@@ -29,14 +29,14 @@ assert_eq() {
 
 echo "=== check_disk_usage ユニットテスト ==="
 
-kc() { echo '{"node":{"fs":{"usedBytes":25854394368,"capacityBytes":80321626112}}}'; }
+kubelet_stats() { echo '{"node":{"fs":{"usedBytes":25854394368,"capacityBytes":80321626112}}}'; }
 DISK_THRESHOLD_PERCENT=85
 assert_eq "使用率32% (閾値85%) -> ok" "ok|32" "$(check_disk_usage)"
 
-kc() { echo '{"node":{"fs":{"usedBytes":90000000000,"capacityBytes":100000000000}}}'; }
+kubelet_stats() { echo '{"node":{"fs":{"usedBytes":90000000000,"capacityBytes":100000000000}}}'; }
 assert_eq "使用率90% (閾値85%) -> breach" "breach|90" "$(check_disk_usage)"
 
-kc() { echo '{"node":{"fs":{}}}'; }
+kubelet_stats() { echo '{"node":{"fs":{}}}'; }
 assert_eq "fs情報欠落 -> unknown" "unknown|0" "$(check_disk_usage)"
 
 echo ""
