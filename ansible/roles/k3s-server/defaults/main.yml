@@ -1,0 +1,44 @@
+---
+# kube-apiserver の GitHub Actions OIDC 認証。KubeOidcHelper (.github/scripts/kube-oidc.sh) の
+# 要求 audience と必ず同じ値にする
+k3s_github_oidc_audience: aramakisai-kube-prod
+
+# GitHub が不変の ID で発行する claim。改名・移転でも一致し続け、再取得されたリポジトリは別 ID になる
+# (gh api repos/aramakisai/aramakisai-infra --jq '.id, .owner.id')。公開情報
+# job_workflow_ref の前置照合に使う。外部リポジトリの reusable workflow の同名ファイルを拒否する
+k3s_github_oidc_repository: aramakisai/aramakisai-infra
+k3s_github_oidc_repository_id: "1234302830"
+k3s_github_oidc_repository_owner_id: "280745886"
+
+# 許可するワークフローファイル名 → 許可イベントと Environment (null なら不問)。
+# main 上のこのファイルからのトークンだけが gha:<ファイル名> になる。
+# pull_request 系は PR 作成者が任意の内容で発火できるため、どのワークフローにも許可しない
+k3s_github_oidc_workflows:
+  infra-health-check.yml:
+    events: [schedule, workflow_dispatch]
+    environment: null
+  intrusion-response.yml:
+    events: [workflow_dispatch]
+    environment: null
+  kube-cert-issue.yml:
+    events: [workflow_dispatch]
+    environment: null
+  dr-recovery.yml:
+    events: [workflow_dispatch]
+    environment: dr-recovery
+
+# CSR API で発行するクライアント証明書の署名期間の上限 (cluster-signing-duration)
+k3s_client_cert_max_duration: 168h
+
+# 監査ログのローテーション上限。総量は (max_backup + 1) × max_size_mb で頭打ちになる
+# (既定は 5 × 100MB = 500MB。ノードのディスク 80GB に対して十分小さい)
+k3s_audit_log_path: /var/lib/rancher/k3s/server/logs/audit.log
+k3s_audit_log_max_size_mb: 100
+k3s_audit_log_max_backup: 4
+k3s_audit_log_max_age_days: 30
+
+k3s_authentication_config_path: /etc/rancher/k3s/authentication-config.yaml
+k3s_audit_policy_path: /etc/rancher/k3s/audit-policy.yaml
+
+# 設定配布後の再起動で、ローカル admin の /readyz が ok になるまで待つ上限 (秒)
+k3s_apiserver_ready_timeout: 120

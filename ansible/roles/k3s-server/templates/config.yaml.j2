@@ -48,3 +48,16 @@ cluster-init: true
 # K3S_URL 環境変数ではなくここで指定することで server モード (k3s.service) でインストールされる
 server: "https://{{ hostvars[groups['k3s_server'][0]]['k3s_private_ip'] }}:6443"
 {% endif %}
+
+# GitHub Actions OIDC 認証と監査ログ。ファイルは k3s インストール前に配布するため、新規構築でも初回起動から有効になる
+kube-apiserver-arg:
+  - "authentication-config={{ k3s_authentication_config_path }}"
+  - "audit-policy-file={{ k3s_audit_policy_path }}"
+  - "audit-log-path={{ k3s_audit_log_path }}"
+  - "audit-log-maxsize={{ k3s_audit_log_max_size_mb }}"
+  - "audit-log-maxbackup={{ k3s_audit_log_max_backup }}"
+  - "audit-log-maxage={{ k3s_audit_log_max_age_days }}"
+
+# CSR API で発行する証明書の署名期間の上限。k3s のノード・コンポーネント証明書は CSR API を使わず影響しない
+kube-controller-manager-arg:
+  - "cluster-signing-duration={{ k3s_client_cert_max_duration }}"

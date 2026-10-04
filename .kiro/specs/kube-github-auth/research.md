@@ -325,6 +325,34 @@
 - **GitHub リポジトリの設定 (読取)**: `main` のブランチ保護は PR レビュー 1 件必須・古いレビューの却下あり・**管理者への強制は無効** (`enforce_admins: false`)。設計の残存リスク (管理者 bypass でのマージ) の前提は実設定で成立している。Environment `dr-recovery` はユーザーが `gh api` で作成済み。`gh api repos/<repo>/environments/dr-recovery` の応答で、`protection_rules[]` に `type: required_reviewers` (reviewers は `type: Team` の `infra`、`prevent_self_review: false`) と `type: branch_policy` があり、`can_admins_bypass: false`、`deployment_branch_policy` は `custom_branch_policies: true`・`protected_branches: false`、`.../deployment-branch-policies` の `branch_policies` は `main` (`type: branch`) の 1 件であることを確認した (読取のみ)。EnvironmentGuard はこのフィールド名で検査する。`workflow_dispatch` を起動できるのが write 権限保持者に限られること、re-run で入力が変わらないこと、artifact の保持期間指定は、別アカウントでの試験が要るかドキュメントの定義のみで、実機では未検証。
 - **systemd 上の再起動挙動 (検証不能)**: `Type=notify`・`TimeoutStartSec=0`・`Restart=always` のユニットで、認証設定が不正なときの `systemctl restart` (Ansible の handler) の戻り値と待機時間は docker 上で再現できない。k3s は不正設定で即時終了する (2 の結果) ため、`systemctl restart` は失敗で返るか、再起動ループになると想定するが未確認。検証には本番相当のノード (KVM の DR テスト環境) が必要。
 
+## ロール描画物の使い捨て k3s 検証 (tasks 3.5・3.6、2026-10-04)
+
+`scripts/verify-k3s-authn-disposable.sh` (補助 `.py`) が、k3s-server ロールのテンプレートを描画した認証設定・監査ポリシー・`config.yaml` を、本番と同じ版 (`rancher/k3s:v1.36.3-k3s1`) の使い捨てコンテナに入れて検証する。再実行できる。結果は 22 項目すべて pass、テンプレートの修正は不要だった。
+
+| 区分 | 方法 |
+|------|------|
+| 描画 | ansible でロールの 3 テンプレートを描画。テスト用に差し替えたのは認証設定の issuer URL と `certificateAuthority` だけで、照合規則 (claimValidationRules・claimMappings・userValidationRules) は描画結果のまま。監査ログのローテーション上限だけ `-e` で maxsize 1MB・maxbackup 2 に上書き (総量の頭打ちを短時間で確認するため) |
+| 発行者 | 自己署名 CA と自前の鍵で discovery と JWKS を返す HTTPS の一時プロセス (docker ネットワークのゲートウェイ IP で待受)。トークンは同じ鍵で署名し、数値 ID は `defaults/main.yml` から読む |
+| 判定 | `POST /apis/authentication.k8s.io/v1/selfsubjectreviews` の応答で、ユーザー名 (許可) または 401 (拒否) を自動判定 |
+| 起動確認 | `tasks/main.yml` と同じ判定 (ローカル admin の `/readyz` が期限内に ok、匿名 `/version` が 401) をコンテナに対して実行。systemd の再起動は `--restart always` で模した (systemd 上の挙動は 6.7) |
+
+| 項目 | 結果 |
+|------|------|
+| 起動後、匿名の `/healthz`・`/readyz`・`/version`・`/api/v1/namespaces` が 401、ローカル admin (x509) が通る | pass |
+| 許可 6 ケース (4 ワークフローの許可イベント全組み合わせ、環境不要のワークフローに environment claim が付く場合) が `gha:<ファイル名>` で通る | pass |
+| 違反 29 ケースがすべて 401 (他組織・他リポジトリ・フォーク、ref が feature・タグ・欠落、許可リスト外、外部リポジトリの同名 reusable workflow、`job_workflow_ref` が feature ブランチ、サブディレクトリ、pull_request・pull_request_target・push、許可外イベントの組み合わせ、self-hosted・`runner_environment` 欠落、dr-recovery の environment なし・不一致・空、audience のみ一致、claim 欠落 4 種、audience 不一致、期限切れ、nbf 未来、issuer 不一致、署名鍵違い) | pass |
+| 発行者に到達できない状態でも起動し、x509 が通り、JWT は 401 | pass |
+| CEL の構文エラーで k3s が終了 (`invalid authentication configuration … compilation failed` が出る) し、ロールの起動確認が失敗として検知する | pass |
+| 匿名無効が外れた設定 (匿名 `/version` が 200) を、起動確認の 401 判定が失敗として検知する | pass |
+| CSR (`expirationSeconds` 1 年・未指定) が client CA で署名され、有効期間が 168h (604800 秒) | pass |
+| organization `system:masters` の CSR が作成時に拒否される | pass |
+| 監査ログに `gha:*` (create・selfsubjectreviews)、`github:<name>:<id>` 形式の x509 ユーザー (list・namespaces)、ローカル admin (list・nodes) が記録される | pass |
+| システムコンポーネント・ノード・kube-system の ServiceAccount・events・leases が記録されない | pass |
+| ローテーション上限: 負荷後も世代数 3・総量 約 2.3MB で、上限 (maxbackup+1) × maxsize = 3MB を超えない | pass |
+
+- イメージの `k3s kubectl` はコンテナ内で `unknown command "kubectl"` になるため、検証スクリプトは同じバイナリへのリンク `kubectl` を使う。ロール本体 (`k3s kubectl get --raw=/readyz`) は本番ホストへ入れた k3s バイナリで動く前提で、docker 上では再現できない。この差分は 3.7 の本番適用で `/readyz` の確認タスクが通ることで確認する。
+- 匿名の要求は監査ポリシーの除外対象ではなく、`/healthz*` などの nonResourceURLs 以外は `system:anonymous` として記録される (401 になる `/api/v1/namespaces` 等)。
+
 ## ユーザー決定の記録 (実機検証後、2026-10-04)
 
 | 項目 | 決定 | 根拠となった検証結果 |

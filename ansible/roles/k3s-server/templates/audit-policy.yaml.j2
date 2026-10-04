@@ -1,0 +1,22 @@
+# 監査ポリシー (Metadata レベル)。起動時にのみ読まれるため、変更には k3s の再起動が要る。
+# system:serviceaccounts:kube-system を除外しているため、その ServiceAccount が侵害された場合の操作は記録されない
+apiVersion: audit.k8s.io/v1
+kind: Policy
+omitStages: ["RequestReceived"]
+rules:
+  - level: None   # k3s・Kubernetes のシステムコンポーネント
+    users: ["system:kube-controller-manager", "system:kube-scheduler", "system:apiserver",
+            "system:kube-proxy", "system:k3s-controller", "system:k3s-supervisor",
+            "k3s-cloud-controller-manager"]
+  - level: None   # ノードと kube-system の ServiceAccount
+    userGroups: ["system:nodes", "system:serviceaccounts:kube-system"]
+  - level: None   # 全 ServiceAccount の read (大量・低価値)
+    userGroups: ["system:serviceaccounts"]
+    verbs: ["get", "list", "watch"]
+  - level: None
+    nonResourceURLs: ["/healthz*", "/livez*", "/readyz*", "/version", "/metrics"]
+  - level: None
+    resources:
+      - {group: "", resources: ["events"]}
+      - {group: "coordination.k8s.io", resources: ["leases"]}
+  - level: Metadata

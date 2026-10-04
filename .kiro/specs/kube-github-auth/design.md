@@ -341,7 +341,8 @@ graph TB
 
 | 変数 | 型 | 内容 |
 |------|----|------|
-| `k3s_github_oidc_audience` | string | 要求時に指定する audience。KubeOidcHelper と同じ値を使う |
+| `k3s_github_oidc_audience` | string | 要求時に指定する audience (固定値 `aramakisai-kube-prod`)。KubeOidcHelper と同じ値を使う |
+| `k3s_github_oidc_repository` | string | `<owner>/<repo>` 形式のリポジトリ名 (`aramakisai/aramakisai-infra`)。`job_workflow_ref` の前置照合に使い、外部 reusable workflow の同名ファイルを拒否する |
 | `k3s_github_oidc_repository_id` | string | 本リポジトリの数値 ID (公開情報。設定時に GitHub API で取得する) |
 | `k3s_github_oidc_repository_owner_id` | string | 組織の数値 ID (同上) |
 | `k3s_github_oidc_workflows` | map | ワークフローファイル名 → `{events: [...], environment: string or null}` (下表) |

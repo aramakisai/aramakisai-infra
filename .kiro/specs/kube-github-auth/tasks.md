@@ -84,7 +84,7 @@
   - _Requirements: 5.1, 5.2, 5.6, 12.1, 13.5_
   - _Boundary: KubeAccessRbac (humans)_
 
-- [ ] 2.5 【本番・ユーザー承認】RBAC の PR をマージし、ArgoCD での同期を確認する
+- [x] 2.5 【本番・ユーザー承認】RBAC の PR をマージし、ArgoCD での同期を確認する
   - 前提条件: 1.5 が完了している。この時点では `gha:*`・`github:*` のユーザー名は認証されないため、binding は無害である
   - 確認項目: `kube-access` が Synced かつ Healthy で、ClusterRole と binding がクラスタに存在する。既存の Application に影響がない
   - ロールバック: PR を revert し、Application を削除する
@@ -93,7 +93,7 @@
 
 - [ ] 3. P2: 認証設定・署名期間上限・監査ログのノード構成
 
-- [ ] 3.1 k3s-server ロールに GitHub OIDC 認証と証明書・監査ログの変数を定義する
+- [x] 3.1 k3s-server ロールに GitHub OIDC 認証と証明書・監査ログの変数を定義する
   - audience、組織とリポジトリの数値 ID (GitHub API で取得する公開情報)、ワークフローごとの許可イベントと Environment の対応表、クライアント証明書の署名期間上限 (168h)、監査ログのローテーション上限を定義する
   - ワークフローの対応表の初期値は design.md のワークフローポリシー表のとおりにする。infra-health-check は schedule と workflow_dispatch、intrusion-response と kube-cert-issue は workflow_dispatch、dr-recovery は workflow_dispatch と Environment `dr-recovery`。k3s-upgrade と pull_request 系のイベントは含めない
   - 監査ログの上限は、(世代数 + 1) × 1 ファイルの最大サイズがノードのディスク予算に収まる値にする
@@ -101,7 +101,7 @@
   - 完了状態: 変数がロールの既定値として定義され、許可リストを空にするとテンプレートの描画が失敗する
   - _Requirements: 1.2, 1.5, 1.6, 2.6, 3.7, 6.1, 12.3, 13.5_
 
-- [ ] 3.2 (P) GitHub Actions OIDC を検証する認証設定を作る
+- [x] 3.2 (P) GitHub Actions OIDC を検証する認証設定を作る
   - 匿名認証を明示的に無効にする
   - 発行者を GitHub Actions、audience を 3.1 の値とする JWT authenticator を 1 つだけ置く
   - claim の照合規則を、組織 ID、リポジトリ ID、ref = main、許可リスト上のワークフローファイル (main 上のもの)、ワークフローごとの許可イベント、Environment 指定時の environment claim の一致、github-hosted ランナーとする。規則ごとに拒否理由のメッセージを付ける
@@ -113,7 +113,7 @@
   - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 2.1, 2.2, 6.5, 11.3, 12.1, 13.1, 13.3_
   - _Boundary: GitHubOidcAuthenticator_
 
-- [ ] 3.3 (P) 監査ポリシーと、kube-apiserver・kube-controller-manager の起動引数を追加する
+- [x] 3.3 (P) 監査ポリシーと、kube-apiserver・kube-controller-manager の起動引数を追加する
   - 監査ポリシーは design.md の検証済みの内容 (Metadata レベル。システムコンポーネント、kube-system の ServiceAccount、ServiceAccount の read、ヘルスチェック系、events、leases を除外) にする
   - kube-apiserver に、認証設定ファイル、監査ポリシー、監査ログの出力先、ローテーション上限を渡す
   - kube-controller-manager に、署名期間の上限 168h を渡す
@@ -121,7 +121,7 @@
   - _Requirements: 3.7, 11.1, 12.3_
   - _Boundary: AuthnConfigDistribution (k3s config, audit policy)_
 
-- [ ] 3.4 認証設定の配布、1 回だけの再起動、起動確認、自動ロールバックをロールに組み込む
+- [x] 3.4 認証設定の配布、1 回だけの再起動、起動確認、自動ロールバックをロールに組み込む
   - 認証設定と監査ポリシーを、root のみが読める権限で、k3s のインストールより前に置く。新規構築 (DR) では k3s の初回起動から有効になる
   - 内容に変更がない場合は何も変えず、k3s を再起動しない。変更がある場合は handler で 1 回だけ再起動する
   - 配布前に旧ファイルを退避し、配布・再起動・確認を 1 つのブロックにまとめる。確認は、ノード上のローカル admin で `/readyz` が期限内 (既定 120 秒) に ok を返すことと、匿名の `/version` が 401 になること (設定が読み込まれたことの証明) の両方とする
@@ -132,7 +132,7 @@
   - _Depends: 1.5_
   - _Requirements: 6.1, 6.2, 6.3, 6.4, 6.6_
 
-- [ ] 3.5 使い捨ての k3s (本番と同じ v1.36.3) で、描画した認証設定の判定を検証する
+- [x] 3.5 使い捨ての k3s (本番と同じ v1.36.3) で、描画した認証設定の判定を検証する
   - ロールが描画した認証設定と起動引数で起動し、匿名要求が 401、ノード上のローカル admin (x509) が通ることを確認する
   - OIDC 発行者のモックと自前で署名したトークンで、許可されたワークフロー、各規則の違反 (他の組織・リポジトリ・フォーク、main 以外の ref、許可リストにないワークフロー、pull_request 系イベント、自己ホストランナー、dr-recovery で environment がない、audience だけが一致する) を判定させ、許可されたトークンだけが `gha:` のユーザー名で通ることを確認する
   - 発行者に到達できない状態でも起動し、x509 が通ることを確認する
@@ -141,7 +141,7 @@
   - 完了状態: 許可・拒否の判定がすべて期待どおりで、結果が記録されている
   - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 2.1, 2.2, 6.5, 6.6, 11.1, 11.3, 13.5_
 
-- [ ] 3.6 使い捨ての k3s で、署名期間の上限と監査ログを検証する
+- [x] 3.6 使い捨ての k3s で、署名期間の上限と監査ログを検証する
   - CSR を作成・承認すると client CA で署名され、有効期限が 168h で切り詰められることを確認する
   - organization `system:masters` を含む CSR が作成時に拒否されることを確認する
   - 監査ログに `gha:*`・`github:*`・ローカル admin の要求が、ユーザー名・操作・対象リソースとともに記録されることを確認する。システムコンポーネントの要求が記録されないこと、ログの総量がローテーション上限で頭打ちになることも確認する
