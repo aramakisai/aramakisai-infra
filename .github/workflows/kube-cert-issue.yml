@@ -25,7 +25,7 @@ jobs:
 
       # 接続先は Tailscale MagicDNS 名 (prod-node-1) のため、ランナーを tailnet に参加させる (infra-health-check と同じ)
       - name: Setup Tailscale
-        uses: tailscale/github-action@v3
+        uses: tailscale/github-action@6cae46e2d796f265265cfcf628b72a32b4d7cade # v3
         with:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
