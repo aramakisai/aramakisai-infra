@@ -1,0 +1,61 @@
+{# 許可リストが空だと全ワークフローを拒否する設定になり、原因が分かりにくい。描画時に止める #}
+{% if k3s_github_oidc_workflows | default({}) | length == 0 %}
+{{ undef(hint='k3s_github_oidc_workflows が空です。許可するワークフローを 1 つ以上定義してください') }}
+{% endif %}
+{% set events = {} %}
+{% set environments = {} %}
+{% for file, policy in k3s_github_oidc_workflows.items() %}
+{%   set _ = events.update({file: policy.events}) %}
+{%   if policy.environment | default(none) is not none %}
+{%     set _ = environments.update({file: policy.environment}) %}
+{%   endif %}
+{% endfor %}
+{# 式中の map リテラルは JSON と同じ書式で CEL に通る #}
+{% set wf = 'claims.job_workflow_ref.split("@")[0].split("/")[4]' %}
+# AuthenticationConfiguration (apiserver.config.k8s.io/v1)
+# authentication-config を渡すと k3s は anonymous-auth=false を設定しないため、匿名認証を明示的に無効にする
+apiVersion: apiserver.config.k8s.io/v1
+kind: AuthenticationConfiguration
+anonymous:
+  enabled: false
+jwt:
+  - issuer:
+      url: https://token.actions.githubusercontent.com
+      audiences:
+        - {{ k3s_github_oidc_audience | to_json }}
+    claimValidationRules:
+      - expression: >-
+          claims.?repository_owner_id.orValue('') == {{ k3s_github_oidc_repository_owner_id | string | to_json }}
+        message: repository_owner_id が許可した組織と一致しません
+      - expression: >-
+          claims.?repository_id.orValue('') == {{ k3s_github_oidc_repository_id | string | to_json }}
+        message: repository_id が許可したリポジトリと一致しません
+      - expression: >-
+          claims.?ref.orValue('') == "refs/heads/main"
+        message: ref が refs/heads/main ではありません
+      # <owner>/<repo>/.github/workflows/<file>@refs/heads/main の形に限る。サブディレクトリや
+      # 別 ref のファイルは split の要素数と末尾の照合で落ちる
+      - expression: >-
+          claims.?job_workflow_ref.orValue('').endsWith("@refs/heads/main") &&
+          claims.job_workflow_ref.split("@")[0].split("/").size() == 5 &&
+          claims.job_workflow_ref.split("@")[0].split("/")[2] == ".github" &&
+          claims.job_workflow_ref.split("@")[0].split("/")[3] == "workflows" &&
+          {{ wf }} in {{ events | to_json }}
+        message: job_workflow_ref が main 上の許可されたワークフローではありません
+      - expression: >-
+          {{ wf }} in {{ events | to_json }} &&
+          claims.?event_name.orValue('') in {{ events | to_json }}[{{ wf }}]
+        message: event_name がこのワークフローに許可されたイベントではありません
+      - expression: >-
+          !({{ wf }} in {{ environments | to_json }}) ||
+          claims.?environment.orValue('') == {{ environments | to_json }}[{{ wf }}]
+        message: environment がこのワークフローに必要な Environment と一致しません
+      - expression: >-
+          claims.?runner_environment.orValue('') == "github-hosted"
+        message: runner_environment が github-hosted ではありません
+    claimMappings:
+      username:
+        expression: '"gha:" + {{ wf }}.replace(".yml", "")'
+    userValidationRules:
+      - expression: "user.username.startsWith('gha:')"
+        message: "ユーザー名は gha: で始まる必要があります"

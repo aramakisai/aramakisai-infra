@@ -21,88 +21,181 @@
     group: root
     mode: '0755'
 
-# 3. K3s config.yaml を配置 (インストール前に置くことでインストーラが読み込む)
-- name: K3s config.yaml を配置
-  ansible.builtin.template:
-    src: config.yaml.j2
-    dest: /etc/rancher/k3s/config.yaml
-    owner: root
-    group: root
-    mode: '0600'
-  notify: Restart k3s
+# 3. 認証設定・監査ポリシー・config.yaml を配置 (インストール前に置くことでインストーラが読み込む。
+# 新規構築では k3s の初回起動から認証設定が有効になる)。
+# 配布から起動確認までを 1 つの block にし、確認に失敗したら rescue で退避した旧ファイルへ戻す。
+# 不正な認証設定でも k3s の終了コードは 0 で systemd が再起動を繰り返すため、終了コードでは
+# 失敗を検知できない。ローカル admin の /readyz と匿名 /version の 401 で判定する
+- name: K3s 設定の配布・インストール・起動確認 (失敗時は旧設定へ戻す)
+  block:
+    - name: K3s 設定ファイルを配置 (旧ファイルは退避)
+      ansible.builtin.template:
+        src: "{{ item.src }}"
+        dest: "{{ item.dest }}"
+        owner: root
+        group: root
+        mode: '0600'
+        backup: true
+      loop:
+        - {src: authentication-config.yaml.j2, dest: "{{ k3s_authentication_config_path }}"}
+        - {src: audit-policy.yaml.j2, dest: "{{ k3s_audit_policy_path }}"}
+        - {src: config.yaml.j2, dest: /etc/rancher/k3s/config.yaml}
+      register: k3s_config_files
+      notify: Restart k3s
 
-# 4. K3s をインストール
-# K3S_URL は設定しない: 環境変数に K3S_URL があると K3s インストールスクリプトが
-# k3s-agent.service をインストールする (agent モード) ため、server モードにならない。
-# join 先の URL は config.yaml の server: キーで指定する。
+    # 4. K3s をインストール
+    # K3S_URL は設定しない: 環境変数に K3S_URL があると K3s インストールスクリプトが
+    # k3s-agent.service をインストールする (agent モード) ため、server モードにならない。
+    # join 先の URL は config.yaml の server: キーで指定する。
 
-# 既存クラスタのトークン (常に正) を使う。詳細は token.yml
-- name: 使用する K3s サーバートークンを決定
-  ansible.builtin.include_tasks: token.yml
+    # 既存クラスタのトークン (常に正) を使う。詳細は token.yml
+    - name: 使用する K3s サーバートークンを決定
+      ansible.builtin.include_tasks: token.yml
 
-- name: K3s の導入済みバージョンを取得
-  ansible.builtin.command: /usr/local/bin/k3s --version
-  register: k3s_installed_version
-  failed_when: false
-  check_mode: false
-  changed_when: false
+    - name: K3s の導入済みバージョンを取得
+      ansible.builtin.command: /usr/local/bin/k3s --version
+      register: k3s_installed_version
+      failed_when: false
+      check_mode: false
+      changed_when: false
 
-- name: K3s インストーラが変更を加える見込みか判定
-  # インストーラは版・トークン (env ファイル) の変化でバイナリ/env/unit を更新して再起動する。
-  # check mode でもその再起動が changed として見えるようにする
-  ansible.builtin.set_fact:
-    k3s_install_pending: "{{ k3s_version not in k3s_installed_version.stdout | default('') or k3s_env_token_differs | bool }}"
+    - name: K3s インストーラが変更を加える見込みか判定
+      # インストーラは版・トークン (env ファイル) の変化でバイナリ/env/unit を更新して再起動する。
+      # check mode でもその再起動が changed として見えるようにする
+      ansible.builtin.set_fact:
+        k3s_install_pending: "{{ k3s_version not in k3s_installed_version.stdout | default('') or k3s_env_token_differs | bool }}"
 
-- name: K3s インストール (または再起動) が必要 (check mode のみ表示)
-  ansible.builtin.debug:
-    msg: "{{ inventory_hostname }}: K3s {{ k3s_version }} のインストーラが変更を加えます"
-  when: ansible_check_mode and k3s_install_pending
-  changed_when: true
+    - name: K3s インストール (または再起動) が必要 (check mode のみ表示)
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }}: K3s {{ k3s_version }} のインストーラが変更を加えます"
+      when: ansible_check_mode and k3s_install_pending
+      changed_when: true
 
-- name: K3s をインストール
-  # creates: /usr/local/bin/k3s は使わない。
-  # 既にk3sがインストール済みの場合にタスク自体をスキップしてしまい、
-  # k3s_versionを変更してもバージョンアップグレードが一切適用されなくなるため。
-  # インストーラはバイナリ・systemd unit・env ファイルのハッシュが変わらなければ
-  # "No change detected so skipping service start" を出して再起動しない。
-  # changed はこの文言の有無で判定する。
-  # get.k3s.io は常に最新を返すため、k3s_version のタグに固定したスクリプトを使う
-  # トークンは environment ではなく stdin で渡す: environment は -vvv の接続ログ (EXEC) に平文で出る。
-  # stdin は module_args に出るため no_log とし、失敗時の出力 (トークンを含まない) は fail タスクで表示する。
-  ansible.builtin.shell:
-    cmd: |
-      set -o pipefail
-      IFS= read -r K3S_TOKEN
-      export K3S_TOKEN
-      curl -sfL https://raw.githubusercontent.com/k3s-io/k3s/{{ k3s_version | urlencode }}/install.sh | sh -
-    executable: /bin/bash
-    stdin: "{{ k3s_effective_token }}"
-  environment:
-    INSTALL_K3S_VERSION: "{{ k3s_version }}"
-  register: k3s_install_result
-  until: k3s_install_result.rc == 0
-  retries: 3
-  delay: 10
-  failed_when: false
-  changed_when: "k3s_install_result.rc == 0 and 'No change detected so skipping service start' not in k3s_install_result.stdout"
-  no_log: true
+    - name: K3s をインストール
+      # creates: /usr/local/bin/k3s は使わない。
+      # 既にk3sがインストール済みの場合にタスク自体をスキップしてしまい、
+      # k3s_versionを変更してもバージョンアップグレードが一切適用されなくなるため。
+      # インストーラはバイナリ・systemd unit・env ファイルのハッシュが変わらなければ
+      # "No change detected so skipping service start" を出して再起動しない。
+      # changed はこの文言の有無で判定する。
+      # get.k3s.io は常に最新を返すため、k3s_version のタグに固定したスクリプトを使う
+      # トークンは environment ではなく stdin で渡す: environment は -vvv の接続ログ (EXEC) に平文で出る。
+      # stdin は module_args に出るため no_log とし、失敗時の出力 (トークンを含まない) は fail タスクで表示する。
+      ansible.builtin.shell:
+        cmd: |
+          set -o pipefail
+          IFS= read -r K3S_TOKEN
+          export K3S_TOKEN
+          curl -sfL https://raw.githubusercontent.com/k3s-io/k3s/{{ k3s_version | urlencode }}/install.sh | sh -
+        executable: /bin/bash
+        stdin: "{{ k3s_effective_token }}"
+      environment:
+        INSTALL_K3S_VERSION: "{{ k3s_version }}"
+      register: k3s_install_result
+      until: k3s_install_result.rc == 0
+      retries: 3
+      delay: 10
+      failed_when: false
+      changed_when: "k3s_install_result.rc == 0 and 'No change detected so skipping service start' not in k3s_install_result.stdout"
+      no_log: true
 
-- name: K3s インストール失敗を報告
-  ansible.builtin.fail:
-    msg: "K3s のインストールに失敗しました (rc={{ k3s_install_result.rc }}): {{ (k3s_install_result.stdout_lines + k3s_install_result.stderr_lines)[-8:] | join(' | ') }}"
-  when: not ansible_check_mode and k3s_install_result.rc != 0
+    - name: K3s インストール失敗を報告
+      ansible.builtin.fail:
+        msg: "K3s のインストールに失敗しました (rc={{ k3s_install_result.rc }}): {{ (k3s_install_result.stdout_lines + k3s_install_result.stderr_lines)[-8:] | join(' | ') }}"
+      when: not ansible_check_mode and k3s_install_result.rc != 0
 
-- name: インストール後の K3s バージョンを確認
-  # インストーラ出力の取りこぼし (空入力のスクリプトなど) を成功扱いにしない
-  ansible.builtin.command: /usr/local/bin/k3s --version
-  register: k3s_post_version
-  changed_when: false
-  failed_when: k3s_version not in k3s_post_version.stdout
-  when: not ansible_check_mode
+    - name: インストール後の K3s バージョンを確認
+      # インストーラ出力の取りこぼし (空入力のスクリプトなど) を成功扱いにしない
+      ansible.builtin.command: /usr/local/bin/k3s --version
+      register: k3s_post_version
+      changed_when: false
+      failed_when: k3s_version not in k3s_post_version.stdout
+      when: not ansible_check_mode
 
-# 5. config.yaml の変更を K3s に反映させる (wait_for より前にハンドラーを実行)
-- name: ハンドラーを即時実行 (config 変更を反映)
-  ansible.builtin.meta: flush_handlers
+    # 5. 設定変更を K3s に反映させ (wait_for より前にハンドラーを実行)、起動を確認する
+    - name: ハンドラーを即時実行 (config 変更を反映)
+      ansible.builtin.meta: flush_handlers
+
+    - name: ローカル admin で /readyz が ok になるまで待機
+      ansible.builtin.command: k3s kubectl get --raw=/readyz
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      register: k3s_readyz
+      until: k3s_readyz.rc == 0 and k3s_readyz.stdout == 'ok'
+      retries: "{{ (k3s_apiserver_ready_timeout // 5) | int }}"
+      delay: 5
+      changed_when: false
+      check_mode: false
+      when: not ansible_check_mode
+
+    - name: 匿名の /version が 401 であることを確認 (認証設定の読み込みの証明)
+      ansible.builtin.uri:
+        url: https://127.0.0.1:6443/version
+        validate_certs: false
+        status_code: 401
+      check_mode: false
+      when: not ansible_check_mode
+
+    - name: 退避した旧ファイルを削除
+      ansible.builtin.file:
+        path: "{{ item.backup_file }}"
+        state: absent
+      loop: "{{ k3s_config_files.results | selectattr('backup_file', 'defined') | list }}"
+      loop_control:
+        label: "{{ item.item.dest }}"
+      when: not ansible_check_mode
+
+  rescue:
+    - name: 退避した旧ファイルを戻す
+      ansible.builtin.copy:
+        src: "{{ item.backup_file }}"
+        dest: "{{ item.item.dest }}"
+        remote_src: true
+        owner: root
+        group: root
+        mode: '0600'
+      loop: "{{ (k3s_config_files | default({})).results | default([]) | selectattr('backup_file', 'defined') | list }}"
+      loop_control:
+        label: "{{ item.item.dest }}"
+      register: k3s_config_restored
+
+    - name: 戻せる旧ファイルがないため、戻さず失敗にする
+      ansible.builtin.fail:
+        msg: >-
+          K3s の起動確認に失敗しました。退避できる旧ファイルがない (新規構築、または設定ファイルに変更がない) ため、
+          自動で戻せません。
+          journalctl -u k3s で原因を確認してください。
+      when: k3s_config_restored.results | default([]) | length == 0
+
+    - name: 旧設定で K3s を再起動して復帰を確認
+      block:
+        - name: K3s を再起動
+          ansible.builtin.systemd:
+            name: k3s
+            state: restarted
+            daemon_reload: true
+
+        - name: 旧設定で /readyz が ok になるまで待機
+          ansible.builtin.command: k3s kubectl get --raw=/readyz
+          environment:
+            KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+          register: k3s_rollback_readyz
+          until: k3s_rollback_readyz.rc == 0 and k3s_rollback_readyz.stdout == 'ok'
+          retries: "{{ (k3s_apiserver_ready_timeout // 5) | int }}"
+          delay: 5
+          changed_when: false
+      rescue:
+        - name: 旧設定でも復帰しなかったことを報告
+          ansible.builtin.fail:
+            msg: >-
+              K3s の起動確認に失敗し、旧設定へ戻しても /readyz が ok になりません。
+              API サーバーは停止している可能性があります。SSH で journalctl -u k3s を確認して復旧してください。
+
+    - name: 旧設定へ戻して復帰を確認したうえで失敗終了
+      ansible.builtin.fail:
+        msg: >-
+          新しい認証設定での K3s の起動確認 (/readyz と匿名 /version の 401) に失敗したため、
+          旧設定へ戻しました。journalctl -u k3s で原因を確認してください。
 
 # 6. K3s サービスが起動するまで待機
 - name: K3s サービスが起動するまで待機 (port 6443)
