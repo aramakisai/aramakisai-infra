@@ -1,0 +1,28 @@
+---
+# GitHub OIDC / クライアント証明書で認証されるユーザーの RBAC
+# wave: -1 — クラスタスコープの RBAC を他 Application から独立して prune できるようにする。
+# binding を Git から消すと同期で即時にクラスタからも剥奪される。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kube-access
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:aramakisai/aramakisai-infra.git
+    targetRevision: main
+    path: gitops/manifests/prod/kube-access
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
