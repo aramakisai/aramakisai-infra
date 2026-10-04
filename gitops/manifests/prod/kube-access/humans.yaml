@@ -1,19 +1,7 @@
----
 # 人用 binding。ロールは組み込みの cluster-admin / admin / edit / view から選ぶ。
 # 追加手順: 下記ブロックを複製し、metadata.name と subjects[].name を書き換える。
 #   subjects[].name は github:<GitHubログイン名>:<数値ID> の形式。
 #   数値ID は `gh api users/<login> --jq .id` で取得できる。
 # ログイン名を変更すると一致しなくなり権限を失う (fail-closed)。
 # 権限の剥奪はブロックの削除 (ArgoCD の prune で即時反映)。
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: github-tom1022-42195304
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: cluster-admin
-subjects:
-  - apiGroup: rbac.authorization.k8s.io
-    kind: User
-    name: "github:tom1022:42195304"
+---
