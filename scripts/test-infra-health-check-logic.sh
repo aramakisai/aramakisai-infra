@@ -110,6 +110,15 @@ whoami_other() { echo "system:anonymous"; }
 run_main whoami_other cnpg_ok stats_ok
 assert_eq "想定外ユーザー -> 非0" "1" "$?"
 
+whoami_masked_stderr() { echo "::add-mask::dummy" >&2; echo "gha:infra-health-check"; }
+run_main whoami_masked_stderr cnpg_ok stats_ok
+assert_eq "exec プラグインが stderr に add-mask を出しても認証成功 -> 0" "0" "$?"
+
+whoami_fail_masked() { echo "::add-mask::secret-token" >&2; echo "denied" >&2; return 1; }
+kc() { whoami_fail_masked; }
+assert_eq "認証失敗メッセージに mask 行を含めない" "0" "$(check_kube_auth 2>&1 | grep -c 'secret-token')"
+assert_eq "認証失敗メッセージに stderr の理由を含める" "1" "$(check_kube_auth 2>&1 | grep -c 'denied')"
+
 run_main whoami_ok fail stats_ok
 assert_eq "CNPG取得失敗 -> 非0" "1" "$?"
 assert_eq "CNPG取得失敗でもdiskチェックは続行" "1" "$(grep -c '^recovered disk-' "${CALLS}")"
