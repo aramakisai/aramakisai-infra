@@ -5,7 +5,7 @@
 検知は通知のみ、復旧は人が承認して実行する。
 
 - `dr-trigger.yml` (5分毎 cron) がノード障害を判定し、Discord 通知と `dr-incident` Issue の起票/追記だけを行う。復旧ワークフローは自動起動しない。
-- 復旧は `dr-recovery.yml` を人が `workflow_dispatch` で起動し、GitHub Environment `dr-recovery` の required reviewers が承認すると始まる。
+- 復旧は `dr-recovery.yml` を人が `workflow_dispatch` で起動し、GitHub Environment `dr-recovery` の required reviewers (team `infra`) が承認すると始まる。起動者本人の承認でもよい。
 - `recovery.sh` は冒頭で読み取り専用の生存確認ゲートを通し、ノードが生きている兆候が1つでもあれば何も変更せず停止する。
 - 自動化の対象は **クラスター唯一のノード (prod-node-1) を喪失した単一ノード構成** のみ。他に Hetzner サーバーが残っている構成 (ノード追加期間中など) や prod-node-1 以外が対象の場合は、etcd 分断を避けるため停止し、手動手順に委ねる。
 
@@ -56,7 +56,7 @@ gh workflow run dr-recovery.yml --repo aramakisai/aramakisai-infra -f target_nod
 #   -f force=true
 ```
 
-Actions の実行画面で reviewer が **Review deployments** から承認すると、ジョブが始まる。
+Actions の実行画面で team `infra` のメンバー (起動者本人でもよい) が **Review deployments** から承認すると、ジョブが始まる。
 
 | 入力 | 既定 | 意味 |
 |------|------|------|
@@ -394,9 +394,10 @@ gh workflow run dr-trigger.yml --repo aramakisai/aramakisai-infra
 リポジトリ設定は Terraform 管理外 (`terraform/` に github provider は無い) のため、管理者が手動で作成する。
 
 1. Settings → Environments → New environment → 名前 `dr-recovery`
-2. **Required reviewers** に承認者 (1名以上) を追加する
-3. 必要に応じて **Prevent self-review** を有効化する
-4. Deployment branches は `main` のみに制限する
+2. **Required reviewers** に team `infra` を設定する。承認者の追加・削除は team のメンバー管理で手動で行う
+3. **Prevent self-review は無効**にする。起動者本人が承認できる (別メンバーの承認は必須としない)
+4. **Allow administrators to bypass** は無効にする
+5. Deployment branches は `main` のみに制限する
 
 Environment が無いまま実行すると GitHub が承認なしの Environment を自動作成してしまう。ワークフローは冒頭の検査で止まるが、先に作成しておくこと。
 

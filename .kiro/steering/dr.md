@@ -12,7 +12,7 @@
   1回の実行内で障害判定が3回連続したときだけ Discord 通知と `dr-incident` Issue 起票/追記を行う。
   復旧ワークフローの自動起動はしない。open な `dr-incident` Issue があれば追記のみ (重複起票しない)
 - **復旧は `dr-recovery.yml` を `workflow_dispatch` で人が起動**: GitHub Environment `dr-recovery`
-  の required reviewers の承認後にジョブが始まる。入力は `target_node` (必須)・`force`。冒頭で Environment の required reviewers を検査し、`main` 以外では起動しない
+  の required reviewers (team `infra`、起動者本人の承認も可) の承認後にジョブが始まる。入力は `target_node` (必須)・`force`。冒頭で Environment の required reviewers を検査し、`main` 以外では起動しない
 - **生存確認ゲート**: `recovery.sh` は冒頭で Hetzner サーバー状態・Tailscale・公開エンドポイント・
   `kubectl get nodes` を読み取り専用で確認し、生存または判定不能を示すシグナルが1つでもあれば停止する
   (`force` でのみ上書き)
