@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # k3s-server ロールが描画した認証設定・監査ポリシー・起動引数を、本番と同じ版の使い捨て k3s (docker) に
-# 入れ、OIDC 判定・署名期間の上限・監査ログを検証する (kube-github-auth tasks 3.5・3.6)。
+# 入れ、OIDC 判定・署名期間の上限・監査ログを検証する (kube-github-auth tasks 3.5・3.6)。人向け証明書の発行ワークフロー (kube-cert-issue.yml) のスクリプト部分もここで検証する。
 # 本番・Infisical・make kubectl には触れない。kubectl はコンテナ内の kubectl だけを使う。
 #
 # 使い方:
@@ -231,6 +231,72 @@ if mkreq masters "/O=system:masters/CN=github:evil:1" "" | kc create -f - >"${WO
 else
   grep -q 'system:masters' "${WORK}/masters.out" && ok "system:masters を含む CSR が作成時に拒否される" || ng "拒否理由に system:masters が出ない"
 fi
+
+echo "--- 発行ワークフロー: kube-cert-issue.yml のスクリプト部分 (CSR 作成・承認・署名) ---"
+WF="${ROOT}/.github/workflows/kube-cert-issue.yml"
+kc apply -f - <"${ROOT}/gitops/manifests/prod/kube-access/workflows.yaml" >/dev/null && ok "本番と同じ RBAC (workflows.yaml) を適用" || ng "RBAC の適用"
+CI_TOK_PORT="$(python3 -c 'import socket;s=socket.socket();s.bind(("",0));print(s.getsockname()[1])')"
+python3 "${PY}" tokensrv "${JUDGE_ARGS[@]}" --issuer "${ISSUER}" --port "${CI_TOK_PORT}" --request-token "${REQ_TOKEN}" --workflow kube-cert-issue.yml &
+EXTRA_PIDS+=($!)
+for _ in $(seq 1 20); do curl -s -o /dev/null "http://127.0.0.1:${CI_TOK_PORT}/" && break; sleep 0.5; done
+CI_ENV=(ACTIONS_ID_TOKEN_REQUEST_URL="http://127.0.0.1:${CI_TOK_PORT}/token?api-version=2.0" ACTIONS_ID_TOKEN_REQUEST_TOKEN="${REQ_TOKEN}")
+step() { # step <name> -> ワークフローの step の run を標準出力へ
+  python3 -c 'import sys,yaml
+for s in yaml.safe_load(open(sys.argv[1]))["jobs"]["issue"]["steps"]:
+    if s.get("name") == sys.argv[2]: print(s["run"])' "${WF}" "$1"
+}
+step "Validate CSR" >"${WORK}/step-validate.sh"
+step "Issue certificate" >"${WORK}/step-issue.sh"
+[[ -s "${WORK}/step-validate.sh" && -s "${WORK}/step-issue.sh" ]] && ok "ワークフローから 2 つの step を取り出せる" || ng "step の取り出し"
+ci_run() { # ci_run <csr-file> <actor> <actor_id> <run_id> <attempt> <port> -> 検証 step → 発行 step。RUNNER_TEMP=${WORK}/rt-<run_id>
+  local rt="${WORK}/rt-$4"
+  mkdir -p "${rt}" && : >"${rt}/summary.md"
+  local common=(env "${CI_ENV[@]}" KUBE_API_HOST=127.0.0.1 KUBE_API_PORT="$6" RUNNER_TEMP="${rt}" GITHUB_STEP_SUMMARY="${rt}/summary.md" GH_ACTOR="$2" GH_ACTOR_ID="$3" RUN_ID="$4" RUN_ATTEMPT="$5")
+  "${common[@]}" CSR_B64="$(base64 -w0 "$1")" bash -c "$(cat "${WORK}/step-validate.sh")" >"${rt}/validate.log" 2>&1 || return 10
+  "${common[@]}" bash -c "$(cat "${WORK}/step-issue.sh")" >"${rt}/issue.log" 2>&1 || return 20
+}
+mkcsr_ci() { # mkcsr_ci <name> <subj> -> ${WORK}/<name>.csr
+  openssl req -new -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -keyout "${WORK}/$1.key" -subj "$2" -out "${WORK}/$1.csr" 2>/dev/null
+}
+csr_names() { kc get csr -o name | grep -c "github-" || true; }
+
+mkcsr_ci ci-ok "/CN=github:alice:1001"
+if ci_run "${WORK}/ci-ok.csr" alice 1001 7001 1 "${PORT_A}"; then
+  ok "正常な CSR が検証・作成・承認・署名まで完了する"
+  crt="${WORK}/rt-7001/cert/kube-client.crt"
+  [[ "$(openssl x509 -in "${crt}" -noout -subject -nameopt RFC2253)" == "subject=CN=github:alice:1001" ]] && ok "証明書の CN が起動者のユーザー名" || ng "証明書の CN"
+  [[ "$(secs "${crt}")" -eq 604800 ]] && ok "証明書の有効期間が 168h" || ng "証明書の有効期間"
+  openssl x509 -in "${crt}" -noout -pubkey | cmp -s - <(openssl pkey -in "${WORK}/ci-ok.key" -pubout) && ok "証明書の公開鍵が CSR の鍵と一致" || ng "公開鍵の一致"
+  grep -q 'github:alice:1001' "${WORK}/rt-7001/summary.md" && grep -q 'notAfter' "${WORK}/rt-7001/summary.md" && ok "job summary に起動者・ユーザー名・notAfter が出る" || ng "job summary"
+  kc get csr github-1001-7001 >/dev/null 2>&1 && ok "CSR 名が github-<数値ID>-<run ID>" || ng "CSR 名"
+  [[ "$(find "${WORK}/rt-7001/cert" -type f | wc -l)" -eq 1 && -f "${WORK}/rt-7001/cert/kube-client.crt" ]] && ok "artifact 対象は証明書 1 ファイルだけ" || ng "artifact 対象"
+  cat "${WORK}/rt-7001/"*.log >"${WORK}/rt-7001.all"
+  grep -qF "${REQ_TOKEN}" "${WORK}/rt-7001.all" && ng "要求トークンがログに出ている" || ok "要求トークンがログに出ない"
+  grep -q 'BEGIN' "${WORK}/rt-7001.all" && ng "鍵・証明書の PEM がログに出ている" || ok "PEM がログに出ない"
+else ng "正常な CSR の発行 ($(tail -3 "${WORK}/rt-7001/"*.log 2>/dev/null))"; fi
+if ci_run "${WORK}/ci-ok.csr" alice 1001 7001 2 "${PORT_A}"; then ok "re-run (同じ run ID・attempt 2) でも名前が衝突せず発行される"; else ng "re-run の発行"; fi
+
+before="$(csr_names)"
+mkcsr_ci ci-other "/CN=github:bob:1002"
+ci_run "${WORK}/ci-other.csr" alice 1001 7002 1 "${PORT_A}"; rc=$?
+[[ "${rc}" -eq 10 ]] && ok "他人の CN は検証 step で拒否される" || ng "他人の CN の拒否 (rc=${rc})"
+[[ "$(csr_names)" == "${before}" ]] && ok "拒否時に CSR オブジェクトが作られない" || ng "拒否時に CSR オブジェクトが作られた"
+grep -q '^::error' "${WORK}/rt-7002/validate.log" && grep -q '理由' "${WORK}/rt-7002/summary.md" && ok "拒否理由がエラー注釈と job summary に出る" || ng "拒否理由の出力"
+mkcsr_ci ci-org "/O=system:masters/CN=github:alice:1001"
+ci_run "${WORK}/ci-org.csr" alice 1001 7003 1 "${PORT_A}"; [[ $? -eq 10 ]] && ok "organization 付き CSR は拒否される" || ng "organization 付きの拒否"
+[[ "$(csr_names)" == "${before}" ]] && ok "organization 付きでも CSR オブジェクトが作られない" || ng "organization 付きで作られた"
+
+ci_run "${WORK}/ci-ok.csr" alice 1001 7004 1 "${DEAD_PORT}"; rc=$?
+[[ "${rc}" -eq 20 ]] && grep -q '^::error' "${WORK}/rt-7004/issue.log" && ok "API サーバー不達で発行 step が非 0・エラー注釈" || ng "不達時の失敗 (rc=${rc})"
+[[ ! -e "${WORK}/rt-7004/cert/kube-client.crt" ]] && ok "失敗時に証明書ファイルを残さない" || ng "失敗時に証明書が残った"
+
+echo "--- 発行ワークフロー: gha:kube-cert-issue の権限 ---"
+CI_KCFG="${WORK}/ci-kubeconfig"
+env KUBE_API_HOST=127.0.0.1 KUBE_API_PORT="${PORT_A}" "${CI_ENV[@]}" bash "${KO}" kubeconfig "${CI_KCFG}" >/dev/null 2>&1
+ci_can() { env "${CI_ENV[@]}" kubectl --kubeconfig "${CI_KCFG}" auth can-i "$@" 2>/dev/null; }
+[[ "$(env "${CI_ENV[@]}" kubectl --kubeconfig "${CI_KCFG}" auth whoami -o jsonpath='{.status.userInfo.username}' 2>/dev/null)" == "gha:kube-cert-issue" ]] && ok "gha:kube-cert-issue として認証される" || ng "gha:kube-cert-issue の認証"
+[[ "$(ci_can delete certificatesigningrequests)" == no ]] && ok "CSR の delete はできない" || ng "CSR の delete ができる"
+[[ "$(ci_can create clusterrolebindings.rbac.authorization.k8s.io)" == no ]] && ok "binding は作れない" || ng "binding を作れる"
 
 echo "--- 3.6 監査ログ ---"
 kc get nodes >/dev/null 2>&1
