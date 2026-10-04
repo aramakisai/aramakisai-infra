@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # DR Recovery ローカル統合テスト
 #
-# recovery.sh の自己修復ステップ (Step0, Step6a, Step6b, Step7末尾) を
+# recovery.sh の自己修復ステップ (Step6a, Step6b) を
 # k3d クラスターに対して検証する。
 #
 # Steps 2-5 (Tailscale/TFC/Ansible/VolSync) は実インフラが必要なため
@@ -137,7 +137,7 @@ install_operators() {
   helm repo add jetstack https://charts.jetstack.io 2>/dev/null || true
   helm repo update cnpg jetstack 2>/dev/null || true
 
-  # CNPG operator (Step0, Step7末尾 のCRD提供)
+  # CNPG operator (CNPG CRD 提供)
   if ! helm --kubeconfig="${KUBECONFIG_FILE}" list -n cnpg-system 2>/dev/null | grep -q cloudnative-pg; then
     log "CNPG operator をインストールします (0.21.x)"
     helm install cloudnative-pg cnpg/cloudnative-pg \
@@ -171,52 +171,6 @@ install_operators() {
   kubectl_r create namespace argocd  2>/dev/null || true
 
   log "オペレータセットアップ完了"
-}
-
-# ============================================================
-# Step0 テスト: CNPG 古い Job のベストエフォート削除
-# ============================================================
-
-test_step0() {
-  log ""
-  log "=== Test: Step0 - CNPG Job クリーンアップ ==="
-
-  # テスト用 Job を作成 (CNPG ラベル付き)
-  kubectl_r create job authentik-db-stale --image=busybox:latest \
-    -n prod -- sleep 3600 2>/dev/null || true
-  kubectl_r label job authentik-db-stale -n prod \
-    "cnpg.io/cluster=authentik-db" --overwrite 2>/dev/null || true
-
-  kubectl_r create job directus-db-stale --image=busybox:latest \
-    -n prod -- sleep 3600 2>/dev/null || true
-  kubectl_r label job directus-db-stale -n prod \
-    "cnpg.io/cluster=directus-db" --overwrite 2>/dev/null || true
-
-  # Job が存在することを確認
-  local job_count
-  job_count=$(kubectl_r get jobs -n prod -l "cnpg.io/cluster" --no-headers 2>/dev/null | wc -l)
-  assert_eq "Step0 前: ラベル付き Job が 2 件存在" "$job_count" "2"
-
-  # Step0 ロジックを実行 (recovery.sh と同一ロジック)
-  kubectl_r delete jobs -n prod -l "cnpg.io/cluster=authentik-db" \
-    --request-timeout=10s 2>/dev/null \
-    || log "警告: authentik-db の Job 削除をスキップしました"
-
-  kubectl_r delete jobs -n prod -l "cnpg.io/cluster=directus-db" \
-    --request-timeout=10s 2>/dev/null \
-    || log "警告: directus-db の Job 削除をスキップしました"
-
-  # Job が削除されていることを確認
-  local remaining
-  remaining=$(kubectl_r get jobs -n prod -l "cnpg.io/cluster" --no-headers 2>/dev/null | wc -l)
-  assert_eq "Step0 後: ラベル付き Job が 0 件" "$remaining" "0"
-
-  # non-fatal テスト: 存在しないクラスターへの削除は失敗せず続行する
-  local non_fatal_ok=true
-  kubectl_r delete jobs -n nonexistent -l "cnpg.io/cluster=ghost-db" \
-    --request-timeout=5s 2>/dev/null \
-    || non_fatal_ok=true  # 失敗しても non-fatal で ok
-  assert_eq "Step0: 存在しない namespace への削除は non-fatal" "$non_fatal_ok" "true"
 }
 
 # ============================================================
@@ -437,8 +391,6 @@ main() {
 
   setup_cluster
   install_operators
-
-  test_step0
   test_step6a
   test_step6b
   test_step7_tail
@@ -449,7 +401,6 @@ main() {
   log "============================================================"
   log ""
   log "ローカルで検証済み:"
-  log "  ✓ Step0  - CNPG 古い Job クリーンアップ (non-fatal)"
   log "  ✓ Step6a - infisical-auth / Deploy Key 空チェックと自己修復"
   log "  ✓ Step6b - mail-tls Certificate CR apply (冪等性含む)"
   log "  ✓ Step7末尾 - directus-db リストア確認ログ (フォールバック含む)"

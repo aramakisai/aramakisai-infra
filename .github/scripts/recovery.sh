@@ -1,20 +1,36 @@
 #!/usr/bin/env bash
-# K3s コールドスタンバイ復旧スクリプト
-# 実行フロー:
-#   0. CNPG 古い Job をベストエフォートで削除 (non-fatal)
-#   1. 必須環境変数チェック
-#   2. Tailscale から prod-node-1 デバイスを削除 (残存デバイスによる重複ホスト名防止)
-#   3. Terraform Cloud API でノードを再作成
-#   4. Tailscale に prod-node-1 として登録されるまでポーリング (最大10分)
-#   5. Ansible でシングルノード K3s をブートストラップ
-#   6. ArgoCD sync 完了・CNPG healthy を待機
-#   6a. infisical-auth / Deploy Key 空チェックと自己修復
-#   6b. mail-tls 証明書の自己修復
-#   7. mailserver メールデータを VolSync で Hetzner Object Storage からリストア
-#      (完了時に directus-db リストア確認ログを出力)
+# K3s コールドスタンバイ復旧スクリプト (人の承認付き dr-recovery ワークフローから実行)
 #
-# 注意: GitHub Actions の dr-recovery ワークフローから呼び出される。
-#       infisical run --env=prod -- bash .github/scripts/recovery.sh で実行すること。
+# 対象は「クラスター唯一のノードを喪失した」単一ノード構成のみ。
+# 残存 etcd メンバーが他にいる構成の復旧 (join) は自動化せず docs/dr-runbook.md の手動手順に委ねる。
+# etcd スナップショットは取得していない。ノード全喪失時は空の etcd (cluster-init) から
+# ArgoCD が GitOps で再構築し、状態は CNPG WAL / VolSync / Infisical から戻す。
+#
+# 実行フロー:
+#   1. 必須環境変数チェック・進捗記録先 (dr-incident Issue) の確定
+#   2. 生存確認ゲート (読み取り専用)。生存を示すシグナルが 1 つでもあれば停止 (DR_FORCE=1 でのみ上書き)
+#   3. Hetzner のサーバー状態 (不在は TFC state と突き合わせ) で復旧モードを決定
+#        absent  : Terraform (対象サーバーのみ -target, plan 検査後 apply) → メール DNS/rDNS だけの 2 回目の run
+#                  → Ansible。Tailscale 旧デバイスは plan 検査後・apply 直前に削除
+#        off     : 電源投入 → k3s の Ready 確認のみ (Ansible は流さない。デバイスも消さない)
+#        その他  : DR_FORCE 時のみ。インフラ操作なしで Ansible から再実行
+#   4. bootstrap Secret の自己修復 → ArgoCD / 稼働中 CNPG の healthy 待機 (タイムアウトは失敗)
+#
+# Ansible を流す経路は冪等化済みの playbook (ansible/playbooks/tasks/ensure_secret.yml) と、
+# HEAD が origin/main と一致し未コミット変更が無いことが前提。満たさなければ破壊的操作の前に停止する。
+# サーバーを作り直す経路は、メールの ReplicationSource が spec.paused: true であることも前提とする。
+#
+# Infisical は読取用の CI machine identity (INFISICAL_CLIENT_ID/SECRET) を使う。
+# メールデータのリストアは自動化しない (docs/dr-runbook.md)。
+#
+# 必須入力: DR_TARGET_NODE (例: prod-node-1)
+# 任意入力: DR_FORCE=1
+#
+# ローカルテスト用フラグ:
+#   DR_LOCAL_TEST=1  : 生存確認ゲートとインフラ操作 (Tailscale/Terraform/Ansible) を全てスキップし、
+#                      既存 k3d クラスター上で待機・自己修復のみ実行する
+#   DR_SKIP_INFRA=1  : DR_LOCAL_TEST と同様にゲートとインフラ操作をスキップするが Ansible は実行する
+#                      (KVM テスト向け。DR_ANSIBLE_INVENTORY で inventory を差し替える)
 
 set -euo pipefail
 
@@ -22,476 +38,737 @@ log() { echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') [recovery] $*" >&2; }
 die() { log "ERROR: $*"; exit 1; }
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-KUBECONFIG_FILE="/tmp/kubeconfig-recovery"
+KUBECONFIG_FILE="${KUBECONFIG_FILE:-/tmp/kubeconfig-recovery}"
+REPO="${GITHUB_REPOSITORY:-aramakisai/aramakisai-infra}"
+INCIDENT_LABEL="dr-incident"
 
-# ローカルテスト用フラグ (デフォルトはすべて 0 = 本番モード)
-#
-# DR_LOCAL_TEST=1          : Steps 2-5 をすべてスキップ (k3d 既存クラスター向け)
-# DR_SKIP_TAILSCALE_DELETE=1: Step 2 (Tailscale デバイス削除) のみスキップ
-# DR_SKIP_TFC=1             : Step 3 (Terraform Cloud Run) のみスキップ
-# DR_SKIP_TAILSCALE_WAIT=1  : Step 4 (Tailscale 登録待機) のみスキップ
-# DR_SKIP_ANSIBLE=1         : Step 5 (Ansible) のみスキップ
-# DR_ANSIBLE_INVENTORY      : Ansible に使う inventory ファイルパス (デフォルト: tailscale.yml)
-#
-# KVM テスト向け推奨設定:
-#   DR_SKIP_TAILSCALE_DELETE=1 DR_SKIP_TFC=1 DR_SKIP_TAILSCALE_WAIT=1 \
-#   DR_ANSIBLE_INVENTORY=/path/to/kvm-test.yml \
-#   KUBECONFIG_FILE=/tmp/kubeconfig-kvm-test \
-#   infisical run --env=prod -- bash .github/scripts/recovery.sh
+DR_TARGET_NODE="${DR_TARGET_NODE:-}"
+DR_FORCE="${DR_FORCE:-0}"
 DR_LOCAL_TEST="${DR_LOCAL_TEST:-0}"
-DR_SKIP_TAILSCALE_DELETE="${DR_SKIP_TAILSCALE_DELETE:-0}"
-DR_SKIP_TFC="${DR_SKIP_TFC:-0}"
-DR_SKIP_TAILSCALE_WAIT="${DR_SKIP_TAILSCALE_WAIT:-0}"
-DR_SKIP_ANSIBLE="${DR_SKIP_ANSIBLE:-0}"
-DR_ANSIBLE_INVENTORY="${DR_ANSIBLE_INVENTORY:-}"
+DR_SKIP_INFRA="${DR_SKIP_INFRA:-0}"
+DR_ANSIBLE_INVENTORY="${DR_ANSIBLE_INVENTORY:-${REPO_ROOT}/ansible/inventory/tailscale.yml}"
+[[ "${DR_LOCAL_TEST}" == "1" ]] && DR_SKIP_INFRA=1
 
-# DR_LOCAL_TEST=1 は全フラグを有効化するショートカット
-if [[ "${DR_LOCAL_TEST}" == "1" ]]; then
-  DR_SKIP_TAILSCALE_DELETE=1
-  DR_SKIP_TFC=1
-  DR_SKIP_TAILSCALE_WAIT=1
-  DR_SKIP_ANSIBLE=1
-fi
+HCLOUD_API="https://api.hetzner.cloud/v1"
+TS_API="https://api.tailscale.com/api/v2"
+TFC_API="https://app.terraform.io/api/v2"
+ENDPOINTS=(
+  "https://idp.aramakisai.com"
+  "https://argocd.aramakisai.com"
+  "https://webmail.aramakisai.com"
+)
+
+DR_ISSUE=""
+TFC_PENDING_RUN=""
+SSH_KEY_FILE=""
+TFC_SCOPE_NODE=""
+TFC_RESULT=""
+
+# サーバー作成後に追従が必要な (prod-node-1 のアドレスを参照する) メール用リソース
+MAIL_DNS_ADDRS=(
+  "cloudflare_record.mail_prod_node_1"
+  "cloudflare_record.mail_prod_node_1_ipv4"
+  "hcloud_rdns.mail_ipv4"
+  "hcloud_rdns.mail_ipv6"
+)
 
 kubectl_r() { kubectl --kubeconfig="${KUBECONFIG_FILE}" "$@"; }
 
 # ============================================================
-# 1. 必須環境変数チェック
+# 進捗記録 (dr-incident Issue)
 # ============================================================
 
-if [[ "${DR_LOCAL_TEST}" == "1" ]]; then
-  # k3d ローカルテストモード: インフラ系変数は不要
-  REQUIRED_VARS=(
-    INFISICAL_CLIENT_ID
-    INFISICAL_CLIENT_SECRET
-  )
-  log "[LOCAL TEST MODE] Steps 2-5 (Tailscale/TFC/Ansible) をスキップします"
-  log "[LOCAL TEST MODE] KUBECONFIG_FILE=${KUBECONFIG_FILE}"
-  if [[ ! -f "${KUBECONFIG_FILE}" ]]; then
-    [[ -n "${KUBECONFIG:-}" ]] || die "KUBECONFIG または KUBECONFIG_FILE が必要です"
+# 再実行時に TFC run ID など進行状況を人が追えるよう Issue に残す。
+# 記録失敗で復旧自体は止めない。
+init_record() {
+  [[ -n "${GH_TOKEN:-}" ]] || { log "GH_TOKEN 未設定のため進捗は Issue に記録しません"; return 0; }
+  DR_ISSUE=$(gh issue list --repo "${REPO}" --label "${INCIDENT_LABEL}" --state open \
+    --json number --jq '.[0].number // empty' 2>/dev/null || true)
+  if [[ -z "${DR_ISSUE}" ]]; then
+    gh api "repos/${REPO}/labels/${INCIDENT_LABEL}" >/dev/null 2>&1 \
+      || gh api "repos/${REPO}/labels" -f name="${INCIDENT_LABEL}" -f color="d73a4a" \
+        -f description="DR: ノード障害疑い・復旧の進捗記録" >/dev/null 2>&1 || true
+    DR_ISSUE=$(gh issue create --repo "${REPO}" --label "${INCIDENT_LABEL}" \
+      --title "DR: ${DR_TARGET_NODE} 復旧実行 ($(date -u '+%Y-%m-%dT%H:%M:%SZ'))" \
+      --body "dr-recovery の実行記録です。run: ${GITHUB_SERVER_URL:-https://github.com}/${REPO}/actions/runs/${GITHUB_RUN_ID:-unknown}" \
+      2>/dev/null | grep -oE '[0-9]+$' || true)
+  fi
+  record "復旧開始: target=${DR_TARGET_NODE} force=${DR_FORCE} run=${GITHUB_RUN_ID:-local}"
+}
+
+record() {
+  log "$*"
+  [[ -n "${DR_ISSUE}" ]] || return 0
+  gh issue comment "${DR_ISSUE}" --repo "${REPO}" --body "$*" >/dev/null 2>&1 || true
+}
+
+# ============================================================
+# 入力検証
+# ============================================================
+
+# Terraform local.nodes に定義済みのノードだけを受け付ける。
+validate_target_node() {
+  local node="$1"
+  [[ "${node}" =~ ^prod-node-[0-9]+$ ]] || return 1
+  grep -qE "^[[:space:]]+\"${node}\"[[:space:]]*=[[:space:]]*\{" "${REPO_ROOT}/terraform/main.tf"
+}
+
+# inventory 上で k3s_cluster_init: true が付いたホスト名を返す。
+inventory_init_host() {
+  awk '
+    /^        [A-Za-z0-9_.-]+:[[:space:]]*$/ { gsub(/[: ]/, "", $1); host=$1 }
+    /k3s_cluster_init:[[:space:]]*true/ { print host; exit }
+  ' "$1"
+}
+
+# ============================================================
+# Tailscale (OAuth クライアント。devices:core の書込スコープが必要)
+# ============================================================
+
+ts_token() {
+  local response
+  response=$(curl -sf -X POST "${TS_API}/oauth/token" \
+    -d "client_id=${TAILSCALE_OAUTH_CLIENT_ID}" \
+    -d "client_secret=${TAILSCALE_OAUTH_CLIENT_SECRET}") || return 1
+  echo "${response}" | jq -r '.access_token // empty'
+}
+
+ts_devices() {
+  local token="$1"
+  curl -sf -H "Authorization: Bearer ${token}" "${TS_API}/tailnet/${TAILSCALE_TAILNET}/devices"
+}
+
+# 非 ephemeral のため再作成すると旧デバイスと `<name>-N` で重複する。両方を対象にする。
+# 引数: devices JSON, ノード名, 状態 (online|offline|any)
+ts_device_ids() {
+  local json="$1" node="$2" state="${3:-any}"
+  echo "${json}" | jq -r --arg n "${node}" --arg s "${state}" '
+    .devices[]
+    | select((.hostname // "") | test("^" + $n + "(-[0-9]+)?$"))
+    | select($s == "any" or ($s == "online" and .connectedToControl == true)
+                         or ($s == "offline" and .connectedToControl != true))
+    | .id'
+}
+
+# hostname が完全一致で接続中のデバイスがあるか (新ノードの登録確認)
+ts_node_registered() {
+  echo "$1" | jq -e --arg n "$2" \
+    '[.devices[] | select((.hostname // "") == $n and .connectedToControl == true)] | length > 0' >/dev/null
+}
+
+# ============================================================
+# 生存確認ゲート (読み取り専用)
+# ============================================================
+
+# 出力: Hetzner サーバー状態 (running/off/... | absent | unknown)
+hcloud_server_status() {
+  local node="$1" response
+  response=$(curl -sf -H "Authorization: Bearer ${HCLOUD_TOKEN}" \
+    "${HCLOUD_API}/servers?name=${node}") || { echo unknown; return; }
+  echo "${response}" | jq -r '.servers[0].status // "absent"'
+}
+
+# 対象以外の k8s ノード用サーバー (残存 etcd メンバー候補) の名前一覧
+hcloud_peer_servers() {
+  local node="$1" response
+  response=$(curl -sf -H "Authorization: Bearer ${HCLOUD_TOKEN}" \
+    "${HCLOUD_API}/servers?label_selector=role%3Dserver") || return 1
+  echo "${response}" | jq -r --arg n "${node}" '.servers[] | select(.name != $n) | .name'
+}
+
+# TFC の state に対象サーバーが記録されているか。戻り値: 0=ある / 1=ない / 2=取得失敗
+# ノード名や API 障害の取り違えで「不在」と誤判定しないための突き合わせに使う。
+tfc_server_in_state() {
+  local node="$1" json
+  json=$(tfc_api GET "/workspaces/${TFC_WORKSPACE_ID}/resources?page%5Bsize%5D=100") || return 2
+  echo "${json}" | jq -e --arg n "${node}" --arg addr "hcloud_server.nodes[\"${node}\"]" '
+    any(.data[]?.attributes;
+      (.address // "") == $addr
+      or ((.name // "") == "nodes" and (.["name-index"] // "") == $n
+          and ((.["provider-type"] // .type // "") | test("hcloud"))))' >/dev/null
+  case $? in 0) return 0 ;; 1) return 1 ;; *) return 2 ;; esac
+}
+
+# Hetzner API の状態に TFC state との整合を加えた判定。
+# 出力: running 等 / off / absent (Hetzner 不在かつ state にある) / unknown (取得失敗・不整合)
+server_state() {
+  local node="$1" status rc=0
+  status=$(hcloud_server_status "${node}")
+  if [[ "${status}" == "absent" ]]; then
+    tfc_server_in_state "${node}" || rc=$?
+    if [[ "${rc}" != "0" ]]; then
+      log "Hetzner 上に ${node} は無いが TFC state で確認できません (rc=${rc})。判定不能として扱います"
+      status="unknown"
+    fi
+  fi
+  echo "${status}"
+}
+
+endpoint_up() { curl -sf -o /dev/null --max-time 10 "$1"; }
+
+# 各シグナルを "名前=alive|dead|unknown" で出力する。
+# unknown (API 失敗) は生存の否定にならないため、ゲートでは alive と同様に停止要因として扱う。
+collect_signals() {
+  local node="$1" status ts_json ts_tok online_ids url any_up
+
+  status=$(server_state "${node}")
+  case "${status}" in
+    off | absent) echo "hetzner=dead (${status})" ;;
+    unknown) echo "hetzner=unknown" ;;
+    *) echo "hetzner=alive (${status})" ;;
+  esac
+
+  if ts_tok=$(ts_token) && [[ -n "${ts_tok}" ]] && ts_json=$(ts_devices "${ts_tok}") \
+    && online_ids=$(ts_device_ids "${ts_json}" "${node}" online); then
+    if [[ -n "${online_ids}" ]]; then
+      echo "tailscale=alive"
+    else
+      echo "tailscale=dead"
+    fi
+  else
+    echo "tailscale=unknown"
+  fi
+
+  any_up=0
+  for url in "${ENDPOINTS[@]}"; do
+    if endpoint_up "${url}"; then any_up=1; fi
+  done
+  if [[ "${any_up}" == "1" ]]; then echo "endpoints=alive"; else echo "endpoints=dead"; fi
+
+  if [[ -f "${KUBECONFIG_FILE}" ]] && kubectl_r --request-timeout=10s get nodes >/dev/null 2>&1; then
+    echo "kubectl=alive"
+  else
+    echo "kubectl=dead"
+  fi
+}
+
+# 戻り値: 0=復旧に進んでよい / 1=停止
+liveness_gate() {
+  local signals="$1" blocking
+  blocking=$(echo "${signals}" | grep -E '=(alive|unknown)' || true)
+  [[ -z "${blocking}" ]] && return 0
+  log "生存確認ゲート: 以下のシグナルが生存または判定不能を示しています"
+  echo "${blocking}" >&2
+  [[ "${DR_FORCE}" == "1" ]] && { log "DR_FORCE=1 のためゲートを上書きして続行します"; return 0; }
+  return 1
+}
+
+# ============================================================
+# Terraform Cloud (対象ノードのみ -target、plan 検査後に apply)
+# ============================================================
+
+tfc_api() {
+  local method="$1" path="$2" body="${3:-}"
+  local args=(-sf -X "${method}" -H "Authorization: Bearer ${TFC_API_TOKEN}" -H "Content-Type: application/vnd.api+json")
+  [[ -n "${body}" ]] && args+=(-d "${body}")
+  curl "${args[@]}" "${TFC_API}${path}"
+}
+
+tfc_create_run() {
+  local message="$1" payload
+  shift
+  payload=$(jq -n --arg ws "${TFC_WORKSPACE_ID}" --arg msg "${message}" '{
+    data: {
+      type: "runs",
+      attributes: {
+        "is-destroy": false,
+        "auto-apply": false,
+        "target-addrs": $ARGS.positional,
+        message: $msg
+      },
+      relationships: { workspace: { data: { type: "workspaces", id: $ws } } }
+    }
+  }' --args "$@")
+  tfc_api POST /runs "${payload}" | jq -r '.data.id // empty'
+}
+
+# apply 前に異常終了したとき planned のまま残る run がワークスペースをロックし続けないよう破棄する
+tfc_discard_pending() {
+  [[ -n "${TFC_PENDING_RUN}" ]] || return 0
+  tfc_api POST "/runs/${TFC_PENDING_RUN}/actions/discard" '{"comment":"recovery.sh stopped before apply"}' >/dev/null 2>&1 || true
+  log "未 apply の TFC run ${TFC_PENDING_RUN} を discard しました"
+  TFC_PENDING_RUN=""
+}
+
+# 異常終了時に、未 apply の run の破棄と SSH 鍵の一時ファイル削除を行う
+cleanup_all() {
+  tfc_discard_pending
+  [[ -z "${SSH_KEY_FILE}" ]] || rm -f "${SSH_KEY_FILE}"
+}
+
+# plan が確認可能 (または変更なし) になるまで待つ。出力: confirmable | no-changes
+tfc_wait_plan() {
+  local run_id="$1" elapsed=0 timeout=900 json status confirmable
+  while true; do
+    json=$(tfc_api GET "/runs/${run_id}") || die "TFC run の取得に失敗しました"
+    status=$(echo "${json}" | jq -r '.data.attributes.status')
+    confirmable=$(echo "${json}" | jq -r '.data.attributes.actions["is-confirmable"] // false')
+    log "TFC run ${run_id}: ${status} (${elapsed}s)"
+    case "${status}" in
+      planned_and_finished) echo no-changes; return ;;
+      errored | canceled | force_canceled | discarded) die "TFC run が失敗しました (status: ${status})" ;;
+    esac
+    [[ "${confirmable}" == "true" ]] && { echo confirmable; return; }
+    ((elapsed >= timeout)) && die "TFC plan がタイムアウトしました (${timeout}s)"
+    sleep 15
+    elapsed=$((elapsed + 15))
+  done
+}
+
+# plan に含まれる変更が「対象サーバーの新規作成 + 依存する Tailscale auth key」だけかを機械検査する。
+# placement group 所属変更や他ノード作成、DNS/RDNS 変更が混入していれば 1 を返す。
+# 引数: plan JSON, ノード名
+plan_scope_ok() {
+  local json="$1" node="$2"
+  echo "${json}" | jq -e --arg addr "hcloud_server.nodes[\"${node}\"]" '
+    [.resource_changes[] | select(.change.actions != ["no-op"] and .change.actions != ["read"])] as $c
+    | ($c | length > 0)
+      and ([$c[] | select(.address == $addr and .change.actions == ["create"])] | length == 1)
+      and ([$c[] | select(.address != $addr and .address != "tailscale_tailnet_key.k3s_nodes")] | length == 0)
+  ' >/dev/null
+}
+
+# plan の変更が指定アドレス (と依存する auth key) の create/update/置換だけで、純粋な削除を含まないかを検査する。
+# 引数: plan JSON, 許可アドレス...
+plan_scope_addrs() {
+  local json="$1" allowed
+  shift
+  allowed=$(printf '%s\n' "$@" | jq -R . | jq -cs .)
+  echo "${json}" | jq -e --argjson allowed "${allowed}" '
+    [.resource_changes[] | select(.change.actions != ["no-op"] and .change.actions != ["read"])] as $c
+    | ([$c[] | select(((.address as $a | $allowed | index($a)) == null)
+                      and .address != "tailscale_tailnet_key.k3s_nodes")] | length == 0)
+      and ([$c[] | select(.change.actions == ["delete"])] | length == 0)
+  ' >/dev/null
+}
+
+scope_server_create() { plan_scope_ok "$1" "${TFC_SCOPE_NODE}"; }
+scope_mail_dns() { plan_scope_addrs "$1" "${MAIL_DNS_ADDRS[@]}"; }
+
+# redacted 版でも resource_changes のアドレスと actions は含まれ、機微な値は含まれない
+tfc_plan_json() {
+  local run_id="$1" plan_id
+  plan_id=$(tfc_api GET "/runs/${run_id}" | jq -r '.data.relationships.plan.data.id')
+  curl -sfL -H "Authorization: Bearer ${TFC_API_TOKEN}" "${TFC_API}/plans/${plan_id}/json-output-redacted"
+}
+
+tfc_wait_applied() {
+  local run_id="$1" elapsed=0 timeout=900 status
+  while true; do
+    status=$(tfc_api GET "/runs/${run_id}" | jq -r '.data.attributes.status')
+    log "TFC run ${run_id}: ${status} (${elapsed}s)"
+    case "${status}" in
+      applied) return 0 ;;
+      errored | canceled | force_canceled | discarded) die "TFC apply が失敗しました (status: ${status})" ;;
+    esac
+    ((elapsed >= timeout)) && die "TFC apply がタイムアウトしました (${timeout}s)"
+    sleep 15
+    elapsed=$((elapsed + 15))
+  done
+}
+
+# 対象限定の run を作り、plan がスコープ内であることを検査してから apply する。
+# 引数: ラベル, スコープ検査関数, apply 直前フック (空可), 対象アドレス...
+# 結果: TFC_RESULT=applied | no-changes
+tfc_target_apply() {
+  local label="$1" scope_fn="$2" pre_apply="$3" run_id plan_kind plan_json
+  shift 3
+
+  trap cleanup_all EXIT
+  run_id=$(tfc_create_run "DR recovery: ${label}" "$@")
+  [[ -n "${run_id}" ]] || die "TFC run の作成に失敗しました"
+  TFC_PENDING_RUN="${run_id}"
+  record "TFC run 作成 (${label}, target=$*, auto-apply 無効): ${run_id}"
+
+  plan_kind=$(tfc_wait_plan "${run_id}")
+  if [[ "${plan_kind}" == "no-changes" ]]; then
+    TFC_PENDING_RUN=""
+    TFC_RESULT="no-changes"
+    record "plan に変更なし (${label}, run: ${run_id})"
+    return 0
+  fi
+
+  plan_json=$(tfc_plan_json "${run_id}")
+  "${scope_fn}" "${plan_json}" \
+    || die "plan にスコープ外の変更が含まれるため停止します (${label}, run: ${run_id} は discard)。手動で plan を確認してください"
+  record "plan 検査 OK (${label})"
+
+  [[ -z "${pre_apply}" ]] || "${pre_apply}"
+
+  tfc_api POST "/runs/${run_id}/actions/apply" '{"comment":"DR recovery apply"}' >/dev/null \
+    || die "apply の開始に失敗しました (run: ${run_id})"
+  TFC_PENDING_RUN=""
+  tfc_wait_applied "${run_id}"
+  TFC_RESULT="applied"
+  record "Terraform apply 完了 (${label}, run: ${run_id})"
+}
+
+# 非 ephemeral のため再作成すると旧デバイスと `<name>-N` で重複する。
+# plan 検査を通った後・apply の直前に、対象名一致 かつ offline のものだけ ID 指定で削除する。
+delete_stale_tailscale_devices() {
+  local token devices id
+  token=$(ts_token) || die "Tailscale OAuth token の取得に失敗しました"
+  devices=$(ts_devices "${token}") || die "Tailscale デバイス一覧の取得に失敗しました"
+  for id in $(ts_device_ids "${devices}" "${TFC_SCOPE_NODE}" offline); do
+    log "Tailscale 旧デバイス削除: ${id}"
+    curl -sf -X DELETE -H "Authorization: Bearer ${token}" "${TS_API}/device/${id}" >/dev/null \
+      || die "デバイス削除に失敗しました (${id})。OAuth クライアントに devices:core の書込スコープが必要です"
+  done
+}
+
+recreate_node() {
+  TFC_SCOPE_NODE="$1"
+  tfc_target_apply "server ${TFC_SCOPE_NODE}" scope_server_create delete_stale_tailscale_devices \
+    "hcloud_server.nodes[\"${TFC_SCOPE_NODE}\"]"
+  [[ "${TFC_RESULT}" == "applied" ]] || die "plan に変更がありません。サーバーは存在するはずです"
+}
+
+# 新サーバーの IP に A/AAAA と rDNS を追従させる。メール用リソースだけを対象にした別 run にする。
+update_mail_dns() {
+  local node="$1"
+  if [[ "${node}" != "prod-node-1" ]]; then
+    log "${node} はメール用アドレスの対象ではないため DNS/rDNS 更新をスキップします"
+    return 0
+  fi
+  tfc_target_apply "mail DNS/rDNS" scope_mail_dns "" "${MAIL_DNS_ADDRS[@]}"
+}
+
+poweron_node() {
+  local node="$1" server_id
+  server_id=$(curl -sf -H "Authorization: Bearer ${HCLOUD_TOKEN}" "${HCLOUD_API}/servers?name=${node}" \
+    | jq -r '.servers[0].id // empty')
+  [[ -n "${server_id}" ]] || die "サーバー ID を取得できませんでした (${node})"
+  curl -sf -X POST -H "Authorization: Bearer ${HCLOUD_TOKEN}" \
+    "${HCLOUD_API}/servers/${server_id}/actions/poweron" >/dev/null || die "電源投入に失敗しました (${node})"
+  record "${node} を電源投入しました (Tailscale デバイスは保持)"
+}
+
+wait_tailscale_registered() {
+  local node="$1" elapsed=0 timeout=600 token devices
+  while true; do
+    if token=$(ts_token) && devices=$(ts_devices "${token}") && ts_node_registered "${devices}" "${node}"; then
+      record "${node} が Tailscale に接続しました"
+      return 0
+    fi
+    ((elapsed >= timeout)) && die "${node} の Tailscale 接続がタイムアウトしました (${timeout}s)"
+    log "未接続 (${elapsed}s)"
+    sleep 15
+    elapsed=$((elapsed + 15))
+  done
+}
+
+# 承認待ちや Terraform 実行中に main が進むと、Ansible 側の「HEAD が origin/main と一致」検査で
+# 作り直し後に止まる。破壊的操作の前に同じ条件を確認して早期に止める。
+# 戻り値: 0=一致・未コミット変更なし / 1=不一致または変更あり / 2=fetch 失敗
+git_in_sync() {
+  git -C "${REPO_ROOT}" fetch -q origin main || return 2
+  [[ "$(git -C "${REPO_ROOT}" rev-parse HEAD)" == "$(git -C "${REPO_ROOT}" rev-parse origin/main)" ]] || return 1
+  [[ -z "$(git -C "${REPO_ROOT}" status --porcelain)" ]]
+}
+
+# 新クラスターでは空の mailserver-data を sourcePVC とする ReplicationSource が最初に同期し、
+# 同じ restic リポジトリの最新スナップショットが空になり、保持ポリシーの prune で障害前のものも消える。
+# 作成直後に backup Job が走らないよう、DR の前にコミットで spec.paused: true にしておく必要がある。
+mail_rs_paused() {
+  grep -qE '^[[:space:]]+paused:[[:space:]]*true' "${REPO_ROOT}/gitops/manifests/prod/mailserver/replication-source.yaml"
+}
+
+# 冪等化済みの playbook でないと、再作成後の bootstrap が稼働中 Secret の空上書きや
+# 入力不足のまま進みうる。破壊的操作の前に存在で検知する。
+ansible_ready() {
+  [[ -f "${REPO_ROOT}/ansible/playbooks/tasks/ensure_secret.yml" ]]
+}
+
+# CI identity で Infisical のアクセストークンを取得する。失敗は呼び出し側で fail にする。
+dr_infisical_token() {
+  local token
+  token=$(infisical login --method=universal-auth \
+    --client-id="${INFISICAL_CLIENT_ID}" --client-secret="${INFISICAL_CLIENT_SECRET}" \
+    --silent --plain 2>/dev/null) || return 1
+  [[ -n "${token}" ]] || return 1
+  echo "::add-mask::${token}" >&2
+  echo "${token}"
+}
+
+# bootstrap が Infisical に登録した kubeconfig を取得し直す。値は変数に受けるだけで出力しない。
+refresh_kubeconfig() {
+  local token kubeconfig
+  token=$(dr_infisical_token) || die "Infisical へのログインに失敗しました"
+  kubeconfig=$(infisical secrets get KUBECONFIG --env=prod --projectId="${INFISICAL_PROJECT_ID}" \
+    --token="${token}" --plain 2>/dev/null) || die "Infisical から KUBECONFIG を取得できませんでした"
+  [[ -n "${kubeconfig}" ]] || die "Infisical の KUBECONFIG が空です"
+  echo "${kubeconfig}" > "${KUBECONFIG_FILE}"
+  chmod 600 "${KUBECONFIG_FILE}"
+}
+
+run_ansible() {
+  local node="$1"
+  record "Ansible k3s-bootstrap を ${node} に限定して実行します"
+  # cloud-init は tailscale up に --ssh を付けないため、k3s-upgrade.yml と同じ CI 専用デプロイ鍵で接続する。
+  # 鍵は 0600 の一時ファイルに書き出し、終了時に削除する。
+  SSH_KEY_FILE=$(mktemp)
+  trap cleanup_all EXIT
+  chmod 600 "${SSH_KEY_FILE}"
+  printf '%s\n' "${CI_SSH_PRIVATE_KEY}" > "${SSH_KEY_FILE}"
+
+  ANSIBLE_HOST_KEY_CHECKING=False \
+    ANSIBLE_PRIVATE_KEY_FILE="${SSH_KEY_FILE}" \
+    K3S_TOKEN="${K3S_TOKEN}" \
+    CLOUDFLARE_TUNNEL_TOKEN="${CLOUDFLARE_TUNNEL_TOKEN}" \
+    CLOUDFLARE_TUNNEL_ID="${CLOUDFLARE_TUNNEL_ID}" \
+    INFISICAL_CLIENT_ID="${INFISICAL_CLIENT_ID}" \
+    INFISICAL_CLIENT_SECRET="${INFISICAL_CLIENT_SECRET}" \
+    INFISICAL_PROJECT_ID="${INFISICAL_PROJECT_ID}" \
+    ARGOCD_GITHUB_DEPLOY_KEY="${ARGOCD_GITHUB_DEPLOY_KEY}" \
+    timeout 2400 ansible-playbook -i "${DR_ANSIBLE_INVENTORY}" --limit "${node}" \
+    "${REPO_ROOT}/ansible/playbooks/k3s-bootstrap.yml"
+
+  [[ "${DR_SKIP_INFRA}" == "1" ]] || refresh_kubeconfig
+}
+
+# 電源投入のみの経路。k3s と etcd のデータはディスクに残っているため bootstrap は流さず、
+# ノードが Ready に戻るかだけを確認する。戻らなければ人が force で Ansible 再実行を判断する。
+wait_k3s_ready() {
+  local node="$1" elapsed=0 timeout=600 ready
+  while true; do
+    ready=$(kubectl_r get node "${node}" \
+      -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)
+    [[ "${ready}" == "True" ]] && { record "${node} が Ready に戻りました"; return 0; }
+    ((elapsed >= timeout)) && die "${node} が Ready に戻りません (${timeout}s)。状態を確認し、必要なら force で Ansible から再実行してください"
+    log "${node} Ready 待機中 (${elapsed}s)"
+    sleep 15
+    elapsed=$((elapsed + 15))
+  done
+}
+
+# ============================================================
+# クラスター状態の待機
+# ============================================================
+
+# 稼働中の CNPG クラスター ("ns/name") を列挙する。instances=0 と hibernation 中は凍結扱いで除外。
+cnpg_active_clusters() {
+  echo "$1" | jq -r '.items[]
+    | select((.spec.instances // 1) > 0)
+    | select((.metadata.annotations["cnpg.io/hibernation"] // "off") != "on")
+    | "\(.metadata.namespace)/\(.metadata.name)"'
+}
+
+# 引数: cluster 一覧 JSON。出力: healthy でないクラスター ("ns/name")
+cnpg_unhealthy() {
+  echo "$1" | jq -r '.items[]
+    | select((.spec.instances // 1) > 0)
+    | select((.metadata.annotations["cnpg.io/hibernation"] // "off") != "on")
+    | select(.status.phase != "Cluster in healthy state")
+    | "\(.metadata.namespace)/\(.metadata.name)"'
+}
+
+# 引数: Application 一覧 JSON。出力: 未 Healthy な Application 名
+argocd_unhealthy_apps() {
+  echo "$1" | jq -r '.items[] | select(.status.health.status != "Healthy") | .metadata.name'
+}
+
+# 引数: Application 一覧 JSON, Application 名。出力: 管理下の Deployment/StatefulSet ("kind ns name")
+app_workloads() {
+  echo "$1" | jq -r --arg a "$2" '
+    .items[] | select(.metadata.name == $a) | .status.resources[]?
+    | select(.kind == "Deployment" or .kind == "StatefulSet")
+    | "\(.kind) \(.namespace) \(.name)"'
+}
+
+# 管理下のワークロードが全て replicas=0 なら凍結中とみなす (ワークロードの無い Application は凍結扱いにしない)
+app_is_frozen() {
+  local json="$1" app="$2" kind ns name replicas found=0
+  while read -r kind ns name; do
+    [[ -n "${kind}" ]] || continue
+    found=1
+    replicas=$(kubectl_r get "${kind}" "${name}" -n "${ns}" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "?")
+    [[ "${replicas}" == "0" ]] || return 1
+  done < <(app_workloads "${json}" "${app}")
+  [[ "${found}" == "1" ]]
+}
+
+wait_argocd_healthy() {
+  local elapsed=0 timeout=1200 json app pending
+  while true; do
+    json=$(kubectl_r get applications -n argocd -o json 2>/dev/null || echo '{"items":[]}')
+    pending=()
+    for app in $(argocd_unhealthy_apps "${json}"); do
+      app_is_frozen "${json}" "${app}" || pending+=("${app}")
+    done
+    [[ "${#pending[@]}" -eq 0 && "$(echo "${json}" | jq '.items | length')" -gt 0 ]] \
+      && { log "凍結中を除く全 ArgoCD Application が Healthy です"; return 0; }
+    # mail-tls は cert-manager の sync 順に依存して欠け、mailserver が止まることがある
+    repair_mail_tls
+    ((elapsed >= timeout)) && die "ArgoCD の Healthy 待機がタイムアウトしました (未 Healthy: ${pending[*]:-なし})"
+    log "Healthy でない Application: ${pending[*]:-(一覧取得待ち)} (${elapsed}s)"
+    sleep 30
+    elapsed=$((elapsed + 30))
+  done
+}
+
+wait_cnpg_healthy() {
+  local elapsed=0 timeout=900 json active unhealthy
+  while true; do
+    json=$(kubectl_r get clusters.postgresql.cnpg.io -A -o json 2>/dev/null || echo '{"items":[]}')
+    active=$(cnpg_active_clusters "${json}")
+    if [[ -z "${active}" ]]; then
+      log "稼働中の CNPG クラスターが見つかりません (${elapsed}s)"
+    else
+      unhealthy=$(cnpg_unhealthy "${json}")
+      [[ -z "${unhealthy}" ]] && { log "稼働中の CNPG クラスターは全て healthy です: $(echo "${active}" | tr '\n' ' ')"; return 0; }
+      log "healthy でない CNPG: $(echo "${unhealthy}" | tr '\n' ' ') (${elapsed}s)"
+    fi
+    ((elapsed >= timeout)) && die "CNPG の healthy 待機がタイムアウトしました"
+    sleep 30
+    elapsed=$((elapsed + 30))
+  done
+}
+
+# 待機より前に実行する。ESO が動かないと ArgoCD/CNPG の healthy 待機自体が成立しないため。
+repair_bootstrap_secrets() {
+  local client_id key_len
+  client_id=$(kubectl_r get secret infisical-auth -n argocd -o jsonpath='{.data.clientId}' 2>/dev/null | base64 -d || true)
+  key_len=$(kubectl_r get secret aramakisai-infra-repo -n argocd -o jsonpath='{.data.sshPrivateKey}' 2>/dev/null | base64 -d | wc -c || echo 0)
+
+  if [[ -z "${client_id}" ]]; then
+    record "infisical-auth が空のため修復します"
+    kubectl_r create secret generic infisical-auth \
+      --from-literal=clientId="${INFISICAL_CLIENT_ID}" \
+      --from-literal=clientSecret="${INFISICAL_CLIENT_SECRET}" \
+      -n argocd --dry-run=client -o yaml | kubectl_r apply -f -
+    kubectl_r annotate externalsecret --all -A "force-sync=$(date +%s)" --overwrite || true
+  fi
+
+  if [[ "${key_len}" -lt 100 ]]; then
+    [[ -n "${ARGOCD_GITHUB_DEPLOY_KEY:-}" ]] || die "Deploy Key が空ですが ARGOCD_GITHUB_DEPLOY_KEY が未設定のため修復できません"
+    record "ArgoCD の Deploy Key が空のため修復します"
+    kubectl_r create secret generic aramakisai-infra-repo \
+      --from-literal=type=git \
+      --from-literal=url=git@github.com:aramakisai/aramakisai-infra.git \
+      --from-file=sshPrivateKey=<(printf '%s\n' "${ARGOCD_GITHUB_DEPLOY_KEY}") \
+      -n argocd --dry-run=client -o yaml \
+      | kubectl_r label --local -f - argocd.argoproj.io/secret-type=repository -o yaml \
+      | kubectl_r apply -f -
+  fi
+}
+
+# cert-manager の sync タイミングで mail-tls が作られず mailserver が ContainerCreating で止まることがある。
+repair_mail_tls() {
+  local reason start_epoch stuck f
+  reason=$(kubectl_r get pod -n prod -l app=mailserver \
+    -o jsonpath='{.items[0].status.containerStatuses[0].state.waiting.reason}' 2>/dev/null || true)
+  [[ "${reason}" == "ContainerCreating" ]] || return 0
+
+  start_epoch=$(date -d "$(kubectl_r get pod -n prod -l app=mailserver -o jsonpath='{.items[0].status.startTime}' 2>/dev/null)" +%s 2>/dev/null || date +%s)
+  stuck=$(($(date +%s) - start_epoch))
+  ((stuck >= 120)) || return 0
+
+  if [[ -z "$(kubectl_r get secret mail-tls -n prod --ignore-not-found 2>/dev/null)" ]]; then
+    record "mail-tls が無く mailserver が ${stuck}s 停止しているため certificate 関連を apply します"
+    for f in certificate external-secret restic-external-secret; do
+      kubectl_r apply -f "${REPO_ROOT}/gitops/manifests/prod/mailserver/${f}.yaml"
+    done
+  fi
+}
+
+report_cnpg_recovery_points() {
+  local json ref ns name point
+  json=$(kubectl_r get clusters.postgresql.cnpg.io -A -o json)
+  for ref in $(cnpg_active_clusters "${json}"); do
+    ns="${ref%%/*}"; name="${ref##*/}"
+    point=$(echo "${json}" | jq -r --arg ns "${ns}" --arg n "${name}" \
+      '.items[] | select(.metadata.namespace == $ns and .metadata.name == $n) | .status.firstRecoverabilityPoint // "未取得"')
+    log "CNPG ${ref}: firstRecoverabilityPoint=${point}"
+  done
+}
+
+# ============================================================
+# メイン
+# ============================================================
+
+main() {
+  trap cleanup_all EXIT
+  local vars=()
+  if [[ "${DR_LOCAL_TEST}" != "1" ]]; then
+    vars+=(DR_TARGET_NODE K3S_TOKEN ARGOCD_GITHUB_DEPLOY_KEY CLOUDFLARE_TUNNEL_TOKEN CLOUDFLARE_TUNNEL_ID
+      INFISICAL_CLIENT_ID INFISICAL_CLIENT_SECRET INFISICAL_PROJECT_ID CI_SSH_PRIVATE_KEY)
+  fi
+  if [[ "${DR_SKIP_INFRA}" != "1" ]]; then
+    vars+=(HCLOUD_TOKEN TAILSCALE_OAUTH_CLIENT_ID TAILSCALE_OAUTH_CLIENT_SECRET TAILSCALE_TAILNET TFC_API_TOKEN TFC_WORKSPACE_ID KUBECONFIG)
+  fi
+  local v
+  for v in "${vars[@]}"; do
+    [[ -n "${!v:-}" ]] || die "必須環境変数が未設定です: ${v}"
+  done
+
+  if [[ "${DR_SKIP_INFRA}" != "1" ]]; then
+    validate_target_node "${DR_TARGET_NODE}" || die "DR_TARGET_NODE が不正です: ${DR_TARGET_NODE}"
+  fi
+
+  if [[ -n "${KUBECONFIG:-}" && ( "${DR_SKIP_INFRA}" != "1" || ! -f "${KUBECONFIG_FILE}" ) ]]; then
     echo "${KUBECONFIG}" > "${KUBECONFIG_FILE}"
     chmod 600 "${KUBECONFIG_FILE}"
   fi
-elif [[ "${DR_SKIP_TAILSCALE_DELETE}" == "1" && "${DR_SKIP_TFC}" == "1" && "${DR_SKIP_TAILSCALE_WAIT}" == "1" ]]; then
-  # KVM テストモード: Tailscale/TFC スキップ、Ansible は実行
-  REQUIRED_VARS=(
-    INFISICAL_CLIENT_ID
-    INFISICAL_CLIENT_SECRET
-    K3S_TOKEN
-    ARGOCD_GITHUB_DEPLOY_KEY
-    CLOUDFLARE_TUNNEL_TOKEN
-    CLOUDFLARE_TUNNEL_ID
-  )
-  log "[KVM TEST MODE] Tailscale/TFC をスキップ、Ansible で KVM VM をブートストラップします"
-  log "[KVM TEST MODE] DR_ANSIBLE_INVENTORY=${DR_ANSIBLE_INVENTORY:-tailscale.yml}"
-  log "[KVM TEST MODE] KUBECONFIG_FILE=${KUBECONFIG_FILE}"
-else
-  REQUIRED_VARS=(
-    INFISICAL_CLIENT_ID
-    INFISICAL_CLIENT_SECRET
-    K3S_TOKEN
-    ARGOCD_GITHUB_DEPLOY_KEY
-    TAILSCALE_API_KEY
-    TAILSCALE_TAILNET
-    TFC_API_TOKEN
-    TFC_WORKSPACE_ID
-    CLOUDFLARE_TUNNEL_TOKEN
-    CLOUDFLARE_TUNNEL_ID
-    KUBECONFIG
-  )
-fi
+  [[ -f "${KUBECONFIG_FILE}" ]] || die "KUBECONFIG または KUBECONFIG_FILE が必要です"
 
-for VAR in "${REQUIRED_VARS[@]}"; do
-  [[ -n "${!VAR:-}" ]] || die "必須環境変数が未設定です: $VAR"
-done
+  local need_ansible=0
+  [[ "${DR_LOCAL_TEST}" == "1" ]] || need_ansible=1
 
-# 本番モード (Tailscale/TFC を実行するケース) のみ KUBECONFIG env var を事前書き出し
-if [[ "${DR_LOCAL_TEST}" != "1" && "${DR_SKIP_TAILSCALE_DELETE}" != "1" ]]; then
-  echo "${KUBECONFIG}" > "${KUBECONFIG_FILE}"
-  chmod 600 "${KUBECONFIG_FILE}"
-fi
+  if [[ "${DR_SKIP_INFRA}" != "1" ]]; then
+    init_record
 
-log "環境変数チェック完了"
+    local signals status peers init_host
+    signals=$(collect_signals "${DR_TARGET_NODE}")
+    record "生存確認: $(echo "${signals}" | tr '\n' ' ')"
+    liveness_gate "${signals}" || die "ノードの生存を示すシグナルがあるため復旧を中止しました (上書きは force=true)"
 
-# ============================================================
-# 0. CNPG 古い Job をベストエフォートで削除
-#    再実行時に残存した full-recovery Job が PVC を initializing で stuck させる問題を予防する
-#    クラスターが存在しない場合や到達不可の場合は非 fatal で続行する
-# ============================================================
+    init_host=$(inventory_init_host "${DR_ANSIBLE_INVENTORY}")
+    [[ "${DR_TARGET_NODE}" == "${init_host}" ]] \
+      || die "${DR_TARGET_NODE} は cluster-init ホスト (${init_host}) ではないため自動復旧の対象外です (docs/dr-runbook.md)"
 
-log "CNPG 古い Job をクリーンアップします (non-fatal)"
+    peers=$(hcloud_peer_servers "${DR_TARGET_NODE}") || die "Hetzner のサーバー一覧を取得できません"
+    [[ -z "${peers}" ]] || die "残存サーバーがあり etcd が分断されるおそれがあるため中止しました: $(echo "${peers}" | tr '\n' ' ') (docs/dr-runbook.md)"
 
-kubectl_r delete jobs -n prod -l "cnpg.io/cluster=authentik-db" \
-  --request-timeout=10s 2>/dev/null \
-  || log "警告: authentik-db の Job 削除をスキップしました (クラスター不在またはタイムアウト)"
+    status=$(server_state "${DR_TARGET_NODE}")
+    [[ "${status}" != "unknown" ]] || die "サーバー状態を確認できません (Hetzner / TFC state の取得失敗または不整合)"
+    [[ "${status}" != "off" ]] && need_ansible=1 || need_ansible=0
 
-kubectl_r delete jobs -n prod -l "cnpg.io/cluster=directus-db" \
-  --request-timeout=10s 2>/dev/null \
-  || log "警告: directus-db の Job 削除をスキップしました (クラスター不在またはタイムアウト)"
-
-log "CNPG Job クリーンアップ完了 (または非 fatal スキップ)"
-
-# ============================================================
-# 2. Tailscale から prod-node-1 デバイスを削除
-#    ephemeral=false のため障害ノードが tailnet に残存し、
-#    新ノードが prod-node-1-1 として登録されるのを防ぐ
-# ============================================================
-
-if [[ "${DR_SKIP_TAILSCALE_DELETE}" == "1" ]]; then
-  log "[SKIP] Step2 (Tailscale デバイス削除) をスキップします"
-else
-
-log "Tailscale から prod-node-1 を削除します"
-
-DEVICE_IDS=$(curl -sf \
-  -H "Authorization: Bearer ${TAILSCALE_API_KEY}" \
-  "https://api.tailscale.com/api/v2/tailnet/${TAILSCALE_TAILNET}/devices" \
-  | jq -r '.devices[] | select(.hostname == "prod-node-1") | .id' || true)
-
-if [[ -z "$DEVICE_IDS" ]]; then
-  log "Tailscale に prod-node-1 デバイスは見つかりませんでした (スキップ)"
-else
-  for ID in $DEVICE_IDS; do
-    log "デバイス削除: $ID"
-    curl -sf -X DELETE \
-      -H "Authorization: Bearer ${TAILSCALE_API_KEY}" \
-      "https://api.tailscale.com/api/v2/device/${ID}" || log "警告: デバイス削除に失敗しました ($ID)"
-  done
-fi
-
-fi  # DR_SKIP_TAILSCALE_DELETE Step2
-
-# ============================================================
-# 3. Terraform Cloud API でプランを作成・適用
-# ============================================================
-
-if [[ "${DR_SKIP_TFC}" == "1" ]]; then
-  log "[SKIP] Step3 (Terraform Cloud Run) をスキップします"
-else
-
-log "Terraform Cloud でプランを作成します (Workspace: ${TFC_WORKSPACE_ID})"
-
-RUN_PAYLOAD=$(jq -n \
-  --arg ws_id "${TFC_WORKSPACE_ID}" \
-  '{
-    data: {
-      attributes: {
-        "is-destroy": false,
-        "auto-apply": true,
-        message: "Cold standby recovery triggered by recovery.sh"
-      },
-      type: "runs",
-      relationships: {
-        workspace: {
-          data: { type: "workspaces", id: $ws_id }
-        }
-      }
-    }
-  }')
-
-RUN_RESPONSE=$(curl -sf \
-  -X POST \
-  -H "Authorization: Bearer ${TFC_API_TOKEN}" \
-  -H "Content-Type: application/vnd.api+json" \
-  -d "$RUN_PAYLOAD" \
-  "https://app.terraform.io/api/v2/runs")
-
-RUN_ID=$(echo "$RUN_RESPONSE" | jq -r '.data.id')
-[[ -n "$RUN_ID" && "$RUN_ID" != "null" ]] || die "Terraform Cloud の Run 作成に失敗しました"
-log "Terraform Cloud Run 作成完了: $RUN_ID"
-
-TIMEOUT=900
-ELAPSED=0
-SLEEP_INTERVAL=15
-
-while true; do
-  STATUS=$(curl -sf \
-    -H "Authorization: Bearer ${TFC_API_TOKEN}" \
-    "https://app.terraform.io/api/v2/runs/${RUN_ID}" \
-    | jq -r '.data.attributes.status')
-
-  log "Run ステータス: $STATUS (経過: ${ELAPSED}s)"
-
-  case "$STATUS" in
-    applied|planned_and_finished)
-      log "Terraform Cloud Apply 完了"
-      break
-      ;;
-    errored|canceled|force_canceled|discarded)
-      die "Terraform Cloud Run が失敗しました (status: $STATUS)"
-      ;;
-  esac
-
-  (( ELAPSED >= TIMEOUT )) && die "Terraform Cloud Apply がタイムアウトしました (${TIMEOUT}s)"
-
-  sleep $SLEEP_INTERVAL
-  ELAPSED=$(( ELAPSED + SLEEP_INTERVAL ))
-done
-
-fi  # DR_SKIP_TFC Step3
-
-# ============================================================
-# 4. Tailscale に prod-node-1 として登録されるまでポーリング
-# ============================================================
-
-if [[ "${DR_SKIP_TAILSCALE_WAIT}" == "1" ]]; then
-  log "[SKIP] Step4 (Tailscale 登録待機) をスキップします"
-else
-
-log "Tailscale への prod-node-1 登録を待機します (最大10分)"
-TS_TIMEOUT=600
-TS_ELAPSED=0
-TS_SLEEP=15
-
-while true; do
-  REGISTERED=$(curl -sf \
-    -H "Authorization: Bearer ${TAILSCALE_API_KEY}" \
-    "https://api.tailscale.com/api/v2/tailnet/${TAILSCALE_TAILNET}/devices" \
-    | jq -r '.devices[] | select(.hostname == "prod-node-1") | .addresses[0]' || true)
-
-  if [[ -n "$REGISTERED" ]]; then
-    log "prod-node-1 が Tailscale に登録されました: $REGISTERED"
-    break
-  fi
-
-  (( TS_ELAPSED >= TS_TIMEOUT )) && die "prod-node-1 の Tailscale 登録がタイムアウトしました (${TS_TIMEOUT}s)"
-
-  log "未登録 (経過: ${TS_ELAPSED}s) — ${TS_SLEEP}s 後に再確認します"
-  sleep $TS_SLEEP
-  TS_ELAPSED=$(( TS_ELAPSED + TS_SLEEP ))
-done
-
-fi  # DR_SKIP_TAILSCALE_WAIT Step4
-
-# ============================================================
-# 5. Ansible でシングルノード K3s をブートストラップ
-# ============================================================
-
-if [[ "${DR_SKIP_ANSIBLE}" == "1" ]]; then
-  log "[SKIP] Step5 (Ansible k3s ブートストラップ) をスキップします"
-else
-
-_ANSIBLE_INVENTORY="${DR_ANSIBLE_INVENTORY:-${REPO_ROOT}/ansible/inventory/tailscale.yml}"
-log "Ansible Playbook を実行します (inventory: ${_ANSIBLE_INVENTORY})"
-ANSIBLE_HOST_KEY_CHECKING=False \
-  K3S_TOKEN="${K3S_TOKEN}" \
-  CLOUDFLARE_TUNNEL_TOKEN="${CLOUDFLARE_TUNNEL_TOKEN}" \
-  CLOUDFLARE_TUNNEL_ID="${CLOUDFLARE_TUNNEL_ID}" \
-  INFISICAL_CLIENT_ID="${INFISICAL_CLIENT_ID}" \
-  INFISICAL_CLIENT_SECRET="${INFISICAL_CLIENT_SECRET}" \
-  ARGOCD_GITHUB_DEPLOY_KEY="${ARGOCD_GITHUB_DEPLOY_KEY}" \
-  ansible-playbook \
-    -i "${_ANSIBLE_INVENTORY}" \
-    "${REPO_ROOT}/ansible/playbooks/k3s-bootstrap.yml"
-
-# Ansible が新しい kubeconfig を Infisical に登録するため、再取得して上書きする
-# DR_ANSIBLE_INVENTORY が指定されている場合は Infisical への登録はスキップされるため
-# VM から直接 kubeconfig を取得する
-if [[ -n "${DR_ANSIBLE_INVENTORY:-}" ]]; then
-  KVM_HOST=$(grep -A2 'k3s_server:' "${DR_ANSIBLE_INVENTORY}" \
-    | grep 'ansible_host:' | awk '{print $2}' | head -1 || true)
-  if [[ -n "$KVM_HOST" ]]; then
-    log "KVM VM (${KVM_HOST}) から kubeconfig を取得します"
-    ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
-      root@"${KVM_HOST}" cat /etc/rancher/k3s/k3s.yaml \
-      | sed "s|https://127.0.0.1:6443|https://${KVM_HOST}:6443|g" \
-      > "${KUBECONFIG_FILE}"
-    log "kubeconfig を KVM VM から取得しました"
-  fi
-else
-  KUBECONFIG_NEW=$(infisical secrets get KUBECONFIG --env=prod --plain 2>/dev/null || true)
-  if [[ -n "$KUBECONFIG_NEW" ]]; then
-    echo "${KUBECONFIG_NEW}" > "${KUBECONFIG_FILE}"
-    log "kubeconfig を Infisical から再取得しました"
-  fi
-fi
-
-fi  # DR_SKIP_ANSIBLE Step5
-
-# ============================================================
-# 6. ArgoCD sync 完了・CNPG healthy を待機
-# ============================================================
-
-log "ArgoCD sync と CNPG healthy を待機します (最大20分)"
-ARGOCD_TIMEOUT=1200
-ARGOCD_ELAPSED=0
-
-while true; do
-  NOT_HEALTHY=$(kubectl_r get applications -n argocd --no-headers 2>/dev/null \
-    | awk '{print $3}' | grep -cv "Healthy" || echo "99")
-
-  if [[ "$NOT_HEALTHY" -eq 0 ]]; then
-    log "全 ArgoCD Application が Healthy になりました"
-    break
-  fi
-
-  (( ARGOCD_ELAPSED >= ARGOCD_TIMEOUT )) && {
-    log "警告: ArgoCD の Healthy 待機がタイムアウトしました。処理を続行します。"
-    break
-  }
-
-  log "Healthy でない Application: ${NOT_HEALTHY} 件 (経過: ${ARGOCD_ELAPSED}s)"
-  sleep 30
-  ARGOCD_ELAPSED=$(( ARGOCD_ELAPSED + 30 ))
-done
-
-# CNPG クラスターが healthy になるまで待機
-for CLUSTER in authentik-db directus-db; do
-  log "CNPG クラスター ${CLUSTER} の healthy を待機します"
-  kubectl_r wait cluster "${CLUSTER}" -n prod \
-    --for=jsonpath='{.status.phase}'='Cluster in healthy state' \
-    --timeout=600s || log "警告: ${CLUSTER} の healthy 待機がタイムアウトしました"
-done
-
-# ============================================================
-# 6a. infisical-auth / Deploy Key 空チェックと自己修復
-#     2026-06-02 インシデント: infisical-auth と Deploy Key が空になり ESO 全停止・ArgoCD 接続不可
-# ============================================================
-
-log "infisical-auth と Deploy Key の空チェックを開始します"
-
-INFISICAL_AUTH_CLIENT_ID=$(kubectl_r get secret infisical-auth -n argocd \
-  -o jsonpath='{.data.clientId}' 2>/dev/null | base64 -d || true)
-DEPLOY_KEY_LEN=$(kubectl_r get secret aramakisai-infra-repo -n argocd \
-  -o jsonpath='{.data.sshPrivateKey}' 2>/dev/null | base64 -d | wc -c || echo "0")
-
-NEEDS_SECRET_REPAIR=false
-[[ -z "$INFISICAL_AUTH_CLIENT_ID" ]] && { log "警告: infisical-auth.clientId が空です"; NEEDS_SECRET_REPAIR=true; }
-[[ "$DEPLOY_KEY_LEN" -lt 100 ]] && { log "警告: aramakisai-infra-repo.sshPrivateKey が空または短すぎます"; NEEDS_SECRET_REPAIR=true; }
-
-if [[ "$NEEDS_SECRET_REPAIR" == "true" ]]; then
-  log "Infisical から再取得して infisical-auth を修復します"
-
-  kubectl_r create secret generic infisical-auth \
-    --from-literal=clientId="${INFISICAL_CLIENT_ID}" \
-    --from-literal=clientSecret="${INFISICAL_CLIENT_SECRET}" \
-    -n argocd --dry-run=client -o yaml | kubectl_r apply -f -
-
-  log "ESO の ExternalSecret に force-sync annotation を付与します"
-  kubectl_r annotate externalsecret --all -n prod \
-    "force-sync=$(date +%s)" --overwrite
-
-  log "infisical-auth 修復完了・ESO force-sync 実行済み"
-else
-  log "infisical-auth と Deploy Key は正常です"
-fi
-
-# ============================================================
-# 6b. mail-tls 証明書の自己修復
-#     mailserver Pod が ContainerCreating で 2 分以上停止している場合に mail-tls を確認・修復する
-# ============================================================
-
-log "mailserver Pod の状態を確認します"
-
-CONTAINER_CREATING_REASON=$(kubectl_r get pod -n prod -l app=mailserver \
-  -o jsonpath='{.items[0].status.containerStatuses[0].state.waiting.reason}' 2>/dev/null || true)
-
-if [[ "$CONTAINER_CREATING_REASON" == "ContainerCreating" ]]; then
-  POD_START=$(kubectl_r get pod -n prod -l app=mailserver \
-    -o jsonpath='{.items[0].status.startTime}' 2>/dev/null || true)
-
-  if [[ -n "$POD_START" ]]; then
-    START_EPOCH=$(date -d "$POD_START" +%s 2>/dev/null || true)
-    NOW_EPOCH=$(date +%s)
-    STUCK_SECS=$(( NOW_EPOCH - ${START_EPOCH:-NOW_EPOCH} ))
-
-    if [[ $STUCK_SECS -ge 120 ]]; then
-      log "mailserver Pod が ContainerCreating で ${STUCK_SECS}s 停止しています"
-
-      MAIL_TLS_EXISTS=$(kubectl_r get secret mail-tls -n prod --ignore-not-found 2>/dev/null || true)
-      if [[ -z "$MAIL_TLS_EXISTS" ]]; then
-        log "mail-tls Secret が存在しません。certificate.yaml 等を apply します"
-        kubectl_r apply -f "${REPO_ROOT}/gitops/manifests/prod/mailserver/certificate.yaml"
-        kubectl_r apply -f "${REPO_ROOT}/gitops/manifests/prod/mailserver/external-secret.yaml"
-        kubectl_r apply -f "${REPO_ROOT}/gitops/manifests/prod/mailserver/restic-external-secret.yaml"
-        log "mail-tls 関連リソースを apply しました"
-      else
-        log "mail-tls Secret は存在します (Pod stuck の原因は別)"
-      fi
-    else
-      log "mailserver Pod は ContainerCreating ですが待機時間が短いため様子を見ます (${STUCK_SECS}s)"
+    if [[ "${need_ansible}" == "1" ]]; then
+      local sync_rc=0
+      git_in_sync || sync_rc=$?
+      [[ "${sync_rc}" == "0" ]] \
+        || die "リポジトリが origin/main と一致しない、または未コミットの変更があります (rc=${sync_rc})。最新の main でワークフローを起動し直してください"
+      ansible_ready || die "冪等化済みの k3s-bootstrap.yml (ansible/playbooks/tasks/ensure_secret.yml) がありません。Ansible を流す経路は停止します"
     fi
+
+    if [[ "${status}" == "absent" ]]; then
+      mail_rs_paused || die "gitops/manifests/prod/mailserver/replication-source.yaml が spec.paused: true ではありません。新クラスターの最初のバックアップで restic の最新・過去スナップショットを失わないよう、先に paused: true をコミットしてから起動し直してください (docs/dr-runbook.md)"
+    fi
+
+    case "${status}" in
+      absent)
+        recreate_node "${DR_TARGET_NODE}"
+        update_mail_dns "${DR_TARGET_NODE}"
+        ;;
+      off) poweron_node "${DR_TARGET_NODE}" ;;
+      *) log "サーバー状態 ${status}: DR_FORCE のためインフラ操作なしで Ansible から再実行します" ;;
+    esac
+    wait_tailscale_registered "${DR_TARGET_NODE}"
+    [[ "${status}" != "off" ]] || wait_k3s_ready "${DR_TARGET_NODE}"
   fi
-else
-  log "mailserver Pod は ContainerCreating 以外の状態です (status: ${CONTAINER_CREATING_REASON:-不明})"
-fi
 
-# ============================================================
-# 7. mailserver メールデータを VolSync で Hetzner Object Storage からリストア
-# ============================================================
-
-log "mailserver を停止して VolSync リストアを開始します"
-
-kubectl_r scale statefulset mailserver -n prod --replicas=0
-kubectl_r wait pod -n prod -l app=mailserver --for=delete --timeout=60s || true
-
-# ReplicationDestination を適用
-RESTORE_TRIGGER="dr-$(date +%Y%m%dT%H%M%S)"
-kubectl_r apply -f - <<EOF
-apiVersion: volsync.backube/v1alpha1
-kind: ReplicationDestination
-metadata:
-  name: mailserver-restore
-  namespace: prod
-spec:
-  trigger:
-    manual: "${RESTORE_TRIGGER}"
-  restic:
-    repository: mailserver-restic-secret
-    destinationPVC: mailserver-data
-    copyMethod: Direct
-    moverSecurityContext:
-      runAsUser: 0
-      runAsGroup: 0
-      fsGroup: 0
-EOF
-
-log "VolSync リストア完了を待機します (最大30分)"
-_VOLSYNC_TIMEOUT=1800
-_VOLSYNC_ELAPSED=0
-while true; do
-  _RESULT=$(kubectl_r get replicationdestination/mailserver-restore -n prod \
-    -o jsonpath='{.status.latestMoverStatus.result}' 2>/dev/null || true)
-  if [[ "$_RESULT" == "Successful" ]]; then
-    log "VolSync リストア成功"
-    break
-  elif [[ "$_RESULT" == "Failed" ]]; then
-    die "VolSync リストアが失敗しました"
+  if [[ "${need_ansible}" == "1" ]]; then
+    run_ansible "${DR_TARGET_NODE}"
   fi
-  (( _VOLSYNC_ELAPSED >= _VOLSYNC_TIMEOUT )) && die "VolSync リストアがタイムアウトしました (${_VOLSYNC_TIMEOUT}s)"
-  log "  VolSync 待機中... result=${_RESULT:-同期中} (${_VOLSYNC_ELAPSED}s)"
-  sleep 15
-  _VOLSYNC_ELAPSED=$(( _VOLSYNC_ELAPSED + 15 ))
-done
 
-log "VolSync リストア完了"
+  repair_bootstrap_secrets
+  wait_argocd_healthy
+  wait_cnpg_healthy
 
-# リストア用リソースを削除
-kubectl_r delete replicationdestination mailserver-restore -n prod
+  report_cnpg_recovery_points
+  record "復旧完了"
+}
 
-# mailserver を再起動
-kubectl_r scale statefulset mailserver -n prod --replicas=1
-kubectl_r wait pod -n prod -l app=mailserver --for=condition=Ready --timeout=120s
-
-# Step 7 末尾: directus-db リストア確認ログ
-log "directus-db リストア確認を行います"
-
-FIRST_RECOV=$(kubectl_r get cluster directus-db -n prod \
-  -o jsonpath='{.status.firstRecoverabilityPoint}' 2>/dev/null || true)
-log "directus-db firstRecoverabilityPoint: ${FIRST_RECOV:-未取得 (initdb 起動の可能性あり)}"
-
-DIRECTUS_PRIMARY=$(kubectl_r get pod -n prod \
-  -l "cnpg.io/cluster=directus-db,role=primary" \
-  -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
-
-if [[ -n "$DIRECTUS_PRIMARY" ]]; then
-  TABLE_COUNT=$(kubectl_r exec -n prod "${DIRECTUS_PRIMARY}" \
-    -- psql -U postgres -d directus \
-    -c "SELECT count(*) FROM pg_tables WHERE schemaname='public';" \
-    --tuples-only --no-align 2>/dev/null | tr -d '[:space:]' || true)
-  log "directus-db public スキーマのテーブル数: ${TABLE_COUNT:-取得失敗}"
-else
-  log "警告: directus-db primary Pod が見つかりません"
+if [[ "${BASH_SOURCE[0]:-$0}" == "${0}" ]]; then
+  main "$@"
 fi
-
-log "復旧完了"

@@ -74,7 +74,7 @@ Authentik 時代の定義は `terraform/authentik_*.tf.disabled` として残す
 - シングルノード (prod-node-1) が etcd + ワークロードを担う。CX33 (2vCPU/8GB/80GB NVMe) 使用。
 - **主要フラグ**: `--flannel-backend none` (Cilium用), `--disable-network-policy` (Ciliumが担当), `--disable traefik,servicelb` (GitOps/Tunnel代替), `--embedded-registry` (Spegel)
 - **Swap設定**: 全ノード共通で 4GB swap を Ansible（swap ロール）で作成。kubelet `fail-swap-on=false` を設定（ホスト側プロセスの OOM 安全弁）。Pod cgroup には swap を割り当てない「NoSwap」挙動を維持し、K8s 資源モデルの予測可能性を保つ。
-- **障害復旧**: 障害時は自動復旧ワークフロー（dr-trigger/dr-recovery）により無人復旧する。詳細は [dr.md](dr.md) 参照。
+- **障害復旧**: dr-trigger が障害を通知し、人が dr-recovery を起動・承認して復旧する (単一ノード構成のみ自動化)。詳細は [dr.md](dr.md) 参照。
 
 ### Terraform の出力パラメータと外部連携
 - **healthchecksio_mailserver_backup_ping_url**: mailserver バックアップの生存確認用。Infisical の `HEALTHCHECKS_MAILSERVER_BACKUP_PING_URL` へ反映。
@@ -141,7 +141,7 @@ Grafana Cloud は解約済みで使用しない。単一ノード (CX33) のメ�
 | Falco + Falcosidekick (`gitops/apps/prod/falco.yaml`) | eBPF ランタイム侵入検知 | Discord (`DISCORD_OPS_WEBHOOK_URL`) |
 | UptimeRobot (`terraform/uptimerobot.tf`) | 公開エンドポイントの外形監視 | UptimeRobot 通知設定 |
 | Healthchecks.io (`terraform/healthchecksio.tf`) | mailserver バックアップ (VolSync) の dead man's switch | Healthchecks.io 通知設定 |
-| DR Trigger (`.github/workflows/dr-trigger.yml`, 5分毎cron) | Tailscale 疎通 + idp/argocd/webmail 複合検出によるノード障害判定 | Discord、猶予期間経過後は自動復旧ワークフローへ引き継ぎ |
+| DR Trigger (`.github/workflows/dr-trigger.yml`, 5分毎cron) | Tailscale 疎通 + idp/argocd/webmail 複合検出によるノード障害判定 | Discord + `dr-incident` Issue (通知のみ。復旧は人が `dr-recovery.yml` を起動し Environment 承認) |
 | Infra Health Check (`.github/workflows/infra-health-check.yml`, 15分毎cron) | CNPG WAL アーカイブ失敗 (`Cluster.status.conditions` の `ContinuousArchiving`)、ノードルートディスク使用率 (閾値 85%、`kubectl get --raw /api/v1/nodes/<node>/proxy/stats/summary`) | Discord。状態は GitHub Issue (ラベル `infra-alert`) で管理し、解消時に自動クローズ |
 
 Netdata・Falco はいずれもリソース予算 (requests/limits) を明示的に絞ってデプロイしている。値を変更する際は `make kubectl ARGS="top pod -n monitoring"` で実メモリを確認すること。
@@ -180,7 +180,7 @@ ssh root@prod-node-1 "systemctl status os-update-notify.timer; cat /var/run/rebo
 
 ### Infisical で管理するシークレット一覧
 - **IaC & 認証**: `HCLOUD_TOKEN`, `CLOUDFLARE_API_TOKEN`, `TAILSCALE_OAUTH_CLIENT_ID`, `TAILSCALE_OAUTH_CLIENT_SECRET`, `TF_VAR_k3s_token`, `TF_VAR_tailscale_api_key`, `TF_VAR_authentik_cf_client_id`, `TF_VAR_authentik_cf_client_secret`, `TF_VAR_zitadel_cf_access_client_id`, `TF_VAR_zitadel_cf_access_client_secret`（`terraform/access.tf`のCloudflare Access向けZitadel OIDC IdP登録用。`ansible/roles/zitadel-bootstrap`が作成するcloudflare-access OIDC Applicationの発行値を登録する、`authentik_cf_client_id`と同じチキンエッグ回避パターン）
-- **Ansible & 復旧**: `K3S_TOKEN`, `CLOUDFLARE_TUNNEL_TOKEN`, `CLOUDFLARE_TUNNEL_ID`, `INFISICAL_CLIENT_ID`, `INFISICAL_CLIENT_SECRET`, `ARGOCD_GITHUB_DEPLOY_KEY`, `TFC_API_TOKEN`, `TFC_WORKSPACE_ID`, `TAILSCALE_API_KEY`, `TAILSCALE_TAILNET`
+- **Ansible & 復旧**: `K3S_TOKEN`, `CLOUDFLARE_TUNNEL_TOKEN`, `CLOUDFLARE_TUNNEL_ID`, `INFISICAL_CLIENT_ID`, `INFISICAL_CLIENT_SECRET` (Infisical 読取用 CI identity。infisical-auth の素材も兼ねる), `ARGOCD_GITHUB_DEPLOY_KEY`, `CI_SSH_PRIVATE_KEY`, `TFC_API_TOKEN`, `TFC_WORKSPACE_ID`, `TAILSCALE_TAILNET` (復旧は `TAILSCALE_OAUTH_CLIENT_ID/SECRET` の書込権限付きクライアントを使用)
 - **Cloudflare Access (E2E CI)**: `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET`（`aramakisai-web` の Playwright E2E テストが Cloudflare Access の Authentik ログインを迂回するための Service Token。`terraform/access.tf` の `cloudflare_zero_trust_access_service_token.e2e_ci` が発行元。`aramakisai-web` 側 `staging-e2e-verification` spec が前提としていた secret 名と一致しており乖離なし）
 - **アプリ用シークレット**:
   - **Authentik**: `AUTHENTIK_SECRET_KEY`, `AUTHENTIK_DB_PASSWORD`, `NOREPLY_SMTP_PASSWORD`（`noreply@aramakisai.com` 用 SMTP パスワード。Vaultwarden・Directus の SMTP 設定でも同一キーを再利用） <!-- confidential:allow -->

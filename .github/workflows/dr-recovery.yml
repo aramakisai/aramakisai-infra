@@ -1,8 +1,24 @@
 name: DR Recovery
 
 on:
-  repository_dispatch:
-    types: [dr-recovery]
+  workflow_dispatch:
+    inputs:
+      target_node:
+        description: "復旧対象ノード名 (例: prod-node-1)"
+        required: true
+        type: string
+      force:
+        description: "生存確認ゲートを上書きする (ノードが生きていないことを人が確認した場合のみ)"
+        required: false
+        type: boolean
+        default: false
+
+# Issue への進捗記録に issues: write が必要
+# actions: read は Environment の保護ルール検査に必要
+permissions:
+  contents: read
+  issues: write
+  actions: read
 
 # 同時に複数の復旧が走るのを防ぐ
 concurrency:
@@ -12,10 +28,34 @@ concurrency:
 jobs:
   recover:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    # 各段階の最大待機の合計 (TFC run 2 回 = plan 15 + apply 15 を 2 回 + Tailscale 10 + Ansible 40
+    # + ArgoCD 20 + CNPG 15 = 145分) にセットアップ時間を足した上限。段階側で必ず失敗するよう、
+    # ジョブ上限はこれより長くする
+    timeout-minutes: 165
+    # main 以外のブランチのワークフロー定義で復旧を起動させない
+    if: github.ref == 'refs/heads/main'
+    # required reviewers を設定した Environment。承認されるまでジョブは開始されない
+    environment: dr-recovery
 
     steps:
+      # Environment が未作成だと GitHub が承認なしで自動作成して実行を許してしまうため、
+      # required reviewers が設定されていなければここで失敗させる
+      - name: Verify environment protection
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          reviewers=$(gh api "repos/${GITHUB_REPOSITORY}/environments/dr-recovery" \
+            --jq '[.protection_rules[]? | select(.type == "required_reviewers")] | length') \
+            || { echo "::error::Environment dr-recovery の保護ルールを取得できません"; exit 1; }
+          if [ "${reviewers}" -lt 1 ]; then
+            echo "::error::Environment dr-recovery に required reviewers が設定されていません (docs/dr-runbook.md)"
+            exit 1
+          fi
+
+      # 承認待ちの間に main が進んでも、起動時点ではなく承認後の main を使う
       - uses: actions/checkout@v7
+        with:
+          ref: main
 
       # GitHub Actions ランナーを tailnet に参加させる (Ansible SSH 経路の確保)
       # 前提: Tailscale ACL に tag:ci が定義されていること
@@ -45,6 +85,9 @@ jobs:
           INFISICAL_CLIENT_ID: ${{ secrets.INFISICAL_CLIENT_ID }}
           INFISICAL_CLIENT_SECRET: ${{ secrets.INFISICAL_CLIENT_SECRET }}
           INFISICAL_PROJECT_ID: ${{ secrets.INFISICAL_PROJECT_ID }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DR_TARGET_NODE: ${{ inputs.target_node }}
+          DR_FORCE: ${{ inputs.force && '1' || '0' }}
         run: |
           # infisical run はUniversal Auth環境変数を自動認識しないため、
           # 明示的にlogin --method=universal-authでトークンを取得し --token で渡す。
