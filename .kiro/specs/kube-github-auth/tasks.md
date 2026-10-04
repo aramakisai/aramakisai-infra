@@ -12,7 +12,7 @@
 
 - [ ] 1. P0: 進行中 PR との Infisical 認証情報の整合とマージ
 
-- [ ] 1.1 PR #288 (k3s-bootstrap 冪等化) から作成できない認証情報の前提と kubeconfig 登録を外す
+- [x] 1.1 PR #288 (k3s-bootstrap 冪等化) から作成できない認証情報の前提と kubeconfig 登録を外す
   - kubeconfig を取得して Infisical へ登録する Play を削除する
   - `OPS_INFISICAL_*`・`ESO_INFISICAL_*` の参照を既存の `INFISICAL_CLIENT_*` (K3s identity、Viewer) に戻す。ESO 用 `infisical-auth` の作成と修復にも同じ値を使う
   - CLAUDE.md 等に追記された `OPS_*` の記述を外す
@@ -20,7 +20,7 @@
   - 完了状態: PR #288 のブランチで `OPS_*`・`ESO_*` と kubeconfig 登録への参照が検索で 0 件になり、PR の既存の検証が通る
   - _Requirements: 8.5, 10.1, 10.2, 10.3, 10.4, 13.4_
 
-- [ ] 1.2 (P) PR #287 (DR 手動承認化) から作成できない認証情報の前提を外し、kubeconfig 取得を読取だけにする
+- [x] 1.2 (P) PR #287 (DR 手動承認化) から作成できない認証情報の前提を外し、kubeconfig 取得を読取だけにする
   - `OPS_INFISICAL_*`・`ESO_INFISICAL_*` の参照を `INFISICAL_CLIENT_*` に戻す
   - kubeconfig の再取得処理を、Viewer で読める既存の共有 kubeconfig を読むだけの処理にする。OIDC による生成への置き換えは 6.2 で行う
   - 電源投入だけの DR 経路が、既存の共有 kubeconfig でこれまでどおり動くことを保つ
