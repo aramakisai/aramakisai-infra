@@ -227,7 +227,7 @@
 
 - [ ] 6. P5: 残りの消費者 (intrusion-response・DR・Zitadel・k3s-upgrade) の移行
 
-- [ ] 6.1 (P) intrusion-response を OIDC 認証と tag:ci の tailnet 参加に移行する
+- [x] 6.1 (P) intrusion-response を OIDC 認証と tag:ci の tailnet 参加に移行する
   - 両方のジョブに `id-token: write` を与え、4.1 の部品で kubeconfig を生成する
   - tailnet への参加を、他の CI と同じ OAuth と `tag:ci` による方式にする。Infisical からの kube 資格情報と Tailscale API キーの取得、名前解決の手動追記を削除する
   - 隔離の NetworkPolicy は create で作り、既に存在する場合は成功として扱う
