@@ -10,7 +10,7 @@
 
 ---
 
-- [ ] 1. P0: 進行中 PR との Infisical 認証情報の整合とマージ
+- [x] 1. P0: 進行中 PR との Infisical 認証情報の整合とマージ
 
 - [x] 1.1 PR #288 (k3s-bootstrap 冪等化) から作成できない認証情報の前提と kubeconfig 登録を外す
   - kubeconfig を取得して Infisical へ登録する Play を削除する
@@ -51,7 +51,7 @@
   - 完了状態: main に両 PR が入り、本仕様のブランチでマニフェスト適用タスクと再起動後の待機タスクを使える
   - _Requirements: 8.5, 10.1, 10.2, 10.3_
 
-- [ ] 2. P1: kube-access による RBAC の定義
+- [x] 2. P1: kube-access による RBAC の定義
 
 - [x] 2.1 RBAC の正本として `kube-access` Application を追加する
   - sync-wave -1、prune と selfHeal を有効にし、kube-access のマニフェストのディレクトリを管理させる
