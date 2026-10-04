@@ -260,7 +260,7 @@
   - _Requirements: 8.6_
   - _Boundary: ZitadelBootstrapMigration_
 
-- [ ] 6.5 (P) k3s-upgrade から kube 資格情報と kubectl を外す
+- [x] 6.5 (P) k3s-upgrade から kube 資格情報と kubectl を外す
   - kubectl のインストールと kube 資格情報の受け渡しを削除する
   - アップグレード前後の状態確認は、k3s-server ロールの etcd 健全性待ちと Ready 待ち (ノード上のローカル admin) に任せる
   - 完了状態: ワークフローに kube 資格情報と kubectl への参照がなく、OIDC の許可リストにも含まれていない
