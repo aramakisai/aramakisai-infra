@@ -1,0 +1,89 @@
+---
+# ワークフロー用ユーザー (gha:<ワークフローファイル名>) の最小権限。
+# k3s-upgrade 用の binding は意図的に作らない。
+#
+# infra-health-check: CNPG の状態確認と kubelet 統計の取得だけ。
+# nodes/proxy を与えると kubelet の exec/run まで到達できるため、nodes/stats に限定する。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: gha-infra-health-check
+rules:
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["nodes/stats"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: gha-infra-health-check
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: gha-infra-health-check
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: User
+    name: "gha:infra-health-check"
+---
+# intrusion-response: 調査 (Pod・ログ・Event・NetworkPolicy の参照) と隔離用 NetworkPolicy の作成だけ。
+# kubectl apply ではなく create で適用するため patch/update は不要。delete も与えない。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: gha-intrusion-response
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "events"]
+    verbs: ["get", "list"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list", "create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: gha-intrusion-response
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: gha-intrusion-response
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: User
+    name: "gha:intrusion-response"
+---
+# kube-cert-issue: 人用クライアント証明書の CSR 作成・承認だけ。
+# 承認できる signer を kube-apiserver-client に限定し、binding の作成権限は持たない。
+# delete は与えない (CSR は GC で消える)。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: gha-kube-cert-issue
+rules:
+  - apiGroups: ["certificates.k8s.io"]
+    resources: ["certificatesigningrequests"]
+    verbs: ["create", "get"]
+  - apiGroups: ["certificates.k8s.io"]
+    resources: ["certificatesigningrequests/approval"]
+    verbs: ["update"]
+  - apiGroups: ["certificates.k8s.io"]
+    resources: ["signers"]
+    resourceNames: ["kubernetes.io/kube-apiserver-client"]
+    verbs: ["approve"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: gha-kube-cert-issue
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: gha-kube-cert-issue
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: User
+    name: "gha:kube-cert-issue"

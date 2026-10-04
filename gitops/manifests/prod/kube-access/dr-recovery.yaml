@@ -1,0 +1,17 @@
+---
+# DR 復旧ワークフロー (gha:dr-recovery) への cluster-admin 付与。
+# GitHub Environment dr-recovery の承認 (OIDC の environment claim を API サーバーが必須化) で保護される。
+# k3s-bootstrap の Ansible がこのファイル単体を適用する (ArgoCD 同期前に DR 認証を使うため)。
+# 値を二重管理しないよう、このファイルを他の RBAC と分けて置いている。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: gha-dr-recovery
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: User
+    name: "gha:dr-recovery"
