@@ -353,6 +353,17 @@
 - イメージの `k3s kubectl` はコンテナ内で `unknown command "kubectl"` になるため、検証スクリプトは同じバイナリへのリンク `kubectl` を使う。ロール本体 (`k3s kubectl get --raw=/readyz`) は本番ホストへ入れた k3s バイナリで動く前提で、docker 上では再現できない。この差分は 3.7 の本番適用で `/readyz` の確認タスクが通ることで確認する。
 - 匿名の要求は監査ポリシーの除外対象ではなく、`/healthz*` などの nonResourceURLs 以外は `system:anonymous` として記録される (401 になる `/api/v1/namespaces` 等)。
 
+## 本番適用の記録 (task 3.7、2026-10-04)
+
+- 事前に本番へ `--check --diff` を実行し、変更が認証設定・監査ポリシー・k3s 設定の 3 ファイルと再起動 1 回だけであることを確認した。この過程で、ArgoCD インストールが Git 管理の ConfigMap (`argocd-cm`・`argocd-rbac-cm`) に upstream 既定を書き込む冪等性の欠陥が見つかり、#292 で修正してから適用した
+- 1 回目の実行: 3 ファイルを配布し、k3s を 1 回再起動。起動確認 (`/readyz` ok・匿名 `/version` 401) が通り、rescue は発動しなかった
+- 2 回目の実行: changed=0、再起動なし
+- 適用後の確認:
+  - `/readyz` ok、ノード Ready、共有 kubeconfig の `make kubectl` は従来どおり使える
+  - 匿名 `/version` は 401
+  - GitHub の issuer を名乗る不正署名のトークンを 1 回提示して 401 を確認し、`apiserver_authentication_jwt_authenticator_jwks_fetch_last_timestamp_seconds{result="success"}` が記録された (JWKS は初回のトークン提示時に取得される)
+  - 監査ログは再起動直後の約 15 分で約 0.6MB。playbook 2 回目の実行分を含む。総量はローテーション上限 ((4 + 1) × 100MB) で頭打ちになり、ノードのディスク空きに対して十分小さい
+
 ## ユーザー決定の記録 (実機検証後、2026-10-04)
 
 | 項目 | 決定 | 根拠となった検証結果 |
