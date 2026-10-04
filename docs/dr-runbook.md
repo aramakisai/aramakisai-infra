@@ -75,7 +75,7 @@ Actions の実行画面で team `infra` のメンバー (起動者本人でも�
      - kubectl get nodes が成功
 2. 他に Hetzner サーバー (role=server) が残っている、対象が cluster-init ホストでない、
    Ansible を流す経路で HEAD が origin/main と一致しない・未コミット変更がある・冪等化済み playbook
-   (ansible/playbooks/tasks/ensure_secret.yml) が無い・ESO_INFISICAL_CLIENT_ID/SECRET が未設定、
+   (ansible/playbooks/tasks/ensure_secret.yml) が無い、
    サーバー再作成の経路でメールの ReplicationSource が `spec.paused: true` でない、のいずれかなら破壊的操作の前に停止
    (checkout は承認後の main を使う)
 3. サーバー状態で分岐
@@ -91,9 +91,8 @@ Actions の実行画面で team `infra` のメンバー (起動者本人でも�
 5. 不在・force の経路のみ: ansible-playbook k3s-bootstrap.yml を対象ノードに限定して実行 (最大40分。SSH は
      CI 専用デプロイ鍵 `CI_SSH_PRIVATE_KEY` を 0600 の一時ファイルに書き出して使い、終了時に削除する)
      (cluster-init は空の etcd から作り直す。etcd スナップショットは取得していない)
-     Ansible の Infisical 書込 (KUBECONFIG 登録) は運用用 identity (OPS_INFISICAL_*) で行い、完了後に Infisical から
-     kubeconfig を取得し直す (取得失敗は停止)
-6. infisical-auth / Deploy Key の空チェックと自己修復 (ESO 用の認証情報から作成)
+     完了後に Infisical の共有 kubeconfig を読み取って取得し直す (取得失敗は停止)
+6. infisical-auth / Deploy Key の空チェックと自己修復 (CI 用 identity の値から作成)
 7. ArgoCD の Application が Healthy になるまで待機 (replicas=0 のワークロードだけを持つ凍結中アプリは除外、最大20分、
    待機中に mail-tls の自己修復も試行) と、稼働中の全 CNPG クラスターの healthy 待機 (最大15分)。
    instances=0 や hibernation 中のクラスターは対象外。タイムアウトは失敗
@@ -221,8 +220,8 @@ echo "$KUBECONFIG" > /tmp/kubeconfig-dr && chmod 600 /tmp/kubeconfig-dr
 
 kubectl --kubeconfig=/tmp/kubeconfig-dr \
   create secret generic infisical-auth \
-  --from-literal=clientId="$ESO_INFISICAL_CLIENT_ID" \
-  --from-literal=clientSecret="$ESO_INFISICAL_CLIENT_SECRET" \
+  --from-literal=clientId="$INFISICAL_CLIENT_ID" \
+  --from-literal=clientSecret="$INFISICAL_CLIENT_SECRET" \
   -n argocd --dry-run=client -o yaml \
   | kubectl --kubeconfig=/tmp/kubeconfig-dr apply -f -
 
@@ -412,33 +411,19 @@ Terraform provider・dr-trigger・recovery.sh は同じキー名の OAuth クラ
 
 ACL を Terraform で管理する場合は `policy_file` スコープも必要。Admin console の Settings → OAuth clients で作成し、値を Infisical (`prod`) の同名キーへ投入する。`tailscale_oauth_client` による Terraform 管理は、provider 自身の認証に使うクライアントを自身で作る鶏卵問題があり、発行されたシークレットが state に残るため採用していない (最初の1つは手動作成が必須)。
 
-### 運用用 Infisical machine identity (OPS_INFISICAL_*)
-
-`k3s-bootstrap.yml` は新しい kubeconfig を Infisical の KUBECONFIG に書き込む。既存の CI 用 identity は
-prod 読取専用で書込が 403 になり、再作成時に bootstrap が最後まで進まない。kubeconfig の書込は、DR と
-k3s-upgrade で共用する運用用の machine identity (Universal Auth) で行う。`INFISICAL_CLIENT_ID/SECRET` は
-Infisical からの読取用 CI identity のまま。Infisical の identity は Terraform 管理外のため手動で作成する。
-
-- 権限: prod の全シークレット読取 (復旧が `infisical run` で注入する) + `KUBECONFIG` の作成・更新のみ。それ以外の書込は付けない。
-- GitHub Secrets に `OPS_INFISICAL_CLIENT_ID` / `OPS_INFISICAL_CLIENT_SECRET` として登録する (dr-recovery.yml と k3s-upgrade.yml が参照)。
-- ESO 用の認証情報 (`ESO_INFISICAL_CLIENT_ID` / `ESO_INFISICAL_CLIENT_SECRET`、Infisical `prod` に保存) とは分ける。
-  infisical-auth Secret はこの ESO 用の値から作り、運用用 identity は ESO に渡さない。
-
 ### GitHub Actions Secrets (要設定)
 
 その他の認証情報は Infisical から注入する。ワークフローが直接参照する GitHub Secrets は次のとおり。
 
 | Secret 名 | 内容 | 使用ワークフロー |
 |-----------|------|------------------|
-| `INFISICAL_CLIENT_ID` | Infisical Machine Identity Client ID (CI 用、読取) | dr-trigger.yml |
-| `INFISICAL_CLIENT_SECRET` | Infisical Machine Identity Client Secret (CI 用、読取) | dr-trigger.yml |
-| `OPS_INFISICAL_CLIENT_ID` | 運用用 Machine Identity Client ID (prod 読取 + KUBECONFIG 書込のみ。DR と k3s-upgrade で共用) | dr-recovery.yml / k3s-upgrade.yml |
-| `OPS_INFISICAL_CLIENT_SECRET` | 運用用 Machine Identity Client Secret | dr-recovery.yml / k3s-upgrade.yml |
+| `INFISICAL_CLIENT_ID` | Infisical Machine Identity Client ID (CI 用、読取) | dr-trigger.yml / dr-recovery.yml |
+| `INFISICAL_CLIENT_SECRET` | Infisical Machine Identity Client Secret (CI 用、読取) | dr-trigger.yml / dr-recovery.yml |
 | `INFISICAL_PROJECT_ID` | Infisical プロジェクト ID | dr-trigger.yml / dr-recovery.yml |
 | `TS_OAUTH_CLIENT_ID` | Tailscale OAuth Client ID (tag:ci 用、ランナーの tailnet 参加) | dr-recovery.yml |
 | `TS_OAUTH_SECRET` | Tailscale OAuth Client Secret (tag:ci 用) | dr-recovery.yml |
 
-Infisical (`prod`) から注入する主なキー: `ESO_INFISICAL_CLIENT_ID/SECRET`、 `HCLOUD_TOKEN` (Hetzner サーバー状態の確認・電源投入)、`TAILSCALE_OAUTH_CLIENT_ID/SECRET`、`TAILSCALE_TAILNET`、`TFC_API_TOKEN`、`TFC_WORKSPACE_ID`、`DISCORD_OPS_WEBHOOK_URL`、`K3S_TOKEN` ほか Ansible 用。
+Infisical (`prod`) から注入する主なキー: `INFISICAL_CLIENT_ID/SECRET`、`HCLOUD_TOKEN` (Hetzner サーバー状態の確認・電源投入)、`TAILSCALE_OAUTH_CLIENT_ID/SECRET`、`TAILSCALE_TAILNET`、`TFC_API_TOKEN`、`TFC_WORKSPACE_ID`、`DISCORD_OPS_WEBHOOK_URL`、`K3S_TOKEN` ほか Ansible 用。
 
 `GITHUB_TOKEN` は Issue 操作のため `issues: write` を、dr-recovery.yml では Environment の保護ルール検査のため `actions: read` を `permissions` で付与している。新規 PAT は不要。
 dr-recovery.yml は冒頭で Environment `dr-recovery` の required reviewers を検査し、未設定なら失敗する。`main` 以外の ref では起動しない。

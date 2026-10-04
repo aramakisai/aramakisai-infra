@@ -20,7 +20,7 @@
 # HEAD が origin/main と一致し未コミット変更が無いことが前提。満たさなければ破壊的操作の前に停止する。
 # サーバーを作り直す経路は、メールの ReplicationSource が spec.paused: true であることも前提とする。
 #
-# Infisical は運用用 machine identity (OPS_INFISICAL_CLIENT_ID/SECRET: prod 読取 + KUBECONFIG 書込) を使う。
+# Infisical は読取用の CI machine identity (INFISICAL_CLIENT_ID/SECRET) を使う。
 # メールデータのリストアは自動化しない (docs/dr-runbook.md)。
 #
 # 必須入力: DR_TARGET_NODE (例: prod-node-1)
@@ -479,11 +479,11 @@ ansible_ready() {
   [[ -f "${REPO_ROOT}/ansible/playbooks/tasks/ensure_secret.yml" ]]
 }
 
-# 運用用 identity で Infisical のアクセストークンを取得する。失敗は呼び出し側で fail にする。
+# CI identity で Infisical のアクセストークンを取得する。失敗は呼び出し側で fail にする。
 dr_infisical_token() {
   local token
   token=$(infisical login --method=universal-auth \
-    --client-id="${OPS_INFISICAL_CLIENT_ID}" --client-secret="${OPS_INFISICAL_CLIENT_SECRET}" \
+    --client-id="${INFISICAL_CLIENT_ID}" --client-secret="${INFISICAL_CLIENT_SECRET}" \
     --silent --plain 2>/dev/null) || return 1
   [[ -n "${token}" ]] || return 1
   echo "::add-mask::${token}" >&2
@@ -493,7 +493,7 @@ dr_infisical_token() {
 # bootstrap が Infisical に登録した kubeconfig を取得し直す。値は変数に受けるだけで出力しない。
 refresh_kubeconfig() {
   local token kubeconfig
-  token=$(dr_infisical_token) || die "運用用 Infisical identity でのログインに失敗しました"
+  token=$(dr_infisical_token) || die "Infisical へのログインに失敗しました"
   kubeconfig=$(infisical secrets get KUBECONFIG --env=prod --projectId="${INFISICAL_PROJECT_ID}" \
     --token="${token}" --plain 2>/dev/null) || die "Infisical から KUBECONFIG を取得できませんでした"
   [[ -n "${kubeconfig}" ]] || die "Infisical の KUBECONFIG が空です"
@@ -504,9 +504,6 @@ refresh_kubeconfig() {
 run_ansible() {
   local node="$1"
   record "Ansible k3s-bootstrap を ${node} に限定して実行します"
-  # playbook 内の Infisical 書込 (KUBECONFIG 登録) は運用用 identity (OPS_INFISICAL_*) でログインする。
-  # INFISICAL_CLIENT_ID/SECRET は prod から注入済みの読取用 CI identity のまま、
-  # ESO 用の認証情報 (ESO_INFISICAL_CLIENT_ID/SECRET) も注入済みの値を使う。
   # cloud-init は tailscale up に --ssh を付けないため、k3s-upgrade.yml と同じ CI 専用デプロイ鍵で接続する。
   # 鍵は 0600 の一時ファイルに書き出し、終了時に削除する。
   SSH_KEY_FILE=$(mktemp)
@@ -519,8 +516,8 @@ run_ansible() {
     K3S_TOKEN="${K3S_TOKEN}" \
     CLOUDFLARE_TUNNEL_TOKEN="${CLOUDFLARE_TUNNEL_TOKEN}" \
     CLOUDFLARE_TUNNEL_ID="${CLOUDFLARE_TUNNEL_ID}" \
-    OPS_INFISICAL_CLIENT_ID="${OPS_INFISICAL_CLIENT_ID}" \
-    OPS_INFISICAL_CLIENT_SECRET="${OPS_INFISICAL_CLIENT_SECRET}" \
+    INFISICAL_CLIENT_ID="${INFISICAL_CLIENT_ID}" \
+    INFISICAL_CLIENT_SECRET="${INFISICAL_CLIENT_SECRET}" \
     INFISICAL_PROJECT_ID="${INFISICAL_PROJECT_ID}" \
     ARGOCD_GITHUB_DEPLOY_KEY="${ARGOCD_GITHUB_DEPLOY_KEY}" \
     timeout 2400 ansible-playbook -i "${DR_ANSIBLE_INVENTORY}" --limit "${node}" \
@@ -628,20 +625,16 @@ wait_cnpg_healthy() {
 }
 
 # 待機より前に実行する。ESO が動かないと ArgoCD/CNPG の healthy 待機自体が成立しないため。
-# infisical-auth は ESO 専用の認証情報 (ESO_INFISICAL_CLIENT_ID/SECRET) から作る。
-# 運用用 identity (OPS_INFISICAL_*) は ESO に渡さない。
 repair_bootstrap_secrets() {
   local client_id key_len
   client_id=$(kubectl_r get secret infisical-auth -n argocd -o jsonpath='{.data.clientId}' 2>/dev/null | base64 -d || true)
   key_len=$(kubectl_r get secret aramakisai-infra-repo -n argocd -o jsonpath='{.data.sshPrivateKey}' 2>/dev/null | base64 -d | wc -c || echo 0)
 
   if [[ -z "${client_id}" ]]; then
-    [[ -n "${ESO_INFISICAL_CLIENT_ID:-}" && -n "${ESO_INFISICAL_CLIENT_SECRET:-}" ]] \
-      || die "infisical-auth が空ですが ESO_INFISICAL_CLIENT_ID/SECRET が未設定のため修復できません"
-    record "infisical-auth が空のため ESO 用認証情報から修復します"
+    record "infisical-auth が空のため修復します"
     kubectl_r create secret generic infisical-auth \
-      --from-literal=clientId="${ESO_INFISICAL_CLIENT_ID}" \
-      --from-literal=clientSecret="${ESO_INFISICAL_CLIENT_SECRET}" \
+      --from-literal=clientId="${INFISICAL_CLIENT_ID}" \
+      --from-literal=clientSecret="${INFISICAL_CLIENT_SECRET}" \
       -n argocd --dry-run=client -o yaml | kubectl_r apply -f -
     kubectl_r annotate externalsecret --all -A "force-sync=$(date +%s)" --overwrite || true
   fi
@@ -698,7 +691,7 @@ main() {
   local vars=()
   if [[ "${DR_LOCAL_TEST}" != "1" ]]; then
     vars+=(DR_TARGET_NODE K3S_TOKEN ARGOCD_GITHUB_DEPLOY_KEY CLOUDFLARE_TUNNEL_TOKEN CLOUDFLARE_TUNNEL_ID
-      OPS_INFISICAL_CLIENT_ID OPS_INFISICAL_CLIENT_SECRET INFISICAL_PROJECT_ID CI_SSH_PRIVATE_KEY)
+      INFISICAL_CLIENT_ID INFISICAL_CLIENT_SECRET INFISICAL_PROJECT_ID CI_SSH_PRIVATE_KEY)
   fi
   if [[ "${DR_SKIP_INFRA}" != "1" ]]; then
     vars+=(HCLOUD_TOKEN TAILSCALE_OAUTH_CLIENT_ID TAILSCALE_OAUTH_CLIENT_SECRET TAILSCALE_TAILNET TFC_API_TOKEN TFC_WORKSPACE_ID KUBECONFIG)
@@ -746,8 +739,6 @@ main() {
       [[ "${sync_rc}" == "0" ]] \
         || die "リポジトリが origin/main と一致しない、または未コミットの変更があります (rc=${sync_rc})。最新の main でワークフローを起動し直してください"
       ansible_ready || die "冪等化済みの k3s-bootstrap.yml (ansible/playbooks/tasks/ensure_secret.yml) がありません。Ansible を流す経路は停止します"
-      [[ -n "${ESO_INFISICAL_CLIENT_ID:-}" && -n "${ESO_INFISICAL_CLIENT_SECRET:-}" ]] \
-        || die "ESO_INFISICAL_CLIENT_ID/SECRET が未設定です (infisical-auth の作成に必要)"
     fi
 
     if [[ "${status}" == "absent" ]]; then

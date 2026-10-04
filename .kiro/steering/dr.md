@@ -29,8 +29,6 @@
   Ansible を流す経路 (再作成・force) は冪等化済みの `k3s-bootstrap.yml` (`tasks/ensure_secret.yml` の存在) が前提
 - **再作成後はメール DNS/rDNS を別 run で追従**: `mail_prod_node_1` / `mail_prod_node_1_ipv4` / `mail_ipv4` / `mail_ipv6`
   の4アドレスだけを target にし、plan がこの範囲を出れば停止する
-- **Infisical の書込は運用用 machine identity (DR と k3s-upgrade で共用)** (`OPS_INFISICAL_CLIENT_ID/SECRET`: prod 読取 + KUBECONFIG 書込)。
-  infisical-auth は ESO 用 (`ESO_INFISICAL_CLIENT_ID/SECRET`) から作り、運用用 identity は ESO に渡さない
 - **メールデータのリストアは自動化しない**: mailserver Application の selfHeal が replicas=0 を戻して稼働中 PVC に書込むため。
   稼働中 PVC には書かず、新名の plain PVC + ReplicationDestination (`copyMethod: Direct`) へリストアし、RD 削除 →
   `claimName` / `sourcePVC` の切替をコミットだけで行う (`docs/dr-runbook.md`、雛形は `docs/templates/mailserver-restore.yaml`)。

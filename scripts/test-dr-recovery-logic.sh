@@ -221,8 +221,8 @@ assert_eq "メール DNS run のスコープ逸脱 -> discard し apply しな�
 assert_eq "prod-node-1 以外は DNS 更新しない" "" "$(calls)"
 
 echo ""
-echo "=== Infisical (運用用 identity)・kubeconfig 取得は失敗で止まる ==="
-OPS_INFISICAL_CLIENT_ID=id OPS_INFISICAL_CLIENT_SECRET=sec INFISICAL_PROJECT_ID=proj
+echo "=== Infisical (読取用 CI identity)・kubeconfig 取得は失敗で止まる ==="
+INFISICAL_CLIENT_ID=id INFISICAL_CLIENT_SECRET=sec INFISICAL_PROJECT_ID=proj
 infisical() {
   echo "infisical $1 $2" >>"${CALLS}"
   case "$1" in
@@ -313,13 +313,9 @@ kubectl_r() {
 : >"${CALLS}"; AUTH_B64=$(echo -n id | base64) KEY_B64=$(head -c 200 /dev/zero | tr '\0' a | base64 -w0)
 repair_bootstrap_secrets >/dev/null 2>&1
 assert_eq "正常な Secret は触らない" "0" "$(grep -c "create secret" "${CALLS}")"
-: >"${CALLS}"; AUTH_B64="" ESO_INFISICAL_CLIENT_ID="" ESO_INFISICAL_CLIENT_SECRET=""
+: >"${CALLS}"; AUTH_B64="" INFISICAL_CLIENT_ID=ci-id INFISICAL_CLIENT_SECRET=ci-sec
 (repair_bootstrap_secrets) >/dev/null 2>&1
-assert_eq "infisical-auth が空で ESO_* 未設定 -> 修復せず異常終了" 1 $?
-: >"${CALLS}"; ESO_INFISICAL_CLIENT_ID=eso-id ESO_INFISICAL_CLIENT_SECRET=eso-sec INFISICAL_CLIENT_ID=ci-id
-(repair_bootstrap_secrets) >/dev/null 2>&1
-assert_eq "ESO 用の値で作成し 運用用 identity / CI identity は使わない" "1" "$(grep -c "clientId=eso-id" "${CALLS}")"
-assert_eq "運用用 identity の値を infisical-auth に使わない" "0" "$(grep -c "clientId=id " "${CALLS}")"
+assert_eq "infisical-auth が空なら CI identity の値で作成する" "1" "$(grep -c "clientId=ci-id" "${CALLS}")"
 
 echo ""
 echo "=== main: 経路ごとの実行順 ==="
@@ -341,9 +337,9 @@ mail_rs_paused() { return "${MAIL_PAUSED_RC}"; }
 GIT_SYNC_RC=0
 MAIL_PAUSED_RC=0
 export DR_TARGET_NODE=prod-node-1 K3S_TOKEN=x ARGOCD_GITHUB_DEPLOY_KEY=x CLOUDFLARE_TUNNEL_TOKEN=x CLOUDFLARE_TUNNEL_ID=x
-export OPS_INFISICAL_CLIENT_ID=x OPS_INFISICAL_CLIENT_SECRET=x INFISICAL_PROJECT_ID=x HCLOUD_TOKEN=x
+export INFISICAL_CLIENT_ID=x INFISICAL_CLIENT_SECRET=x INFISICAL_PROJECT_ID=x HCLOUD_TOKEN=x
 export TAILSCALE_OAUTH_CLIENT_ID=x TAILSCALE_OAUTH_CLIENT_SECRET=x TAILSCALE_TAILNET=x TFC_API_TOKEN=x TFC_WORKSPACE_ID=x KUBECONFIG=x
-export GH_TOKEN=dummy ESO_INFISICAL_CLIENT_ID=eso ESO_INFISICAL_CLIENT_SECRET=eso CI_SSH_PRIVATE_KEY=key
+export GH_TOKEN=dummy CI_SSH_PRIVATE_KEY=key
 DR_ANSIBLE_INVENTORY="${ROOT}/ansible/inventory/tailscale.yml"
 # errexit が効く別プロセス相当の環境で main を実行する (途中の失敗が後続段階を止めることまで検証)
 run_main() { : >"${CALLS}"; (set -e; main) >/dev/null 2>&1; echo "rc=$? $(calls)"; }
@@ -388,10 +384,6 @@ assert_eq "cluster-init ホスト以外は自動復旧しない" "rc=1 " "$(run_
 DR_TARGET_NODE=prod-node-1
 set_world absent "${OFFLINE}" 1 1; STATE_RC=1
 assert_eq "TFC state と不整合 -> 停止" "rc=1 " "$(run_main)"
-unset ESO_INFISICAL_CLIENT_ID
-set_world absent "${OFFLINE}" 1 1
-assert_eq "ESO_INFISICAL_CLIENT_ID 未設定 -> 破壊的操作の前に停止" "rc=1 " "$(run_main)"
-export ESO_INFISICAL_CLIENT_ID=eso
 
 DR_FORCE=1
 set_world running "${OFFLINE}" 1 1
