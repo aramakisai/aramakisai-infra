@@ -52,8 +52,8 @@ jobs:
       - name: Run upgrade
         id: run_upgrade
         env:
-          OPS_INFISICAL_CLIENT_ID: ${{ secrets.OPS_INFISICAL_CLIENT_ID }}
-          OPS_INFISICAL_CLIENT_SECRET: ${{ secrets.OPS_INFISICAL_CLIENT_SECRET }}
+          INFISICAL_CLIENT_ID: ${{ secrets.INFISICAL_CLIENT_ID }}
+          INFISICAL_CLIENT_SECRET: ${{ secrets.INFISICAL_CLIENT_SECRET }}
           INFISICAL_PROJECT_ID: ${{ secrets.INFISICAL_PROJECT_ID }}
           # ansible.cfg は ansible/ 配下にあるがリポジトリルートから実行するため読み込まれず、
           # host_key_checking = False が適用されない。CI使い捨てランナーはknown_hostsが
@@ -64,8 +64,8 @@ jobs:
           # 明示的にlogin --method=universal-authでトークンを取得し --token で渡す。
           # トークンはログに出力されうるため ::add-mask:: で確実にマスクする。
           INFISICAL_TOKEN=$(infisical login --method=universal-auth \
-            --client-id="${OPS_INFISICAL_CLIENT_ID}" \
-            --client-secret="${OPS_INFISICAL_CLIENT_SECRET}" \
+            --client-id="${INFISICAL_CLIENT_ID}" \
+            --client-secret="${INFISICAL_CLIENT_SECRET}" \
             --silent --plain)
           echo "::add-mask::${INFISICAL_TOKEN}"
 
