@@ -35,6 +35,17 @@ kc() {
   kubectl --kubeconfig="${KUBECTL_CONF}" "$@"
 }
 
+EXPECTED_KUBE_USER="gha:infra-health-check"
+
+# 認証が壊れたまま続行すると全チェックが取得失敗になり、監視停止に誰も気付けない
+check_kube_auth() {
+  local user
+  user=$(kc auth whoami -o jsonpath='{.status.userInfo.username}' 2>&1) \
+    || { echo "::error::kube への認証に失敗しました (OIDC 拒否または到達不能): ${user}"; return 1; }
+  [[ "${user}" == "${EXPECTED_KUBE_USER}" ]] \
+    || { echo "::error::kube 認証ユーザーが想定と異なります (expected=${EXPECTED_KUBE_USER}, actual=${user})"; return 1; }
+}
+
 # nodes/proxy 権限を持たないため API サーバーの node proxy は使えない。
 # nodes/stats だけで通る kubelet (10250) を、kubeconfig と同じ CA で検証して直接呼ぶ
 kubelet_stats() {
@@ -54,17 +65,17 @@ kubelet_stats() {
 # チェック1: ノードルートディスク使用率
 # ============================================================
 
-# 出力: "breach|<usage_percent>" または "ok|<usage_percent>"
+# 出力: "breach|<usage_percent>" / "ok|<usage_percent>" / 取得失敗時 "error|0"
 check_disk_usage() {
   local stats used capacity percent
   stats=$(kubelet_stats) \
-    || { log "警告: ${NODE_NAME} の stats/summary 取得に失敗しました"; echo "unknown|0"; return; }
+    || { log "警告: ${NODE_NAME} の stats/summary 取得に失敗しました"; echo "error|0"; return; }
 
   used=$(echo "${stats}" | jq -r '.node.fs.usedBytes // empty')
   capacity=$(echo "${stats}" | jq -r '.node.fs.capacityBytes // empty')
   if [[ -z "${used}" || -z "${capacity}" || "${capacity}" == "0" ]]; then
     log "警告: ${NODE_NAME} の fs 使用量を取得できませんでした"
-    echo "unknown|0"
+    echo "error|0"
     return
   fi
 
@@ -83,11 +94,11 @@ check_disk_usage() {
 #  CNPG operator 自身がこの条件を管理しており、追加のメトリクス収集基盤なしに読める)
 # ============================================================
 
-# 出力: 1行1クラスターで "<namespace>/<name>|breach|<message>" または "<namespace>/<name>|ok|"
+# 出力: 取得失敗時は "-|error|" の1行。それ以外は1行1クラスターで "<namespace>/<name>|breach|<message>" または "<namespace>/<name>|ok|"
 check_cnpg_archiving() {
   local clusters
   clusters=$(kc get clusters.postgresql.cnpg.io -A -o json) \
-    || { log "警告: CNPG Cluster 一覧の取得に失敗しました"; return; }
+    || { log "警告: CNPG Cluster 一覧の取得に失敗しました"; echo "-|error|"; return; }
 
   echo "${clusters}" | jq -r '
     .items[] |
@@ -184,6 +195,11 @@ main() {
   done
 
   setup_kubeconfig
+  # ::error:: は check_kube_auth が出力済み
+  check_kube_auth || die "kube 認証を確認できないためヘルスチェックを中止します"
+
+  # 観測できなかった項目。取得失敗は「回復」ではないため Issue をクローズせず、最後に非 0 で終える
+  local unobserved=()
 
   local disk_result disk_state disk_percent
   disk_result=$(check_disk_usage)
@@ -202,7 +218,8 @@ main() {
       sync_recovered "disk-${NODE_NAME}"
       ;;
     *)
-      log "ディスク使用率を判定できなかったため今回はスキップします"
+      log "ディスク使用率を取得できませんでした"
+      unobserved+=("disk-${NODE_NAME}")
       ;;
   esac
 
@@ -210,6 +227,9 @@ main() {
   while IFS='|' read -r cluster_key state message; do
     [[ -n "${cluster_key}" ]] || continue
     case "${state}" in
+      error)
+        unobserved+=("cnpg-wal")
+        ;;
       breach)
         # shellcheck disable=SC2016 # バッククォートはMarkdown装飾の文字リテラル (展開不要)
         sync_breach "cnpg-wal-${cluster_key}" \
@@ -225,6 +245,10 @@ main() {
     esac
   done < <(check_cnpg_archiving)
 
+  if ((${#unobserved[@]} > 0)); then
+    echo "::error::観測できなかったチェック項目があります: ${unobserved[*]}"
+    return 1
+  fi
   return 0
 }
 
