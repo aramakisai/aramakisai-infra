@@ -1,6 +1,4 @@
-KUBECTL_CONF := /tmp/kubeconfig-aramakisai
-
-.PHONY: lint lint-staged install-hooks setup kubectl
+.PHONY: lint lint-staged install-hooks setup kubectl kube-login
 
 lint: ## Run all linters on all files
 	pre-commit run --all-files
@@ -66,11 +64,14 @@ setup: ## Check prerequisites and install project dependencies
 	@echo "---------------------------------------------------------------------"
 	@echo "  - tflint:      https://github.com/terraform-linters/tflint/releases"
 	@echo "  - kubeconform: https://github.com/yannh/kubeconform/releases"
+	@echo "  - gh (GitHub CLI) 2.87.0 以上: https://cli.github.com/  # make kube-login が dispatch の run ID 取得に使う"
 	@echo "====================================================================="
 
 deploy: ## Run terraform apply and ansible bootstrapping sequentially (use ARGS="-y" for auto-approve)
 	./scripts/deploy.sh $(ARGS)
 
-kubectl: ## kubectl を Infisical 経由で実行 (例: make kubectl ARGS="get pods -A")
-	@infisical run -- bash -c \
-		'echo "$$KUBECONFIG" > $(KUBECTL_CONF) && chmod 600 $(KUBECTL_CONF) && kubectl --kubeconfig=$(KUBECTL_CONF) $(ARGS)'
+kubectl: ## kubectl を手元のコンテキスト aramakisai-prod で実行 (例: make kubectl ARGS="get pods -A")。事前に make kube-login
+	@kubectl --context aramakisai-prod $(ARGS)
+
+kube-login: ## GitHub 経由で短命クライアント証明書を発行し、コンテキスト aramakisai-prod を作成・更新 (CA 変更時のみ ARGS=--accept-new-ca)
+	@./scripts/kube-login.sh $(ARGS)

@@ -1,0 +1,108 @@
+name: Kube Cert Issue
+
+# 起動者本人の CSR にだけ短命のクライアント証明書を発行する (make kube-login が起動する)。
+# kube-apiserver は job_workflow_ref・ref・event_name で gha:kube-cert-issue を照合するため、
+# このファイルは main 上のものだけが認証される。Environment は参照せず、承認待ちなしで即時に完了する。
+on:
+  workflow_dispatch:
+    inputs:
+      csr:
+        description: "base64 化した PKCS#10 CSR (PEM)"
+        required: true
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  issue:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # 接続先は Tailscale MagicDNS 名 (prod-node-1) のため、ランナーを tailnet に参加させる (infra-health-check と同じ)
+      - name: Setup Tailscale
+        uses: tailscale/github-action@6cae46e2d796f265265cfcf628b72a32b4d7cade # v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: Validate CSR
+        env:
+          CSR_B64: ${{ inputs.csr }}
+          GH_ACTOR: ${{ github.actor }}
+          GH_ACTOR_ID: ${{ github.actor_id }}
+        run: |
+          set -uo pipefail
+          user="github:${GH_ACTOR}:${GH_ACTOR_ID}"
+          reject() {
+            echo "::error title=CSR rejected::$1"
+            { echo "### 証明書を発行しませんでした"; echo "- 起動者: \`${GH_ACTOR}\`"; echo "- 理由: $1"; } >>"${GITHUB_STEP_SUMMARY}"
+            exit 1
+          }
+          mkdir -p "${RUNNER_TEMP}/cert"
+          base64 -d <<<"${CSR_B64}" >"${RUNNER_TEMP}/csr.pem" 2>/dev/null || reject "CSR input is not valid base64"
+          if ! out="$(bash .github/scripts/kube-cert-validate.sh "${user}" <"${RUNNER_TEMP}/csr.pem")"; then
+            reject "${out}"
+          fi
+
+      - name: Issue certificate
+        env:
+          GH_ACTOR: ${{ github.actor }}
+          GH_ACTOR_ID: ${{ github.actor_id }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          user="github:${GH_ACTOR}:${GH_ACTOR_ID}"
+          # re-run は run ID が同じで、CSR オブジェクトは 1 時間残るため試行回数で名前を分ける
+          name="github-${GH_ACTOR_ID}-${RUN_ID}"
+          [[ "${RUN_ATTEMPT}" == 1 ]] || name="${name}-${RUN_ATTEMPT}"
+          fail() {
+            echo "::error title=Certificate issue failed::$1"
+            { echo "### 証明書の発行に失敗しました"; echo "- 起動者: \`${GH_ACTOR}\`"; echo "- 理由: $1"; } >>"${GITHUB_STEP_SUMMARY}"
+            exit 1
+          }
+          export KUBECONFIG="${RUNNER_TEMP}/kubeconfig"
+          bash .github/scripts/kube-oidc.sh kubeconfig "${KUBECONFIG}" || fail "kubeconfig generation failed"
+
+          # 署名期間は kube-controller-manager の上限 (168h) に切り詰められるため、同じ値を要求する
+          jq -n --arg name "${name}" --arg req "$(base64 -w0 "${RUNNER_TEMP}/csr.pem")" '{
+            apiVersion: "certificates.k8s.io/v1", kind: "CertificateSigningRequest",
+            metadata: {name: $name},
+            spec: {request: $req, signerName: "kubernetes.io/kube-apiserver-client",
+                   usages: ["digital signature", "client auth"], expirationSeconds: 604800}
+          }' | kubectl create -f - >/dev/null || fail "CSR object creation failed"
+          kubectl certificate approve "${name}" >/dev/null || fail "CSR approval failed"
+
+          crt=""
+          for _ in $(seq 1 60); do
+            crt="$(kubectl get csr "${name}" -o jsonpath='{.status.certificate}')" || fail "CSR lookup failed"
+            [[ -z "${crt}" ]] || break
+            [[ -z "$(kubectl get csr "${name}" -o jsonpath='{.status.conditions[?(@.type=="Failed")].type}')" ]] || fail "signing failed"
+            sleep 2
+          done
+          [[ -n "${crt}" ]] || fail "timed out waiting for the signed certificate"
+
+          base64 -d <<<"${crt}" >"${RUNNER_TEMP}/cert/kube-client.crt"
+          [[ "$(openssl x509 -in "${RUNNER_TEMP}/cert/kube-client.crt" -noout -subject -nameopt RFC2253)" == "subject=CN=${user}" ]] \
+            || fail "issued certificate subject mismatch"
+          not_after="$(openssl x509 -in "${RUNNER_TEMP}/cert/kube-client.crt" -noout -enddate | cut -d= -f2)"
+          {
+            echo "### 証明書を発行しました"
+            echo "- 起動者: \`${GH_ACTOR}\`"
+            echo "- ユーザー名: \`${user}\`"
+            echo "- 有効期限 (notAfter): ${not_after}"
+          } >>"${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload certificate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: kube-client-cert
+          path: ${{ runner.temp }}/cert/kube-client.crt
+          retention-days: 1
+          if-no-files-found: error

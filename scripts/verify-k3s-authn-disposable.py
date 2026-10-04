@@ -68,7 +68,7 @@ def tokensrv(a):
                 self.end_headers()
                 return
             aud = (q.get("audience") or [None])[0]
-            body = json.dumps({"value": x.sign(dict(x.base(), exp=int(time.time()) + 300), aud=aud)}).encode()
+            body = json.dumps({"value": x.sign(dict(x.base(a.workflow), exp=int(time.time()) + 300), aud=aud)}).encode()
             self.send_response(200)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
@@ -236,6 +236,7 @@ def main():
     s.add_argument("--port", type=int, required=True)
     s.add_argument("--request-token", required=True)
     s.add_argument("--api", default="0:0")
+    s.add_argument("--workflow", default="infra-health-check.yml")
     s.set_defaults(f=tokensrv)
     s = sp.add_parser("patch")
     s.add_argument("--inp", required=True)

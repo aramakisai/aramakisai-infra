@@ -120,7 +120,7 @@ graph TB
 | Layer | Choice / Version | Role in Feature | Notes |
 |-------|------------------|-----------------|-------|
 | CLI (手元) | gh >= 2.87.0、openssl、kubectl、tailscale | 鍵・CSR 生成、発行ワークフロー起動と run 特定、コンテキスト作成 | gh の最低版は dispatch の run ID 返却のため。`make setup` の案内に追記 |
-| CI | GitHub Actions (`id-token: write`)、`actions/checkout` / `actions/upload-artifact` (SHA 固定) | OIDC トークン取得、CSR 検証・発行、証明書の受け渡し | 第三者アクションは発行ワークフローで使わない |
+| CI | GitHub Actions (`id-token: write`)、`actions/checkout` / `actions/upload-artifact` / `tailscale/github-action` (tailnet 参加用) のみ、すべて commit SHA 固定 | OIDC トークン取得、CSR 検証・発行、証明書の受け渡し | 発行ワークフローは CSR 承認権限を持つため、可変タグが乗っ取られると任意の証明書を発行されうる |
 | Runtime | K3s v1.36.3+k3s1 (structured authentication v1、CSR API v1) | JWT 検証、client CA による署名 | 新規依存なし |
 | 構成管理 | Ansible k3s-server ロール | 認証設定・署名期間の配布 | PR #288 の待機タスクを前提にする |
 | GitOps | ArgoCD Application `kube-access` (新規、wave -1) | RBAC の正本 | Application 追加の根拠を tech.md に記録 |
@@ -543,11 +543,11 @@ k3s-upgrade は含めない (kube 権限を使わない)。
 - Trigger: `workflow_dispatch` (write 権限保持者のみ起動可能、3.1)。Environment は参照せず、承認待ちなしで即時に実行される (決定事項 D1)。
 - Input: `csr` (base64 化した PEM)。input は `env` 経由でスクリプトへ渡し、`${{ }}` を shell に展開しない。
 - Permissions: `id-token: write`、`contents: read`。
-- 処理: CsrValidator → KubeOidcHelper で kubeconfig 生成 → CSR オブジェクト作成 (名前 `github-<actor_id>-<run_id>`、`signerName: kubernetes.io/kube-apiserver-client`、`usages: [digital signature, client auth]`、`expirationSeconds` = 上限値) → 承認 → `status.certificate` を待つ。
+- 処理: CsrValidator → KubeOidcHelper で kubeconfig 生成 → CSR オブジェクト作成 (名前 `github-<actor_id>-<run_id>`、re-run 時は `-<attempt>` を付与、`signerName: kubernetes.io/kube-apiserver-client`、`usages: [digital signature, client auth]`、`expirationSeconds` = 上限値) → 承認 → `status.certificate` を待つ。
 - Output: artifact `kube-client-cert` (証明書 PEM のみ、保持 1 日)。job summary に起動者・ユーザー名・有効期限 (notAfter) を記録 (12.2)。拒否時は理由を job summary とエラー注釈に出す (3.4)。
 - Idempotency & recovery: CSR 名に run ID を含めるため再実行で衝突しない。CSR オブジェクトは承認後 1 時間で GC される (3.9。k3d で、承認から 1 時間経過後の最初の GC 周期 (30 分間隔) に Issued・Failed とも削除されることを確認済みで、実際の消滅は承認から 1〜1.5 時間後)。
 - 実測 (k3d): 承認から数秒で `status.certificate` が入る。証明書の `notBefore` は発行時刻の 5 分前、`notAfter` は `notBefore` の 168h 後 (job summary の有効期限は証明書の `notAfter` を使う)。`expirationSeconds` 未指定・上限超過はともに 168h、600 秒未満は作成時に拒否される。署名できない用途 (`server auth` 等) の CSR は作成・承認まで通り、署名で `Approved,Failed` になる。
-- 使用アクション: `actions/checkout` と `actions/upload-artifact` のみ (commit SHA 固定)。ログ・artifact にトークンを出さない (3.8)。
+- 使用アクション: `actions/checkout`・`actions/upload-artifact`・`tailscale/github-action` (tailnet 参加用) のみ、すべて commit SHA 固定 (発行ワークフローは CSR 承認権限を持つため、可変タグの乗っ取りで任意の証明書を発行されうる)。ログ・artifact にトークンを出さない (3.8)。
 
 ### 手元
 
@@ -582,7 +582,7 @@ k3s-upgrade は含めない (kube 権限を使わない)。
 ## Data Models
 
 ### Data Contracts & Integration
-- **CSR オブジェクト** (`certificates.k8s.io/v1`): `metadata.name` = `github-<actor_id>-<run_id>`、`spec.signerName` = `kubernetes.io/kube-apiserver-client`、`spec.usages` = [`digital signature`, `client auth`]、`spec.expirationSeconds` = 上限 (秒)、`spec.request` = 利用者の CSR。作成者 (`spec.username`) は `gha:kube-cert-issue` になる。
+- **CSR オブジェクト** (`certificates.k8s.io/v1`): `metadata.name` = `github-<actor_id>-<run_id>` (re-run 時は `-<attempt>` を付与)、`spec.signerName` = `kubernetes.io/kube-apiserver-client`、`spec.usages` = [`digital signature`, `client auth`]、`spec.expirationSeconds` = 上限 (秒)、`spec.request` = 利用者の CSR。作成者 (`spec.username`) は `gha:kube-cert-issue` になる。
 - **ExecCredential**: `apiVersion: client.authentication.k8s.io/v1`、`kind: ExecCredential`、`status.token`、`status.expirationTimestamp` (RFC 3339)。
 - **手元 kubeconfig のエントリ名**: cluster / user / context とも `aramakisai-prod`。server は `https://prod-node-1:6443` (`tls-san` の MagicDNS 名)。
 - **artifact `kube-client-cert`**: 証明書 PEM 1 ファイル。公開情報として扱う。
