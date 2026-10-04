@@ -3,7 +3,7 @@
 # `POST /admin/v1/import`で反映する (task 9.3)。到達経路はresources.yml(task9.2)と
 # 同じ_api_call.yml経由のkubectl exec方式を踏襲する。
 #
-# 対象host/クラスタは常にzitadel_external_domain/zitadel_bootstrap_kubeconfig
+# 対象host/クラスタは常にzitadel_external_domain/zitadel_bootstrap_kubeconfig_override
 # (defaults/main.yml)で決まり、いずれもk3d値がデフォルト・本番はENV変数上書きの
 # みで指定する方式のため、このファイル自体に本番エンドポイントのハードコードはない。
 #

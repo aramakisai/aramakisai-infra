@@ -252,7 +252,7 @@
   - _Requirements: 2.6, 2.8, 6.4, 8.4_
   - _Boundary: DrBootstrapBinding_
 
-- [ ] 6.4 (P) Zitadel のブートストラップとカットオーバーを、共有 kubeconfig に依存しない形にする
+- [x] 6.4 (P) Zitadel のブートストラップとカットオーバーを、共有 kubeconfig に依存しない形にする
   - 環境変数の KUBECONFIG の中身をファイルに書き出す処理を削除する
   - kubectl は標準の kubeconfig の解決と、コンテキストを指定する変数 (既定は `aramakisai-prod`) を使う
   - k3d 検証用の kubeconfig のパス指定は残す
