@@ -244,7 +244,7 @@
   - _Requirements: 1.6, 1.9, 7.2, 7.4, 8.4, 10.1_
   - _Boundary: DrMigration, EnvironmentGuard_
 
-- [ ] 6.3 (P) k3s-bootstrap で DR 用の binding を ArgoCD の同期より前に適用する
+- [x] 6.3 (P) k3s-bootstrap で DR 用の binding を ArgoCD の同期より前に適用する
   - ArgoCD の bootstrap Play で、2.3 のマニフェストを PR #288 のマニフェスト適用タスク (server-side apply) で適用する。playbook の完了前に適用されるようにする
   - 値を Ansible 側に複製せず、main の同じファイルだけを参照する
   - 既存クラスタで再実行しても差分が出ないようにする
