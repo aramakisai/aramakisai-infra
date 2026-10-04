@@ -84,7 +84,7 @@
   - _Requirements: 5.1, 5.2, 5.6, 12.1, 13.5_
   - _Boundary: KubeAccessRbac (humans)_
 
-- [ ] 2.5 【本番・ユーザー承認】RBAC の PR をマージし、ArgoCD での同期を確認する
+- [x] 2.5 【本番・ユーザー承認】RBAC の PR をマージし、ArgoCD での同期を確認する
   - 前提条件: 1.5 が完了している。この時点では `gha:*`・`github:*` のユーザー名は認証されないため、binding は無害である
   - 確認項目: `kube-access` が Synced かつ Healthy で、ClusterRole と binding がクラスタに存在する。既存の Application に影響がない
   - ロールバック: PR を revert し、Application を削除する
