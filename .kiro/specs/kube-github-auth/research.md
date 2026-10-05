@@ -433,6 +433,19 @@
 - 以後 `infisical run` は KUBECONFIG を注入しない。`make kubectl` はコンテキスト `aramakisai-prod` で動作することを確認した
 - 注入対策だった `unset KUBECONFIG` (infra-health-check.sh) と `env -u KUBECONFIG` の手順は不要になったため削除した
 
+## KVM の DR テスト環境での client CA forced rotation の検証 (task 8.1、2026-10-05)
+
+- 環境: 使い捨て VM に本番と同一の k3s-server ロール・同一 k3s バージョンを適用した。OIDC は issuer をモックに差し替えた。sudo・ホストのネットワーク設定変更は不要だった
+- rotation 前: 匿名 401、旧 admin 証明書・CSR 発行の人向け証明書・ローカル admin・OIDC はすべて認証成功
+- forced rotation (新 client CA を作成し `k3s certificate rotate-ca --path <NEW> --force`、`systemctl restart k3s`): 旧 admin 証明書と人の旧証明書は 401、新しいローカル admin と OIDC は成功、rotation 後に CSR で再発行した人向け証明書も成功した。client CA の指紋は変化し、server CA と `/cacerts` は不変。`/readyz` は ok でノードは Ready。design.md の rotation 手順 1〜4 は記載どおり通った
+- 「旧 admin 証明書」と「旧ローカル admin のコピー」は同一の証明書で、別々の検証にはならない
+- D16: rotation・戻し方 A・戻し方 B (cluster-reset) のいずれの再起動でも、Pod の containerID・startedAt・restartCount と containerd-shim のプロセスが不変だった (Pod は落ちない)
+- 戻し方 A を退避ファイルのまま行うと失敗した: k3s が `client-ca.{crt,key} newer than datastore and could cause a cluster outage` で起動しない。k3s は rotate-ca 時に入力ファイルの mtime をデータストアのタイムスタンプとして保存し、起動時にディスク上のファイルと比較する。退避ファイルは rotation 前に作るため mtime が新 CA より古くなる。この状態では k3s が止まっており rotate-ca を再実行できない。復旧は `server/tls/client-ca.{crt,key}` を別の場所へ移して restart (データストアの CA から再生成される) で成功した
+- 修正手順 (rotate-ca の直前に退避ファイルを `touch`) では、戻し方 A が手作業なしで成功した。戻した後、client CA の指紋は rotation 前と同じで、rotation 前の証明書・ローカル admin・OIDC が成功し、Pod は無傷だった
+- 戻し方 B (etcd スナップショット → rotation → 起動不能を模擬 → `systemctl stop k3s` → `k3s server --cluster-reset --cluster-reset-restore-path=<snapshot>` → 退避 CA を `server/tls/` へコピー → start): A と同じ確認がすべて成功した。rotation 後に作ったデータは消える (設計どおり)。ディスク上の `server/tls/client-ca.*` が壊れていると cluster-reset 自体が失敗するため、有効な証明書が置かれている必要がある。cluster-reset 直後にディスク上の client CA は既にスナップショット側に戻っており、差し戻しのコピーは結果に影響しなかった (無害。省略時の挙動は未確認)
+- 未確認: 実際の GitHub Actions トークンでの OIDC (モック issuer で代替)、`make kube-login` の発行ワークフロー (CSR の手動発行で代替)
+- 本番で使うチェックリストは design.md の「rotation の本番チェックリスト」に置いた
+
 ## ユーザー決定の記録 (実機検証後、2026-10-04)
 
 | 項目 | 決定 | 根拠となった検証結果 |

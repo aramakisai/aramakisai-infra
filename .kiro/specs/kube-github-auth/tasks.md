@@ -336,7 +336,7 @@
 
 - [ ] 8. P7: client CA の forced rotation による旧共有 admin 証明書の無効化
 
-- [ ] 8.1 KVM の DR テスト環境で forced rotation の手順を通しで確かめる
+- [x] 8.1 KVM の DR テスト環境で forced rotation の手順を通しで確かめる
   - design.md の手順で行う。新しい client CA を正しい置き場所に置き、forced で rotation を実行し、k3s を再起動する
   - 確認項目: 旧 admin 証明書、旧ローカル admin のコピー、人の旧証明書が 401 になる。新しいローカル admin と OIDC 認証が通る。client CA の指紋が変わり、server CA の指紋は変わらない
   - D16 の確認: systemd 上の再起動で、既存のコンテナが残り Pod が落ちない
