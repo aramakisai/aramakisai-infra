@@ -401,6 +401,24 @@
   - `wait_argocd_healthy` は Health しか見ないため、Sync が Unknown でも成功を返す
   - 手元に docker がある場合は、DOCKER-USER に virbr0 の転送許可が要る
 
+## 本番での各消費者の確認 (task 6.8、2026-10-05)
+
+- Zitadel bootstrap:
+  - 手元のコンテキスト (人向けクライアント証明書) で `zitadel-bootstrap.yml` を実行した。playbook は読取のみで、exec は ready 確認・ファイル存在確認・cat だけであることを確認した
+  - 「Zitadel が ready になるまで待機」が ok で、コンテキストでの kube 接続は成功した。後続の PAT 待機は失敗したが、PAT が emptyDir 上にあり既に消えているためで、認証方式とは無関係。Unauthorized・Forbidden は出ていない。PAT は回収されず、出力先は削除した
+  - Infisical の KUBECONFIG は使わない。`infisical run` を付けると Infisical 側の KUBECONFIG の中身がパスとして解釈され衝突するため、`env -u KUBECONFIG` を付けて実行する
+- intrusion-response:
+  - 検証専用の namespace と待機 Pod を GitOps で追加し、main から dispatch した (namespace は検証用、`pod_selector` で待機 Pod を指定)。全ジョブが成功した
+  - tag:ci での tailnet 参加、フォレンジック artifact の保存、隔離 NetworkPolicy の作成、Discord 通知ジョブが成功し、Unauthorized・Forbidden は出なかった。隔離 NetworkPolicy は namespace 全体が対象で仕様どおり (`pod_selector` は採取対象にのみ効く)
+  - kube-apiserver の監査ログに `gha:intrusion-response` の要求が記録された
+  - 後始末は revert でリソースを Git から外し、ArgoCD の prune (Application の resources-finalizer) で namespace ごと削除された (数分)
+  - 注意: 隔離 NetworkPolicy は `kubectl create` のため、同一 namespace で再実行すると AlreadyExists で失敗する
+- k3s-upgrade:
+  - 実機のない追加 server ノードがインベントリにあると、`any_errors_fatal` により unreachable なホストのために既存ノードの処理も中断する。未作成ノードをインベントリから外した (追加 server グループは空で残す。戻す時期は festival-peak-scaleout の tasks.md に注記済み)
+  - その上で main から dispatch し、成功した。ワークフローログに KUBECONFIG・kubectl の参照はない。PLAY RECAP は unreachable=0・failed=0、changed=0 (対象バージョンは適用済みで、アップグレード自体は走っていない)
+  - readyz・匿名アクセス拒否・etcd 健全性・ノード Ready・cloudflared/ArgoCD Ready の確認タスクはすべて ok。実行後のノードは Ready
+- DR の電源投入経路: 6.9 のゲート停止 run で代替する (ユーザー決定)
+
 ## ユーザー決定の記録 (実機検証後、2026-10-04)
 
 | 項目 | 決定 | 根拠となった検証結果 |
