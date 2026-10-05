@@ -386,6 +386,21 @@
 - 剥奪: binding を削除する PR のマージから約 1 分半で ArgoCD が同期し、同じ証明書で `Forbidden` になった (認証は成功し、認可のみ拒否)。binding を戻す PR のマージから約 50 秒で復帰した
 - 未実測: write 権限のないアカウントで発行ワークフローを起動できないことは実測していない。GitHub の仕様 (workflow_dispatch には write 権限が必要) に依拠する
 
+## KVM の DR テスト環境での検証 (task 6.7、2026-10-05)
+
+- 隔離: 使い捨てクローンで本番 inventory を削除し、`gitops/root.yaml` を Application `kube-access` だけに差し替えた。cloudflared は replicas 0、Infisical は使わずダミー値。事前検査 (origin/main 一致) は、クローンの origin を手元の bare リポジトリに向けて通した。OIDC は VM 内に発行者モックを置き、認証設定の issuer/CA をモックへ差し替えて確認した (実 issuer では偽署名トークンが 401 になり、JWKS 取得成功のメトリクスが出ることを先に確認)
+- 初回起動: 作成直後・作り直し後とも、最初の kube-apiserver 起動に `--authentication-config` が付き、認証設定が有効だった。匿名は 401
+- DR 用 binding: 作成直後・作り直し後とも、ArgoCD の Application 作成と初回 sync より前に存在した。同期後は Ansible の field manager と ArgoCD の共同所有になる
+- 作り直し: 旧 kubeconfig は x509 unknown authority で失敗し、作り直した kubeconfig の CA は新しい server CA と一致、`gha:dr-recovery` として認証された
+- 不正な認証設定 (CEL の構文エラー): 再起動のハンドラーが約 8 秒で失敗を返し、rescue が旧ファイルを戻して再起動、旧設定で `/readyz` ok を確認してから playbook を失敗終了した。ファイルのハッシュは元に戻り、匿名 401 も復帰した。rescue はハンドラーの失敗で発動し、起動確認タスクには到達しない経路だった。ロールバックしない場合、systemd (`Restart=always`、`RestartSec=5s`) は約 13 秒周期で再起動を繰り返す。稼働中の apiserver は配置直後の動的再読込で検証エラーを出し、旧設定のまま稼働を続けた
+- ArgoCD への引き継ぎ: ArgoCD は Ansible が作った binding を引き継いだ。playbook の再実行は changed=0 で、sync 履歴は増えず、binding を削除すると約 10 秒で selfHeal により戻った
+- DR の流れ: `run_ansible` → kubeconfig 作り直し → bootstrap シークレット修復 → ArgoCD の Healthy 待ち が共有 kubeconfig なしで進んだ。ただし `recovery.sh` を関数単位で呼び出しており、`main` を通しての実行ではない (KVM モードの `main` は開始時に既存 kubeconfig を必須とし、bootstrap 後の作り直しを `DR_SKIP_INFRA` で飛ばすため)。CNPG の待機は対象外
+- 周辺の事項 (設計の不具合ではない):
+  - 新規 VM の apt キャッシュが空だと、初回の playbook が失敗する
+  - k3s をアンインストールして VM を再起動せずに再構築すると、Pod の外向き通信が不通になる
+  - `wait_argocd_healthy` は Health しか見ないため、Sync が Unknown でも成功を返す
+  - 手元に docker がある場合は、DOCKER-USER に virbr0 の転送許可が要る
+
 ## ユーザー決定の記録 (実機検証後、2026-10-04)
 
 | 項目 | 決定 | 根拠となった検証結果 |
