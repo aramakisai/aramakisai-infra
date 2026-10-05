@@ -64,7 +64,7 @@ make kubectl ARGS="get applications -n argocd"
 - すべての CLI 操作は `infisical run -- <command>` で実行する
 - `.infisical.json` の `defaultEnvironment` が `"prod"` であることを確認する（空だと dev にフォールバックする）
 - 手元の `terraform` 実行は `terraform login` (Terraform Cloud) で認証する。`HCLOUD_TOKEN` 等のプロバイダー認証情報は TFC 側が保持する
-- DR 経路 (`recovery.sh`) は TFC API を直接叩くため、Infisical `prod` の `TFC_API_TOKEN` / `TFC_WORKSPACE_ID` を使う。トークンは workspace `aramakisai-infra` に apply 権限を持つ team の team token (organization token は run を作れず、user token は個人に紐づくため不可)
+- DR 経路 (`recovery.sh`) は TFC API を直接叩くため、Infisical `prod` の `TFC_API_TOKEN` / `TFC_WORKSPACE_ID` を使う。トークンは `owners` team の team token (有効期限なし。期限切れで障害時に DR が黙って止まるのを避けるため。無料プランでは team を `owners` 1つしか作れない。organization token は run を作れず、user token は個人に紐づくため不可)。org 管理者と同等の権限を持ち DR に必要な範囲より広いが、intrusion-response のローテーション対象に含まれる
 
 ---
 
