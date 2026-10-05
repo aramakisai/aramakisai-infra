@@ -133,7 +133,7 @@ SSOを一切経由しない**Vaultwardenネイティブアカウント**とし�
 
 3. **SSO_ONLY を一時解除 → ログイン → Personal API Key 発行**
    - `gitops/manifests/prod/vaultwarden/deployment.yaml` の `SSO_ONLY` を `false` に変更し、コミット&反映
-   - 反映確認: `make kubectl ARGS="get pods -n prod -l app=vaultwarden"` で再起動完了を確認
+   - 反映確認: `make kubectl ARGS="get pods -n prod -l app=vaultwarden"` で再起動完了を確認 (事前に `make kube-login` でコンテキスト `aramakisai-prod` を作成しておく)
    - Web Vaultにマスターパスワードでログイン
    - 受諾後、Organization Owner が Web UI で当該メンバーを **Confirm**（この操作のみOrg Owner本人のブラウザ作業が必須）
    - サービスアカウント自身でPersonal API Keyを発行: Web Vault → Settings → Security → Keys → API Key（マスターパスワード再入力が必要）

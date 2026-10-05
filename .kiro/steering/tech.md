@@ -66,7 +66,7 @@ Authentik 時代の定義は `terraform/authentik_*.tf.disabled` として残す
 1. K3s インストール (prod-node-1: `--cluster-init`、シングルノード)
 2. **Cilium CNI** を Helm でインストール (`--flannel-backend: none` のため必須。ないと全ノード NotReady)
 3. cloudflared を `gitops/manifests/prod/cloudflared/` から直接 kubectl apply (ArgoCD への外部アクセス経路確保)
-4. ArgoCD インストール → `infisical-auth` Secret 作成 → GitHub Deploy Key 登録 → App of Apps 適用
+4. ArgoCD インストール → `infisical-auth` Secret 作成 → GitHub Deploy Key 登録 → DR 用 RBAC binding (`kube-access/dr-recovery.yaml`) の先行適用 → App of Apps 適用
    - ArgoCD v3.4.4 以降の configmap informer ラベル要件に対応するため、`argocd-cm` および `argocd-rbac-cm` に `app.kubernetes.io/name` と `app.kubernetes.io/part-of` ラベルを明示的に付与する。
 5. ESO が `sync-wave: "-1"` で先行 sync → 他アプリは `wave: 0`
 
@@ -75,6 +75,21 @@ Authentik 時代の定義は `terraform/authentik_*.tf.disabled` として残す
 - **主要フラグ**: `--flannel-backend none` (Cilium用), `--disable-network-policy` (Ciliumが担当), `--disable traefik,servicelb` (GitOps/Tunnel代替), `--embedded-registry` (Spegel)
 - **Swap設定**: 全ノード共通で 4GB swap を Ansible（swap ロール）で作成。kubelet `fail-swap-on=false` を設定（ホスト側プロセスの OOM 安全弁）。Pod cgroup には swap を割り当てない「NoSwap」挙動を維持し、K8s 資源モデルの予測可能性を保つ。
 - **障害復旧**: dr-trigger が障害を通知し、人が dr-recovery を起動・承認して復旧する (単一ノード構成のみ自動化)。詳細は [dr.md](dr.md) 参照。
+
+### kube-apiserver の認証と RBAC (kube-access)
+- **認証方式**: 共有 kubeconfig は使わず、kube-apiserver が 2 種類の資格情報を直接検証する。
+  - CI・DR: GitHub Actions OIDC。`k3s-server` ロールが `authentication-config` (AuthenticationConfiguration) を配布し、組織・リポジトリの数値 ID、`ref` = main、`job_workflow_ref` (main 上の許可ファイル)、`event_name`、`runner_environment`、(高権限のみ) `environment` を CEL で照合する。ユーザー名は `gha:<ワークフローファイル名>` で、許可リストは `k3s_github_oidc_workflows` (pull_request 系は許可しない)。匿名認証は明示的に無効。`k3s-upgrade` は kube-apiserver の権限を持たない (ノード上のローカル admin を使う)
+  - 人: `make kube-login` が `kube-cert-issue.yml` で発行する短命クライアント証明書 (ユーザー名 `github:<login>:<数値ID>`、有効期限 7 日。`cluster-signing-duration` で同じ上限を課す)。証明書は失効できない
+- **`kube-access` Application** (`gitops/apps/prod/kube-access.yaml`、wave -1、prune・selfHeal): 全 RBAC (`gitops/manifests/prod/kube-access/` の `workflows.yaml`・`humans.yaml`・`dr-recovery.yaml`) の正本。binding を Git から消すと同期で即時に剥奪される。権限の付与・剥奪は binding を追加・削除する PR で行う。クラスタ全体の権限を他 Application から独立して prune できるようにするため、専用の Application に分けている
+- **bootstrap 時の先行適用 (GitOps 原則の例外)**: `gha:dr-recovery` の binding (`dr-recovery.yaml`) だけは、`k3s-bootstrap.yml` がノード上のローカル admin で ArgoCD の同期より前に適用する。クラスタ再作成直後に DR が OIDC で認証できる必要があるため。定義は同じファイルを参照し値を複製しない。適用後は ArgoCD が引き継ぐ (server-side apply で共同所有)
+- **監査ログ**: 要求ごとの認証済みユーザー名・操作・対象を Metadata レベルで記録する (kube-system の ServiceAccount と全 ServiceAccount の read は除外)。ローテーション上限でディスク予算内に収める
+- **設定変更の適用**: 認証設定と `config.yaml` の変更は k3s の再起動を伴う。適用後にローカル admin の `/readyz` と匿名 `/version` = 401 を確認し、失敗したら旧設定へ自動ロールバックして playbook を失敗させる
+- **発行ワークフローの防御と残存リスク**: 承認権限は CSR の subject を制限できず、発行ワークフローが侵害されると任意の CN (ServiceAccount 名や `gha:*` を含む) の証明書を作れて cluster-admin 相当になる。発行ごとの別メンバー承認は課さない (7 日ごとの再発行が利用者単独で完結する運用を優先)。
+  - 防御: API サーバーの claim 照合 (main 上の `kube-cert-issue.yml`・`workflow_dispatch`・github-hosted のみ)、ワークフロー内の CSR 検証 (CN が起動者本人の `github:<login>:<数値ID>` と完全一致、他属性・拡張なし。`kube-cert-validate.sh`)、組み込みの `CertificateSubjectRestriction` (`system:masters` を拒否)、有効期限の上限 7 日、アクションの commit SHA 固定と入力の環境変数渡し、main のブランチ保護
+  - 残存リスク: main への悪意ある変更がレビューを通る、または管理者 bypass でマージされた場合、発行済みの不正証明書は有効期限まで失効できない。検知後にできるのは main の修正と binding の削除で、発行済み証明書を無効にできるのは client CA の forced rotation だけ。write 権限保持者のアカウントが乗っ取られた場合は、その本人の binding の範囲で証明書を取得され得る
+  - **レビューの扱い**: `kube-cert-issue.yml`・`kube-cert-validate.sh`・`kube-oidc.sh`・`kube-access/` の RBAC・`k3s-server` ロールの認証設定の変更は、cluster-admin 権限の変更と同じ扱いでレビューする
+- **Environment `dr-recovery`**: 承認者は team `infra` で、起動者本人の承認を認める (別メンバーの確認は保証しない)。管理者 bypass 無効・deployment branch は main のみ。`dr-recovery.yml` が実行時に `verify-environment-protection.sh` で required reviewers (1 件以上)・管理者 bypass 無効・main 限定を検査し、満たさなければ DR を開始しない (Environment が未作成だと GitHub が承認なしで自動作成するため)。team へのメンバー追加は手動 (Terraform 管理外)
+- **再検証が必要になる条件**: 許可ワークフローの追加・改名、リポジトリ・組織の移転・改名、GitHub OIDC の claim 形式の変更、k3s アップグレード (signer 設定・匿名認証の既定値)、Environment の名前・保護設定・team 構成の変更、ノード名・`tls-san` の変更、Tailscale ACL の変更 (`tag:ci` から 6443・10250 への到達が前提で、ACL は手動管理のため機械的に検知できない)
 
 ### Terraform の出力パラメータと外部連携
 - **healthchecksio_mailserver_backup_ping_url**: mailserver バックアップの生存確認用。Infisical の `HEALTHCHECKS_MAILSERVER_BACKUP_PING_URL` へ反映。
@@ -155,7 +170,7 @@ eBPF ランタイム侵入検知（Falco）において、コントロールプ�
 ## Development Environment
 
 ### Required Tools & Rules
-- `terraform >= 1.9`, `ansible >= 2.14`, `kubectl`, `tailscale` (SSH接続用), `infisical` (シークレット注入), `uv`
+- `terraform >= 1.9`, `ansible >= 2.14`, `kubectl`, `tailscale` (SSH接続用), `gh` (2.87.0 以上。`make kube-login` が使う), `infisical` (シークレット注入), `uv`
 - **Infisical が Single Source of Truth**。`.env` などのローカルファイルは無効化されており、`infisical run --` 経由で環境変数を注入する。
 
 ### Common Commands
@@ -167,6 +182,10 @@ infisical run -- terraform -chdir=terraform apply
 # Ansible 単体実行 / K3s アップデート
 infisical run -- ansible-playbook -i ansible/inventory/tailscale.yml ansible/playbooks/k3s-bootstrap.yml
 infisical run -- ansible-playbook -i ansible/inventory/tailscale.yml ansible/playbooks/k3s-bootstrap.yml -e "k3s_version=v1.36.3+k3s1"
+
+# kubectl: 初回と 7 日ごとに証明書を発行してからコンテキスト aramakisai-prod で実行 (kubectl を直接叩かない)
+make kube-login
+make kubectl ARGS="get pods -A"
 
 # K3s バージョン差分の手動確認 (通常は週次cronで自動実行)
 # GitHub Actions の k3s-version-check.yml を workflow_dispatch で手動トリガー
