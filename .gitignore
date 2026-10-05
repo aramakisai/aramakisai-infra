@@ -13,6 +13,7 @@ override.tf.json
 *_override.tf.json
 
 # Ansible
+ansible/kubeconfig
 *.retry
 *.pyc
 __pycache__/
