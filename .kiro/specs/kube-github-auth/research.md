@@ -364,6 +364,43 @@
   - GitHub の issuer を名乗る不正署名のトークンを 1 回提示して 401 を確認し、`apiserver_authentication_jwt_authenticator_jwks_fetch_last_timestamp_seconds{result="success"}` が記録された (JWKS は初回のトークン提示時に取得される)
   - 監査ログは再起動直後の約 15 分で約 0.6MB。playbook 2 回目の実行分を含む。総量はローテーション上限 ((4 + 1) × 100MB) で頭打ちになり、ノードのディスク空きに対して十分小さい
 
+## infra-health-check の OIDC 移行の本番検証 (task 4.3、2026-10-04〜05)
+
+- main での workflow_dispatch と、その後の schedule 実行 (複数回) が成功した。OIDC 認証で CNPG の状態とノードのディスク使用率を従来どおり取得できた。ディスク使用率は kubelet 10250 への直接取得で、`nodes/stats` 権限のみを使い、kubelet 証明書の CA 検証あり。tailnet の `tag:ci` から 10250 への到達 (D14) が成り立っている
+- schedule と workflow_dispatch の `event_name` はどちらも許可イベントとして受理された (D16)
+- 拒否経路:
+  - main 以外の ref から dispatch した infra-health-check と、許可リストにない一時ワークフロー (push 起動、一時ブランチ) は、どちらも 401 になった。API サーバーのログに照合規則のメッセージ (`ref が refs/heads/main ではありません`) が出た
+  - 規則は先頭から評価され、最初に偽になった規則で拒否される。許可リスト規則単独の拒否は 3.5 の使い捨て k3s で確認済み
+  - 一時ブランチと run は削除した
+- 検証中に、スクリプトが kube の取得失敗を警告扱いで続行し、run が success になる問題を見つけた。認証確認 (`kubectl auth whoami`) と、取得失敗時の非 0 終了を追加した
+- 上記の修正で、exec プラグインが stderr に出す `::add-mask::` 行を値として取り込む不具合が出た。stdout だけを使うよう修正した (stderr を値として取り込まないこと)
+
+## 人向け証明書の本番検証 (task 5.4、2026-10-04)
+
+- 発行: `make kube-login` で、dispatch の run ID 返却・完了待ち・artifact 取得が設計どおり動いた。承認待ちなしで約 30 秒で発行され、有効期限は 7 日
+- 認証・認可: 発行された証明書で `github:<ユーザー名>:<数値ID>` として認証され、binding の範囲で exec・`logs -f`・port-forward が動いた。`make kubectl` は Infisical を参照せず、コンテキスト `aramakisai-prod` で動く
+- 記録: job summary に起動者・ユーザー名・notAfter が残る。ログ・artifact にトークンと秘密鍵は出ず、artifact は証明書 1 ファイルだけ
+- 拒否: 他人の CN の CSR は理由付き (`CN が期待ユーザー名と一致しません`) で拒否され、CSR オブジェクトは作られない
+- re-run: attempt 2 で発行された証明書の公開鍵は、最初の起動者の鍵と一致した。CSR 名は re-run 時に `-<attempt>` が付く
+- GC: CSR オブジェクトは承認から約 1 時間 15 分後に GC で消えた
+- 剥奪: binding を削除する PR のマージから約 1 分半で ArgoCD が同期し、同じ証明書で `Forbidden` になった (認証は成功し、認可のみ拒否)。binding を戻す PR のマージから約 50 秒で復帰した
+- 未実測: write 権限のないアカウントで発行ワークフローを起動できないことは実測していない。GitHub の仕様 (workflow_dispatch には write 権限が必要) に依拠する
+
+## KVM の DR テスト環境での検証 (task 6.7、2026-10-05)
+
+- 隔離: 使い捨てクローンで本番 inventory を削除し、`gitops/root.yaml` を Application `kube-access` だけに差し替えた。cloudflared は replicas 0、Infisical は使わずダミー値。事前検査 (origin/main 一致) は、クローンの origin を手元の bare リポジトリに向けて通した。OIDC は VM 内に発行者モックを置き、認証設定の issuer/CA をモックへ差し替えて確認した (実 issuer では偽署名トークンが 401 になり、JWKS 取得成功のメトリクスが出ることを先に確認)
+- 初回起動: 作成直後・作り直し後とも、最初の kube-apiserver 起動に `--authentication-config` が付き、認証設定が有効だった。匿名は 401
+- DR 用 binding: 作成直後・作り直し後とも、ArgoCD の Application 作成と初回 sync より前に存在した。同期後は Ansible の field manager と ArgoCD の共同所有になる
+- 作り直し: 旧 kubeconfig は x509 unknown authority で失敗し、作り直した kubeconfig の CA は新しい server CA と一致、`gha:dr-recovery` として認証された
+- 不正な認証設定 (CEL の構文エラー): 再起動のハンドラーが約 8 秒で失敗を返し、rescue が旧ファイルを戻して再起動、旧設定で `/readyz` ok を確認してから playbook を失敗終了した。ファイルのハッシュは元に戻り、匿名 401 も復帰した。rescue はハンドラーの失敗で発動し、起動確認タスクには到達しない経路だった。ロールバックしない場合、systemd (`Restart=always`、`RestartSec=5s`) は約 13 秒周期で再起動を繰り返す。稼働中の apiserver は配置直後の動的再読込で検証エラーを出し、旧設定のまま稼働を続けた
+- ArgoCD への引き継ぎ: ArgoCD は Ansible が作った binding を引き継いだ。playbook の再実行は changed=0 で、sync 履歴は増えず、binding を削除すると約 10 秒で selfHeal により戻った
+- DR の流れ: `run_ansible` → kubeconfig 作り直し → bootstrap シークレット修復 → ArgoCD の Healthy 待ち が共有 kubeconfig なしで進んだ。ただし `recovery.sh` を関数単位で呼び出しており、`main` を通しての実行ではない (KVM モードの `main` は開始時に既存 kubeconfig を必須とし、bootstrap 後の作り直しを `DR_SKIP_INFRA` で飛ばすため)。CNPG の待機は対象外
+- 周辺の事項 (設計の不具合ではない):
+  - 新規 VM の apt キャッシュが空だと、初回の playbook が失敗する
+  - k3s をアンインストールして VM を再起動せずに再構築すると、Pod の外向き通信が不通になる
+  - `wait_argocd_healthy` は Health しか見ないため、Sync が Unknown でも成功を返す
+  - 手元に docker がある場合は、DOCKER-USER に virbr0 の転送許可が要る
+
 ## ユーザー決定の記録 (実機検証後、2026-10-04)
 
 | 項目 | 決定 | 根拠となった検証結果 |

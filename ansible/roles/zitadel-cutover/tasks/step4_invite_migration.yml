@@ -14,9 +14,10 @@
   ansible.builtin.shell:
     cmd: >
       nohup kubectl port-forward -n {{ zitadel_bootstrap_namespace }} svc/zitadel 18080:8080
-      --kubeconfig {{ zitadel_bootstrap_kubeconfig }}
+      {{ zitadel_bootstrap_kubectl_args | join(' ') }}
       > {{ zitadel_bootstrap_output_dir }}/port-forward.log 2>&1 &
       echo $! > {{ zitadel_bootstrap_output_dir }}/port-forward.pid
+  environment: "{{ zitadel_bootstrap_kubectl_env }}"
   changed_when: true
 
 - name: port-forwardの確立を待つ

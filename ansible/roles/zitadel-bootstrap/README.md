@@ -11,18 +11,19 @@ Pod内の一時ファイル(`/zitadel-data/zitadel-admin-sa.pat`)へ書き込む
 
 ## 使い方 (本番)
 
-`make kubectl`と同じ方式で、Infisicalの`KUBECONFIG`シークレット(内容そのもの)を
-`infisical run`経由で読み込みkubeconfigファイルを自動生成する。ambientな
+`make kube-login`で作ったコンテキスト`aramakisai-prod`を`kubectl --context`で
+明示して使う(`ZITADEL_KUBE_CONTEXT`で変更可)。kubeconfigは標準の解決(環境変数
+`KUBECONFIG`のパス、なければ`~/.kube/config`)に従い、ambientな
 `kubectl config current-context`には依存しない。
 
 ```bash
-infisical run -- ansible-playbook -i ansible/inventory/tailscale.yml ansible/playbooks/zitadel-bootstrap.yml
+ansible-playbook -i ansible/inventory/tailscale.yml ansible/playbooks/zitadel-bootstrap.yml
 ```
 
 ## 使い方 (k3d検証環境)
 
 ```bash
-export ZITADEL_POC_KUBECONFIG=/path/to/k3d-kubeconfig.yaml   # 必須。指定時は本番kubeconfig生成をスキップする
+export ZITADEL_POC_KUBECONFIG=/path/to/k3d-kubeconfig.yaml   # 必須。指定時はコンテキスト指定を付けずこのkubeconfigを使う
 ansible-playbook ansible/playbooks/zitadel-bootstrap.yml
 ```
 

@@ -93,12 +93,6 @@ kubectl_r create secret generic aramakisai-infra-repo \
   | kubectl_r label --local -f - argocd.argoproj.io/secret-type=repository -o yaml \
   | kubectl_r apply -f -
 
-# ============================================================
-# 6. KUBECONFIG ファイルの内容を KUBECONFIG 環境変数に変換
-#    recovery.sh は KUBECONFIG env var (内容) を KUBECONFIG_FILE に書き出す。
-#    DR_LOCAL_TEST=1 ではファイルが既存なら env var は不要だが念のため設定する。
-# ============================================================
-
 log ""
 log "セットアップ完了。recovery.sh を実行してください:"
 log ""

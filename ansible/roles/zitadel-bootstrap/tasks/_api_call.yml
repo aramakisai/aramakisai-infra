@@ -12,19 +12,11 @@
 
 - name: "Zitadel API呼び出し: {{ zitadel_api_label | default(zitadel_api_method ~ ' ' ~ zitadel_api_path) }}"
   ansible.builtin.command:
-    argv:
-      - kubectl
-      - exec
-      - -i
-      - "{{ zitadel_bootstrap_pod }}"
-      - -n
-      - "{{ zitadel_bootstrap_namespace }}"
-      - -c
-      - "{{ zitadel_bootstrap_login_container }}"
-      - --
-      - node
-      - -e
-      - "{{ lookup('file', role_path + '/files/zitadel_api.js') }}"
+    argv: >-
+      {{ ['kubectl'] + zitadel_bootstrap_kubectl_args
+         + ['exec', '-i', zitadel_bootstrap_pod, '-n', zitadel_bootstrap_namespace,
+            '-c', zitadel_bootstrap_login_container, '--', 'node', '-e',
+            lookup('file', role_path + '/files/zitadel_api.js')] }}
     stdin: "{{ _zitadel_api_payload }}"
   vars:
     _zitadel_api_payload: "{{ _zitadel_api_payload_dict | to_json }}"
@@ -37,8 +29,7 @@
       fileBase64: "{{ zitadel_api_file.base64 | default(none) }}"
       fileName: "{{ zitadel_api_file.name | default(none) }}"
       fileType: "{{ zitadel_api_file.type | default(none) }}"
-  environment:
-    KUBECONFIG: "{{ zitadel_bootstrap_kubeconfig }}"
+  environment: "{{ zitadel_bootstrap_kubectl_env }}"
   register: zitadel_api_raw
   changed_when: false
   no_log: true

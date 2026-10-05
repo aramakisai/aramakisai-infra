@@ -24,24 +24,21 @@
 - name: "[k3d] 既存の検証用Podを削除する (冪等な再実行のため)"
   ansible.builtin.command:
     argv: [kubectl, delete, pod, "{{ zitadel_cutover_k3d_dovecot_pod }}", -n, "{{ zitadel_cutover_k3d_dovecot_namespace }}", --ignore-not-found, --wait=true]
-  environment:
-    KUBECONFIG: "{{ zitadel_bootstrap_kubeconfig }}"
+  environment: "{{ zitadel_bootstrap_kubectl_env }}"
   changed_when: false
   when: zitadel_cutover_target_env == 'k3d'
 
 - name: "[k3d] 検証用Podを起動する"
   ansible.builtin.command:
     argv: [kubectl, run, "{{ zitadel_cutover_k3d_dovecot_pod }}", "--image=alpine:3.20", -n, "{{ zitadel_cutover_k3d_dovecot_namespace }}", --restart=Never, --command, --, sleep, "1800"]
-  environment:
-    KUBECONFIG: "{{ zitadel_bootstrap_kubeconfig }}"
+  environment: "{{ zitadel_bootstrap_kubectl_env }}"
   changed_when: true
   when: zitadel_cutover_target_env == 'k3d'
 
 - name: "[k3d] Podの起動を待つ"
   ansible.builtin.command:
     argv: [kubectl, wait, --for=condition=Ready, "pod/{{ zitadel_cutover_k3d_dovecot_pod }}", -n, "{{ zitadel_cutover_k3d_dovecot_namespace }}", --timeout=60s]
-  environment:
-    KUBECONFIG: "{{ zitadel_bootstrap_kubeconfig }}"
+  environment: "{{ zitadel_bootstrap_kubectl_env }}"
   changed_when: false
   when: zitadel_cutover_target_env == 'k3d'
 
@@ -49,8 +46,7 @@
   ansible.builtin.command:
     argv: [kubectl, exec, "{{ zitadel_cutover_k3d_dovecot_pod }}", -n, "{{ zitadel_cutover_k3d_dovecot_namespace }}", --, sh, -c,
            "apk add --quiet dovecot dovecot-lua lua5.3 lua5.3-socket lua5.3-cjson && mkdir -p /etc/dovecot /var/run/dovecot /var/lib/dovecot"]
-  environment:
-    KUBECONFIG: "{{ zitadel_bootstrap_kubeconfig }}"
+  environment: "{{ zitadel_bootstrap_kubectl_env }}"
   changed_when: true
   when: zitadel_cutover_target_env == 'k3d'
 
@@ -105,8 +101,7 @@
 - name: "[k3d] PATをPodへ転送する"
   ansible.builtin.command:
     argv: [kubectl, cp, "{{ zitadel_bootstrap_output_dir }}/dovecot-lua-auth.pat", "{{ zitadel_cutover_k3d_dovecot_namespace }}/{{ zitadel_cutover_k3d_dovecot_pod }}:/run/secrets/zitadel-dovecot-pat"]
-  environment:
-    KUBECONFIG: "{{ zitadel_bootstrap_kubeconfig }}"
+  environment: "{{ zitadel_bootstrap_kubectl_env }}"
   changed_when: true
   no_log: true
   when: zitadel_cutover_target_env == 'k3d'
@@ -129,8 +124,7 @@
   loop:
     - [kubectl, cp, "{{ zitadel_bootstrap_output_dir }}/zitadel-auth.lua", "{{ zitadel_cutover_k3d_dovecot_namespace }}/{{ zitadel_cutover_k3d_dovecot_pod }}:/etc/dovecot/zitadel-auth.lua"]
     - [kubectl, cp, "{{ role_path }}/files/dovecot-test.conf", "{{ zitadel_cutover_k3d_dovecot_namespace }}/{{ zitadel_cutover_k3d_dovecot_pod }}:/etc/dovecot/dovecot.conf"]
-  environment:
-    KUBECONFIG: "{{ zitadel_bootstrap_kubeconfig }}"
+  environment: "{{ zitadel_bootstrap_kubectl_env }}"
   changed_when: true
   when: zitadel_cutover_target_env == 'k3d'
 
@@ -141,8 +135,7 @@
   ansible.builtin.command:
     argv: [kubectl, exec, "{{ zitadel_cutover_k3d_dovecot_pod }}", -n, "{{ zitadel_cutover_k3d_dovecot_namespace }}", --, sh, -c,
            "dovecot -c /etc/dovecot/dovecot.conf >/dev/null 2>&1"]
-  environment:
-    KUBECONFIG: "{{ zitadel_bootstrap_kubeconfig }}"
+  environment: "{{ zitadel_bootstrap_kubectl_env }}"
   changed_when: true
   when: zitadel_cutover_target_env == 'k3d'
 
@@ -170,8 +163,7 @@
 - name: "[k3d] 正しいパスワードで認証成功することを確認する"
   ansible.builtin.command:
     argv: [kubectl, exec, "{{ zitadel_cutover_k3d_dovecot_pod }}", -n, "{{ zitadel_cutover_k3d_dovecot_namespace }}", --, doveadm, -c, /etc/dovecot/dovecot.conf, auth, test, cutover-dovecot-test@aramakisai.invalid, "CutoverTest1!"]
-  environment:
-    KUBECONFIG: "{{ zitadel_bootstrap_kubeconfig }}"
+  environment: "{{ zitadel_bootstrap_kubectl_env }}"
   register: _dovecot_auth_ok
   changed_when: false
   failed_when: "'auth succeeded' not in _dovecot_auth_ok.stdout"
@@ -180,8 +172,7 @@
 - name: "[k3d] 誤ったパスワードで認証拒否されることを確認する"
   ansible.builtin.command:
     argv: [kubectl, exec, "{{ zitadel_cutover_k3d_dovecot_pod }}", -n, "{{ zitadel_cutover_k3d_dovecot_namespace }}", --, doveadm, -c, /etc/dovecot/dovecot.conf, auth, test, cutover-dovecot-test@aramakisai.invalid, WrongPassword!]
-  environment:
-    KUBECONFIG: "{{ zitadel_bootstrap_kubeconfig }}"
+  environment: "{{ zitadel_bootstrap_kubectl_env }}"
   register: _dovecot_auth_wrong
   changed_when: false
   failed_when: "'auth failed' not in _dovecot_auth_wrong.stdout"
@@ -190,8 +181,7 @@
 - name: "[k3d] userdbルックアップが成功することを確認する"
   ansible.builtin.command:
     argv: [kubectl, exec, "{{ zitadel_cutover_k3d_dovecot_pod }}", -n, "{{ zitadel_cutover_k3d_dovecot_namespace }}", --, doveadm, -c, /etc/dovecot/dovecot.conf, user, cutover-dovecot-test@aramakisai.invalid]
-  environment:
-    KUBECONFIG: "{{ zitadel_bootstrap_kubeconfig }}"
+  environment: "{{ zitadel_bootstrap_kubectl_env }}"
   register: _dovecot_userdb
   changed_when: false
   failed_when: "'uid\t5000' not in _dovecot_userdb.stdout"
@@ -205,8 +195,7 @@
 - name: "[k3d] 検証用Podを停止・削除する (後片付け)"
   ansible.builtin.command:
     argv: [kubectl, delete, pod, "{{ zitadel_cutover_k3d_dovecot_pod }}", -n, "{{ zitadel_cutover_k3d_dovecot_namespace }}", --ignore-not-found]
-  environment:
-    KUBECONFIG: "{{ zitadel_bootstrap_kubeconfig }}"
+  environment: "{{ zitadel_bootstrap_kubectl_env }}"
   changed_when: true
   when: zitadel_cutover_target_env == 'k3d'
 

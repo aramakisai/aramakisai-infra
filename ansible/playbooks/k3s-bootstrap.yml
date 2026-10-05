@@ -27,6 +27,7 @@
     git_applied_paths:
       - gitops/manifests/prod/cloudflared
       - gitops/manifests/prod/argocd
+      - gitops/manifests/prod/kube-access/dr-recovery.yaml
       - gitops/root.yaml
   tasks:
     - name: 制御ノードの検査
@@ -380,6 +381,7 @@
     # argocd-config (ArgoCD Application) が Git から管理する upstream 同名の ConfigMap
     argocd_cm_file: "{{ playbook_dir }}/../../gitops/manifests/prod/argocd/argocd-cm.yaml"
     argocd_rbac_cm_file: "{{ playbook_dir }}/../../gitops/manifests/prod/argocd/argocd-rbac-cm.yaml"
+    dr_recovery_binding: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../gitops/manifests/prod/kube-access/dr-recovery.yaml') }}"
   tasks:
     - name: ArgoCD namespace 作成
       ansible.builtin.include_tasks: tasks/ensure_namespace.yml
@@ -497,6 +499,15 @@
           argocd.argoproj.io/secret-type: repository
         bs_hint: ARGOCD_GITHUB_DEPLOY_KEY
         bs_dry: false
+
+    - name: DR 復旧ワークフロー用の ClusterRoleBinding を適用
+      # クラスター再作成直後は ArgoCD の同期 (kube-access) より前に dr-recovery が OIDC で
+      # 認証できる必要がある。定義は kube-access と同じファイルを使い、値を複製しない。
+      # --force-conflicts により ArgoCD の field manager からも所有権を取るが、内容は同一のため
+      # 既存クラスターでは差分が出ず、後続の ArgoCD 同期もそのまま引き継ぐ
+      ansible.builtin.include_tasks: tasks/apply_manifests.yml
+      vars:
+        am_stdin: "{{ dr_recovery_binding }}"
 
     - name: App of Apps (root.yaml) を適用
       # 適用後は ArgoCD が自律的に sync を開始:

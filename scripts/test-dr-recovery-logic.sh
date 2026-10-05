@@ -7,7 +7,7 @@
 # 使い方: ./scripts/test-dr-recovery-logic.sh
 
 # スタブ関数・source 先から参照する変数は静的解析では追えない
-# shellcheck disable=SC2317,SC2034,SC2218
+# shellcheck disable=SC2317,SC2329,SC2034,SC2218,SC2030,SC2031
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -39,6 +39,8 @@ export PATH="${WORK}/bin:${PATH}"
 source "${ROOT}/.github/scripts/recovery.sh"
 set +e +u
 set +o pipefail
+# 生存確認ゲート以降のテストは refresh_kubeconfig をスタブするため、実体を別名で退避する
+eval "real_$(declare -f refresh_kubeconfig)"
 
 PASS=0
 FAIL=0
@@ -84,6 +86,7 @@ ts_token() { echo tok; }
 ts_devices() { echo "${TS_JSON}"; }
 endpoint_up() { return "${EP_RC}"; }
 kubectl_r() { return "${KUBECTL_RC}"; }
+refresh_kubeconfig() { echo refresh_kubeconfig >>"${CALLS}"; return "${REFRESH_RC:-0}"; }
 hcloud_server_status() { echo "${HC_STATUS}"; }
 tfc_server_in_state() { return "${STATE_RC}"; }
 set_world() { HC_STATUS="$1"; TS_JSON="$2"; EP_RC="$3"; KUBECTL_RC="$4"; STATE_RC=0; }
@@ -104,6 +107,14 @@ set_world absent "${OFFLINE}" 0 1
 assert_eq "公開エンドポイントが 1 つでも応答 -> 停止" 1 "$(gate)"
 set_world absent "${OFFLINE}" 1 0
 assert_eq "kubectl get nodes が成功 -> 停止" 1 "$(gate)"
+REFRESH_RC=1
+set_world absent "${OFFLINE}" 1 0
+assert_eq "kubeconfig 生成失敗 (CA 取得不可 = 到達不能) -> kubectl は dead として進行" 0 "$(gate)"
+assert_eq "kubeconfig 生成失敗のシグナルは kubectl=dead" "kubectl=dead" "$(collect_signals prod-node-1 2>/dev/null | grep kubectl)"
+REFRESH_RC=0
+assert_eq "kubeconfig 生成成功のシグナルは kubectl=alive" "kubectl=alive" "$( set_world absent "${OFFLINE}" 1 0; collect_signals prod-node-1 2>/dev/null | grep kubectl)"
+set_world absent "${OFFLINE}" 1 1
+assert_eq "kubeconfig は作れるが kubectl 失敗 -> dead として進行" 0 "$(gate)"
 set_world unknown "${OFFLINE}" 1 1
 assert_eq "Hetzner API 失敗 (判定不能) -> 停止" 1 "$(gate)"
 set_world starting "${OFFLINE}" 1 1
@@ -221,23 +232,25 @@ assert_eq "メール DNS run のスコープ逸脱 -> discard し apply しな�
 assert_eq "prod-node-1 以外は DNS 更新しない" "" "$(calls)"
 
 echo ""
-echo "=== Infisical (読取用 CI identity)・kubeconfig 取得は失敗で止まる ==="
-INFISICAL_CLIENT_ID=id INFISICAL_CLIENT_SECRET=sec INFISICAL_PROJECT_ID=proj
-infisical() {
-  echo "infisical $1 $2" >>"${CALLS}"
-  case "$1" in
-    login) [[ "${INF_LOGIN_RC:-0}" == "0" ]] && echo tok; return "${INF_LOGIN_RC:-0}" ;;
-    secrets) [[ "${INF_GET_RC:-0}" == "0" ]] && printf '%s' "${INF_VALUE-apiVersion: v1}"; return "${INF_GET_RC:-0}" ;;
-  esac
-}
-: >"${CALLS}"; INF_LOGIN_RC=0 INF_GET_RC=0 INF_VALUE="apiVersion: v1"
-(refresh_kubeconfig) >/dev/null 2>&1
-assert_eq "取得成功: kubeconfig を書き換える" "apiVersion: v1" "$(cat "${KUBECONFIG_FILE}")"
+echo "=== refresh_kubeconfig: kube-oidc.sh で OIDC kubeconfig を作る (失敗は return 1、旧ファイルは壊さない) ==="
+KUBE_OIDC="${WORK}/kube-oidc-stub.sh"
+cat >"${KUBE_OIDC}" <<'STUB'
+#!/bin/sh
+echo "kube-oidc $*" >>"$CALLS"
+[ "${OIDC_RC:-0}" = "0" ] || exit "${OIDC_RC}"
+[ "$1" = "kubeconfig" ] && printf 'apiVersion: v1' >"$2"
+STUB
+chmod +x "${KUBE_OIDC}"
+export CALLS
+: >"${CALLS}"; echo old >"${KUBECONFIG_FILE}"
+(export OIDC_RC=0; real_refresh_kubeconfig) >/dev/null 2>&1; assert_eq "生成成功: kubeconfig を書き換える" "apiVersion: v1" "$(cat "${KUBECONFIG_FILE}")"
+assert_eq "kubeconfig モードで KUBECONFIG_FILE に書かせる" "kube-oidc kubeconfig ${KUBECONFIG_FILE}.new" "$(head -1 "${CALLS}")"
 echo old >"${KUBECONFIG_FILE}"
-(INF_GET_RC=1; refresh_kubeconfig) >/dev/null 2>&1; assert_eq "secrets get 失敗 -> 異常終了" 1 $?
-(INF_LOGIN_RC=1; refresh_kubeconfig) >/dev/null 2>&1; assert_eq "login 失敗 -> 異常終了" 1 $?
-(INF_VALUE=""; refresh_kubeconfig) >/dev/null 2>&1; assert_eq "空の KUBECONFIG -> 異常終了" 1 $?
-assert_eq "失敗時に古い kubeconfig を空で上書きしない" "old" "$(cat "${KUBECONFIG_FILE}")"
+(export OIDC_RC=1; real_refresh_kubeconfig) >/dev/null 2>&1; assert_eq "生成失敗 (CA 取得不可など) -> return 1" 1 $?
+assert_eq "失敗時に古い kubeconfig を上書きしない" "old" "$(cat "${KUBECONFIG_FILE}")"
+assert_eq "失敗時に一時ファイルを残さない" "no" "$([[ -e "${KUBECONFIG_FILE}.new" ]] && echo yes || echo no)"
+assert_eq "recovery.sh は共有 kubeconfig・Infisical の kube 資格情報を参照しない" "0" \
+  "$(grep -cE 'secrets get KUBECONFIG|dr_infisical_token|echo "\$\{KUBECONFIG\}"' "${ROOT}/.github/scripts/recovery.sh")"
 
 echo ""
 echo "=== CNPG 待機対象・凍結アプリの除外 ==="
@@ -324,7 +337,7 @@ record() { :; }
 init_record() { :; }
 ts_devices() { echo "${TS_JSON}"; }
 kubectl_r() { return "${KUBECTL_RC}"; }
-for fn in recreate_node update_mail_dns poweron_node run_ansible wait_tailscale_registered wait_k3s_ready \
+for fn in refresh_kubeconfig recreate_node update_mail_dns poweron_node run_ansible wait_tailscale_registered wait_k3s_ready \
   repair_bootstrap_secrets wait_argocd_healthy wait_cnpg_healthy; do
   eval "${fn}() { echo ${fn} >>\"\${CALLS}\"; }"
 done
@@ -338,7 +351,7 @@ GIT_SYNC_RC=0
 MAIL_PAUSED_RC=0
 export DR_TARGET_NODE=prod-node-1 K3S_TOKEN=x ARGOCD_GITHUB_DEPLOY_KEY=x CLOUDFLARE_TUNNEL_TOKEN=x CLOUDFLARE_TUNNEL_ID=x
 export INFISICAL_CLIENT_ID=x INFISICAL_CLIENT_SECRET=x INFISICAL_PROJECT_ID=x HCLOUD_TOKEN=x
-export TAILSCALE_OAUTH_CLIENT_ID=x TAILSCALE_OAUTH_CLIENT_SECRET=x TAILSCALE_TAILNET=x TFC_API_TOKEN=x TFC_WORKSPACE_ID=x KUBECONFIG=x
+export TAILSCALE_OAUTH_CLIENT_ID=x TAILSCALE_OAUTH_CLIENT_SECRET=x TAILSCALE_TAILNET=x TFC_API_TOKEN=x TFC_WORKSPACE_ID=x
 export GH_TOKEN=dummy CI_SSH_PRIVATE_KEY=key
 DR_ANSIBLE_INVENTORY="${ROOT}/ansible/inventory/tailscale.yml"
 # errexit が効く別プロセス相当の環境で main を実行する (途中の失敗が後続段階を止めることまで検証)
@@ -347,63 +360,66 @@ TAIL="repair_bootstrap_secrets wait_argocd_healthy wait_cnpg_healthy "
 
 PEERS=""
 set_world running "${ONLINE}" 0 0
-assert_eq "生存シグナルあり -> 停止しインフラ操作なし" "rc=1 " "$(run_main)"
+assert_eq "生存シグナルあり -> 停止しインフラ操作なし" "rc=1 refresh_kubeconfig " "$(run_main)"
 set_world absent "${OFFLINE}" 1 1
 assert_eq "不在 -> 再作成 -> メール DNS -> 接続待機 -> ansible -> 修復と待機" \
-  "rc=0 recreate_node update_mail_dns wait_tailscale_registered run_ansible ${TAIL}" "$(run_main)"
+  "rc=0 refresh_kubeconfig recreate_node update_mail_dns wait_tailscale_registered run_ansible refresh_kubeconfig ${TAIL}" "$(run_main)"
 set_world off "${OFFLINE}" 1 1
 assert_eq "停止 -> 電源投入 -> Ready 確認のみ (Ansible・再作成なし)" \
-  "rc=0 poweron_node wait_tailscale_registered wait_k3s_ready ${TAIL}" "$(run_main)"
+  "rc=0 refresh_kubeconfig poweron_node wait_tailscale_registered wait_k3s_ready ${TAIL}" "$(run_main)"
 PEERS="prod-node-2"
-assert_eq "残存サーバーあり -> cluster-init せず停止" "rc=1 " "$(run_main)"
+assert_eq "残存サーバーあり -> cluster-init せず停止" "rc=1 refresh_kubeconfig " "$(run_main)"
 PEERS=""
 set_world absent "${OFFLINE}" 1 1
 ANSIBLE_READY_RC=1
-assert_eq "冪等化前の playbook -> 破壊的操作の前に停止" "rc=1 " "$(run_main)"
+assert_eq "冪等化前の playbook -> 破壊的操作の前に停止" "rc=1 refresh_kubeconfig " "$(run_main)"
 set_world off "${OFFLINE}" 1 1
 assert_eq "電源投入だけの経路は playbook 未冪等化でも進める" \
-  "rc=0 poweron_node wait_tailscale_registered wait_k3s_ready ${TAIL}" "$(run_main)"
+  "rc=0 refresh_kubeconfig poweron_node wait_tailscale_registered wait_k3s_ready ${TAIL}" "$(run_main)"
 ANSIBLE_READY_RC=0
 set_world absent "${OFFLINE}" 1 1
 GIT_SYNC_RC=1
-assert_eq "HEAD が origin/main と不一致 -> 破壊的操作の前に停止" "rc=1 " "$(run_main)"
+assert_eq "HEAD が origin/main と不一致 -> 破壊的操作の前に停止" "rc=1 refresh_kubeconfig " "$(run_main)"
 GIT_SYNC_RC=2
-assert_eq "git fetch 失敗 -> 停止" "rc=1 " "$(run_main)"
+assert_eq "git fetch 失敗 -> 停止" "rc=1 refresh_kubeconfig " "$(run_main)"
 GIT_SYNC_RC=0
 MAIL_PAUSED_RC=1
-assert_eq "再作成の経路で mail RS が paused でない -> 停止" "rc=1 " "$(run_main)"
+assert_eq "再作成の経路で mail RS が paused でない -> 停止" "rc=1 refresh_kubeconfig " "$(run_main)"
 set_world off "${OFFLINE}" 1 1
 assert_eq "電源投入のみの経路は mail RS の paused を要求しない" \
-  "rc=0 poweron_node wait_tailscale_registered wait_k3s_ready ${TAIL}" "$(run_main)"
+  "rc=0 refresh_kubeconfig poweron_node wait_tailscale_registered wait_k3s_ready ${TAIL}" "$(run_main)"
 GIT_SYNC_RC=1
 assert_eq "電源投入のみの経路は git 同期も要求しない (Ansible を流さない)" \
-  "rc=0 poweron_node wait_tailscale_registered wait_k3s_ready ${TAIL}" "$(run_main)"
+  "rc=0 refresh_kubeconfig poweron_node wait_tailscale_registered wait_k3s_ready ${TAIL}" "$(run_main)"
 GIT_SYNC_RC=0; MAIL_PAUSED_RC=0
 DR_TARGET_NODE=prod-node-2
-assert_eq "cluster-init ホスト以外は自動復旧しない" "rc=1 " "$(run_main)"
+assert_eq "cluster-init ホスト以外は自動復旧しない" "rc=1 refresh_kubeconfig " "$(run_main)"
 DR_TARGET_NODE=prod-node-1
 set_world absent "${OFFLINE}" 1 1; STATE_RC=1
-assert_eq "TFC state と不整合 -> 停止" "rc=1 " "$(run_main)"
+assert_eq "TFC state と不整合 -> 停止" "rc=1 refresh_kubeconfig " "$(run_main)"
 
 DR_FORCE=1
 set_world running "${OFFLINE}" 1 1
 assert_eq "force + 稼働中 -> インフラ操作なしで ansible から再実行" \
-  "rc=0 wait_tailscale_registered run_ansible ${TAIL}" "$(run_main)"
+  "rc=0 refresh_kubeconfig wait_tailscale_registered run_ansible refresh_kubeconfig ${TAIL}" "$(run_main)"
 DR_FORCE=0
 
 echo ""
 echo "=== main: 途中の失敗で後続段階に進まない (errexit) ==="
 set_world absent "${OFFLINE}" 1 1
-for fn in wait_tailscale_registered run_ansible repair_bootstrap_secrets wait_argocd_healthy; do
+for fn in wait_tailscale_registered run_ansible refresh_kubeconfig repair_bootstrap_secrets wait_argocd_healthy; do
   eval "${fn}() { echo ${fn} >>\"\${CALLS}\"; return 1; }"
 done
-assert_eq "Tailscale 待機の失敗で Ansible に進まない" "rc=1 recreate_node update_mail_dns wait_tailscale_registered " "$(run_main)"
+assert_eq "Tailscale 待機の失敗で Ansible に進まない" "rc=1 refresh_kubeconfig recreate_node update_mail_dns wait_tailscale_registered " "$(run_main)"
 wait_tailscale_registered() { echo wait_tailscale_registered >>"${CALLS}"; }
-assert_eq "Ansible の失敗で待機に進まない" "rc=1 recreate_node update_mail_dns wait_tailscale_registered run_ansible " "$(run_main)"
+assert_eq "Ansible の失敗で待機に進まない" "rc=1 refresh_kubeconfig recreate_node update_mail_dns wait_tailscale_registered run_ansible " "$(run_main)"
 run_ansible() { echo run_ansible >>"${CALLS}"; }
-assert_eq "Secret 修復の失敗で待機に進まない" "rc=1 recreate_node update_mail_dns wait_tailscale_registered run_ansible repair_bootstrap_secrets " "$(run_main)"
+refresh_kubeconfig() { echo refresh_kubeconfig >>"${CALLS}"; return 1; }
+assert_eq "bootstrap 後の kubeconfig 再生成の失敗で Secret 修復に進まない" "rc=1 refresh_kubeconfig recreate_node update_mail_dns wait_tailscale_registered run_ansible refresh_kubeconfig " "$(run_main)"
+refresh_kubeconfig() { echo refresh_kubeconfig >>"${CALLS}"; }
+assert_eq "Secret 修復の失敗で待機に進まない" "rc=1 refresh_kubeconfig recreate_node update_mail_dns wait_tailscale_registered run_ansible refresh_kubeconfig repair_bootstrap_secrets " "$(run_main)"
 repair_bootstrap_secrets() { echo repair_bootstrap_secrets >>"${CALLS}"; }
-assert_eq "ArgoCD 待機の失敗で CNPG 待機に進まない" "rc=1 recreate_node update_mail_dns wait_tailscale_registered run_ansible repair_bootstrap_secrets wait_argocd_healthy " "$(run_main)"
+assert_eq "ArgoCD 待機の失敗で CNPG 待機に進まない" "rc=1 refresh_kubeconfig recreate_node update_mail_dns wait_tailscale_registered run_ansible refresh_kubeconfig repair_bootstrap_secrets wait_argocd_healthy " "$(run_main)"
 
 echo ""
 echo "=== 外部コマンドの未スタブ呼び出しがないこと ==="

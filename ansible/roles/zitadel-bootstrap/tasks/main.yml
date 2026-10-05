@@ -19,30 +19,6 @@
     mode: "0700"
   delegate_to: localhost
 
-- name: "本番kubeconfigをInfisical KUBECONFIG(内容そのもの)から生成 (make kubectlと同じ方式)"
-  # k3d検証時はZITADEL_POC_KUBECONFIGで明示上書きされるためスキップする。
-  # `infisical run -- ansible-playbook ...`で実行すること前提 (KUBECONFIG環境変数に
-  # kubeconfig本体のYAMLが展開される、Makefileのkubectlターゲットと同一の仕組み)。
-  ansible.builtin.copy:
-    content: "{{ lookup('env', 'KUBECONFIG') }}"
-    dest: "{{ zitadel_bootstrap_materialized_kubeconfig }}"
-    mode: "0600"
-  no_log: true
-  delegate_to: localhost
-  when: zitadel_bootstrap_kubeconfig_override | length == 0
-
-- name: 必須変数を検証 (誤って別クラスタを操作する事故を防ぐ)
-  ansible.builtin.assert:
-    that:
-      - zitadel_bootstrap_kubeconfig is defined
-      - zitadel_bootstrap_kubeconfig | length > 0
-    fail_msg: >-
-      kubeconfigを決定できませんでした。本番実行時は`infisical run --
-      ansible-playbook ...`(Infisicalの KUBECONFIG シークレットを経由)で実行して
-      ください。k3d検証時はambientなkubectl current-contextに依存しない設計のため、
-      環境変数 ZITADEL_POC_KUBECONFIG でk3d検証クラスタのkubeconfigパスを
-      明示的に指定してください(例: k3d kubeconfig get zitadel-poc > /path/to/kubeconfig)。
-
 - name: "既にPATを取得済みか確認 (冪等性: 取得済みならスキップ)"
   ansible.builtin.stat:
     path: "{{ zitadel_bootstrap_pat_output_file }}"
@@ -63,12 +39,11 @@
   block:
     - name: Zitadelがready状態になるまで待機
       ansible.builtin.command: >
-        kubectl exec {{ zitadel_bootstrap_pod }}
+        kubectl {{ zitadel_bootstrap_kubectl_args | join(' ') }} exec {{ zitadel_bootstrap_pod }}
         -n {{ zitadel_bootstrap_namespace }}
         -c {{ zitadel_bootstrap_zitadel_container }}
         -- /app/zitadel ready
-      environment:
-        KUBECONFIG: "{{ zitadel_bootstrap_kubeconfig }}"
+      environment: "{{ zitadel_bootstrap_kubectl_env }}"
       register: zitadel_ready_check
       until: zitadel_ready_check.rc == 0
       retries: "{{ zitadel_bootstrap_ready_retries }}"
@@ -80,12 +55,11 @@
       # zitadelコンテナがsetup完了直後にPATファイルを書き込む。ready確認の直後は
       # 書き込みタイミングと競合しうるため、loginコンテナ経由でファイル存在を再確認する
       ansible.builtin.command: >
-        kubectl exec {{ zitadel_bootstrap_pod }}
+        kubectl {{ zitadel_bootstrap_kubectl_args | join(' ') }} exec {{ zitadel_bootstrap_pod }}
         -n {{ zitadel_bootstrap_namespace }}
         -c {{ zitadel_bootstrap_login_container }}
         -- test -s {{ zitadel_bootstrap_pat_path_in_pod }}
-      environment:
-        KUBECONFIG: "{{ zitadel_bootstrap_kubeconfig }}"
+      environment: "{{ zitadel_bootstrap_kubectl_env }}"
       register: pat_file_check
       until: pat_file_check.rc == 0
       retries: "{{ zitadel_bootstrap_ready_retries }}"
@@ -96,12 +70,11 @@
     - name: PATファイルをPod内から取得 (zitadelコンテナはshellを持たないためloginコンテナ経由)
       # no_log: PAT平文をAnsibleログに残さない (過去複数回のinfisical CLI出力漏洩実績を踏まえた徹底)
       ansible.builtin.command: >
-        kubectl exec {{ zitadel_bootstrap_pod }}
+        kubectl {{ zitadel_bootstrap_kubectl_args | join(' ') }} exec {{ zitadel_bootstrap_pod }}
         -n {{ zitadel_bootstrap_namespace }}
         -c {{ zitadel_bootstrap_login_container }}
         -- cat {{ zitadel_bootstrap_pat_path_in_pod }}
-      environment:
-        KUBECONFIG: "{{ zitadel_bootstrap_kubeconfig }}"
+      environment: "{{ zitadel_bootstrap_kubectl_env }}"
       register: pat_content
       no_log: true
       changed_when: true

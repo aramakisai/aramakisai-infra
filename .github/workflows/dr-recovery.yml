@@ -15,10 +15,12 @@ on:
 
 # Issue への進捗記録に issues: write が必要
 # actions: read は Environment の保護ルール検査に必要
+# id-token: write は kube-apiserver への GitHub OIDC 認証 (kube-oidc.sh) に必要
 permissions:
   contents: read
   issues: write
   actions: read
+  id-token: write
 
 # 同時に複数の復旧が走るのを防ぐ
 concurrency:
@@ -38,24 +40,17 @@ jobs:
     environment: dr-recovery
 
     steps:
-      # Environment が未作成だと GitHub が承認なしで自動作成して実行を許してしまうため、
-      # required reviewers が設定されていなければここで失敗させる
-      - name: Verify environment protection
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          reviewers=$(gh api "repos/${GITHUB_REPOSITORY}/environments/dr-recovery" \
-            --jq '[.protection_rules[]? | select(.type == "required_reviewers")] | length') \
-            || { echo "::error::Environment dr-recovery の保護ルールを取得できません"; exit 1; }
-          if [ "${reviewers}" -lt 1 ]; then
-            echo "::error::Environment dr-recovery に required reviewers が設定されていません (docs/dr-runbook.md)"
-            exit 1
-          fi
-
       # 承認待ちの間に main が進んでも、起動時点ではなく承認後の main を使う
       - uses: actions/checkout@v7
         with:
           ref: main
+
+      # Environment が未作成だと GitHub が承認なしで自動作成して実行を許してしまうため、
+      # 保護設定 (required reviewers・管理者 bypass 無効・main 限定) を満たさなければここで失敗させる
+      - name: Verify environment protection
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash .github/scripts/verify-environment-protection.sh dr-recovery
 
       # GitHub Actions ランナーを tailnet に参加させる (Ansible SSH 経路の確保)
       # 前提: Tailscale ACL に tag:ci が定義されていること

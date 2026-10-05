@@ -156,7 +156,7 @@
   - 完了状態: 本番で上記の確認項目がすべて満たされ、記録されている
   - _Requirements: 6.1, 6.2, 6.3, 6.5, 9.1, 9.5, 12.3_
 
-- [ ] 4. P3: CI 共通の OIDC 部品と infra-health-check の移行
+- [x] 4. P3: CI 共通の OIDC 部品と infra-health-check の移行
 
 - [x] 4.1 CI・DR が共通で使う OIDC kubeconfig 生成部品を作る
   - kubeconfig を生成するモード: 接続先 (既定は MagicDNS 名 `prod-node-1`) から server CA を tailnet 経由で取得し、取得した CA で同じエンドポイントの TLS 検証が通ることを確認する。そのうえで、所有者だけが読める kubeconfig に、exec プラグインでトークンを得るユーザーを書き出す。TLS 検証は無効にしない
@@ -173,7 +173,7 @@
   - 完了状態: ワークフローとスクリプトから共有 kubeconfig への参照がなくなり、監視項目と通知の内容は従来と同じになっている
   - _Requirements: 1.9, 2.3, 8.1_
 
-- [ ] 4.3 【本番・ユーザー承認】PR をマージし、本番の段階検証 1・2 を行う
+- [x] 4.3 【本番・ユーザー承認】PR をマージし、本番の段階検証 1・2 を行う
   - 前提条件: 3.7 が完了している
   - 確認項目: main での手動実行と schedule 実行が成功し、従来と同じ監視結果が出る。同じワークフローを feature ブランチから dispatch すると 401 になる。許可リストにないワークフローのトークンが 401 になる (一時ワークフローは確認後にブランチと run を削除する)。拒否理由が API サーバーのログに規則のメッセージとして出る
   - D16 の確認: schedule 実行と workflow_dispatch 実行の `event_name` が許可イベントの値と一致する。kubelet への到達で Tailscale ACL の前提 (D14) が成り立っている
@@ -181,7 +181,7 @@
   - 完了状態: 許可される経路と拒否される経路の両方が本番で確認され、記録されている
   - _Requirements: 1.3, 1.4, 1.5, 8.1, 9.1, 9.5_
 
-- [ ] 5. P4: 人向け証明書の発行と手元のコンテキスト作成
+- [x] 5. P4: 人向け証明書の発行と手元のコンテキスト作成
 
 - [x] 5.1 CSR の検証部品とテストを作る
   - CSR が 1 つの PKCS#10 で、自己署名が検証できることを確認する
@@ -215,7 +215,7 @@
   - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.6, 7.1, 7.2, 7.3, 7.5, 13.2_
   - _Boundary: KubeLogin / MakeKubectl_
 
-- [ ] 5.4 【本番・ユーザー承認】PR をマージし、発行から kubectl 操作までと権限の剥奪を本番で検証する
+- [x] 5.4 【本番・ユーザー承認】PR をマージし、発行から kubectl 操作までと権限の剥奪を本番で検証する
   - 前提条件: 2.5・4.3 が完了し、2.4 で検証担当者の binding が同期されている
   - D16 の確認: `make kube-login` で、dispatch による run ID の返却、完了待ち、artifact の取得が設計どおりに動く
   - 確認項目: 承認待ちなしで発行が完了する。発行された証明書で exec、logs のフォロー、port-forward が binding の範囲で動く。job summary に起動者・ユーザー名・有効期限が残る。ログと artifact にトークンと秘密鍵が出ていない。他人の CN の CSR が理由付きで拒否される。re-run しても証明書は最初の起動者の鍵にしか対応しない。CSR オブジェクトが承認から 1〜1.5 時間後に消える
@@ -227,7 +227,7 @@
 
 - [ ] 6. P5: 残りの消費者 (intrusion-response・DR・Zitadel・k3s-upgrade) の移行
 
-- [ ] 6.1 (P) intrusion-response を OIDC 認証と tag:ci の tailnet 参加に移行する
+- [x] 6.1 (P) intrusion-response を OIDC 認証と tag:ci の tailnet 参加に移行する
   - 両方のジョブに `id-token: write` を与え、4.1 の部品で kubeconfig を生成する
   - tailnet への参加を、他の CI と同じ OAuth と `tag:ci` による方式にする。Infisical からの kube 資格情報と Tailscale API キーの取得、名前解決の手動追記を削除する
   - 隔離の NetworkPolicy は create で作り、既に存在する場合は成功として扱う
@@ -235,7 +235,7 @@
   - _Requirements: 1.9, 2.4, 8.2_
   - _Boundary: IntrusionResponseMigration_
 
-- [ ] 6.2 (P) DR 復旧ワークフローと復旧スクリプトを OIDC 認証に移行する
+- [x] 6.2 (P) DR 復旧ワークフローと復旧スクリプトを OIDC 認証に移行する
   - ワークフローに `id-token: write` を与え、Environment `dr-recovery` で実行する。EnvironmentGuard が、1.4 で確認したフィールド名で保護設定 (required reviewers が 1 件以上、管理者 bypass が無効、deployment branch が main だけ) を検査し、満たさなければ DR を開始しない。自己承認の可否は検査しない
   - 復旧の開始時と k3s-bootstrap の後に、4.1 の部品で kubeconfig を生成する。クラスタの再作成で CA が変わるため、bootstrap 後に作り直す
   - 旧クラスタの生存確認では、CA が取得できない場合と kubectl が失敗した場合を停止扱いにする
@@ -244,7 +244,7 @@
   - _Requirements: 1.6, 1.9, 7.2, 7.4, 8.4, 10.1_
   - _Boundary: DrMigration, EnvironmentGuard_
 
-- [ ] 6.3 (P) k3s-bootstrap で DR 用の binding を ArgoCD の同期より前に適用する
+- [x] 6.3 (P) k3s-bootstrap で DR 用の binding を ArgoCD の同期より前に適用する
   - ArgoCD の bootstrap Play で、2.3 のマニフェストを PR #288 のマニフェスト適用タスク (server-side apply) で適用する。playbook の完了前に適用されるようにする
   - 値を Ansible 側に複製せず、main の同じファイルだけを参照する
   - 既存クラスタで再実行しても差分が出ないようにする
@@ -252,7 +252,7 @@
   - _Requirements: 2.6, 2.8, 6.4, 8.4_
   - _Boundary: DrBootstrapBinding_
 
-- [ ] 6.4 (P) Zitadel のブートストラップとカットオーバーを、共有 kubeconfig に依存しない形にする
+- [x] 6.4 (P) Zitadel のブートストラップとカットオーバーを、共有 kubeconfig に依存しない形にする
   - 環境変数の KUBECONFIG の中身をファイルに書き出す処理を削除する
   - kubectl は標準の kubeconfig の解決と、コンテキストを指定する変数 (既定は `aramakisai-prod`) を使う
   - k3d 検証用の kubeconfig のパス指定は残す
@@ -260,21 +260,21 @@
   - _Requirements: 8.6_
   - _Boundary: ZitadelBootstrapMigration_
 
-- [ ] 6.5 (P) k3s-upgrade から kube 資格情報と kubectl を外す
+- [x] 6.5 (P) k3s-upgrade から kube 資格情報と kubectl を外す
   - kubectl のインストールと kube 資格情報の受け渡しを削除する
   - アップグレード前後の状態確認は、k3s-server ロールの etcd 健全性待ちと Ready 待ち (ノード上のローカル admin) に任せる
   - 完了状態: ワークフローに kube 資格情報と kubectl への参照がなく、OIDC の許可リストにも含まれていない
   - _Requirements: 2.6, 8.3_
   - _Boundary: K3sUpgradeMigration_
 
-- [ ] 6.6 移行した消費者をまとめて静的に検証し、1 つの PR にする
+- [x] 6.6 移行した消費者をまとめて静的に検証し、1 つの PR にする
   - ワークフローの静的検査、shellcheck、ansible-lint、既存のテストスクリプトが通ることを確認する
   - 1.9 の観点で、CI・DR が Infisical やリポジトリシークレットの kube 資格情報を参照していないことを検索で確認する
   - 完了状態: すべての検査が通り、P5 の変更が 1 つの PR にまとまっている
   - _Depends: 6.1, 6.2, 6.3, 6.4, 6.5_
   - _Requirements: 1.9, 8.2, 8.3, 8.4, 8.6_
 
-- [ ] 6.7 KVM の DR テスト環境で、DR の認証とノード構成の未検証事項を確かめる
+- [x] 6.7 KVM の DR テスト環境で、DR の認証とノード構成の未検証事項を確かめる
   - 本番のクラスタは作り直さない
   - クラスタの再作成後、k3s の初回起動から認証設定が有効で、DR 用の binding が ArgoCD の同期前に存在し、bootstrap 後に作り直した kubeconfig で新しい CA に接続できることを確認する
   - D16 の確認: systemd 上で、不正な認証設定による再起動の挙動を確かめ、ロールの起動確認と自動ロールバックが期待どおりに働くことを確認する。ArgoCD が Ansible の作った binding を引き継ぎ、prune や selfHeal で問題が起きないことも確認する
