@@ -467,7 +467,7 @@
 - KVM の DR テスト環境にはこれらのコントローラがいなかったため、8.1 では現れなかった
 
 ### Falco
-- 再起動直後の約 20 秒間、各コントローラの再接続で `Contact K8S API Server From Container` (Notice) と、k3s による `/etc/rancher/k3s/k3s.yaml` の再生成で `Write below etc` が出た。実害はない。除外ルールは別途検討する (本仕様では Falco 設定を変えない)
+- 再起動直後の約 20 秒間、各コントローラの再接続で `Contact K8S API Server From Container` (Notice) と、k3s による `/etc/rancher/k3s/k3s.yaml` の再生成で `Write below etc` が出た。実害はない。両方とも Falco の除外ルールに追加した (namespace + イメージ、proc + パスで限定。tech.md の監視の誤検知除外設定を参照)
 
 ### SSH 例外 (D17)
 - rotation の実行から、再発行と確認の完了までの間に限って使った。完了後は SSH での kubectl に戻していない。例外の期間は終了した
