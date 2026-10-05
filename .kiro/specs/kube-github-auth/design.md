@@ -673,7 +673,7 @@ graph TB
 
 人・CI・DR は P6 まで旧方式を使い続けられ、新方式は消費者ごとに切り替えるため、接続できない期間は生じない (9.1)。
 
-### client CA forced rotation の手順 (P7、k3d で検証済み)
+### client CA forced rotation の手順 (P7、k3d と KVM の DR テスト環境で検証済み)
 
 **SSH 例外 (D17)**: 平常時の kubectl 経路では SSH を使わない (Req 13.2)。本手順に限り、ノード上のローカル admin (`/etc/rancher/k3s/k3s.yaml`) を SSH 経由で使い、kubectl・復旧の代替としてよい。範囲: 目的は、rotation コマンドの実行 (ノード上で行うため元々必須)、再起動後の確認 (旧証明書が 401・Pod 稼働・server CA 不変)、人の再発行が通らない場合の復旧。期間は rotation コマンドの実行開始から、新 CA での接続 (OIDC・`make kube-login` による再発行) と下記確認 4 の完了まで。完了後は SSH での kubectl 利用に戻さない。実施時期は任意 (メンテナンス時間の設定は要るが、時期の制約はない)。
 
@@ -684,17 +684,58 @@ graph TB
 
 - k3d で、旧証明書 3 種が 401 になり、新 `k3s.yaml` と OIDC 認証が通り、node が Ready、server CA の指紋が不変であることを確認した。人の kubeconfig の CA (server CA) は影響を受けない。
 - 影響: Infisical の `KUBECONFIG` と手元に残る旧 kubeconfig はすべて無効になる (意図どおり)。Ansible が使うノード上のローカル admin は再生成される。リポジトリの gitops に client 証明書を使う kubeconfig はない。
-- 未検証: 本番相当の systemd 環境での再起動 (`KillMode=process` で既存コンテナが残ること)。k3d は docker の再起動で Pod が `Unknown` になるため、Pod が落ちないことの確認は P7 の本番作業の確認項目として残す。
+- KVM の DR テスト環境 (systemd、`KillMode=process`) で、rotation と戻し方 A・B のいずれの再起動でも Pod のコンテナと startedAt・restartCount が変わらない (Pod が落ちない) ことを確認した。 ただし leader election を使うコントローラ (CNPG operator、cilium-operator、snapshot-controller など) は、API 停止中に lease を失って再起動しうる。ワークロードの Pod には影響しない。
 
 ### rotation の戻し方 (P7、ユーザー承認済み)
 
 rotation の後に k3s が復帰しない、またはノード・ワークロードが正常に戻らない場合に、退避した旧 client CA へ戻す。戻し方の作業は SSH 例外 (D17) の範囲内 (rotation の開始から確認 4 の完了まで) で行い、戻し終えて下記の確認が済んだ時点で例外の期間を終える。
 
 - 事前準備 (手順 1 の前): ノード上の `server/tls/` から旧 `client-ca.crt`・`client-ca.key` を、戻し用ディレクトリの `tls/` の下に退避する。etcd のスナップショットを取得し、CNPG のバックアップが正常であることを確認する。退避した鍵はノードから持ち出さない。
-- 戻し方 A (k3s の API が応答する場合): 退避した旧 CA を置いた戻し用ディレクトリを指定して `k3s certificate rotate-ca --path <戻し用ディレクトリ> --force` を実行し、k3s を再起動する。手順 1〜3 と同じ仕組みで、旧 CA を新しい CA として入れ直す形になる。
-- 戻し方 B (k3s が起動しない場合): k3s を停止し、事前に取得した etcd スナップショットから `--cluster-reset` で復元し、`server/tls/` の client CA を退避したファイルに戻して起動する。
+- 戻し方 A (k3s の API が応答する場合): **rotate-ca の直前に**戻し用ディレクトリの `client-ca.crt`・`client-ca.key` を `touch` してから、`k3s certificate rotate-ca --path <戻し用ディレクトリ> --force` を実行し、k3s を再起動する。手順 1〜3 と同じ仕組みで、旧 CA を新しい CA として入れ直す形になる。`touch` が必須なのは、k3s が rotate-ca の入力ファイルの mtime をデータストア側のタイムスタンプとして保存し、起動時にディスク上の `server/tls/client-ca.*` と比較するため。rotation 前に退避したままのファイルでは mtime が新 CA より古く、`client-ca.{crt,key} newer than datastore and could cause a cluster outage` で k3s が起動しない。
+  - A で起動しなくなった場合: `server/tls/client-ca.{crt,key}` を別の場所へ移して k3s を再起動する (データストアの CA から再生成される)。この状態では k3s が止まっており rotate-ca は `/cacerts` への接続が要るため再実行できない。
+- 戻し方 B (k3s が起動しない場合): k3s を停止し、`k3s server --cluster-reset --cluster-reset-restore-path=<snapshot>` で事前に取得した etcd スナップショットから復元し、退避した `client-ca.{crt,key}` を `server/tls/` へコピー (鍵は 600) して k3s を起動する。前提として、`server/tls/client-ca.*` が有効な証明書であること (壊れていると cluster-reset 自体が失敗する)。
 - 確認: `/readyz` が ok、ノードが Ready で Pod が稼働している、client CA の指紋が rotation 前と同じ、server CA の指紋が変わっていない、ノード上のローカル admin と OIDC (infra-health-check) が通る、rotation 前に発行した人の証明書が再び通る。
-- 戻し方 A・B はどちらも本番前に KVM の DR テスト環境で試す (未検証)。B は rotation 後に行われたクラスタへの書込を失うため、A が使えない場合に限る。戻した後の再実施は原因を調べてから改めて判断する。
+- 戻し方 A・B は KVM の DR テスト環境で成功を確認済み。B は rotation 後に行われたクラスタへの書込を失うため、A が使えない場合に限る。戻した後の再実施は原因を調べてから改めて判断する。
+
+### rotation の本番チェックリスト (P7、KVM の DR テスト環境で検証した手順)
+
+`<BACK>`・`<NEW>` はノード上の作業ディレクトリ、`<snapshot>` は取得したスナップショットのパス。鍵はノードから持ち出さない。
+
+```
+# 事前
+CA=/var/lib/rancher/k3s/server/tls
+install -d -m700 <BACK>/tls && cp $CA/client-ca.{crt,key} <BACK>/tls/ && chmod 600 <BACK>/tls/*
+k3s etcd-snapshot save --name pre-rotation      # CNPG バックアップ正常も確認
+# 記録: client-ca / server-ca / https://127.0.0.1:6443/cacerts の指紋、Pod の containerID・startedAt・restartCount
+
+# rotation
+install -d -m700 <NEW>/tls
+openssl ecparam -name prime256v1 -genkey -noout -out <NEW>/tls/client-ca.key
+openssl req -x509 -new -key <NEW>/tls/client-ca.key -sha256 -days 3650 -subj "/CN=k3s-client-ca@$(date +%s)" \
+  -addext "basicConstraints=critical,CA:TRUE" -addext "keyUsage=critical,keyCertSign,digitalSignature,cRLSign" \
+  -out <NEW>/tls/client-ca.crt
+k3s certificate rotate-ca --path <NEW> --force
+systemctl restart k3s
+until k3s kubectl get --raw=/readyz | grep -q ok; do sleep 3; done
+# 確認: 旧 admin・人の旧証明書が 401、ローカル admin と OIDC が通る、client CA 指紋は変化・server CA と /cacerts は不変、
+#       Pod 不変、infra-health-check 成功、make kube-login で再発行
+
+# 戻し方 A (API 応答あり)
+touch <BACK>/tls/client-ca.{crt,key}
+k3s certificate rotate-ca --path <BACK> --force && systemctl restart k3s
+# A で起動しなくなった場合: mv $CA/client-ca.{crt,key} <別の場所>/ && systemctl restart k3s
+
+# 戻し方 B (k3s が起動しない)
+systemctl stop k3s
+# server/tls/client-ca.* が有効な証明書であることを確認
+k3s server --cluster-reset --cluster-reset-restore-path=<snapshot>
+cp <BACK>/tls/client-ca.{crt,key} $CA/ && chmod 600 $CA/client-ca.key
+systemctl start k3s
+
+# 戻した後
+# client CA 指紋が rotation 前と同じ、server CA 不変、/readyz ok、ノード Ready、Pod 無傷、
+# ローカル admin・OIDC・rotation 前の人の証明書が通る
+```
 
 ### PR #288 / #287 との調整 (P0)
 
@@ -716,7 +757,7 @@ rotation の後に k3s が復帰しない、またはノード・ワークロー
 | D4 | intrusion-response の tailnet 参加 | 他の CI と同じ OAuth + `tag:ci` | 8.2 |
 | D5 | k3s 監査ログ | Metadata レベルで有効化。system コンポーネントと大量の read を除外し、ローテーション上限付き。配布は k3s-server ロール。ポリシーと容量上限は k3d で検証済み (Components の「監査ポリシー」) | 12.3 |
 | D6 | health-check のディスク使用率取得 | kubelet の `/stats/summary` (10250) を OIDC トークンで直接呼び、RBAC は `nodes/stats` の get のみ。`nodes/proxy` は与えない。実機検証で前提 (10250 への到達、serving 証明書の SAN と CA、kubelet の webhook 認証での OIDC 受け入れ、権限の絞り込み) が成立することを確認済み | 問題 5, 2.3 |
-| D7 | 旧共有 admin 証明書の扱い | client CA だけを差し替える forced rotation (k3d で検証済み。手順は Migration Strategy)。P7 でメンテナンス時間を取って実施する。人の証明書は再発行する | 問題 3, 9.3, 9.4 |
+| D7 | 旧共有 admin 証明書の扱い | client CA だけを差し替える forced rotation (k3d と KVM の DR テスト環境で検証済み。手順は Migration Strategy)。P7 でメンテナンス時間を取って実施する。人の証明書は再発行する | 問題 3, 9.3, 9.4 |
 | D8 | 人の証明書の有効期限 | 7 日。`cluster-signing-duration=168h` でクラスタ側にも上限を強制 | 3.7, 11.1 |
 | D9 | GitHub Environment `dr-recovery` の管理方法と承認者 | 手動作成済み。required reviewers は team `infra` (org のチーム。リポジトリの read 権限を付与)、自己承認は許可 (起動者本人が承認してよい。別メンバーの承認を求めない方針は D1 と同じ)、管理者 bypass は無効、deployment branch は main のみ。team へのメンバー追加は手動で行う (org の全員を順次追加する予定)。EnvironmentGuard が保護設定を実行時に検査する (PR #287 と同じ。設定内容は tech.md に明記) | 1.6 |
 | D10 | PR #287 / #288 のマージ順序 | #288 (kubeconfig 登録 Play 削除) → #287 (`refresh_kubeconfig` 縮退) → 本仕様 | 10.1〜10.3 |
@@ -725,5 +766,5 @@ rotation の後に k3s が復帰しない、またはノード・ワークロー
 | D13 | 認証設定不正時の復旧 | Ansible の `block`/`rescue` で、適用後の `/readyz` (ローカル admin) と匿名 `/version` = 401 の確認に失敗したら旧設定へ自動ロールバック。k3s は不正設定で exit 0 するため終了コードは判定に使わない | 6.6 |
 | D14 | Tailscale ACL の確認 | 読取 scope は追加せず、health-check の失敗検知 (到達不能で job 失敗) と再検証トリガーに任せる | 8.1 |
 | D15 | 監査ポリシーの除外範囲 | `system:serviceaccounts:kube-system` と全 ServiceAccount の read を除外する (検証済みポリシーのとおり) | 12.3 |
-| D16 | 未検証事項の確認タイミング | EnvironmentGuard の API 応答は `dr-recovery` 作成後に確認済み。`environment` claim は DR の OIDC 移行 (P5) のマージ後に、main 上の `dr-recovery` を生存確認ゲートで停止する経路で確認する (下記「environment claim の確認」)。gh の `return_run_details` 等は実装マージ後、systemd 再起動・rotation 時の Pod 継続は KVM の DR テスト環境または P7 | 1.6, 4.1, 9.4 |
+| D16 | 未検証事項の確認タイミング | EnvironmentGuard の API 応答は `dr-recovery` 作成後に確認済み。`environment` claim は DR の OIDC 移行 (P5) のマージ後に、main 上の `dr-recovery` を生存確認ゲートで停止する経路で確認する (下記「environment claim の確認」)。gh の `return_run_details` 等は実装マージ後、systemd 再起動・rotation 時の Pod 継続は KVM の DR テスト環境で確認済み (research.md) | 1.6, 4.1, 9.4 |
 | D17 | client CA rotation の時期と SSH 例外 | 時期は任意。rotation 作業中に限り SSH でノード上のローカル admin を使ってよい (範囲・期間は Migration Strategy)。平常時は不可 | 9.3, 9.4, 13.2 |

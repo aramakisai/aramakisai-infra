@@ -433,6 +433,45 @@
 - 以後 `infisical run` は KUBECONFIG を注入しない。`make kubectl` はコンテキスト `aramakisai-prod` で動作することを確認した
 - 注入対策だった `unset KUBECONFIG` (infra-health-check.sh) と `env -u KUBECONFIG` の手順は不要になったため削除した
 
+## KVM の DR テスト環境での client CA forced rotation の検証 (task 8.1、2026-10-05)
+
+- 環境: 使い捨て VM に本番と同一の k3s-server ロール・同一 k3s バージョンを適用した。OIDC は issuer をモックに差し替えた。sudo・ホストのネットワーク設定変更は不要だった
+- rotation 前: 匿名 401、旧 admin 証明書・CSR 発行の人向け証明書・ローカル admin・OIDC はすべて認証成功
+- forced rotation (新 client CA を作成し `k3s certificate rotate-ca --path <NEW> --force`、`systemctl restart k3s`): 旧 admin 証明書と人の旧証明書は 401、新しいローカル admin と OIDC は成功、rotation 後に CSR で再発行した人向け証明書も成功した。client CA の指紋は変化し、server CA と `/cacerts` は不変。`/readyz` は ok でノードは Ready。design.md の rotation 手順 1〜4 は記載どおり通った
+- 「旧 admin 証明書」と「旧ローカル admin のコピー」は同一の証明書で、別々の検証にはならない
+- D16: rotation・戻し方 A・戻し方 B (cluster-reset) のいずれの再起動でも、Pod の containerID・startedAt・restartCount と containerd-shim のプロセスが不変だった (Pod は落ちない)
+- 戻し方 A を退避ファイルのまま行うと失敗した: k3s が `client-ca.{crt,key} newer than datastore and could cause a cluster outage` で起動しない。k3s は rotate-ca 時に入力ファイルの mtime をデータストアのタイムスタンプとして保存し、起動時にディスク上のファイルと比較する。退避ファイルは rotation 前に作るため mtime が新 CA より古くなる。この状態では k3s が止まっており rotate-ca を再実行できない。復旧は `server/tls/client-ca.{crt,key}` を別の場所へ移して restart (データストアの CA から再生成される) で成功した
+- 修正手順 (rotate-ca の直前に退避ファイルを `touch`) では、戻し方 A が手作業なしで成功した。戻した後、client CA の指紋は rotation 前と同じで、rotation 前の証明書・ローカル admin・OIDC が成功し、Pod は無傷だった
+- 戻し方 B (etcd スナップショット → rotation → 起動不能を模擬 → `systemctl stop k3s` → `k3s server --cluster-reset --cluster-reset-restore-path=<snapshot>` → 退避 CA を `server/tls/` へコピー → start): A と同じ確認がすべて成功した。rotation 後に作ったデータは消える (設計どおり)。ディスク上の `server/tls/client-ca.*` が壊れていると cluster-reset 自体が失敗するため、有効な証明書が置かれている必要がある。cluster-reset 直後にディスク上の client CA は既にスナップショット側に戻っており、差し戻しのコピーは結果に影響しなかった (無害。省略時の挙動は未確認)
+- 未確認: 実際の GitHub Actions トークンでの OIDC (モック issuer で代替)、`make kube-login` の発行ワークフロー (CSR の手動発行で代替)
+- 本番で使うチェックリストは design.md の「rotation の本番チェックリスト」に置いた
+
+## 本番の client CA forced rotation の実施記録 (task 8.2・8.3、2026-10-05)
+
+### 8.2 実施の決定
+- ユーザーが本日の実施を決定した。kube の利用者がユーザー本人のみのため、事前周知は不要と判断した
+
+### 8.3 事前確認と実施
+- CNPG: 稼働中の Cluster は Ready で WAL アーカイブは正常、直近の base backup は成功していた。週次スケジュールのものは base backup が 24 時間を超えていたが、WAL で直近まで復元できると判断した。hibernation 中の Cluster は対象外とした
+- 退避: 旧 client CA をノード上の戻し用ディレクトリに退避した (鍵はノード外に持ち出していない)。rotation 直前に etcd スナップショットを取得した (ローカル保存のみで、ノード外へのコピーは無い)。指紋と Pod の状態を記録した
+- 実施: design.md の本番チェックリストどおりに新 client CA を作成し、`rotate-ca --force` のあと `systemctl restart k3s` を行った。`/readyz` が ok になるまで十数秒だった。戻し方は使っていない
+
+### 確認結果
+- 旧ローカル admin のコピー、人の旧証明書、旧共有 admin 証明書 (手元に残っていた写し) はすべて 401 になった。新しいローカル admin は成功した
+- client CA の指紋は新 CA と一致し、server CA と `/cacerts` は不変だった。ノードは Ready
+- infra-health-check が OIDC で成功した。`make kube-login` で再発行でき、kubectl が使えた (`gh run watch` が GitHub API の一時エラーで失敗し再試行が要ったが、発行ワークフロー自体は成功していた)
+- ArgoCD の状態は rotation 前から変化しなかった
+
+### D16 (Pod の継続) の結果
+- ワークロードの Pod は変化しなかった。一方、leader election を使うコントローラ 3 個 (CNPG operator、cilium-operator、snapshot-controller) が、k3s の再起動中に各 1 回再起動した。lease を失ったためと推定している (未確認)。いずれも Running に復帰した
+- KVM の DR テスト環境にはこれらのコントローラがいなかったため、8.1 では現れなかった
+
+### Falco
+- 再起動直後の約 20 秒間、各コントローラの再接続で `Contact K8S API Server From Container` (Notice) と、k3s による `/etc/rancher/k3s/k3s.yaml` の再生成で `Write below etc` が出た。実害はない。除外ルールは別途検討する (本仕様では Falco 設定を変えない)
+
+### SSH 例外 (D17)
+- rotation の実行から、再発行と確認の完了までの間に限って使った。完了後は SSH での kubectl に戻していない。例外の期間は終了した
+
 ## ユーザー決定の記録 (実機検証後、2026-10-04)
 
 | 項目 | 決定 | 根拠となった検証結果 |
