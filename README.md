@@ -79,6 +79,7 @@ ansible >= 2.14
 kubectl
 jq
 curl
+gh >= 2.87.0   # make kube-login が発行ワークフローの run ID 取得に使う
 ```
 
 ### 必要なアカウント・サービス
@@ -202,6 +203,20 @@ infisical run --env=prod -- ansible-playbook -i ansible/inventory/tailscale.yml 
   ansible/playbooks/k3s-bootstrap.yml
 ```
 
+### kubectl によるクラスタ操作
+
+kube-apiserver への認証は GitHub Actions OIDC (CI・DR) と、GitHub 経由で発行する短命クライアント証明書 (人) で行い、共有 kubeconfig はありません。
+
+```bash
+make kube-login                          # 証明書を発行し、コンテキスト aramakisai-prod を作成・更新 (有効期限 7 日。切れたら再実行)
+make kubectl ARGS="get pods -A"          # kubectl --context aramakisai-prod
+```
+
+- 前提: `gh` ログイン済み、tailnet 接続済み、リポジトリの write 権限
+- server CA が変わった場合 (クラスタ再作成など) は指紋を表示して止まります。正当と確認できたときだけ `make kube-login ARGS=--accept-new-ca` を使います
+- 権限は `gitops/manifests/prod/kube-access/` の RBAC binding で付与・剥奪します (PR をマージすると ArgoCD が同期)。証明書は失効できないため、即時の剥奪は binding の削除で行います
+- GitHub 障害時は発行・CI・DR が止まります。発行済みの証明書は有効期限まで使えます。詳細は [CLAUDE.md](CLAUDE.md) を参照
+
 ---
 
 ## ArgoCD 管理画面
@@ -255,8 +270,8 @@ spec:
 
 ## 注意事項
 
-- `.env`, `.env.app-secrets`, `terraform/secrets.tfvars`, `kubeconfig` などのローカルシークレットファイルはすべて無効化されています。
-- シークレットおよび `kubeconfig` は Infisical から取得します（`ansible/kubeconfig` は Git 管理から除外されています）。playbook は kubeconfig を Infisical へ登録しません。
+- `.env`, `.env.app-secrets`, `terraform/secrets.tfvars` などのローカルシークレットファイルはすべて無効化されています。
+- シークレットは Infisical から取得します。kubectl の認証情報は Infisical に置かず、`make kube-login` で発行した短命証明書を使います。
 - tfstate は Terraform Cloud で管理 (ローカルに置かない)
 - ポート 22 は公開しない (Tailscale SSH を使用)
 - staging から prod の DB へのアクセス禁止 (別 Namespace / 別 CNPG Cluster)

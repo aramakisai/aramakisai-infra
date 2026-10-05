@@ -46,15 +46,27 @@
 
 ## kubectl の実行方法
 
-KUBECONFIG は Infisical に YAML 内容として保存されている（ファイルパスではない）。  
+共有 kubeconfig は存在しない。人は `make kube-login` で GitHub 経由の短命クライアント証明書 (有効期限 7 日) を発行し、手元のコンテキスト `aramakisai-prod` を使う。
 **必ず `make kubectl ARGS="..."` を使うこと。** 直接 kubectl を叩かない。
 
 ```bash
+make kube-login                       # 初回・7 日ごと・クラスタ再作成後
 make kubectl ARGS="get pods -n prod"
 make kubectl ARGS="get applications -n argocd"
 ```
 
-内部的に Infisical から KUBECONFIG を取得して `/tmp/kubeconfig-aramakisai` に書き出す (読取のみ。playbook は登録しない)。
+### DR 時の kube-apiserver 認証
+
+- `dr-recovery` は GitHub Actions OIDC (ユーザー名 `gha:dr-recovery`) で認証する。API サーバーは Environment `dr-recovery` の承認を経たジョブのトークンだけを `gha:dr-recovery` として受け入れ、cluster-admin を持つ。
+- k3s は初回起動から OIDC 認証設定を読み込む。`gha:dr-recovery` の binding は ArgoCD の同期を待たず `k3s-bootstrap.yml` が先行適用するため、ArgoCD が壊れていても DR から直せる。
+- クラスタを作り直すと server CA と client CA が変わる。`recovery.sh` は bootstrap 後に OIDC の kubeconfig を新しい server CA で作り直す。
+
+### クラスタ再作成後の人の証明書と server CA
+
+- 作り直し前に発行した人の証明書は新しい client CA で検証できず、すべて無効になる。各自が `make kube-login` で再発行する。
+- 手元のコンテキストの server CA も古くなる。`make kube-login` は CA の違いを検出すると指紋を表示して止まる。クラスタ再作成が正当な理由であることを確認してから `--accept-new-ca` で更新する。
+- server CA は `make kube-login` が tailnet 経由でノードから取得する (tailnet が信頼の根拠)。
+- GitHub 障害中は発行できないため、緊急時に限り Tailscale SSH でノード上のローカル admin (`/etc/rancher/k3s/k3s.yaml`) を使う。
 
 ---
 
@@ -63,7 +75,8 @@ make kubectl ARGS="get applications -n argocd"
 - **Single Source of Truth は Infisical**。`.env` ファイルは参照しない
 - すべての CLI 操作は `infisical run -- <command>` で実行する
 - `.infisical.json` の `defaultEnvironment` が `"prod"` であることを確認する（空だと dev にフォールバックする）
-- Terraform 認証情報 (`HCLOUD_TOKEN` 等) は `terraform login` (Terraform Cloud) が担う。Infisical には入っているが TFC が自動参照するため二重管理になっている
+- 手元の `terraform` 実行は `terraform login` (Terraform Cloud) で認証する。`HCLOUD_TOKEN` 等のプロバイダー認証情報は TFC 側が保持する
+- DR 経路 (`recovery.sh`) は TFC API を直接叩くため、Infisical `prod` の `TFC_API_TOKEN` / `TFC_WORKSPACE_ID` を使う。トークンは `owners` team の team token (有効期限なし。期限切れで障害時に DR が黙って止まるのを避けるため。無料プランでは team を `owners` 1つしか作れない。organization token は run を作れず、user token は個人に紐づくため不可)。org 管理者と同等の権限を持ち DR に必要な範囲より広いが、intrusion-response のローテーション対象に含まれる
 
 ---
 

@@ -31,6 +31,24 @@ variables.tf / outputs.tf  ← 変数・出力
 - ロールは `k3s-server`（K3s インストール・設定）、`swap`（全ノード共通のホスト側 OOM 安全弁）、`os-auto-update`（ホスト OS 自動更新設定の配布・結果通知）、`zitadel-bootstrap`（Zitadel リソース管理）、`zitadel-cutover`（Zitadel カットオーバーの事前条件確認・検証）で構成する
 - K3s 設定フラグは `k3s-server` ロールの `k3s_extra_args` で渡す
 
+### kube-apiserver 認証 (GitHub OIDC・短命証明書)
+**目的**: 共有 kubeconfig を使わず、CI・DR・人が kube-apiserver に認証する
+```
+ansible/roles/k3s-server/
+  defaults/main.yml                     ← OIDC 許可リスト (k3s_github_oidc_workflows)・audience・証明書上限・監査ログ上限
+  templates/authentication-config.yaml.j2 / audit-policy.yaml.j2  ← AuthenticationConfiguration・監査ポリシー
+gitops/apps/prod/kube-access.yaml       ← RBAC の Application (wave -1)
+gitops/manifests/prod/kube-access/
+  workflows.yaml                        ← gha:* の最小権限 ClusterRole / Binding
+  dr-recovery.yaml                      ← DR 用 binding (k3s-bootstrap が先行適用。単体ファイルで置く)
+  humans.yaml                           ← github:<login>:<数値ID> の binding
+.github/scripts/kube-oidc.sh            ← CI・DR 共通の OIDC kubeconfig 生成
+.github/scripts/kube-cert-validate.sh   ← CSR 検証 (発行ワークフローと手元で共用)
+.github/scripts/verify-environment-protection.sh ← Environment の保護設定検査
+.github/workflows/kube-cert-issue.yml   ← 人向け証明書の発行
+scripts/kube-login.sh                   ← `make kube-login` の実体 (コンテキスト aramakisai-prod の作成)
+```
+
 ### GitOps (`gitops/`)
 **目的**: ArgoCD が管理する Kubernetes マニフェスト一式  
 **構造**: 3 つの関心で分割

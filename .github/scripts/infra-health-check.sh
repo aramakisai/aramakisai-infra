@@ -26,8 +26,6 @@ KUBECTL_CONF="${INFRA_HEALTH_KUBECONFIG:-/tmp/kubeconfig-infra-health-check}"
 KUBE_OIDC="$(dirname "${BASH_SOURCE[0]}")/kube-oidc.sh"
 
 setup_kubeconfig() {
-  # Infisical run が注入する共有 kubeconfig を kubectl が拾わないようにする
-  unset KUBECONFIG
   bash "${KUBE_OIDC}" kubeconfig "${KUBECTL_CONF}" || die "OIDC kubeconfig の生成に失敗しました"
 }
 

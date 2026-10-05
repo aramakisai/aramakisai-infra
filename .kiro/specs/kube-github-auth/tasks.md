@@ -225,7 +225,7 @@
   - 完了状態: 上記の確認項目が本番で満たされ、実値を含まない形で記録されている
   - _Requirements: 3.1, 3.4, 3.8, 3.9, 4.1, 4.5, 5.2, 5.3, 9.5, 12.2_
 
-- [ ] 6. P5: 残りの消費者 (intrusion-response・DR・Zitadel・k3s-upgrade) の移行
+- [x] 6. P5: 残りの消費者 (intrusion-response・DR・Zitadel・k3s-upgrade) の移行
 
 - [x] 6.1 (P) intrusion-response を OIDC 認証と tag:ci の tailnet 参加に移行する
   - 両方のジョブに `id-token: write` を与え、4.1 の部品で kubeconfig を生成する
@@ -290,7 +290,7 @@
   - 完了状態: すべての消費者が新しい方式で動くことが本番で確認され、記録されている
   - _Requirements: 8.2, 8.3, 8.4, 8.6, 9.1, 9.5_
 
-- [ ] 6.9 【本番・ユーザー承認】main 上の `dr-recovery` を使い、生存確認ゲートで停止する経路で `environment` claim を確認する (D16)
+- [x] 6.9 【本番・ユーザー承認】main 上の `dr-recovery` を使い、生存確認ゲートで停止する経路で `environment` claim を確認する (D16)
   - 前提条件: 6.8 が完了し、DR の OIDC 移行が main に入っている。実行すると Issue への記録と失敗通知が出るため、事前に関係者へ知らせる
   - 実行: `dr-recovery` を main から dispatch する。`target_node` は稼働中のノード、`force` は false にする (true にしない)。承認は team `infra` のメンバー (起動者本人でよい) が行う
   - 安全性: 復旧スクリプトは読み取りだけの生存確認ゲートでシグナルを集める。稼働中のノードでは Hetzner・Tailscale・エンドポイントのシグナルが alive になるため、kubectl の結果にかかわらずゲートで停止し、Terraform・Ansible などの破壊的な処理には進まない
@@ -299,15 +299,15 @@
   - 完了状態: ゲートで停止した run で `kubectl=alive` が確認され、記録されている
   - _Requirements: 1.6, 8.4, 13.5_
 
-- [ ] 7. P6: 共有 kubeconfig の撤去とドキュメントの同期
+- [x] 7. P6: 共有 kubeconfig の撤去とドキュメントの同期
 
-- [ ] 7.1 リポジトリから共有 kubeconfig の痕跡を取り除く
-  - リポジトリ直下の kubeconfig スタブを削除する。不要になった ignore 設定と gitleaks の除外設定を整理する
+- [x] 7.1 リポジトリから共有 kubeconfig の痕跡を取り除く
+  - リポジトリ直下の kubeconfig スタブは、共有 kubeconfig の誤用を防ぐガードとして残す。そのため、スタブと関連する ignore 設定・gitleaks の除外設定は変更しない
   - Infisical の KUBECONFIG を参照するコード、ワークフロー、スクリプトが残っていないことを検索で確認する (k3d 検証用のパス指定と、標準の環境変数としての KUBECONFIG は除く)
-  - 完了状態: 共有 kubeconfig を参照する箇所の検索結果が 0 件になる
+  - 完了状態: 共有 kubeconfig を参照する箇所の検索結果が 0 件になる (残すスタブ自体は除く)
   - _Requirements: 8.7_
 
-- [ ] 7.2 (P) 運用ドキュメントを新しい認証方式に合わせる
+- [x] 7.2 (P) 運用ドキュメントを新しい認証方式に合わせる
   - CLAUDE.md、README、DR runbook、Zitadel のカットオーバーとロールバックの runbook から、共有 kubeconfig を前提にした記述を除く
   - kubectl の使い方 (`make kube-login` による証明書の発行とコンテキストの作成、7 日ごとの再発行、CA が変わったときの扱い) を書く
   - 権限の付与と剥奪の手順 (binding の追加と削除の PR) と、証明書を失効できないことの注意 (即時の剥奪は binding の削除、残るリスクの上限は有効期限) を書く
@@ -317,7 +317,7 @@
   - _Requirements: 5.5, 11.2, 11.4, 13.5, 14.1, 14.4_
   - _Boundary: Docs (CLAUDE.md, README, runbooks)_
 
-- [ ] 7.3 (P) steering を新しい認証方式に合わせる
+- [x] 7.3 (P) steering を新しい認証方式に合わせる
   - tech.md: Infisical のシークレット一覧から KUBECONFIG を除く。kube-access Application を追加した根拠と、bootstrap 時の先行適用 (GitOps 原則の例外) を記録する。発行ワークフローの防御と残存リスク、発行ワークフローと関連スクリプトの変更を cluster-admin 権限の変更と同じ扱いでレビューすること、Environment `dr-recovery` の保護設定の内容 (承認者は team `infra`、起動者本人の承認を認めること、team へのメンバー追加は手動) 、再検証が必要になる条件を記載する
   - dr.md: DR 時の kube-apiserver の認証方式、クラスタを作り直したときの人の証明書の再発行、server CA の扱い、kubectl の実行方法の節を更新する
   - structure.md と vaultwarden-rbac.md: 新しいコンポーネントの置き場所と、共有 kubeconfig を前提にした記述を更新する
@@ -326,7 +326,7 @@
   - _Requirements: 11.4, 13.5, 14.1, 14.2, 14.3, 14.4_
   - _Boundary: Docs (steering)_
 
-- [ ] 7.4 【ユーザー作業】PR をマージし、Infisical prod から KUBECONFIG を削除する
+- [x] 7.4 【ユーザー作業】PR をマージし、Infisical prod から KUBECONFIG を削除する
   - 前提条件: 3.7・4.3・5.4・6.8・6.9 で、人・CI・DR のすべてが新しい方式で動くことを確認済みで、7.1〜7.3 の PR がマージされている
   - 削除はユーザーが行う (書込可能な machine identity はなく、追加もしない)。値が出力されないよう、CLI の get や一覧は使わないか、出力を捨てる
   - 確認項目: 削除の後、infra-health-check の定期実行、`make kubectl`、発行ワークフローが成功し続ける。Infisical の KUBECONFIG を読もうとして失敗する実行がない
