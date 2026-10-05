@@ -66,6 +66,7 @@ make kubectl ARGS="get applications -n argocd"
 - 作り直し前に発行した人の証明書は新しい client CA で検証できず、すべて無効になる。各自が `make kube-login` で再発行する。
 - 手元のコンテキストの server CA も古くなる。`make kube-login` は CA の違いを検出すると指紋を表示して止まる。クラスタ再作成が正当な理由であることを確認してから `--accept-new-ca` で更新する。
 - server CA は `make kube-login` が tailnet 経由でノードから取得する (tailnet が信頼の根拠)。
+- 発行済みの証明書を即時に無効化する必要がある場合は client CA の forced rotation を行う。手順と戻し方は `.kiro/specs/kube-github-auth/design.md` の「client CA forced rotation の手順」。rotation 後も人は同様に再発行する。
 - GitHub 障害中は発行できないため、緊急時に限り Tailscale SSH でノード上のローカル admin (`/etc/rancher/k3s/k3s.yaml`) を使う。
 
 ---

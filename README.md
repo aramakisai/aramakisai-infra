@@ -37,6 +37,8 @@ Terraform でクラウドリソースを定義し、Ansible で K3s クラスタ
 ```
 .
 ├── terraform/          クラウドリソース定義 (Hetzner / Cloudflare / Tailscale)
+├── .github/            ワークフロー (DR・k3s-upgrade・kube-cert-issue 等) と scripts/ (kube-oidc.sh 等)
+├── scripts/            運用スクリプト (kube-login.sh = make kube-login の実体 等)
 ├── ansible/            K3s クラスター初期化
 │   ├── inventory/      Tailscale MagicDNS ベースのホスト定義
 │   ├── playbooks/      k3s-bootstrap.yml (ブートストラップ手順・再実行安全) / tasks/ (共通タスク)
