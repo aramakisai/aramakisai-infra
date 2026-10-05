@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       pod_selector:
-        description: 'Pod セレクター (任意、空の場合は namespace 全 Pod を対象)'
+        description: 'Pod セレクター (任意、forensics のログ採取対象のみを絞る。空の場合は namespace 全 Pod。isolate の NetworkPolicy は指定に関わらず namespace 全 Pod を遮断する)'
         required: false
         default: ''
         type: string
@@ -77,9 +77,26 @@ jobs:
             return "${rc}"
           }
 
-          capture /tmp/forensics/pod-logs.txt logs \
-            -n "${IR_NAMESPACE}" --all-containers --tail=1000 \
-            || echo "::warning::Pod ログの取得に失敗しました (部分取得の可能性あり)"
+          # kubectl logs はセレクタ指定だと同時リクエスト数に上限があるため Pod 単位で取る。
+          # stderr は値として取り込まず (::add-mask:: 混入防止)、1 Pod の失敗では止めない
+          sel=()
+          [[ -n "${IR_POD_SELECTOR}" ]] && sel=(-l "${IR_POD_SELECTOR}")
+          mkdir -p /tmp/forensics/pod-logs
+          if pods="$(kubectl get pods -n "${IR_NAMESPACE}" "${sel[@]}" -o name 2>/dev/null)"; then
+            while IFS= read -r pod; do
+              [[ -n "${pod}" ]] || continue
+              name="${pod#pod/}"
+              kubectl logs -n "${IR_NAMESPACE}" "${name}" --all-containers --prefix --tail=1000 \
+                >"/tmp/forensics/pod-logs/${name}.log" 2>/dev/null \
+                || echo "::warning::Pod ${name} のログ取得に失敗しました"
+              # 再起動前のログは前コンテナが無い Pod では失敗するのが正常
+              kubectl logs -n "${IR_NAMESPACE}" "${name}" --all-containers --prefix --tail=1000 --previous \
+                >"/tmp/forensics/pod-logs/${name}.previous.log" 2>/dev/null \
+                || rm -f "/tmp/forensics/pod-logs/${name}.previous.log"
+            done <<<"${pods}"
+          else
+            echo "::warning::Pod 一覧の取得に失敗したためログを採取できませんでした"
+          fi
 
           capture /tmp/forensics/events.txt get events \
             -n "${IR_NAMESPACE}" --sort-by='.lastTimestamp' \
@@ -92,6 +109,12 @@ jobs:
           capture /tmp/forensics/pods.txt get pods \
             -n "${IR_NAMESPACE}" -o wide \
             || echo "::warning::Pod 一覧の取得に失敗しました"
+
+          if [[ -n "${IR_POD_SELECTOR}" ]]; then
+            capture /tmp/forensics/pods-selected.txt get pods \
+              -n "${IR_NAMESPACE}" -l "${IR_POD_SELECTOR}" -o wide \
+              || echo "::warning::セレクタ指定の Pod 一覧の取得に失敗しました"
+          fi
 
           echo "namespace=${IR_NAMESPACE}" > /tmp/forensics/metadata.txt
           echo "pod_selector=${IR_POD_SELECTOR}" >> /tmp/forensics/metadata.txt
