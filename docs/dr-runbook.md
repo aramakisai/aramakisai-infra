@@ -424,6 +424,7 @@ ACL を Terraform で管理する場合は `policy_file` スコープも必要�
 | `TS_OAUTH_SECRET` | Tailscale OAuth Client Secret (tag:ci 用) | dr-recovery.yml |
 
 Infisical (`prod`) から注入する主なキー: `INFISICAL_CLIENT_ID/SECRET`、`HCLOUD_TOKEN` (Hetzner サーバー状態の確認・電源投入)、`TAILSCALE_OAUTH_CLIENT_ID/SECRET`、`TAILSCALE_TAILNET`、`TFC_API_TOKEN`、`TFC_WORKSPACE_ID`、`DISCORD_OPS_WEBHOOK_URL`、`K3S_TOKEN` ほか Ansible 用。
+`TFC_API_TOKEN` は workspace `aramakisai-infra` に apply 権限を持つ team の team token (organization token は run を作れず、user token は個人に紐づくため不可)。
 
 `GITHUB_TOKEN` は Issue 操作のため `issues: write` を、dr-recovery.yml では Environment の保護ルール検査のため `actions: read` を `permissions` で付与している。新規 PAT は不要。
 dr-recovery.yml は冒頭で Environment `dr-recovery` の required reviewers を検査し、未設定なら失敗する。`main` 以外の ref では起動しない。

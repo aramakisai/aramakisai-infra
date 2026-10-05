@@ -63,7 +63,8 @@ make kubectl ARGS="get applications -n argocd"
 - **Single Source of Truth は Infisical**。`.env` ファイルは参照しない
 - すべての CLI 操作は `infisical run -- <command>` で実行する
 - `.infisical.json` の `defaultEnvironment` が `"prod"` であることを確認する（空だと dev にフォールバックする）
-- Terraform 認証情報 (`HCLOUD_TOKEN` 等) は `terraform login` (Terraform Cloud) が担う。Infisical には入っているが TFC が自動参照するため二重管理になっている
+- 手元の `terraform` 実行は `terraform login` (Terraform Cloud) で認証する。`HCLOUD_TOKEN` 等のプロバイダー認証情報は TFC 側が保持する
+- DR 経路 (`recovery.sh`) は TFC API を直接叩くため、Infisical `prod` の `TFC_API_TOKEN` / `TFC_WORKSPACE_ID` を使う。トークンは workspace `aramakisai-infra` に apply 権限を持つ team の team token (organization token は run を作れず、user token は個人に紐づくため不可)
 
 ---
 
