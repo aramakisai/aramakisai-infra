@@ -302,9 +302,9 @@
 - [ ] 7. P6: 共有 kubeconfig の撤去とドキュメントの同期
 
 - [x] 7.1 リポジトリから共有 kubeconfig の痕跡を取り除く
-  - リポジトリ直下の kubeconfig スタブを削除する。不要になった ignore 設定と gitleaks の除外設定を整理する
+  - リポジトリ直下の kubeconfig スタブは、共有 kubeconfig の誤用を防ぐガードとして残す。そのため、スタブと関連する ignore 設定・gitleaks の除外設定は変更しない
   - Infisical の KUBECONFIG を参照するコード、ワークフロー、スクリプトが残っていないことを検索で確認する (k3d 検証用のパス指定と、標準の環境変数としての KUBECONFIG は除く)
-  - 完了状態: 共有 kubeconfig を参照する箇所の検索結果が 0 件になる
+  - 完了状態: 共有 kubeconfig を参照する箇所の検索結果が 0 件になる (残すスタブ自体は除く)
   - _Requirements: 8.7_
 
 - [x] 7.2 (P) 運用ドキュメントを新しい認証方式に合わせる
