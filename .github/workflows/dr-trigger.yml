@@ -26,7 +26,7 @@ jobs:
       # 最終通知時刻と連続 Healthy 回数を実行間で引き継ぐ。キャッシュが失効しても
       # 初期状態に戻るだけ (再通知が早まる側) で、検知自体は止まらない
       - name: Restore state
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: .dr-trigger-state.json
           key: dr-trigger-state-${{ github.run_id }}-${{ github.run_attempt }}
@@ -60,7 +60,7 @@ jobs:
 
       - name: Save state
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: .dr-trigger-state.json
           key: dr-trigger-state-${{ github.run_id }}-${{ github.run_attempt }}
