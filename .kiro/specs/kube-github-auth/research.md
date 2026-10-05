@@ -419,6 +419,14 @@
   - readyz・匿名アクセス拒否・etcd 健全性・ノード Ready・cloudflared/ArgoCD Ready の確認タスクはすべて ok。実行後のノードは Ready
 - DR の電源投入経路: 6.9 のゲート停止 run で代替する (ユーザー決定)
 
+## DR の生存確認ゲートでの確認 (task 6.9、2026-10-05)
+
+- 初回の dispatch: recovery.sh の必須チェックで `TFC_API_TOKEN` と `TFC_WORKSPACE_ID` が Infisical prod に未登録だったため、ゲートの前で失敗した。DR 導入時からの設定欠落で、OIDC 移行とは無関係。ドキュメントは登録済みを前提にしていた
+- 対処: HCP Terraform の無料プランでは team が owners のみのため、owners team token (期限なし) を登録し、TFC API への疎通を確認してから再実行した
+- 再実行 (`target_node` は稼働中のノード、`force=false`、Environment `dr-recovery` は起動者本人が承認): 生存確認ゲートで hetzner・tailscale・endpoints・kubectl が全て alive となり停止した。Terraform・Ansible には進んでいない
+- `kubectl=alive` は、`environment` claim を含む照合で `gha:dr-recovery` が認証されたことを示す。Unauthorized・Forbidden は出ていない。kube-apiserver の監査ログに `gha:dr-recovery` の要求を確認した
+- Issue への記録と失敗通知は想定どおり出た
+
 ## ユーザー決定の記録 (実機検証後、2026-10-04)
 
 | 項目 | 決定 | 根拠となった検証結果 |
