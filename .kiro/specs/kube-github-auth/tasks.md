@@ -299,7 +299,7 @@
   - 完了状態: ゲートで停止した run で `kubectl=alive` が確認され、記録されている
   - _Requirements: 1.6, 8.4, 13.5_
 
-- [ ] 7. P6: 共有 kubeconfig の撤去とドキュメントの同期
+- [x] 7. P6: 共有 kubeconfig の撤去とドキュメントの同期
 
 - [x] 7.1 リポジトリから共有 kubeconfig の痕跡を取り除く
   - リポジトリ直下の kubeconfig スタブは、共有 kubeconfig の誤用を防ぐガードとして残す。そのため、スタブと関連する ignore 設定・gitleaks の除外設定は変更しない
@@ -326,7 +326,7 @@
   - _Requirements: 11.4, 13.5, 14.1, 14.2, 14.3, 14.4_
   - _Boundary: Docs (steering)_
 
-- [ ] 7.4 【ユーザー作業】PR をマージし、Infisical prod から KUBECONFIG を削除する
+- [x] 7.4 【ユーザー作業】PR をマージし、Infisical prod から KUBECONFIG を削除する
   - 前提条件: 3.7・4.3・5.4・6.8・6.9 で、人・CI・DR のすべてが新しい方式で動くことを確認済みで、7.1〜7.3 の PR がマージされている
   - 削除はユーザーが行う (書込可能な machine identity はなく、追加もしない)。値が出力されないよう、CLI の get や一覧は使わないか、出力を捨てる
   - 確認項目: 削除の後、infra-health-check の定期実行、`make kubectl`、発行ワークフローが成功し続ける。Infisical の KUBECONFIG を読もうとして失敗する実行がない

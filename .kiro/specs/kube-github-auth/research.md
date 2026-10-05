@@ -406,7 +406,7 @@
 - Zitadel bootstrap:
   - 手元のコンテキスト (人向けクライアント証明書) で `zitadel-bootstrap.yml` を実行した。playbook は読取のみで、exec は ready 確認・ファイル存在確認・cat だけであることを確認した
   - 「Zitadel が ready になるまで待機」が ok で、コンテキストでの kube 接続は成功した。後続の PAT 待機は失敗したが、PAT が emptyDir 上にあり既に消えているためで、認証方式とは無関係。Unauthorized・Forbidden は出ていない。PAT は回収されず、出力先は削除した
-  - Infisical の KUBECONFIG は使わない。`infisical run` を付けると Infisical 側の KUBECONFIG の中身がパスとして解釈され衝突するため、`env -u KUBECONFIG` を付けて実行する
+  - Infisical の KUBECONFIG は使わない
 - intrusion-response:
   - 検証専用の namespace と待機 Pod を GitOps で追加し、main から dispatch した (namespace は検証用、`pod_selector` で待機 Pod を指定)。全ジョブが成功した
   - tag:ci での tailnet 参加、フォレンジック artifact の保存、隔離 NetworkPolicy の作成、Discord 通知ジョブが成功し、Unauthorized・Forbidden は出なかった。隔離 NetworkPolicy は namespace 全体が対象で仕様どおり (`pod_selector` は採取対象にのみ効く)
@@ -426,6 +426,12 @@
 - 再実行 (`target_node` は稼働中のノード、`force=false`、Environment `dr-recovery` は起動者本人が承認): 生存確認ゲートで hetzner・tailscale・endpoints・kubectl が全て alive となり停止した。Terraform・Ansible には進んでいない
 - `kubectl=alive` は、`environment` claim を含む照合で `gha:dr-recovery` が認証されたことを示す。Unauthorized・Forbidden は出ていない。kube-apiserver の監査ログに `gha:dr-recovery` の要求を確認した
 - Issue への記録と失敗通知は想定どおり出た
+
+## Infisical の KUBECONFIG 削除 (task 7.4、2026-10-05)
+
+- Infisical prod から共有 `KUBECONFIG` を削除した。`infisical run --env=prod` 下で KUBECONFIG が設定されないことを確認した
+- 以後 `infisical run` は KUBECONFIG を注入しない。`make kubectl` はコンテキスト `aramakisai-prod` で動作することを確認した
+- 注入対策だった `unset KUBECONFIG` (infra-health-check.sh) と `env -u KUBECONFIG` の手順は不要になったため削除した
 
 ## ユーザー決定の記録 (実機検証後、2026-10-04)
 
