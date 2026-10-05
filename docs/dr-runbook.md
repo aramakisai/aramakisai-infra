@@ -63,6 +63,14 @@ Actions の実行画面で team `infra` のメンバー (起動者本人でも�
 | `target_node` | (必須) | 復旧対象。terraform `local.nodes` に定義済みで、inventory の cluster-init ホストであること |
 | `force` | false | 生存確認ゲートの上書き。サーバーが稼働中の場合は Terraform・電源操作を行わず Ansible から再実行する (冪等化済みの `k3s-bootstrap.yml` が前提) |
 
+### kube-apiserver の認証
+
+`dr-recovery` は GitHub Actions OIDC で kube-apiserver に認証し、ユーザー名 `gha:dr-recovery` で cluster-admin を持つ。API サーバーは、main 上の `dr-recovery.yml` が Environment `dr-recovery` (承認済み) で実行したジョブのトークンだけを受け入れる。保存された kube 資格情報は使わない。
+
+- kubeconfig は開始時 (生存確認ゲート用) と `k3s-bootstrap.yml` の後の 2 回作る。クラスタを作り直すと server CA が変わるため、bootstrap 後に作り直す。
+- k3s は初回起動から OIDC 認証設定を読み込む。`gha:dr-recovery` の ClusterRoleBinding は、ArgoCD の同期を待たず `k3s-bootstrap.yml` がノード上のローカル admin で先行適用する (定義は `gitops/manifests/prod/kube-access/dr-recovery.yaml` と同じファイル)。
+- 復旧後、人の証明書はすべて無効になる (新しい client CA)。各自が `make kube-login ARGS=--accept-new-ca` で再発行する。server CA の指紋が正当か確認してから受け入れる。
+
 ### 処理の流れ
 
 ```
@@ -91,7 +99,7 @@ Actions の実行画面で team `infra` のメンバー (起動者本人でも�
 5. 不在・force の経路のみ: ansible-playbook k3s-bootstrap.yml を対象ノードに限定して実行 (最大40分。SSH は
      CI 専用デプロイ鍵 `CI_SSH_PRIVATE_KEY` を 0600 の一時ファイルに書き出して使い、終了時に削除する)
      (cluster-init は空の etcd から作り直す。etcd スナップショットは取得していない)
-     完了後に Infisical の共有 kubeconfig を読み取って取得し直す (取得失敗は停止)
+     完了後に GitHub Actions OIDC の kubeconfig を新しい server CA で作り直す (生成失敗は停止)
 6. infisical-auth / Deploy Key の空チェックと自己修復 (CI 用 identity の値から作成)
 7. ArgoCD の Application が Healthy になるまで待機 (replicas=0 のワークロードだけを持つ凍結中アプリは除外、最大20分、
    待機中に mail-tls の自己修復も試行) と、稼働中の全 CNPG クラスターの healthy 待機 (最大15分)。
@@ -164,7 +172,7 @@ dig mail.aramakisai.com AAAA
 
 ## 手動フォールバック
 
-自動復旧が失敗した場合のみ実施する。
+自動復旧が失敗した場合のみ実施する。GitHub 障害中は `dr-recovery` の OIDC 認証と Environment 承認が使えないため、この手順で行う。
 前提: `infisical login` 済み、`terraform login` 済み。ワークフローと同じ安全側の手順で行う。
 
 ### ステップ 1: 状態確認
@@ -214,18 +222,18 @@ infisical run --env=prod -- ansible-playbook \
 
 ### ステップ 5: シークレット修復 (必要な場合)
 
+クラスタを作り直した後は人の証明書が無効なため、先に `make kube-login ARGS=--accept-new-ca` で再発行する (GitHub 障害中で発行できない場合は、Tailscale SSH でノード上のローカル admin `/etc/rancher/k3s/k3s.yaml` を使う)。
+
 ```bash
 infisical run --env=prod -- bash -c '
-echo "$KUBECONFIG" > /tmp/kubeconfig-dr && chmod 600 /tmp/kubeconfig-dr
-
-kubectl --kubeconfig=/tmp/kubeconfig-dr \
+kubectl --context aramakisai-prod \
   create secret generic infisical-auth \
   --from-literal=clientId="$INFISICAL_CLIENT_ID" \
   --from-literal=clientSecret="$INFISICAL_CLIENT_SECRET" \
   -n argocd --dry-run=client -o yaml \
-  | kubectl --kubeconfig=/tmp/kubeconfig-dr apply -f -
+  | kubectl --context aramakisai-prod apply -f -
 
-kubectl --kubeconfig=/tmp/kubeconfig-dr \
+kubectl --context aramakisai-prod \
   annotate externalsecret --all -A \
   force-sync=$(date +%s) --overwrite
 '

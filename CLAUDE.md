@@ -68,11 +68,37 @@ gh workflow run dr-recovery.yml --repo aramakisai/aramakisai-infra -f target_nod
 # ノード接続 (Tailscale SSH)
 ssh root@prod-node-1
 
-# クラスター状態確認 (ホスト上またはmake経由)
+# 初回と 7 日ごとの再発行: GitHub 経由で短命クライアント証明書を発行し、コンテキスト aramakisai-prod を作成・更新する
+make kube-login
+
+# クラスター状態確認
 make kubectl ARGS="get nodes -o wide"
 make kubectl ARGS="get pods -A"
 ```
-決して `kubectl` を直接ローカルで実行しないこと。必ず `make kubectl` 経由で kubeconfig を注入して実行すること。
+`kubectl` は `make kubectl` 経由で、手元のコンテキスト `aramakisai-prod` を使って実行する (`kubectl --context aramakisai-prod` と同じ)。
+
+- 前提: `gh` ログイン済み (2.87.0 以上)、tailnet 接続済み、リポジトリの write 権限。
+- `make kube-login` は鍵と CSR を手元で作り、`kube-cert-issue.yml` で署名済み証明書を受け取る。証明書の有効期限は 7 日で、切れたら再実行する (再実行は新しい鍵で発行し直してコンテキストを置き換える)。秘密鍵は手元から出ない。
+- server CA が既存のコンテキストと異なる場合 (クラスタ再作成など) は指紋を表示して止まる。指紋が正当と確認できたときだけ `make kube-login ARGS=--accept-new-ca` で更新する。
+- クラスタ再作成後は CA が変わるため、全員が `make kube-login` で証明書を再発行する。
+
+### 権限の付与・剥奪 (kube-access)
+
+kube-apiserver への権限はすべて `gitops/manifests/prod/kube-access/` の RBAC が正本で、ArgoCD Application `kube-access` が同期する (直接 `kubectl` で binding を作らない)。
+
+- **付与**: `humans.yaml` に ClusterRoleBinding を追加する PR を出す。ユーザー名は `github:<GitHubログイン名>:<数値ID>` (数値 ID は `gh api users/<login> --jq .id`)。ログイン名を変えると一致せず権限を失う。
+- **剥奪**: binding を削除する PR をマージする。ArgoCD の prune で即時に反映される。
+- クライアント証明書は **失効できない**。証明書自体は有効期限まで認証を通るため、即時の剥奪は binding の削除で行う (証明書は認証されるだけで権限がなくなる)。残存リスクの上限は証明書の有効期限 (最長 7 日)。
+- 発行ワークフローが侵害された疑いがある場合に旧証明書を無効にできるのは client CA の forced rotation だけで、手順は設計 (`.kiro/specs/kube-github-auth/design.md`) にある。
+
+### GitHub 障害時の挙動
+
+認証の信頼の起点は GitHub (Actions と OIDC 発行) のため、障害中は次のとおり動く。
+
+- 止まる: `make kube-login` による発行、CI (infra-health-check・intrusion-response など)、DR (`dr-recovery`)。
+- 使える: 発行済みで有効期限内の証明書による `make kubectl`。kube-apiserver が OIDC の公開鍵を取得できなくても、クライアント証明書の認証は続く。
+- 証明書が期限切れで再発行できない緊急時は、Tailscale SSH でノードに入り、ノード上のローカル admin (`/etc/rancher/k3s/k3s.yaml`) を使える。平常時の運用には使わない。
+- DR が必要なときは `dr-recovery` が動かないため、`docs/dr-runbook.md` の「手動フォールバック」に従う。
 
 ### GitOps 原則：クラスタへの直接操作禁止
 
