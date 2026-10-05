@@ -23,12 +23,14 @@ customRules:
     # cert-manager はベースイメージの update-ca-certificates で /etc/ssl/certs を更新する正常処理のため除外する。
     # k3s-bootstrap.yml (k3sバージョンアップ実行時) は systemd drop-in の k3s.service.env を
     # touch/tee で書き換える正常動作。host側のためimageを持たずfd.name単位で除外する。
+    # k3s は起動のたびに /etc/rancher/k3s/k3s.yaml を再生成するため、host 上の k3s-server に限り除外する。
     # ※container.image.repository はレジストリ接頭辞込み (docker.io/...) で一致させる必要がある。
     - macro: known_etc_writer
       condition: >
         ((k8s.ns.name=prod and container.image.repository=docker.io/mailserver/docker-mailserver)
          or (k8s.ns.name=cert-manager and proc.name in (update-ca-certificates))
-         or (container.id=host and fd.name=/etc/systemd/system/k3s.service.env))
+         or (container.id=host and fd.name=/etc/systemd/system/k3s.service.env)
+         or (container.id=host and proc.name=k3s-server and fd.name=/etc/rancher/k3s/k3s.yaml))
 
     # falco-rules:5 (デフォルトで投入される OCI artifact) には "Write below etc" 系のルールが
     # 含まれていない (falcosecurity/rules の falco-sandbox_rules.yaml にのみ存在し、デフォルトでは pull されない)。
@@ -64,14 +66,22 @@ customRules:
     # リーダー選出・ステータス同期のためk8s APIへ定常アクセスするため、合わせて除外する。
     # mailserver-backup-healthcheck / vaultwarden-rbac-sync (docker.io/alpine/k8s) は
     # prod 内で kubectl get/patch を定期実行する正常動作のため除外する。
+    # k3s (API server) の再起動時は各コントローラが一斉に再接続するため、ns とイメージで限定して除外する。
+    # CNPG instance manager は prod 以外 (zitadel) にもある。
     - macro: user_known_contact_k8s_api_server_activities
       condition: >
         (k8s.ns.name=argocd and container.image.repository=quay.io/argoproj/argocd)
         or (k8s.ns.name=prod and container.image.repository=ghcr.io/goauthentik/server)
         or (k8s.ns.name=cnpg-system and container.image.repository=ghcr.io/cloudnative-pg/cloudnative-pg)
         or (k8s.ns.name=monitoring and container.image.repository=docker.io/netdata/netdata)
-        or (k8s.ns.name=prod and proc.name=manager and container.image.repository=ghcr.io/cloudnative-pg/postgresql)
+        or (k8s.ns.name in (prod, zitadel) and proc.name=manager and container.image.repository=ghcr.io/cloudnative-pg/postgresql)
         or (container.image.repository=docker.io/alpine/k8s and k8s.ns.name=prod)
+        or (k8s.ns.name=volsync and container.image.repository=quay.io/backube/volsync)
+        or (k8s.ns.name=cert-manager and container.image.repository in (quay.io/jetstack/cert-manager-controller, quay.io/jetstack/cert-manager-webhook, quay.io/jetstack/cert-manager-cainjector))
+        or (k8s.ns.name=external-secrets and container.image.repository=oci.external-secrets.io/external-secrets/external-secrets)
+        or (k8s.ns.name=ingress-nginx and container.image.repository=registry.k8s.io/ingress-nginx/controller)
+        or (k8s.ns.name=argocd and container.image.repository=ghcr.io/dexidp/dex)
+        or (k8s.ns.name=reloader and container.image.repository=ghcr.io/stakater/reloader)
 
     # authentik server (gunicorn/dumb-init) は worker との内部通信のため dup3 で
     # stdout/stdin をソケットへ張り替える正常動作。upstream の Redirect STDOUT/STDIN to
