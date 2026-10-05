@@ -334,7 +334,7 @@
   - 完了状態: Infisical prod に KUBECONFIG がなく、すべての消費者が正常に動いている
   - _Requirements: 9.1, 9.2, 13.4_
 
-- [ ] 8. P7: client CA の forced rotation による旧共有 admin 証明書の無効化
+- [x] 8. P7: client CA の forced rotation による旧共有 admin 証明書の無効化
 
 - [x] 8.1 KVM の DR テスト環境で forced rotation の手順を通しで確かめる
   - design.md の手順で行う。新しい client CA を正しい置き場所に置き、forced で rotation を実行し、k3s を再起動する
@@ -345,13 +345,13 @@
   - _Depends: 7.4_
   - _Requirements: 9.3, 9.4_
 
-- [ ] 8.2 【ユーザー作業】本番の rotation を実施するかどうかと、メンテナンス時間を決める
+- [x] 8.2 【ユーザー作業】本番の rotation を実施するかどうかと、メンテナンス時間を決める
   - 実施時期は任意。実施する場合はメンテナンス時間を決め、証明書の再発行が必要になることを利用者に知らせる
   - 実施しない、または延期する場合は、その理由と次に判断する時期を記録する
   - 完了状態: 実施の可否と時期 (または延期の理由と期限) が記録されている
   - _Requirements: 9.3_
 
-- [ ] 8.3 【本番・ユーザー承認】メンテナンス時間に本番の client CA を forced rotation する
+- [x] 8.3 【本番・ユーザー承認】メンテナンス時間に本番の client CA を forced rotation する
   - 前提条件: 7.4・8.1 が完了し、8.2 で実施が決まっている。CNPG のバックアップが正常で、rotation 直前に etcd のスナップショットを取得し、旧 client CA をノード上の戻し用ディレクトリに退避してある (鍵はノードから持ち出さない)
   - SSH 例外 (D17): rotation コマンドの実行開始から、新しい CA での接続 (OIDC と `make kube-login` による再発行) と下記の確認の完了までに限り、SSH でノード上のローカル admin を kubectl と復旧の代わりに使ってよい。目的は、rotation コマンドの実行、再起動後の確認、人の再発行が通らない場合の復旧、下記の戻し方に限る。戻し方を行った場合は、戻した後の確認が終わった時点で例外の期間を終える。完了後は SSH での kubectl に戻さない
   - 確認項目: 旧共有 admin 証明書、旧ローカル admin のコピー、人の旧証明書が 401 になる。ノード上のローカル admin が通る。ノードが Ready で、Pod が稼働し続けている。server CA の指紋が変わらず、client CA の指紋が新しい CA のものになっている。infra-health-check が OIDC で成功する。人が `make kube-login` で再発行でき、kubectl が使える

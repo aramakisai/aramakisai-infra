@@ -446,6 +446,32 @@
 - 未確認: 実際の GitHub Actions トークンでの OIDC (モック issuer で代替)、`make kube-login` の発行ワークフロー (CSR の手動発行で代替)
 - 本番で使うチェックリストは design.md の「rotation の本番チェックリスト」に置いた
 
+## 本番の client CA forced rotation の実施記録 (task 8.2・8.3、2026-10-05)
+
+### 8.2 実施の決定
+- ユーザーが本日の実施を決定した。kube の利用者がユーザー本人のみのため、事前周知は不要と判断した
+
+### 8.3 事前確認と実施
+- CNPG: 稼働中の Cluster は Ready で WAL アーカイブは正常、直近の base backup は成功していた。週次スケジュールのものは base backup が 24 時間を超えていたが、WAL で直近まで復元できると判断した。hibernation 中の Cluster は対象外とした
+- 退避: 旧 client CA をノード上の戻し用ディレクトリに退避した (鍵はノード外に持ち出していない)。rotation 直前に etcd スナップショットを取得した (ローカル保存のみで、ノード外へのコピーは無い)。指紋と Pod の状態を記録した
+- 実施: design.md の本番チェックリストどおりに新 client CA を作成し、`rotate-ca --force` のあと `systemctl restart k3s` を行った。`/readyz` が ok になるまで十数秒だった。戻し方は使っていない
+
+### 確認結果
+- 旧ローカル admin のコピー、人の旧証明書、旧共有 admin 証明書 (手元に残っていた写し) はすべて 401 になった。新しいローカル admin は成功した
+- client CA の指紋は新 CA と一致し、server CA と `/cacerts` は不変だった。ノードは Ready
+- infra-health-check が OIDC で成功した。`make kube-login` で再発行でき、kubectl が使えた (`gh run watch` が GitHub API の一時エラーで失敗し再試行が要ったが、発行ワークフロー自体は成功していた)
+- ArgoCD の状態は rotation 前から変化しなかった
+
+### D16 (Pod の継続) の結果
+- ワークロードの Pod は変化しなかった。一方、leader election を使うコントローラ 3 個 (CNPG operator、cilium-operator、snapshot-controller) が、k3s の再起動中に各 1 回再起動した。lease を失ったためと推定している (未確認)。いずれも Running に復帰した
+- KVM の DR テスト環境にはこれらのコントローラがいなかったため、8.1 では現れなかった
+
+### Falco
+- 再起動直後の約 20 秒間、各コントローラの再接続で `Contact K8S API Server From Container` (Notice) と、k3s による `/etc/rancher/k3s/k3s.yaml` の再生成で `Write below etc` が出た。実害はない。除外ルールは別途検討する (本仕様では Falco 設定を変えない)
+
+### SSH 例外 (D17)
+- rotation の実行から、再発行と確認の完了までの間に限って使った。完了後は SSH での kubectl に戻していない。例外の期間は終了した
+
 ## ユーザー決定の記録 (実機検証後、2026-10-04)
 
 | 項目 | 決定 | 根拠となった検証結果 |

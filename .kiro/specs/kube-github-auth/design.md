@@ -684,7 +684,7 @@ graph TB
 
 - k3d で、旧証明書 3 種が 401 になり、新 `k3s.yaml` と OIDC 認証が通り、node が Ready、server CA の指紋が不変であることを確認した。人の kubeconfig の CA (server CA) は影響を受けない。
 - 影響: Infisical の `KUBECONFIG` と手元に残る旧 kubeconfig はすべて無効になる (意図どおり)。Ansible が使うノード上のローカル admin は再生成される。リポジトリの gitops に client 証明書を使う kubeconfig はない。
-- KVM の DR テスト環境 (systemd、`KillMode=process`) で、rotation と戻し方 A・B のいずれの再起動でも Pod のコンテナと startedAt・restartCount が変わらない (Pod が落ちない) ことを確認した。
+- KVM の DR テスト環境 (systemd、`KillMode=process`) で、rotation と戻し方 A・B のいずれの再起動でも Pod のコンテナと startedAt・restartCount が変わらない (Pod が落ちない) ことを確認した。 ただし leader election を使うコントローラ (CNPG operator、cilium-operator、snapshot-controller など) は、API 停止中に lease を失って再起動しうる。ワークロードの Pod には影響しない。
 
 ### rotation の戻し方 (P7、ユーザー承認済み)
 
