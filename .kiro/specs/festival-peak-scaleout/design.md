@@ -480,6 +480,7 @@ sequenceDiagram
 
 - Integration: Play 0 が `hosts: all` であるため、`--limit` を指定して追加ノードのみを対象とする。Cilium・cloudflared・ArgoCD の各 Play は `run_once: true` により多重実行されない
 - Validation: `--check` と `--limit` を併用し、既存ノードに変更が生じないことを適用前に確認する
+- Risks: 実機のないホストを inventory に置くと、`any_errors_fatal` の Play (`hosts: all`) が unreachable で全台分中断し、`prod-node-1` を含む k3s-bootstrap と k3s-upgrade が実行できなくなる。実機作成後に追加し、縮退でノードを削除したら外す。
 - Risks: inventory を 3 ノードへ更新した状態で DR が発火すると、`recovery.sh` がその内容で Ansible を実行する。DR 制御による停止がこのリスクの回避手段となる
 
 #### tls-san 適用

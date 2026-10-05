@@ -22,17 +22,13 @@ all:
           k3s_cluster_init: true
           k3s_private_ip: 10.0.1.1  # Hetzner private network IP
 
-    # 追加 server ノード。k3s-bootstrap.yml Play 2 が対象とする
+    # 追加 server ノード。k3s-bootstrap.yml Play 2 が対象とする。
+    # 実機のあるノードだけを置くこと。未作成のホストが 1 台でも居ると、
+    # any_errors_fatal の Play (hosts: all) が unreachable で全台分中断し、
+    # prod-node-1 の k3s-bootstrap / k3s-upgrade も実行できなくなる。
+    # 実機を作成してから、prod-node-1 と同じ形式 (k3s_role: server, k3s_private_ip) で追加する。
     k3s_server_worker:
-      hosts:
-        prod-node-2:
-          ansible_host: prod-node-2
-          k3s_role: server
-          k3s_private_ip: 10.0.1.2  # Hetzner private network IP
-        prod-node-3:
-          ansible_host: prod-node-3
-          k3s_role: server
-          k3s_private_ip: 10.0.1.3  # Hetzner private network IP
+      hosts: {}
 
   vars:
     ansible_user: root
