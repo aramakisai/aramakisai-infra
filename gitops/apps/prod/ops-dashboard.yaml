@@ -1,0 +1,38 @@
+---
+# 運用ポータル・運用ダッシュボード (portal + collector)
+# wave: 0 — ESO / ClusterSecretStore (wave -1) が先行して揃った後に同期する。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ops-dashboard
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:aramakisai/aramakisai-infra.git
+    targetRevision: main
+    path: gitops/manifests/prod/ops-dashboard
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ops-dashboard
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      # RespectIgnoreDifferences は配列要素パスの ignore と併用すると、apply 時に配列が live の長さに
+      # 丸められ追加要素が落ちるため付けない
+  ignoreDifferences:
+    - group: external-secrets.io
+      kind: ExternalSecret
+      jqPathExpressions:
+        - .spec.data[].remoteRef.conversionStrategy
+        - .spec.data[].remoteRef.decodingStrategy
+        - .spec.data[].remoteRef.metadataPolicy
+        - .spec.target.deletionPolicy

@@ -66,6 +66,7 @@ customRules:
     # リーダー選出・ステータス同期のためk8s APIへ定常アクセスするため、合わせて除外する。
     # mailserver-backup-healthcheck / vaultwarden-rbac-sync (docker.io/alpine/k8s) は
     # prod 内で kubectl get/patch を定期実行する正常動作のため除外する。
+    # ops-dashboard の collector (python) は 2 分ごとに k8s API を読む定常動作のため除外する。
     # k3s (API server) の再起動時は各コントローラが一斉に再接続するため、ns とイメージで限定して除外する。
     # CNPG instance manager は prod 以外 (zitadel) にもある。
     - macro: user_known_contact_k8s_api_server_activities
@@ -82,6 +83,7 @@ customRules:
         or (k8s.ns.name=ingress-nginx and container.image.repository=registry.k8s.io/ingress-nginx/controller)
         or (k8s.ns.name=argocd and container.image.repository=ghcr.io/dexidp/dex)
         or (k8s.ns.name=reloader and container.image.repository=ghcr.io/stakater/reloader)
+        or (k8s.ns.name=ops-dashboard and container.image.repository=docker.io/library/python)
 
     # authentik server (gunicorn/dumb-init) は worker との内部通信のため dup3 で
     # stdout/stdin をソケットへ張り替える正常動作。upstream の Redirect STDOUT/STDIN to
