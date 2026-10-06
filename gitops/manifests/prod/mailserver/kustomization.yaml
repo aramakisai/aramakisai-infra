@@ -1,0 +1,25 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: prod
+
+resources:
+  - backup-healthcheck-cronjob.yaml
+  - backup-healthcheck-rbac.yaml
+  - certificate.yaml
+  - configmap.yaml
+  - dkim-external-secret.yaml
+  - dovecot-lua-auth-external-secret.yaml
+  - dovecot-oauth2-external-secret.yaml
+  - healthchecks-external-secret.yaml
+  - pvc.yaml
+  - replication-source.yaml
+  - restic-external-secret.yaml
+  - service.yaml
+  - statefulset.yaml
+  - mail-agent.yaml
+
+# コードが変わるとハッシュ付きの名前が変わり、mail-agent Pod だけが再作成される
+configMapGenerator:
+  - name: mail-agent-app
+    files:
+      - mail-agent/app.py
