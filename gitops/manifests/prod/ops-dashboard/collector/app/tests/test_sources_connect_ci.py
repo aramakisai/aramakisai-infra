@@ -6,7 +6,8 @@ from helpers import FakeHttp, make_ctx
 from model import Status
 from sources import ci_github, connect_tailscale, connect_tunnel
 
-CF = "https://api.cloudflare.com/client/v4/accounts/ACC/cfd_tunnel/TID"
+LIST = "https://api.cloudflare.com/client/v4/accounts/ACC/cfd_tunnel"
+CF = LIST + "/TID"
 
 
 def cfg_with(**sources):
@@ -18,10 +19,11 @@ def cfg_with(**sources):
 class TunnelTest(unittest.TestCase):
     def ctx(self, status, conns):
         http = FakeHttp({
+            LIST: {"success": True, "result": [{"id": "TID"}]},
             CF: {"success": True, "result": {"id": "TID", "status": status, "connections": []}},
             CF + "/connections": {"success": True, "result": conns}})
-        cfg = cfg_with(**{"connect.tunnel": {"account_id": "ACC", "tunnel_id": "TID"}})
-        return make_ctx(cfg=cfg, http=http, env={"OPS_CLOUDFLARE_READ_TOKEN": "t"}), http
+        cfg = cfg_with(**{"connect.tunnel": {"tunnel_name": "aramakisai-k3s"}})
+        return make_ctx(cfg=cfg, http=http, env={"OPS_CLOUDFLARE_READ_TOKEN": "t", "TF_VAR_cloudflare_account_id": "ACC"}), http
 
     def test_healthy(self):
         ctx, http = self.ctx("healthy", [{"id": "a", "conns": [{"colo_name": "NRT"}, {"colo_name": "KIX"}]}])
@@ -29,6 +31,7 @@ class TunnelTest(unittest.TestCase):
         self.assertEqual(r.status, Status.OK)
         self.assertEqual(r.items[0].values, {"state": "healthy", "connections": 2})
         self.assertEqual(http.calls[0]["bearer"], "t")
+        self.assertEqual(http.calls[0]["params"]["name"], "aramakisai-k3s")
 
     def test_states(self):
         for state, st in (("degraded", Status.WARN), ("down", Status.CRIT), ("inactive", Status.WARN)):

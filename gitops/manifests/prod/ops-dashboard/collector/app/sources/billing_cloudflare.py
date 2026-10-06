@@ -27,7 +27,7 @@ query($tag: string!, $dayStart: Time, $monthStart: Time, $now: Time) {
 
 def fetch(ctx):
     token = ctx.secret("OPS_CLOUDFLARE_READ_TOKEN")
-    account = ctx.config.source_settings("billing.cloudflare")["account_id"]
+    account = ctx.secret("TF_VAR_cloudflare_account_id")
     now = ctx.now()
     cfg, warn = ctx.config, ctx.config.thresholds.warn_ratio
 

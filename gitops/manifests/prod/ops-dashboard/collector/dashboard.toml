@@ -58,7 +58,7 @@ service = "tailscale"
 name = "Tailscale Free"
 paid = false
 from = "2020-01-01"
-limits = { users = 3, devices = 100 }
+limits = { users = 6 }
 
 [[plans]]
 service = "netdata_cloud"
@@ -93,7 +93,7 @@ service = "hetzner_object_storage"
 name = "Object Storage 基本料金"
 paid = true
 from = "2020-01-01"
-limits = { storage_gb = 1_000, price_month = 4.99 }
+limits = { storage_gb = 1_000, price_month = 6.49 }
 
 # 稼働しているべき Hetzner Cloud サーバー。ここにないサーバーの稼働は差分として表示する。
 [[servers]]
@@ -138,11 +138,7 @@ org = "aramakisai"
 endpoint = "https://fsn1.your-objectstorage.com"
 buckets = ["aramakisai-backups"]
 
-# account_id・tunnel_id は非秘匿。terraform の variable cloudflare_account_id と output tunnel_id の値を入れる。
-# 未設定 (REPLACE_ME) のままでも起動するが、該当の情報源は取得失敗として表示される。
-[sources."billing.cloudflare"]
-account_id = "REPLACE_ME"
-
+# Cloudflare account ID は秘匿扱い (Infisical の TF_VAR_cloudflare_account_id を環境変数で受ける)。
+# tunnel は terraform の cloudflare_zero_trust_tunnel_cloudflared.main の name から ID を引く。
 [sources."connect.tunnel"]
-account_id = "REPLACE_ME"
-tunnel_id = "REPLACE_ME"
+tunnel_name = "aramakisai-k3s"

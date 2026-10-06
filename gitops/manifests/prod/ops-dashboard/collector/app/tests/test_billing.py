@@ -209,7 +209,7 @@ class Cloudflare(unittest.TestCase):
             "https://api.cloudflare.com/client/v4/graphql": gq,
             "https://api.cloudflare.com/client/v4/accounts/acc/access/users": {
                 "result": [], "result_info": {"total_count": users}}})
-        ctx = make_ctx(CFG, http=http, env={"OPS_CLOUDFLARE_READ_TOKEN": "t"}, now=now)
+        ctx = make_ctx(CFG, http=http, env={"OPS_CLOUDFLARE_READ_TOKEN": "t", "TF_VAR_cloudflare_account_id": "acc"}, now=now)
         r = billing_cloudflare.SOURCES[0].fetch(ctx)
         return {i.key: i for i in r.items}, r
 
