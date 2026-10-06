@@ -40,6 +40,7 @@ spec:
             - {name: app, mountPath: /app, readOnly: true}
             - {name: state, mountPath: /var/mail-state, readOnly: true}
             - {name: logs, mountPath: /var/log/mail, readOnly: true}
+            - {name: ops-reports, mountPath: /var/mail/aramakisai.com/ops-reports, readOnly: true}
           resources:
             requests: {memory: "24Mi", cpu: "10m"}
             limits: {memory: "64Mi", cpu: "200m"}
@@ -70,6 +71,8 @@ spec:
           persistentVolumeClaim: {claimName: mailserver-state, readOnly: true}
         - name: logs
           persistentVolumeClaim: {claimName: mailserver-logs, readOnly: true}
+        - name: ops-reports
+          persistentVolumeClaim: {claimName: mailserver-ops-reports, readOnly: true}
 ---
 apiVersion: v1
 kind: Service

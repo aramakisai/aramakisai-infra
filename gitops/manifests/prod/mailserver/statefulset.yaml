@@ -101,6 +101,8 @@ spec:
               mountPath: /var/mail-state
             - name: logs
               mountPath: /var/log/mail
+            - name: ops-reports
+              mountPath: /var/mail/aramakisai.com/ops-reports
             - name: dms-config
               mountPath: /tmp/docker-mailserver/dovecot.cf
               subPath: dovecot.cf
@@ -195,6 +197,9 @@ spec:
         - name: logs
           persistentVolumeClaim:
             claimName: mailserver-logs
+        - name: ops-reports
+          persistentVolumeClaim:
+            claimName: mailserver-ops-reports
         - name: dms-config
           configMap:
             name: mailserver-config
