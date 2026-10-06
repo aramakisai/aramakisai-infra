@@ -1,0 +1,125 @@
+# configMap はディレクトリを持てないため、initContainer で emptyDir に元の配置へ組み直す
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: collector
+  labels:
+    app: collector
+  annotations:
+    secret.reloader.stakater.com/reload: "collector-secrets"
+spec:
+  replicas: 1
+  revisionHistoryLimit: 2
+  # RWO の PVC と SQLite を新旧 Pod で同時に使わない
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: collector
+  template:
+    metadata:
+      labels:
+        app: collector
+    spec:
+      serviceAccountName: collector
+      # ノード状態ファイルの hostPath を読むため
+      nodeSelector:
+        kubernetes.io/hostname: prod-node-1
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: assemble
+          image: python:3.13-slim@sha256:bf44cdfcb76cd3b41e879bc058fc37ec5872002ccfde7fcb765e218cde0cd79c
+          command:
+            - sh
+            - -c
+            - mkdir -p /app/sources /app/render/sections &&
+              cp /src/app/* /app/ &&
+              cp /src/sources/* /app/sources/ &&
+              cp /src/render/* /app/render/ &&
+              cp /src/render-sections/* /app/render/sections/
+          volumeMounts:
+            - {name: app, mountPath: /app}
+            - {name: src-app, mountPath: /src/app, readOnly: true}
+            - {name: src-sources, mountPath: /src/sources, readOnly: true}
+            - {name: src-render, mountPath: /src/render, readOnly: true}
+            - {name: src-render-sections, mountPath: /src/render-sections, readOnly: true}
+          resources:
+            requests: {memory: "16Mi", cpu: "10m"}
+            limits: {memory: "64Mi", cpu: "200m"}
+          securityContext: &restricted
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      containers:
+        - name: collector
+          image: python:3.13-slim@sha256:bf44cdfcb76cd3b41e879bc058fc37ec5872002ccfde7fcb765e218cde0cd79c
+          command: ["python", "/app/main.py"]
+          env:
+            # ルートファイルシステムが読み取り専用
+            - {name: PYTHONDONTWRITEBYTECODE, value: "1"}
+            - {name: PYTHONUNBUFFERED, value: "1"}
+            # 30 分ごとに再発行されるため、envFrom ではなくファイルで受け取る
+            - {name: OPS_GITHUB_TOKEN_FILE, value: /secrets/github-token/OPS_GITHUB_TOKEN}
+          envFrom:
+            - secretRef:
+                name: collector-secrets
+          ports:
+            - {name: http, containerPort: 8080}
+            - {name: falco, containerPort: 8081}
+          volumeMounts:
+            - {name: app, mountPath: /app, readOnly: true}
+            - {name: config, mountPath: /config, readOnly: true}
+            - {name: data, mountPath: /data}
+            - {name: node-state, mountPath: /var/lib/ops-dashboard, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+            - {name: github-token, mountPath: /secrets/github-token, readOnly: true}
+          resources:
+            requests: {memory: "64Mi", cpu: "20m"}
+            limits: {memory: "160Mi", cpu: "500m"}
+          readinessProbe:
+            httpGet:
+              path: /admin/healthz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /admin/healthz
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 30
+            timeoutSeconds: 3
+            failureThreshold: 3
+          securityContext: *restricted
+      volumes:
+        - name: app
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+        # 未生成 (appID 未設定・発行失敗) でも Pod を止めず、GitHub 系ソースだけを MissingSecret にする
+        - name: github-token
+          secret: {secretName: collector-github-token, optional: true}
+        - name: src-app
+          configMap: {name: collector-app}
+        - name: src-sources
+          configMap: {name: collector-sources}
+        - name: src-render
+          configMap: {name: collector-render}
+        - name: src-render-sections
+          configMap: {name: collector-render-sections}
+        - name: config
+          configMap: {name: collector-config}
+        - name: data
+          persistentVolumeClaim:
+            claimName: collector-data
+        - name: node-state
+          hostPath:
+            path: /var/lib/ops-dashboard
+            type: Directory

@@ -1,0 +1,240 @@
+# Implementation Plan
+
+main へのマージは ArgoCD により即時に本番へ反映される。各タスクは、依存先が本番で動作確認済みになってからマージする。「ユーザー実行」と書いたタスクは、本番への適用 (ansible-playbook・HCP Terraform の apply・zitadel Application の手動 sync) をユーザーが行うチェックポイントで、Claude は手順と確認項目を用意して結果の確認だけを行う。資格情報 (OPS_* キー) は Infisical に登録済みのため、発行作業は含めない。
+
+- [x] 1. Zitadel 側の前提を整える
+- [x] 1.1 OIDC アプリの grant type を宣言できるようにする
+  - zitadel-bootstrap の OIDC アプリ作成・更新で、grant type を任意の宣言値から組み立てる。宣言がないアプリは従来どおり認可コードのみとする
+  - 更新要否の判定に grant type の差分を加える
+  - 既存アプリ (cms-prod・vaultwarden・roundcube・cloudflare-access・argocd) に対して `--check --diff` を実行し、更新が発生しないことを確認できる
+  - _Requirements: 4.5, 16.1_
+- [x] 1.2 ポータル用の OIDC アプリと認証イベント読み取り用の machine user を宣言する
+  - OIDC アプリ `ops-portal` を、callback・post logout の URI、ID token への userinfo 含有、認可コードと refresh token の grant type、発行値の Infisical 自動登録 (`OPS_PORTAL_OIDC_CLIENT_ID`・`OPS_PORTAL_OIDC_CLIENT_SECRET`) とともに宣言する
+  - machine user `ops-dashboard-reader` をインスタンスロール `IAM_OWNER_VIEWER` で宣言し、PAT の登録先を `OPS_ZITADEL_READER_PAT` とする
+  - `--check --diff` で、追加の 2 件だけが変更として表示される
+  - _Requirements: 1.2, 1.4, 12.1, 12.2, 16.1_
+- [x] 1.3 (ユーザー実行) zitadel-bootstrap を本番に適用し、結果を確認する
+  - 1.1・1.2 をマージした後、ユーザーが playbook を実行する。発行された PAT はユーザーが Infisical に登録する
+  - `ops-portal` が両方の grant type を持ち、client ID・secret が Infisical に登録されていることを確認する
+  - `OPS_ZITADEL_READER_PAT` で認証イベントの検索 API が 200 を返し、管理系の書き込み API が拒否されることを確認する
+  - 既存の OIDC アプリ (CMS・Webmail・ArgoCD・Cloudflare Access) へのログインが従来どおり通ることを確認する
+  - _Requirements: 1.2, 4.5, 12.2_
+
+- [x] 2. 公開経路を用意する
+- [x] 2.1 `dash.aramakisai.com` の Tunnel 経路と DNS を宣言する
+  - Tunnel の ingress に、ホスト名 `dash.aramakisai.com` から ops-dashboard の portal Service への経路を追加し、DNS に Tunnel への CNAME を追加する
+  - `terraform plan` で、追加の経路と DNS レコードだけが差分として表示される (既知の tailnet key 置換は除く)
+  - _Requirements: 1.8, 16.1_
+- [x] 2.2 (ユーザー実行) HCP Terraform で apply し、ホスト名の解決を確認する
+  - ユーザーが apply した後、`dash.aramakisai.com` が Cloudflare 経由で解決され、Service 未作成の間はオリジン到達不可の応答になることを確認する
+  - 既存ホスト名 (idp・cms・webmail・argocd) の応答が変わらないことを確認する
+  - _Requirements: 1.8_
+
+- [x] 3. ポータル (認証ゲートウェイと静的リンク集) を作る
+- [x] 3.1 リンク宣言と Homer 設定の生成を作る
+  - 共通リンク集 (CMS・Webmail・アカウント設定・公式サイト・Notion・Google Drive・X・Instagram・YouTube) と admin 向けグループを、画面表記定義どおりの名称・説明で宣言する。除外対象 (ArgoCD・dev/stg・メール設定手順・凍結中サービス) は含めない
+  - 内部向けリンクは URL の代わりに環境変数名で宣言し、起動時に値が空のリンクを取り除いた通常版と、admin グループを末尾に加えた admin 版を生成する
+  - 内部向け URL がある場合・ない場合の両方で、期待どおりの 2 ファイルが生成されることをローカルで確認できる
+  - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 3.1_
+- [x] 3.2 nginx の認可ルーティングと拒否・エラーページを作る
+  - 設計のルート表どおりに、executive と admin の判定を internal location 経由の auth_request で行い、設定ファイルの切替は try_files で行う
+  - グループ判定はカンマ区切りの完全一致とし、生成元ファイルへの直接アクセスは常に 404 とする
+  - 利用者ごとに内容が変わる応答に `Cache-Control: private, no-store` を付ける
+  - ポータル用と運用ダッシュボード用の拒否ページ、エラーページを画面表記定義の文言で作る
+  - _Requirements: 1.5, 1.6, 1.7, 3.2, 3.3, 3.4, 3.5, 4.3_
+- [x] 3.3 portal のマニフェストを作る
+  - Namespace、portal Deployment (nginx・oauth2-proxy、Homer 静的ファイルの展開と設定生成の initContainer)、Service、ExternalSecret (OIDC クライアント・cookie 暗号鍵・内部向け URL)、kustomize の configMapGenerator を用意する
+  - oauth2-proxy は Zitadel を issuer とし、groups claim の利用、認証ヘッダーの返却、cookie の有効期間 12 時間・refresh 1 時間、ログアウト時の Zitadel セッション終了を設定する
+  - イメージ・配布物はバージョンと digest を固定し、各コンテナに requests/limits を設定する
+  - 内部向け URL の Secret 変更で portal が再起動されるよう reloader の注釈を付ける
+  - ArgoCD Application はまだ追加しないため、マージしても本番には反映されない状態で、`kustomize build` が成功する
+  - _Requirements: 1.2, 1.3, 2.7, 4.4, 4.5, 16.1, 16.3, 16.4, 17.1_
+- [x] 3.4 ポータルの認可を統合テストで確認する
+  - spike と同じモック IdP 構成で、executive・executive と admin・ロールなし・部分一致する別名グループ・未認証の 5 通りについて、ルート表どおりの応答 (ページ・設定ファイルの内容・拒否・ログイン誘導・404) になることを確認する
+  - 設定ファイルの応答に no-store が付き、未認証時は転送ではなく 401 になることを確認する
+  - テストが再実行可能な形でリポジトリに残る
+  - _Requirements: 1.4, 1.5, 1.6, 1.7, 3.1, 3.2, 3.3, 3.4, 3.5, 4.1, 4.2, 4.3_
+
+- [x] 4. collector の基盤を作る
+- [x] 4.1 宣言ファイルの読み込みと検証、共通の型を作る
+  - プラン・期間・上限・警告閾値・期待サーバー・資格情報の期限・除外対象・呼び出し先の識別子を宣言ファイルから読み込む
+  - 期間の重複、未知のサービス、日付の誤りを起動時に検出して起動を失敗させる
+  - 全サービス分のプラン (Workers の有料期間と無料期間を含む) と期待サーバーを宣言した本番用の宣言ファイルを用意する
+  - 検証エラーの単体テストが通る
+  - _Requirements: 5.1, 5.2, 5.3, 16.1, 16.2_
+- [x] 4.2 SQLite の保存層と保持期間による削除を作る
+  - 設計の物理データモデルのテーブルを作り、書き込みを単一のライターに集約する
+  - Falco・認証イベント・配送失敗・取り込み失敗・DMARC/TLS-RPT の保持期間を過ぎたデータを日次で削除する
+  - 保持期間の境界をまたぐデータが期待どおり削除される単体テストが通る
+  - _Requirements: 13.4, 15.3_
+- [x] 4.3 取得スケジューラと HTTP サーバーを作る
+  - 情報源ごとに独立したスレッド・上限時間で取得し、失敗は取得失敗の結果に変換して直前の成功値を保持する
+  - 描画用 (8080) とヘルスチェック、Falco 受信用 (8081、Bearer トークン検証) を待ち受ける
+  - 1 つの情報源が例外・タイムアウトになっても他の情報源の結果と描画が変わらないことを単体テストで確認できる
+  - _Requirements: 5.13, 6.5, 7.6, 8.5, 9.4, 10.6, 11.5, 12.3, 14.3_
+- [x] 4.4 ページの描画と画面表記を作る
+  - 画面表記定義の全キーを 1 か所に定義し、状態バッジ・取得時刻・最終成功・取得失敗の理由・空表示・単位を共通部品として描画する
+  - ページ枠 (タイトル・最終更新・再読み込み・ポータルへ戻る・ログアウト・節ナビゲーション・要確認の項目の集計) と期間切替を作る
+  - グラフをインライン SVG で描画し、同じ数値を「数値を表で見る」で表示できる。状態は色だけでなく文字でも区別できる
+  - 取得失敗の情報源が正常と区別できる表示になることを描画テストで確認できる
+  - _Requirements: 4.1, 5.13, 6.5, 7.6, 8.5, 9.4, 10.6, 11.5, 12.3, 14.3_
+
+- [x] 5. collector の情報源を作る
+- [x] 5.1 (P) Hetzner Cloud の稼働サーバーと見込み費用を表示する
+  - 稼働中サーバーの一覧、公開料金と当期の送信量・無料枠からの見込み費用を算出し、期待サーバーとの差分 (宣言にない稼働・期待されるのに停止) を異常として示す
+  - 見込み費用と差分判定の単体テストが通る
+  - _Requirements: 5.5, 5.6_
+  - _Boundary: collector sources (billing.hetzner), PlanEvaluator_
+- [x] 5.2 (P) Cloudflare の契約プラン・利用枠と戻し忘れを表示する
+  - 契約中のプランと料金、Workers のリクエスト数 (無料プランは当日と日次上限、有料プランは当月と月次含有量)、R2 の容量と Class A/B 操作数、Zero Trust の利用者数を取得する
+  - 宣言した有料期間を過ぎても宣言または実プランが有料のままなら戻し忘れとして異常にする
+  - プラン期間の切替・戻し忘れ・使用率の閾値判定の単体テストが通る
+  - _Requirements: 5.1, 5.4, 5.7, 5.9, 5.10, 5.11, 5.12_
+  - _Boundary: collector sources (billing.cloudflare), PlanEvaluator_
+- [x] 5.3 (P) その他のサービスの請求額・利用枠と資格情報の期限を表示する
+  - GitHub organization の当月請求見込みと Actions・Packages の使用量、HCP Terraform の管理リソース数と実プラン、Tailscale のユーザー数・デバイス数、Netdata Cloud の接続ノード数、Healthchecks.io のチェック数、UptimeRobot のモニター数を上限と対比する
+  - Infisical は宣言した上限と「取得できない」旨の注記だけを表示する
+  - Hetzner Object Storage の使用容量を合計とバケットごとに集計し、基本料金に含まれる容量と対比する (S3 の署名付き一覧取得)
+  - 期限を宣言した資格情報について、30 日前から警告、期限切れで異常を表示する
+  - 各サービスの応答例を使った単体テストが通る
+  - _Requirements: 5.4, 5.7, 5.8, 5.11, 5.13_
+  - _Boundary: collector sources (billing.github, billing.hcp_terraform, billing.tailscale, billing.netdata, billing.hetzner_os, billing.infisical)_
+- [x] 5.4 (P) 既存監視の状態を表示する
+  - UptimeRobot の各モニターの状態、Healthchecks.io の各チェックの状態と最終受信を表示し、Netdata への参照リンクを置く
+  - 既存監視には参照系の呼び出しだけを行う
+  - 応答例を使った単体テストが通る
+  - _Requirements: 6.1, 6.2, 6.3, 6.4_
+  - _Boundary: collector sources (monitor.uptimerobot, monitor.healthchecks)_
+- [x] 5.5 (P) ノードのリソースと保守状態を表示する
+  - metrics API とノード容量から CPU・メモリ使用率、ノード状態ディレクトリの statvfs からディスク使用率を算出し、85% 超過を通知対象の事象として表示する
+  - 稼働中の K3s と stable チャネルの最新版を比較し、ノード状態ファイルから未適用の更新・再起動要否を表示する。ファイルが古ければ「情報が古い」とする
+  - 単体テストが通る
+  - _Requirements: 7.1, 7.2, 7.3, 7.4, 7.5_
+  - _Boundary: collector sources (node.resources, node.maintenance)_
+- [x] 5.6 (P) クラスタとデータ保護の状態を表示する
+  - ArgoCD Application の同期・ヘルス、再起動の多い Pod と CrashLoopBackOff・OOMKilled、証明書の残り日数、ExternalSecret と ClusterSecretStore の準備状態を表示する
+  - CNPG クラスタのヘルス・WAL アーカイブ・最終バックアップ成功、VolSync の最終同期と結果を表示し、宣言した許容経過時間を超えたら異常にする
+  - 凍結中のサービスを除外する
+  - リソース例を使った単体テストが通る
+  - _Requirements: 8.1, 8.2, 8.3, 8.4, 9.1, 9.2, 9.3_
+  - _Boundary: collector sources (cluster.workloads, cluster.data_protection)_
+- [x] 5.7 (P) 外部接続と CI の状態を表示する
+  - Cloudflare Tunnel の状態と接続数、Tailscale の各デバイスのオンライン状態と最終接続を表示する
+  - 対象リポジトリの直近 7 日間に失敗したワークフロー、オープン中の Renovate PR、対応中のインシデント Issue (dr-incident・infra-alert) を表示する
+  - 単体テストが通る
+  - _Requirements: 10.1, 10.2, 10.3, 10.4, 10.5_
+  - _Boundary: collector sources (connect.tunnel, connect.tailscale, ci.github)_
+- [x] 5.8 (P) Zitadel の認証イベントを表示する
+  - 前回取得以降の認証失敗イベント (パスワード・OTP・SMS・メール・パスキー・ロック) を取得して保存し、期間ごとの推移と直近の一覧を表示する
+  - イベント検索以外の API を呼ばない
+  - 取得位置の継続と種別ごとの集計の単体テストが通る
+  - _Requirements: 12.1, 12.2_
+  - _Boundary: collector sources (auth.zitadel)_
+- [x] 5.9 (P) Falco の検知イベントの受信と統計を作る
+  - 受信したイベントを検証して保存し、優先度別の推移、ルール別の上位、直近の検知一覧を表示する
+  - 保存に失敗した件数を数え、Discord への通知が継続している旨とともに表示する
+  - 不正なトークン・不正な形式・保存失敗の各応答の単体テストが通る
+  - _Requirements: 13.1, 13.2, 13.3, 13.5, 13.6, 13.7_
+  - _Boundary: collector FalcoIngest, collector sources (security.falco)_
+- [x] 5.10 (P) メール配送と fail2ban の状態を表示する
+  - mail-agent から取得したキューの状態、配送遅延・配送失敗の行を解析し、宛先ドメインと理由だけを保存して推移と上位ドメインを表示する。ログのローテーションをまたいで読み進める
+  - jail ごとの BAN 中の IP・開始・解除予定・件数を表示する
+  - 単体テストが通る
+  - _Requirements: 11.1, 14.1, 14.2_
+  - _Boundary: collector sources (mail.delivery, mail.fail2ban)_
+- [x] 5.11 (P) DMARC と TLS-RPT の取り込みと集計を作る
+  - mail-agent から未取り込みのメッセージを取得し、MIME・zip・gzip を展開して DMARC (XML) と TLS-RPT (JSON) を解析し、報告元とレポート ID で重複を排除して保存する
+  - 解析失敗は記録して次へ進み、取り込み済みの記録がない場合は受信先に残る全メッセージを取り込み直す
+  - DMARC の評価結果の推移と送信元別の結果、TLS-RPT の成功・失敗の推移を表示する
+  - 圧縮形式ごとの解析・重複排除・再取り込みの単体テストが通る
+  - _Requirements: 11.2, 11.3, 11.4, 15.1, 15.2, 15.3, 15.4, 15.5, 15.6, 15.7_
+  - _Boundary: collector ReportIngest, collector sources (mail.reports)_
+
+- [x] 6. mail-agent を作る
+- [x] 6.1 (P) mail-agent の読み取り API を作る
+  - fail2ban DB の読み取り専用での BAN 一覧、キューの状態、配送遅延・配送失敗のログ行 (ローテーション対応の位置指定)、レポート用メールボックスの一覧と本文を返す
+  - 全エンドポイントで Bearer トークンを要求し、未設定なら全リクエストを拒否する
+  - 単体テストが通る
+  - _Requirements: 11.1, 11.2, 14.1, 14.2, 15.1_
+  - _Boundary: mail-agent_
+- [x] 6.2 mail-agent を本番と同じ権限条件で統合テストする
+  - postfix 所有 0700 のキュー、uid 5000 の Maildir、root 所有の fail2ban DB とメールログのフィクスチャを置き、root・capability は DAC_READ_SEARCH のみ・読み取り専用マウントの条件で、API 契約どおりに読めることと書き込みが拒否されることを確認する
+  - collector と組み合わせ、フィクスチャから DMARC・TLS-RPT・配送失敗・BAN が取り込まれることを確認する
+  - _Depends: 5.10, 5.11_
+  - _Requirements: 11.1, 11.2, 14.1, 14.2, 15.1, 15.2_
+
+- [x] 7. collector のマニフェストを作る
+  - collector Deployment (prod-node-1 固定、ノード状態ディレクトリの読み取り専用 hostPath、SQLite の PVC)、Service、get/list のみの ClusterRole、NetworkPolicy (8080 は portal から、8081 は falcosidekick から)、configMapGenerator によるコード配布を用意する
+  - 外部 API の資格情報 (登録済みの OPS_* キー、Object Storage の既存キー、Netdata の space ID) の ExternalSecret と、GitHub App のインストールトークンを 30 分ごとに更新する generator を用意する
+  - イメージは digest を固定し、requests/limits を設計値で設定する
+  - ArgoCD Application はまだ追加せず、`kustomize build` が成功する
+  - _Requirements: 4.2, 16.1, 16.3, 16.4, 17.1_
+
+- [ ] 8. ポータルと運用ダッシュボードを本番に投入する
+- [ ] 8.1 ops-dashboard Application を追加して本番に投入する
+  - 1.3 と 2.2 の確認が済んでから、Application を追加してマージする
+  - ArgoCD 上で Synced・Healthy になり、`https://dash.aramakisai.com/` にアクセスすると Zitadel のログインへ誘導されることを確認する
+  - _Depends: 1.3, 2.2, 3.3, 7_
+  - _Requirements: 1.2, 1.3, 16.1, 16.5_
+- [ ] 8.2 ロールごとのアクセスを本番で確認する
+  - executive のみ・executive と admin・ロールなしの 3 種類のアカウントで、共通ページ・admin 導線・運用ダッシュボード・拒否ページ・設定ファイルの直接取得が設計どおりになることを確認する
+  - admin ロールを外したアカウントが、cookie の refresh 間隔 (1 時間) 以内に運用ダッシュボードを拒否されることを確認する
+  - 内部向け URL の Secret を一時的に欠落させても、該当リンク以外が表示されることを確認する
+  - _Requirements: 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 2.6, 3.1, 3.2, 3.3, 4.1, 4.3, 4.4, 4.5_
+- [ ] 8.3 運用ダッシュボードの各情報源を本番で確認する
+  - mail 系と Falco 以外の情報源が本番データで表示され、取得失敗があれば原因 (権限・宣言) を解消する
+  - 宣言ファイルの値 (プラン・期待サーバー・閾値) が現行の契約と一致していることを確認する
+  - _Requirements: 5.1, 5.4, 5.5, 5.7, 5.8, 6.1, 6.2, 7.1, 7.4, 8.1, 8.2, 8.3, 8.4, 9.1, 9.2, 10.1, 10.2, 10.3, 10.4, 12.1_
+
+- [ ] 9. mailserver を段階的に統合する
+- [ ] 9.1 mail-agent を本番に投入する
+  - mail-agent の Deployment・Service・NetworkPolicy・ExternalSecret・コードの ConfigMap を mailserver Application に追加する。この時点では状態用の PVC がないため mail 系の情報源は取得失敗の表示になる
+  - mail-agent が Ready になり、mailserver Pod に再起動が発生しないことを確認する
+  - _Depends: 6.2_
+  - _Requirements: 11.1, 14.1, 16.1, 16.3_
+- [ ] 9.2 mailserver の状態とログを PVC に永続化する
+  - 状態用とログ用の PVC を追加し、mailserver と mail-agent (読み取り専用) にマウントする。mailserver Pod の再作成を伴うため、計画した時間帯にマージする
+  - 再作成後に、送受信・IMAP/SMTP 認証・Roundcube ログインが通ること、fail2ban の BAN が DB から復元されること、キューが引き継がれることを確認する
+  - 運用ダッシュボードにキュー・配送失敗・fail2ban が表示されることを確認する
+  - _Requirements: 11.1, 11.5, 14.1, 14.2, 14.3_
+- [ ] 9.3 postmaster 宛てをレポート用メールボックスにも配送する
+  - 配送専用アドレス `ops-reports@` とそのメールボックス用 PVC を追加し、`postmaster@` を `admin@` と `ops-reports@` の両方へ配送する。DMARC・TLS-RPT の DNS レコードは変えない
+  - テストメールが `admin@` と `ops-reports@` の両方に届き、`ops-reports@` ではログインできないことを確認する
+  - 次に届いた DMARC・TLS-RPT レポートが運用ダッシュボードに表示されることを確認する
+  - _Requirements: 11.2, 11.3, 15.1, 15.2, 15.4_
+
+- [ ] 10. Falco を統合する
+  - collector を `user_known_contact_k8s_api_server_activities` に Namespace とイメージで追記し、Falcosidekick に collector への webhook 出力と認証ヘッダーを追加する
+  - テストイベントが Discord と運用ダッシュボードの両方に現れることを確認する
+  - 投入後 24 時間、本仕様のコンポーネント由来の検知が発生していないことを確認する
+  - _Depends: 8.1_
+  - _Requirements: 13.1, 13.2, 13.3, 13.5_
+
+- [ ] 11. ノードの保守状態を出力する
+- [x] 11.1 os-auto-update にノード状態ファイルの出力を加える
+  - 既存の通知スクリプトが算出する未適用更新数・脆弱性修正の更新数・再起動要否を、日次実行時とノード起動時に状態ファイルへ書き出す
+  - `--check --diff` で、状態ファイルの出力に関する変更だけが表示される
+  - _Requirements: 7.5_
+- [ ] 11.2 (ユーザー実行) k3s-bootstrap を本番に適用し、表示を確認する
+  - ユーザーが playbook を実行した後、状態ファイルが生成され、運用ダッシュボードに未適用の更新と再起動要否が表示されることを確認する
+  - _Requirements: 7.5, 7.6_
+
+- [ ] 12. Zitadel に直接ログインした後の遷移先をポータルにする
+  - zitadel-login に遷移先の環境変数を設定する。8.2 の確認が済むまでマージしない
+  - (ユーザー実行) zitadel Application を手動 sync する
+  - executive のアカウントで Zitadel に直接ログインするとポータルに着地し、executive を持たないアカウントでは拒否ページに着地することを確認する。各アプリ経由のログインの遷移先が変わらないことを確認する
+  - _Depends: 8.2_
+  - _Requirements: 1.1, 1.5_
+
+- [ ] 13. メモリ使用量を実測して上限を合わせる
+  - 全コンポーネントの投入後、各コンテナの実メモリを一定期間測り、requests/limits を実測値に合わせる。上限を超える場合は、引き上げる前に増加要因を調べる
+  - prod-node-1 全体のメモリ使用率が既存の判断基準の範囲内であることを確認する
+  - _Depends: 9.3, 10, 11.2_
+  - _Requirements: 17.1, 17.2, 17.3, 17.4_
+
+- [ ] 14. ドキュメントを同期する
+  - README のデプロイされるサービス一覧と structure.md に、`ops-dashboard` Application と `dash.aramakisai.com` を反映する
+  - tech.md のシークレット一覧に新規キー名を追記し、手動発行した資格情報の権限・所有アカウント・ローテーション手順を記載する。監視スタックの節に運用ダッシュボードの位置付けを、誤検知除外の節に collector の除外を反映する
+  - dr.md に、SQLite の保存データ (Falco・認証イベント・DMARC・TLS-RPT・配送失敗) が再構築時の復元対象外であることと、DMARC・TLS-RPT はレポート用メールボックスから再取り込みされることを記載する。メールデータのバックアップの節に新しい PVC の扱いを反映する
+  - 運用者向けに、リンクの追加・変更手順、プラン・期待サーバーの宣言の更新手順、executive・admin の付与・剥奪がポータルとダッシュボードに反映される仕組みを文書化する
+  - _Requirements: 16.5, 18.1, 18.2, 18.3, 18.4_

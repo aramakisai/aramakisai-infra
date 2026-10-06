@@ -1,0 +1,9 @@
+# config-admin.yml だけに services の末尾へ追加するグループ。
+services:
+  - name: "管理者向け"
+    icon: "fas fa-lock"
+    items:
+      - name: "運用ダッシュボード"
+        icon: "fas fa-gauge-high"
+        subtitle: "課金・監視・セキュリティの状態を確認する"
+        url: "/admin/"
