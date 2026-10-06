@@ -96,12 +96,12 @@ class Client:
         self.jar = http.cookiejar.CookieJar()
         self.op = urllib.request.build_opener(_NoRedirect, urllib.request.HTTPCookieProcessor(self.jar))
 
-    def req(self, url, data=None):
+    def req(self, url, data=None, headers=None):
         if url.startswith("/"):
             url = BASE + url
         url = url.replace("http://mock:8080", MOCK)
         try:
-            r = self.op.open(urllib.request.Request(url, data=data), timeout=10)
+            r = self.op.open(urllib.request.Request(url, data=data, headers=headers or {}), timeout=10)
         except urllib.error.HTTPError as e:
             r = e
         r.body = r.read().decode()
@@ -212,6 +212,14 @@ class Authz(unittest.TestCase):
         self.assertEqual(q["post_logout_redirect_uri"], ["https://dash.aramakisai.com/"])
         self.assertEqual(q["id_token_hint"][0].count("."), 2)  # JWT に置換済み
         self.assertEqual(c.req("/").status, 302)
+
+    def test_sign_out_without_session_skips_idp(self):
+        # セッションが無い (未ログイン・壊れた Cookie) と {id_token} が置換されず end_session が 400 になるため、
+        # IdP を経由せずポータルへ戻す
+        for cookie in (None, "_oauth2_proxy=invalid"):
+            r = Client().req("/oauth2/sign_out", headers={"Cookie": cookie} if cookie else None)
+            self.assertEqual(r.status, 302, cookie)
+            self.assertEqual(r.headers["Location"], "/", cookie)
 
     def test_static_routes(self):
         for c in (Client(), session(["executive", "admin"])):
