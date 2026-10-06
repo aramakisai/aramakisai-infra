@@ -109,6 +109,12 @@ email claim を読むため、`ansible/roles/zitadel-bootstrap/vars/resources.ym
 `zitadel_oidc_apps` で `cloudflare-access` エントリのみ `id_token_userinfo_assertion: true`
 を指定している（CMS/roundcube 等の他アプリは userinfo を自前で呼ぶため不要）。
 
+### Terraform の適用範囲 (festival-peak-scaleout)
+`terraform/main.tf` の `prod-node-2` / `prod-node-3` はイベント期間外は未 apply で保留している。plan に作成差分が出るため、ops 関連など無関係な変更の apply は `-target` で対象リソースに絞る。
+
+### zitadel-bootstrap 系 playbook
+本番では `ZITADEL_EXTERNAL_DOMAIN=idp.aramakisai.com` の指定が必須 (README のコマンド例参照)。`--check` 非対応: 参照 API の応答を前提とする処理が check モードで失敗する。
+
 ### Ansible 実行タイミング
 - `null_resource` + `local-exec` は HCP Terraform リモート実行非対応のため `main.tf` でコメントアウト済み。
 - **Terraform 完了後、常に手動で Ansible を実行する**（設定変更のみの場合も同様）。
@@ -158,6 +164,8 @@ Grafana Cloud は解約済みで使用しない。単一ノード (CX33) のメ�
 | Healthchecks.io (`terraform/healthchecksio.tf`) | mailserver バックアップ (VolSync) の dead man's switch | Healthchecks.io 通知設定 |
 | DR Trigger (`.github/workflows/dr-trigger.yml`, 5分毎cron) | Tailscale 疎通 + idp/argocd/webmail 複合検出によるノード障害判定 | Discord + `dr-incident` Issue (通知のみ。復旧は人が `dr-recovery.yml` を起動し Environment 承認) |
 | Infra Health Check (`.github/workflows/infra-health-check.yml`, 15分毎cron) | CNPG WAL アーカイブ失敗 (`Cluster.status.conditions` の `ContinuousArchiving`)、ノードルートディスク使用率 (閾値 85%、`kubectl get --raw /api/v1/nodes/<node>/proxy/stats/summary`) | Discord。状態は GitHub Issue (ラベル `infra-alert`) で管理し、解消時に自動クローズ |
+
+| 運用ダッシュボード (`gitops/apps/prod/ops-dashboard.yaml`、`dash.aramakisai.com`) | 上記の各情報源 (Falco webhook・Kubernetes・メール・外部 SaaS の利用枠と期限) を collector が集約して admin に表示。通知はせず、通知系の代替ではなく閲覧用の集約画面 | なし (Falcosidekick は Discord に加えて collector へも webhook 転送) |
 
 Netdata・Falco はいずれもリソース予算 (requests/limits) を明示的に絞ってデプロイしている。値を変更する際は `make kubectl ARGS="top pod -n monitoring"` で実メモリを確認すること。
 
@@ -216,6 +224,22 @@ ssh root@prod-node-1 "systemctl status os-update-notify.timer; cat /var/run/rebo
   - **os-k3s-auto-update**: 新規シークレットなし。既存 `DISCORD_OPS_WEBHOOK_URL` を再利用し、`ansible/roles/os-auto-update`(ホストOS更新結果通知)・`.github/workflows/k3s-version-check.yml`・`.github/workflows/k3s-upgrade.yml` の3箇所で新規に利用。
   - **ArgoCD ApplicationSet (directus-schema-preview)**: `ARGOCD_APPLICATIONSET_GITHUB_APP_ID`, `ARGOCD_APPLICATIONSET_GITHUB_APP_INSTALLATION_ID`, `ARGOCD_APPLICATIONSET_GITHUB_APP_PRIVATE_KEY`（aramakisai-infra への `pull-requests: read-only` のみを持つ専用 GitHub App。PR generator が open な `directus-schema-*` PR を検出するために使用）
   - **Zitadel**: `ZITADEL_MASTERKEY`, `ZITADEL_DB_PASSWORD`, `ZITADEL_LOGIN_SESSION_COOKIE_SECRET`（login v2 UIのセッションCookie署名鍵。32文字以上必須で、`openssl rand -base64 32`で生成する。ExternalSecret経由で`ZITADEL_SESSION_COOKIE_SECRET`としてloginコンテナへ渡す。未設定・32文字未満だとloginがreadyにならない）, `ZITADEL_LOGIN_CLIENT_PAT`（login v2 UIコンテナがZitadel APIを呼ぶためのmachine user `login-client`(IAM_LOGIN_CLIENT)のPAT。`ansible/playbooks/zitadel-login-client-pat.yml`が現行値の有効性を確認し、無効/未登録時のみ発行・登録する。FirstInstanceのPATファイル書き出しはインスタンス初期化時の一度きりのため、Pod再作成で失われないようInfisical→ExternalSecret経由で渡す）, `TF_VAR_zitadel_token`（project/role/application/action等のZitadelリソース管理はTerraform providerからAnsible(`ansible/roles/zitadel-bootstrap`のresourcesタスク)へ移行済み。このキーは元々Terraform provider用PATだったが、同一のPAT(machine user: `terraform-provider`, role: `IAM_OWNER`)をAnsible実行時にも`infisical run --env=prod`経由でそのまま再利用する）。RPアプリ側(CMS/Vaultwarden/Roundcube)のOIDC Client Secret・`DOVECOT_ZITADEL_AUTH_PAT`・`ZITADEL_INVITE_RECOVERY_SA_PAT`は、Ansible role初回実行時に新規発行されローカルファイルへ一時保存される値を手動登録する(想定キー名は`ansible/roles/zitadel-bootstrap/vars/resources.yml`の`infisical_hint`参照)。`ARGOCD_OIDC_CLIENT_ID_ZITADEL` / `ARGOCD_OIDC_CLIENT_SECRET_ZITADEL`(ArgoCD SSO用Zitadel OIDC App `argocd`。`ansible/playbooks/zitadel-oidc-apps.yml`がアプリ作成時に自動登録する。旧`ARGOCD_OIDC_CLIENT_SECRET`はauthentik時代の値として残す)
+
+  - **運用ダッシュボード (ops-dashboard)**: portal 用 `OPS_PORTAL_OIDC_CLIENT_ID`, `OPS_PORTAL_OIDC_CLIENT_SECRET`（`zitadel-bootstrap` が自動登録）, `OPS_PORTAL_COOKIE_SECRET`（32 バイトのランダム値）, `PORTAL_NOTION_URL`, `PORTAL_GOOGLE_DRIVE_URL`（内部向けリンクの URL。空ならそのリンクだけ非表示）。collector 用 `OPS_ZITADEL_READER_PAT`, `OPS_FALCO_WEBHOOK_TOKEN`（Falcosidekick から collector への webhook 認証。falcosidekick 側の ExternalSecret も同キーを参照）, `OPS_HCLOUD_READ_TOKEN`, `OPS_CLOUDFLARE_READ_TOKEN`, `OPS_GITHUB_APP_ID`, `OPS_GITHUB_APP_INSTALLATION_ID`, `OPS_GITHUB_APP_PRIVATE_KEY`, `OPS_TFC_TOKEN`, `OPS_NETDATA_API_TOKEN`, `OPS_TAILSCALE_OAUTH_CLIENT_ID`, `OPS_TAILSCALE_OAUTH_CLIENT_SECRET`, `OPS_UPTIMEROBOT_READONLY_KEY`, `OPS_HEALTHCHECKS_READONLY_KEY`。mailserver の mail-agent 用 `OPS_MAIL_AGENT_TOKEN`（collector と共有）。Hetzner Object Storage の利用量取得には既存の `HETZNER_OS_ACCESS_KEY_ID` / `HETZNER_OS_SECRET_ACCESS_KEY` を再利用する
+
+#### 手動発行する資格情報 (ops-dashboard)
+Terraform・Ansible で発行できないため、各サービスの管理画面で発行し infisical CLI で prod のルートパスに登録した。値を端末出力・リポジトリ・会話ログに残さない。ローテーションは同じ方法で再発行して同じキーを上書きする。
+
+| 資格情報 | 権限 | 所有アカウント | Infisical キー | ローテーション |
+|----------|------|----------------|----------------|----------------|
+| Hetzner Cloud API トークン | プロジェクトの Read | インフラ運用の Hetzner プロジェクト | `OPS_HCLOUD_READ_TOKEN` | 期限なし。担当者交代時・漏洩疑い時 |
+| Cloudflare アカウント API トークン | Billing Read、Account Analytics Read、Access: Audit Logs Read、Cloudflare Tunnel Read (zone 権限なし) | aramakisai の Cloudflare アカウント所有 (個人に紐づかない) | `OPS_CLOUDFLARE_READ_TOKEN` | 有効期限 1 年。期限前に再発行し `dashboard.toml` の `credentials` の期限日も更新 |
+| GitHub App `aramakisai-ops-dashboard` | Repository: Actions/Pull requests/Issues/Metadata read、Organization: Administration read。`aramakisai-infra`・`aramakisai-web` のみにインストール。Webhook 無効 | aramakisai organization 所有 | `OPS_GITHUB_APP_ID`, `OPS_GITHUB_APP_INSTALLATION_ID`, `OPS_GITHUB_APP_PRIVATE_KEY` | 秘密鍵は期限なし。担当者交代時・漏洩疑い時に再生成。インストールトークンは ESO が 30 分ごとに更新 |
+| HCP Terraform organization トークン | organization トークン (Explorer と subscription の GET のみ使用) | aramakisai organization | `OPS_TFC_TOKEN` | 有効期限 12 か月。期限前に再発行し `dashboard.toml` の期限日も更新 |
+| Netdata Cloud API トークン | `scope:grafana-plugin` | Netdata space を所有する運用アカウント | `OPS_NETDATA_API_TOKEN` | 期限なし。所有アカウント引き継ぎ時に再発行 |
+| Tailscale OAuth クライアント | `devices:core:read`, `users:read` (タグなし。Terraform 用とは別に発行) | aramakisai の tailnet | `OPS_TAILSCALE_OAUTH_CLIENT_ID`, `OPS_TAILSCALE_OAUTH_CLIENT_SECRET` | 期限なし。担当者交代時・漏洩疑い時 |
+| UptimeRobot Read-Only API キー | get 系のみ | aramakisai の UptimeRobot アカウント | `OPS_UPTIMEROBOT_READONLY_KEY` | 期限なし。担当者交代時・漏洩疑い時 |
+| Healthchecks.io 読み取り専用 API キー | プロジェクトの read-only | aramakisai の Healthchecks.io プロジェクト | `OPS_HEALTHCHECKS_READONLY_KEY` | 期限なし。担当者交代時・漏洩疑い時 |
 
 ### Commit Protection & Coding Standards
 - **パス漏洩防止**: pre-commit フック `scripts/check-confidential-info.py` がローカル絶対パスや非許可メールのコミットをブロック。

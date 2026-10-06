@@ -66,6 +66,16 @@ helm-values/   ← Helm chart の values ファイル
 root.yaml      ← App of Apps エントリーポイント (apps/ 全体を監視)
 ```
 
+### 運用ポータル・運用ダッシュボード (`ops-dashboard`)
+**目的**: executive 向けポータルと admin 向け運用ダッシュボードを `dash.aramakisai.com` で提供する
+```
+gitops/apps/prod/ops-dashboard.yaml             ← ArgoCD Application (wave 0、namespace ops-dashboard)
+gitops/manifests/prod/ops-dashboard/
+  portal/                                       ← nginx + oauth2-proxy + Homer。links.yaml がリンクの単一ソース
+  collector/                                    ← Python の collector。dashboard.toml がプラン・期待サーバー等の宣言
+```
+公開経路は Cloudflare Tunnel (`terraform/tunnel.tf`) から portal の ClusterIP へ直結。運用は `docs/ops-dashboard-runbook.md`。
+
 ## サービス追加パターン
 
 新しいサービスを prod に追加する際の標準的なファイル構成:
