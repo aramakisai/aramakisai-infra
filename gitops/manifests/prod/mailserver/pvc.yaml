@@ -11,3 +11,45 @@ spec:
   resources:
     requests:
       storage: 20Gi
+---
+# docker-mailserver は /var/mail-state があると Postfix キュー・fail2ban DB 等をここへ移して
+# 元の場所にシンボリックリンクを張る。空のボリュームなら初回起動時にイメージの内容が移される
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mailserver-state
+  namespace: prod
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mailserver-logs
+  namespace: prod
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 1Gi
+---
+# ops-reports@ の Maildir。mail-agent がメール本体の PVC を見ずに済むよう分ける
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mailserver-ops-reports
+  namespace: prod
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 1Gi

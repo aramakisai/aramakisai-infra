@@ -292,10 +292,11 @@ data:
     admin@aramakisai.com|{SHA512-CRYPT}!
     general-affairs@aramakisai.com|{SHA512-CRYPT}!
     noreply@aramakisai.com|{SHA512-CRYPT}!
+    ops-reports@aramakisai.com|{SHA512-CRYPT}!
   # postmaster@ は RFC 5321 必須かつ DMARC/TLS-RPT レポート (terraform/dns.tf) と
   # DMS の起動通知の宛先。postmastar@/webmastar@ は既に外部に出回っている綴りのため残す。
   postfix-virtual.cf: |
-    postmaster@aramakisai.com admin@aramakisai.com
+    postmaster@aramakisai.com admin@aramakisai.com,ops-reports@aramakisai.com
     webmaster@aramakisai.com admin@aramakisai.com
     postmastar@aramakisai.com admin@aramakisai.com
     webmastar@aramakisai.com admin@aramakisai.com
@@ -362,6 +363,9 @@ data:
         chmod -R 0700 "${dir}"
       done
     done
+    # local-path は PVC のディレクトリを 0777 で作り、Dovecot は Maildir ルートの権限を
+    # 新しいファイルに引き継ぐため、そのままだとレポートが誰でも書き換え可能になる
+    chmod 0700 /var/mail/aramakisai.com/ops-reports
   # OpenDKIM KeyTable/SigningTable/TrustedHosts:
   # `setup config dkim domain` はこれらを /tmp/docker-mailserver/opendkim/ 配下に
   # 生成するが、その場所はConfigMap/Secretマウントではなく実行時の一時領域のため
