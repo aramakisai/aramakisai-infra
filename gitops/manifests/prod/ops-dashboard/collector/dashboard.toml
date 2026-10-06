@@ -1,0 +1,148 @@
+# collector の宣言ファイル。起動時に検証され、誤りがあると collector は起動に失敗する。
+# 同一サービスの plans は期間 (from〜until、until 省略は無期限) が重ならないこと。
+# プランを切り替えるときは、この表の期間を書き換えるだけでよい。
+
+[[plans]]
+service = "cloudflare_workers"
+name = "Workers Free"
+paid = false
+from = "2020-01-01"
+until = "2026-10-31"
+limits = { requests_day = 100_000 }
+
+[[plans]]
+service = "cloudflare_workers"
+name = "Workers Paid"
+paid = true
+from = "2026-11-01"
+until = "2026-11-30"
+limits = { requests_month = 10_000_000 }
+
+[[plans]]
+service = "cloudflare_workers"
+name = "Workers Free"
+paid = false
+from = "2026-12-01"
+limits = { requests_day = 100_000 }
+
+[[plans]]
+service = "cloudflare_r2"
+name = "R2 Free"
+paid = false
+from = "2020-01-01"
+limits = { storage_gb = 10, class_a_month = 1_000_000, class_b_month = 10_000_000 }
+
+[[plans]]
+service = "cloudflare_zero_trust"
+name = "Zero Trust Free"
+paid = false
+from = "2020-01-01"
+limits = { users = 50 }
+
+[[plans]]
+service = "hcp_terraform"
+name = "HCP Terraform Free"
+paid = false
+from = "2020-01-01"
+limits = { managed_resources = 500 }
+
+[[plans]]
+service = "infisical"
+name = "Infisical Free"
+paid = false
+from = "2020-01-01"
+limits = { identities = 5 }
+
+[[plans]]
+service = "tailscale"
+name = "Tailscale Free"
+paid = false
+from = "2020-01-01"
+limits = { users = 3, devices = 100 }
+
+[[plans]]
+service = "netdata_cloud"
+name = "Netdata Cloud Free"
+paid = false
+from = "2020-01-01"
+limits = { nodes = 5 }
+
+[[plans]]
+service = "healthchecks"
+name = "Healthchecks.io Free"
+paid = false
+from = "2020-01-01"
+limits = { checks = 20 }
+
+[[plans]]
+service = "uptimerobot"
+name = "UptimeRobot Free"
+paid = false
+from = "2020-01-01"
+limits = { monitors = 50 }
+
+[[plans]]
+service = "github"
+name = "GitHub Free"
+paid = false
+from = "2020-01-01"
+limits = { actions_minutes_month = 2_000, packages_storage_gb = 0.5 }
+
+[[plans]]
+service = "hetzner_object_storage"
+name = "Object Storage 基本料金"
+paid = true
+from = "2020-01-01"
+limits = { storage_gb = 1_000, price_month = 4.99 }
+
+# 稼働しているべき Hetzner Cloud サーバー。ここにないサーバーの稼働は差分として表示する。
+[[servers]]
+name = "prod-node-1"
+
+[thresholds]
+warn_ratio = 0.8
+cert_warn_days = 21
+cert_crit_days = 7
+pod_restart_warn = 5
+disk_warn = 0.85
+disk_crit = 0.95
+memory_warn = 0.85
+volsync_max_age = "12h"
+backup_max_age = { "prod/cms-db" = "36h", "prod/authentik-db" = "8d", "zitadel/zitadel-db" = "36h" }
+
+# 有効期限を設定した資格情報。期限日は発行時に控えた値を宣言する。
+[[credentials]]
+name = "Cloudflare API トークン"
+expires_on = "2027-10-31"
+
+[[credentials]]
+name = "HCP Terraform organization トークン"
+expires_on = "2027-10-31"
+
+# 凍結中のワークロード (Namespace または名前) は取得結果から除外する。
+[exclude]
+namespaces_or_names = ["vaultwarden", "vaultwarden-rbac-sync", "room-presence"]
+
+# 情報源ごとの非秘匿の宣言 (呼び出し先・対象)。キーは source_id。
+[sources."billing.github"]
+org = "aramakisai"
+
+[sources."ci.github"]
+org = "aramakisai"
+repos = ["aramakisai-infra", "aramakisai-web"]
+
+[sources."billing.hcp_terraform"]
+org = "aramakisai"
+
+[sources."billing.hetzner_os"]
+endpoint = "https://fsn1.your-objectstorage.com"
+buckets = ["aramakisai-backups"]
+
+# account_id・tunnel_id は非秘匿。terraform の variable cloudflare_account_id と output tunnel_id の値を入れる。
+# 未設定 (REPLACE_ME) のままでも起動するが、該当の情報源は取得失敗として表示される。
+[sources."billing.cloudflare"]
+account_id = "REPLACE_ME"
+
+[sources."connect.tunnel"]
+account_id = "REPLACE_ME"
+tunnel_id = "REPLACE_ME"

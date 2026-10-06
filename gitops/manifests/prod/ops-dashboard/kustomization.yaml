@@ -1,0 +1,87 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: ops-dashboard
+
+resources:
+  - namespace.yaml
+  - portal/deployment.yaml
+  - portal/service.yaml
+  - portal/external-secret.yaml
+  - networkpolicy.yaml
+  - collector/deployment.yaml
+  - collector/service.yaml
+  - collector/pvc.yaml
+  - collector/rbac.yaml
+  - collector/external-secret.yaml
+  - collector/github-token.yaml
+
+# 内容が変わるとハッシュ付きの名前が変わり、portal Pod が再作成される
+configMapGenerator:
+  - name: portal-nginx
+    files:
+      - portal/nginx.conf
+  - name: portal-pages
+    files:
+      - portal/pages/denied.html
+      - portal/pages/denied-admin.html
+      - portal/pages/error.html
+      - portal/pages/style.css
+  - name: portal-links
+    files:
+      - portal/links.yaml
+      - portal/admin-overlay.yaml
+      - portal/generate-config.sh
+
+# コードは tests を含めず配布する。内容が変わると名前が変わり collector Pod が再作成される
+  - name: collector-config
+    files:
+      - collector/dashboard.toml
+  - name: collector-app
+    files:
+      - collector/app/config.py
+      - collector/app/falco_ingest.py
+      - collector/app/http_client.py
+      - collector/app/k8s.py
+      - collector/app/main.py
+      - collector/app/model.py
+      - collector/app/plan.py
+      - collector/app/report_ingest.py
+      - collector/app/store.py
+  - name: collector-sources
+    files:
+      - collector/app/sources/__init__.py
+      - collector/app/sources/_buckets.py
+      - collector/app/sources/_common.py
+      - collector/app/sources/auth_zitadel.py
+      - collector/app/sources/billing_cloudflare.py
+      - collector/app/sources/billing_github.py
+      - collector/app/sources/billing_hcp_terraform.py
+      - collector/app/sources/billing_hetzner.py
+      - collector/app/sources/billing_hetzner_os.py
+      - collector/app/sources/billing_infisical.py
+      - collector/app/sources/billing_netdata.py
+      - collector/app/sources/billing_tailscale.py
+      - collector/app/sources/ci_github.py
+      - collector/app/sources/cluster_data_protection.py
+      - collector/app/sources/cluster_workloads.py
+      - collector/app/sources/connect_tailscale.py
+      - collector/app/sources/connect_tunnel.py
+      - collector/app/sources/mail.py
+      - collector/app/sources/monitor_healthchecks.py
+      - collector/app/sources/monitor_uptimerobot.py
+      - collector/app/sources/node_maintenance.py
+      - collector/app/sources/node_resources.py
+      - collector/app/sources/security_falco.py
+  - name: collector-render
+    files:
+      - collector/app/render/__init__.py
+      - collector/app/render/components.py
+      - collector/app/render/labels.py
+      - collector/app/render/page.py
+      - collector/app/render/svg.py
+  - name: collector-render-sections
+    files:
+      - collector/app/render/sections/__init__.py
+      - collector/app/render/sections/dmarc.py
+      - collector/app/render/sections/fail2ban.py
+      - collector/app/render/sections/mail.py

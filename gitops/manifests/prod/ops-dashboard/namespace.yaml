@@ -1,0 +1,6 @@
+---
+# 運用ポータル・運用ダッシュボード専用 namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ops-dashboard

@@ -1,0 +1,56 @@
+# GitHub App のインストールトークン (有効 1 時間) を ESO が 30 分ごとに発行する。
+# collector は RSA 署名を持たず、ファイルとして mount された OPS_GITHUB_TOKEN だけを読む。
+# appID・installID の置換は Application を追加する前に済ませる
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: collector-github-app-key
+  annotations:
+    argocd.argoproj.io/sync-options: Replace=true
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: infisical
+  target:
+    name: collector-github-app-key
+    creationPolicy: Owner
+  data:
+    - secretKey: private-key
+      remoteRef:
+        key: OPS_GITHUB_APP_PRIVATE_KEY
+---
+# appID・installID は generator の平文フィールドにしか書けない (Secret を参照できない)
+apiVersion: generators.external-secrets.io/v1alpha1
+kind: GithubAccessToken
+metadata:
+  name: ops-dashboard
+spec:
+  appID: "REPLACE_WITH_OPS_GITHUB_APP_ID"
+  installID: "REPLACE_WITH_OPS_GITHUB_APP_INSTALLATION_ID"
+  auth:
+    privateKey:
+      secretRef:
+        name: collector-github-app-key
+        key: private-key
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: collector-github-token
+  annotations:
+    argocd.argoproj.io/sync-options: Replace=true
+spec:
+  refreshInterval: 30m
+  target:
+    name: collector-github-token
+    creationPolicy: Owner
+    template:
+      data:
+        OPS_GITHUB_TOKEN: "{{ .token }}"
+  dataFrom:
+    - sourceRef:
+        generatorRef:
+          apiVersion: generators.external-secrets.io/v1alpha1
+          kind: GithubAccessToken
+          name: ops-dashboard

@@ -1,0 +1,26 @@
+# collector は認可判断を持たないため、到達元をクラスタ内で限定する
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: collector-ingress
+spec:
+  podSelector:
+    matchLabels:
+      app: collector
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: portal
+      ports:
+        - {protocol: TCP, port: 8080}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: falcosidekick
+      ports:
+        - {protocol: TCP, port: 8081}

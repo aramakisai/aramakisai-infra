@@ -1,0 +1,12 @@
+# Falco・認証イベント・DMARC・TLS-RPT の SQLite。再構築時の復元対象外
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: collector-data
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 1Gi
