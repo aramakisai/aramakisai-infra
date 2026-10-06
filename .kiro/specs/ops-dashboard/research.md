@@ -119,7 +119,7 @@
 ### Decision: portal と運用ダッシュボードを 1 ホスト名に収める
 - **Context**: steering の「サブドメインを冗長に増やさない」。
 - **Alternatives Considered**: 1. `portal` と `ops` の 2 ホスト名 2. 1 ホスト名 + パス分け
-- **Selected Approach**: `portal.aramakisai.com` の `/` をポータル、`/admin/` を運用ダッシュボードにする。認可は同じ oauth2-proxy で、パスごとに必要なグループを変える。
+- **Selected Approach**: `dash.aramakisai.com` の `/` をポータル、`/admin/` を運用ダッシュボードにする。認可は同じ oauth2-proxy で、パスごとに必要なグループを変える。
 - **Rationale**: DNS・Tunnel・OIDC アプリ・cookie が 1 つで済む。
 - **Trade-offs**: 両者が同じ cookie を共有する。admin 判定はリクエストごとにサーバー側で行うので問題ない。
 

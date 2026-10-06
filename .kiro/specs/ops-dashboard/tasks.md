@@ -21,12 +21,12 @@ main へのマージは ArgoCD により即時に本番へ反映される。各�
   - _Requirements: 1.2, 4.5, 12.2_
 
 - [ ] 2. 公開経路を用意する
-- [x] 2.1 `portal.aramakisai.com` の Tunnel 経路と DNS を宣言する
-  - Tunnel の ingress に、ホスト名 `portal.aramakisai.com` から ops-dashboard の portal Service への経路を追加し、DNS に Tunnel への CNAME を追加する
+- [x] 2.1 `dash.aramakisai.com` の Tunnel 経路と DNS を宣言する
+  - Tunnel の ingress に、ホスト名 `dash.aramakisai.com` から ops-dashboard の portal Service への経路を追加し、DNS に Tunnel への CNAME を追加する
   - `terraform plan` で、追加の経路と DNS レコードだけが差分として表示される (既知の tailnet key 置換は除く)
   - _Requirements: 1.8, 16.1_
 - [ ] 2.2 (ユーザー実行) HCP Terraform で apply し、ホスト名の解決を確認する
-  - ユーザーが apply した後、`portal.aramakisai.com` が Cloudflare 経由で解決され、Service 未作成の間はオリジン到達不可の応答になることを確認する
+  - ユーザーが apply した後、`dash.aramakisai.com` が Cloudflare 経由で解決され、Service 未作成の間はオリジン到達不可の応答になることを確認する
   - 既存ホスト名 (idp・cms・webmail・argocd) の応答が変わらないことを確認する
   - _Requirements: 1.8_
 
@@ -173,7 +173,7 @@ main へのマージは ArgoCD により即時に本番へ反映される。各�
 - [ ] 8. ポータルと運用ダッシュボードを本番に投入する
 - [ ] 8.1 ops-dashboard Application を追加して本番に投入する
   - 1.3 と 2.2 の確認が済んでから、Application を追加してマージする
-  - ArgoCD 上で Synced・Healthy になり、`https://portal.aramakisai.com/` にアクセスすると Zitadel のログインへ誘導されることを確認する
+  - ArgoCD 上で Synced・Healthy になり、`https://dash.aramakisai.com/` にアクセスすると Zitadel のログインへ誘導されることを確認する
   - _Depends: 1.3, 2.2, 3.3, 7_
   - _Requirements: 1.2, 1.3, 16.1, 16.5_
 - [ ] 8.2 ロールごとのアクセスを本番で確認する
@@ -233,7 +233,7 @@ main へのマージは ArgoCD により即時に本番へ反映される。各�
   - _Requirements: 17.1, 17.2, 17.3, 17.4_
 
 - [ ] 14. ドキュメントを同期する
-  - README のデプロイされるサービス一覧と structure.md に、`ops-dashboard` Application と `portal.aramakisai.com` を反映する
+  - README のデプロイされるサービス一覧と structure.md に、`ops-dashboard` Application と `dash.aramakisai.com` を反映する
   - tech.md のシークレット一覧に新規キー名を追記し、手動発行した資格情報の権限・所有アカウント・ローテーション手順を記載する。監視スタックの節に運用ダッシュボードの位置付けを、誤検知除外の節に collector の除外を反映する
   - dr.md に、SQLite の保存データ (Falco・認証イベント・DMARC・TLS-RPT・配送失敗) が再構築時の復元対象外であることと、DMARC・TLS-RPT はレポート用メールボックスから再取り込みされることを記載する。メールデータのバックアップの節に新しい PVC の扱いを反映する
   - 運用者向けに、リンクの追加・変更手順、プラン・期待サーバーの宣言の更新手順、executive・admin の付与・剥奪がポータルとダッシュボードに反映される仕組みを文書化する

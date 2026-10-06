@@ -209,7 +209,7 @@ class Authz(unittest.TestCase):
         loc = urllib.parse.urlsplit(r.headers["Location"])
         self.assertEqual((loc.netloc, loc.path), ("idp.aramakisai.com", "/oidc/v1/end_session"))
         q = urllib.parse.parse_qs(loc.query)
-        self.assertEqual(q["post_logout_redirect_uri"], ["https://portal.aramakisai.com/"])
+        self.assertEqual(q["post_logout_redirect_uri"], ["https://dash.aramakisai.com/"])
         self.assertEqual(q["id_token_hint"][0].count("."), 2)  # JWT に置換済み
         self.assertEqual(c.req("/").status, 302)
 

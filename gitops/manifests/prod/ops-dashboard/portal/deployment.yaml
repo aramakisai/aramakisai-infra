@@ -114,7 +114,7 @@ spec:
             - --scope=openid email profile offline_access
             - --oidc-groups-claim=groups
             - --code-challenge-method=S256
-            - --redirect-url=https://portal.aramakisai.com/oauth2/callback
+            - --redirect-url=https://dash.aramakisai.com/oauth2/callback
             - --http-address=127.0.0.1:4180
             - --reverse-proxy=true
             - --set-xauthrequest=true

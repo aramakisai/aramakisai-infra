@@ -2,7 +2,7 @@
 
 ## Overview
 
-**Purpose**: Zitadel にログインした実行委員が最初に着地するポータルと、管理者が運用状態を 1 か所で確認する運用ダッシュボードを、1 つのホスト名 `portal.aramakisai.com` で提供する。
+**Purpose**: Zitadel にログインした実行委員が最初に着地するポータルと、管理者が運用状態を 1 か所で確認する運用ダッシュボードを、1 つのホスト名 `dash.aramakisai.com` で提供する。
 
 **Users**: 実行委員 (`executive`) はポータルから委員会のサービスへ移動する。管理者 (`admin`) はポータル上の導線から運用ダッシュボードを開き、課金・監視・クラスタ・メール・セキュリティの状態を巡回する。
 
@@ -182,7 +182,7 @@ gitops/manifests/prod/ops-dashboard/
 - `ansible/roles/zitadel-bootstrap/vars/resources.yml` — OIDC アプリ `ops-portal` (`grant_types` に AUTHORIZATION_CODE と REFRESH_TOKEN)、machine user `ops-dashboard-reader` (`IAM_OWNER_VIEWER`)
 - `ansible/roles/zitadel-bootstrap/tasks/_oidc_app.yml` — 作成・更新の `grantTypes` を任意の `grant_types` パラメータから組み立てる (未指定時は従来どおり AUTHORIZATION_CODE のみ)。更新要否の判定条件に `grantTypes` の差分を加える
 - `ansible/roles/os-auto-update/templates/os-update-notify.sh.j2` (と関連 tasks) — ノード状態ファイルの書き出し
-- `terraform/tunnel.tf`・`terraform/dns.tf` — `portal.aramakisai.com`
+- `terraform/tunnel.tf`・`terraform/dns.tf` — `dash.aramakisai.com`
 - `README.md`・`.kiro/steering/{structure,tech}.md`・`docs/` — 要件 18
 
 ## System Flows
@@ -344,7 +344,7 @@ sequenceDiagram
 **Responsibilities & Constraints**
 - provider `oidc`、issuer `https://idp.aramakisai.com`、scope `openid email profile offline_access`、`--oidc-groups-claim=groups`、`--set-xauthrequest`、`--reverse-proxy`、`--email-domain=*`、`--skip-provider-button`、upstream なし (認証専用)。
 - `--cookie-expire=12h`、`--cookie-refresh=1h`。refresh 時に refresh token で ID token を取り直し、groups を更新するため、ロールの剥奪は最長 1 時間で反映される (要件 4.5)。refresh token を受け取るため、OIDC アプリ `ops-portal` は grant type に REFRESH_TOKEN を持つ (下記「Zitadel 設定」)。
-- ログアウトは `/oauth2/sign_out` で、nginx が `X-Auth-Request-Redirect` に Zitadel の `end_session` URL (`id_token_hint={id_token}`、`post_logout_redirect_uri=https://portal.aramakisai.com/`) を付けて oauth2-proxy へ渡す。oauth2-proxy は自身の cookie を消したうえでブラウザを end_session へリダイレクトし、Zitadel のセッションを終了させてポータルへ戻す。リダイレクト先は `--whitelist-domain=idp.aramakisai.com` で許可する。`--backend-logout-url` は oauth2-proxy のサーバー側から呼ばれ、ブラウザの Zitadel cookie が付かないため使わない。
+- ログアウトは `/oauth2/sign_out` で、nginx が `X-Auth-Request-Redirect` に Zitadel の `end_session` URL (`id_token_hint={id_token}`、`post_logout_redirect_uri=https://dash.aramakisai.com/`) を付けて oauth2-proxy へ渡す。oauth2-proxy は自身の cookie を消したうえでブラウザを end_session へリダイレクトし、Zitadel のセッションを終了させてポータルへ戻す。リダイレクト先は `--whitelist-domain=idp.aramakisai.com` で許可する。`--backend-logout-url` は oauth2-proxy のサーバー側から呼ばれ、ブラウザの Zitadel cookie が付かないため使わない。
 
 #### PortalConfigGenerator (initContainer)
 
@@ -366,8 +366,8 @@ sequenceDiagram
 
 | 対象 | 内容 | 要件 |
 |------|------|------|
-| login コンテナ env | `DEFAULT_REDIRECT_URI=https://portal.aramakisai.com/` | 1.1 |
-| OIDC アプリ `ops-portal` | redirect `https://portal.aramakisai.com/oauth2/callback`、post logout `https://portal.aramakisai.com/`、`id_token_userinfo_assertion: true`、`grant_types: [OIDC_GRANT_TYPE_AUTHORIZATION_CODE, OIDC_GRANT_TYPE_REFRESH_TOKEN]`、`infisical_keys` で `OPS_PORTAL_OIDC_CLIENT_ID`・`OPS_PORTAL_OIDC_CLIENT_SECRET` を自動登録 | 1.2, 1.4 |
+| login コンテナ env | `DEFAULT_REDIRECT_URI=https://dash.aramakisai.com/` | 1.1 |
+| OIDC アプリ `ops-portal` | redirect `https://dash.aramakisai.com/oauth2/callback`、post logout `https://dash.aramakisai.com/`、`id_token_userinfo_assertion: true`、`grant_types: [OIDC_GRANT_TYPE_AUTHORIZATION_CODE, OIDC_GRANT_TYPE_REFRESH_TOKEN]`、`infisical_keys` で `OPS_PORTAL_OIDC_CLIENT_ID`・`OPS_PORTAL_OIDC_CLIENT_SECRET` を自動登録 | 1.2, 1.4 |
 | machine user `ops-dashboard-reader` | `member_scope: instance`、`roles: ["IAM_OWNER_VIEWER"]`、PAT を `OPS_ZITADEL_READER_PAT` へ | 12.1, 12.2 |
 
 - zitadel Application は手動同期のため、env の変更は手動 sync で反映する。
