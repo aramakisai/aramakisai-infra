@@ -50,6 +50,16 @@ resource "cloudflare_record" "vault" {
   comment = "Vaultwarden (Cloudflare Tunnel)"
 }
 
+# 実行委員ポータル・運用ダッシュボード
+resource "cloudflare_record" "portal" {
+  zone_id = var.cloudflare_zone_id
+  name    = "portal"
+  value   = local.tunnel_cname
+  type    = "CNAME"
+  proxied = true
+  comment = "実行委員ポータル・運用ダッシュボード (Cloudflare Tunnel)"
+}
+
 # 旧 Directus API。Directus 本体は撤去済みで Tunnel ingress も持たないが、
 # payload-cms-migration 5.4 の旧 URL リダイレクト (cloudflare_cms_media_redirects.tf) が
 # api.aramakisai.com/assets/<uuid> の 9 件を CMS media URL へ転送するために

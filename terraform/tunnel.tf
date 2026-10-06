@@ -68,6 +68,12 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "main" {
       service  = "http://vaultwarden.prod.svc.cluster.local:80"
     }
 
+    # 実行委員ポータル・運用ダッシュボード (oauth2-proxy + nginx が Zitadel で認証する)
+    ingress_rule {
+      hostname = "portal.aramakisai.com"
+      service  = "http://portal.ops-dashboard.svc.cluster.local:80"
+    }
+
     # フォールバック (いずれのホスト名にもマッチしない場合)
     ingress_rule {
       service = "http_status:404"
