@@ -1,9 +1,11 @@
 """全節で共通の描画部品。表示文言は labels.label() だけから引く。"""
 import html
+import dataclasses
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Mapping, Sequence
 from urllib.parse import urlencode
 
+import model
 from model import Item, SourceResult, Status
 from render.labels import label
 
@@ -73,8 +75,17 @@ def numbers_details(headers: Sequence[str], rows: Sequence[Sequence]) -> Raw:
 
 
 def card(title: str, result: SourceResult | None, render_body: Callable[[Sequence[Item]], str],
-         source: str | None = None, empty: str | None = None) -> Raw:
-    """情報源 1 つ分のカード。取得失敗は理由・最終成功・直前の値 (薄く) を出し、正常と取り違えない。"""
+         source: str | None = None, empty: str | None = None,
+         select: Callable[[Item], bool] | None = None) -> Raw:
+    """情報源 1 つ分のカード。取得失敗は理由・最終成功・直前の値 (薄く) を出し、正常と取り違えない。
+
+    1 つの情報源を複数カードに分けるときは select で項目を絞る。状態は絞った項目だけで計算し直し、
+    他のカードの異常を引きずらない。取得失敗は全カード共通で失敗のまま保つ。"""
+    if result is not None and select:
+        items = [i for i in result.items if select(i)]
+        status = (result.status if result.status is Status.ERROR
+                  else model.worst(i.status for i in items) if items else Status.OK)
+        result = dataclasses.replace(result, items=items, status=status)
     h = f"<h3>{esc(title)}</h3>"
     if result is None:
         return Raw(f'<article class="card s-empty">{h}<p class="empty">{esc(label("empty.collecting"))}</p></article>')
