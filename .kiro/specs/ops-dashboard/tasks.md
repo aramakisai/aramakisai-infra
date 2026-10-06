@@ -2,7 +2,7 @@
 
 main へのマージは ArgoCD により即時に本番へ反映される。各タスクは、依存先が本番で動作確認済みになってからマージする。「ユーザー実行」と書いたタスクは、本番への適用 (ansible-playbook・HCP Terraform の apply・zitadel Application の手動 sync) をユーザーが行うチェックポイントで、Claude は手順と確認項目を用意して結果の確認だけを行う。資格情報 (OPS_* キー) は Infisical に登録済みのため、発行作業は含めない。
 
-- [ ] 1. Zitadel 側の前提を整える
+- [x] 1. Zitadel 側の前提を整える
 - [x] 1.1 OIDC アプリの grant type を宣言できるようにする
   - zitadel-bootstrap の OIDC アプリ作成・更新で、grant type を任意の宣言値から組み立てる。宣言がないアプリは従来どおり認可コードのみとする
   - 更新要否の判定に grant type の差分を加える
@@ -13,19 +13,19 @@ main へのマージは ArgoCD により即時に本番へ反映される。各�
   - machine user `ops-dashboard-reader` をインスタンスロール `IAM_OWNER_VIEWER` で宣言し、PAT の登録先を `OPS_ZITADEL_READER_PAT` とする
   - `--check --diff` で、追加の 2 件だけが変更として表示される
   - _Requirements: 1.2, 1.4, 12.1, 12.2, 16.1_
-- [ ] 1.3 (ユーザー実行) zitadel-bootstrap を本番に適用し、結果を確認する
+- [x] 1.3 (ユーザー実行) zitadel-bootstrap を本番に適用し、結果を確認する
   - 1.1・1.2 をマージした後、ユーザーが playbook を実行する。発行された PAT はユーザーが Infisical に登録する
   - `ops-portal` が両方の grant type を持ち、client ID・secret が Infisical に登録されていることを確認する
   - `OPS_ZITADEL_READER_PAT` で認証イベントの検索 API が 200 を返し、管理系の書き込み API が拒否されることを確認する
   - 既存の OIDC アプリ (CMS・Webmail・ArgoCD・Cloudflare Access) へのログインが従来どおり通ることを確認する
   - _Requirements: 1.2, 4.5, 12.2_
 
-- [ ] 2. 公開経路を用意する
+- [x] 2. 公開経路を用意する
 - [x] 2.1 `dash.aramakisai.com` の Tunnel 経路と DNS を宣言する
   - Tunnel の ingress に、ホスト名 `dash.aramakisai.com` から ops-dashboard の portal Service への経路を追加し、DNS に Tunnel への CNAME を追加する
   - `terraform plan` で、追加の経路と DNS レコードだけが差分として表示される (既知の tailnet key 置換は除く)
   - _Requirements: 1.8, 16.1_
-- [ ] 2.2 (ユーザー実行) HCP Terraform で apply し、ホスト名の解決を確認する
+- [x] 2.2 (ユーザー実行) HCP Terraform で apply し、ホスト名の解決を確認する
   - ユーザーが apply した後、`dash.aramakisai.com` が Cloudflare 経由で解決され、Service 未作成の間はオリジン到達不可の応答になることを確認する
   - 既存ホスト名 (idp・cms・webmail・argocd) の応答が変わらないことを確認する
   - _Requirements: 1.8_
