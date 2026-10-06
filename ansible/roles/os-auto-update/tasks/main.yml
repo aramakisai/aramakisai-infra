@@ -113,3 +113,5 @@
   ansible.builtin.systemd:
     name: os-node-status.service
     enabled: true
+  # check モードでは unit ファイルが配置されず、新規配布時にサービスが見つからず失敗する
+  when: not ansible_check_mode

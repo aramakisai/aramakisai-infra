@@ -84,9 +84,9 @@ zitadel_oidc_apps:
       client_secret: ARGOCD_OIDC_CLIENT_SECRET_ZITADEL
   - name: ops-portal
     redirect_uris:
-      - https://portal.aramakisai.com/oauth2/callback
+      - https://dash.aramakisai.com/oauth2/callback
     post_logout_redirect_uris:
-      - https://portal.aramakisai.com/
+      - https://dash.aramakisai.com/
     # oauth2-proxyが--cookie-refreshでID tokenを取り直すためREFRESH_TOKENが必要
     grant_types:
       - OIDC_GRANT_TYPE_AUTHORIZATION_CODE
