@@ -38,6 +38,8 @@ spec:
             - {name: http, containerPort: 8080}
           volumeMounts:
             - {name: app, mountPath: /app, readOnly: true}
+            - {name: state, mountPath: /var/mail-state, readOnly: true}
+            - {name: logs, mountPath: /var/log/mail, readOnly: true}
           resources:
             requests: {memory: "24Mi", cpu: "10m"}
             limits: {memory: "64Mi", cpu: "200m"}
@@ -63,6 +65,11 @@ spec:
       volumes:
         - name: app
           configMap: {name: mail-agent-app}
+        # RWO は同一ノードの複数 Pod から同時にマウントできる (mailserver と同じ prod-node-1 に固定)
+        - name: state
+          persistentVolumeClaim: {claimName: mailserver-state, readOnly: true}
+        - name: logs
+          persistentVolumeClaim: {claimName: mailserver-logs, readOnly: true}
 ---
 apiVersion: v1
 kind: Service

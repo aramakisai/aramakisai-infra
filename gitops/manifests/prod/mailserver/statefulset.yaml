@@ -97,6 +97,10 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /var/mail
+            - name: state
+              mountPath: /var/mail-state
+            - name: logs
+              mountPath: /var/log/mail
             - name: dms-config
               mountPath: /tmp/docker-mailserver/dovecot.cf
               subPath: dovecot.cf
@@ -185,6 +189,12 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: mailserver-data
+        - name: state
+          persistentVolumeClaim:
+            claimName: mailserver-state
+        - name: logs
+          persistentVolumeClaim:
+            claimName: mailserver-logs
         - name: dms-config
           configMap:
             name: mailserver-config
