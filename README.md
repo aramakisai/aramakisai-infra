@@ -68,6 +68,7 @@ Terraform でクラウドリソースを定義し、Ansible で K3s クラスタ
 | [ESO](https://external-secrets.io) | `external-secrets` | Kubernetes ↔ Infisical シークレット同期 |
 | [CloudNativePG](https://cloudnative-pg.io) | `cnpg-system` | PostgreSQL Operator |
 | [Vaultwarden](https://github.com/dani-garcia/vaultwarden) | `prod` | パスワードマネージャー (SSO対応) |
+| 運用ポータル・運用ダッシュボード (`ops-dashboard`、`dash.aramakisai.com`) | `ops-dashboard` | 実行委員向けポータル (executive) と管理者向け運用ダッシュボード (admin)。運用は [docs/ops-dashboard-runbook.md](docs/ops-dashboard-runbook.md) |
 
 ---
 
@@ -194,6 +195,15 @@ infisical run --env=prod -- ansible-playbook -i ansible/inventory/tailscale.yml 
 2. `gitops/apps/prod/<service-name>.yaml` に ArgoCD Application を定義
 3. シークレットが必要な場合は `external-secret.yaml` を追加
 4. PR を出してマージすると ArgoCD が自動で sync
+
+### Zitadel リソースの投入
+
+`zitadel-bootstrap` 系の playbook は、本番では `ZITADEL_EXTERNAL_DOMAIN=idp.aramakisai.com` の指定が必須です (未指定だとインスタンスを解決できません)。`--check` には対応していません (参照 API の応答を前提とする処理が check モードで失敗します)。
+
+```bash
+infisical run --env=prod -- env ZITADEL_EXTERNAL_DOMAIN=idp.aramakisai.com \
+  ansible-playbook -i ansible/inventory/tailscale.yml ansible/playbooks/zitadel-resources.yml
+```
 
 ### ノードの強制再プロビジョニング
 

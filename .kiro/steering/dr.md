@@ -145,6 +145,15 @@ Stalwart から Docker Mailserver (DMS) v14 に移行済み。管理 CLI やア�
 DR 時の VolSync リストアは自動化していない (`docs/dr-runbook.md` の手動手順)。  
 手動で行う場合は `gitops/manifests/prod/mailserver/replication-source.yaml` を参照。
 
+VolSync の対象は `mailserver-data` PVC のみ。次の PVC は `ReplicationSource` の対象外で、再構築時に復元されない。
+
+- `mailserver-state` (配送状態・fail2ban の BAN DB 等) と `mailserver-logs` (メールログ): 空の PVC として作り直される。BAN 状態は失われる。
+- `mailserver-ops-reports` (`ops-reports@` の Maildir。DMARC・TLS-RPT の集約レポートを受ける): 空で作り直される。レポートは送信元が再送するため、新規分から再び溜まる。
+
+### 運用ダッシュボードのデータ (collector の SQLite)
+
+collector の `collector-data` PVC (SQLite) に保存する Falco 検知・認証イベント・DMARC・TLS-RPT・配送失敗は、再構築時の復元対象外 (バックアップなし)。DMARC・TLS-RPT は、`mailserver-ops-reports` に残っているレポートメールから mail-agent 経由で再取り込みされる (PVC ごと失った場合は上記のとおり再送待ち)。Falco 検知・認証イベント・配送失敗は再取得できない。
+
 ### DKIM / TLS の注意事項
 
 - DKIM 鍵は `dkim-external-secret.yaml` から Infisical 経由で注入。Infisical に鍵が登録済みであること
