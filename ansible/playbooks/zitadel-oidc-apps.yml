@@ -1,5 +1,6 @@
 ---
 # OIDC Application投入(zitadel_oidc_appsの差分のみ)。infisical_keysを持つアプリは発行値をInfisicalへ登録する。
+# 本番は ZITADEL_EXTERNAL_DOMAIN=idp.aramakisai.com の指定が必須: infisical run --env=prod -- env ZITADEL_EXTERNAL_DOMAIN=idp.aramakisai.com ansible-playbook -i ansible/inventory/tailscale.yml ansible/playbooks/zitadel-oidc-apps.yml
 - name: Zitadel OIDC Application投入
   hosts: localhost
   connection: local

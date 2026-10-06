@@ -61,6 +61,7 @@
 - name: Label Policyを更新 (org専用policyが既に存在する場合のみ)
   ansible.builtin.include_tasks: _api_call.yml
   vars:
+    zitadel_api_allow_status: [400]
     zitadel_api_method: PUT
     zitadel_api_path: /management/v1/policies/label
     zitadel_api_body:

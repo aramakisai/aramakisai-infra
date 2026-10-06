@@ -1,6 +1,7 @@
 ---
 # project/role/application/action等のZitadelリソース投入 (task 9.2)。
 # 前提: zitadel-bootstrap.ymlで初回admin/PATブートストラップが完了していること。
+# 本番は ZITADEL_EXTERNAL_DOMAIN=idp.aramakisai.com の指定が必須: infisical run --env=prod -- env ZITADEL_EXTERNAL_DOMAIN=idp.aramakisai.com ansible-playbook -i ansible/inventory/tailscale.yml ansible/playbooks/zitadel-resources.yml
 - name: Zitadelリソース投入 (project/role/application/action)
   hosts: localhost
   connection: local
