@@ -1,0 +1,118 @@
+# mailserver の状態を読み取り専用で collector に渡す。認可は Bearer トークンと NetworkPolicy の二重
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mail-agent
+  namespace: prod
+  labels:
+    app: mail-agent
+  annotations:
+    secret.reloader.stakater.com/reload: "mail-agent-secrets"
+spec:
+  replicas: 1
+  revisionHistoryLimit: 2
+  selector:
+    matchLabels:
+      app: mail-agent
+  template:
+    metadata:
+      labels:
+        app: mail-agent
+    spec:
+      # mailserver と同じノードの PVC (local-path) を読むため
+      nodeSelector:
+        kubernetes.io/hostname: prod-node-1
+      automountServiceAccountToken: false
+      containers:
+        - name: mail-agent
+          image: python:3.13-slim@sha256:bf44cdfcb76cd3b41e879bc058fc37ec5872002ccfde7fcb765e218cde0cd79c
+          command: ["python", "/app/app.py"]
+          env:
+            # ルートファイルシステムが読み取り専用
+            - {name: PYTHONDONTWRITEBYTECODE, value: "1"}
+            - {name: PYTHONUNBUFFERED, value: "1"}
+          envFrom:
+            - secretRef:
+                name: mail-agent-secrets
+          ports:
+            - {name: http, containerPort: 8080}
+          volumeMounts:
+            - {name: app, mountPath: /app, readOnly: true}
+          resources:
+            requests: {memory: "24Mi", cpu: "10m"}
+            limits: {memory: "64Mi", cpu: "200m"}
+          # 全パスが Bearer 必須 (未認証は 401) のため httpGet は使えない
+          readinessProbe:
+            tcpSocket: {port: http}
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            tcpSocket: {port: http}
+            initialDelaySeconds: 20
+            periodSeconds: 30
+            timeoutSeconds: 3
+            failureThreshold: 3
+          # 読む対象の所有者が混在するため root だが、書き込みは読み取り専用マウントで防ぐ
+          securityContext:
+            runAsUser: 0
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+              add: ["DAC_READ_SEARCH"]
+      volumes:
+        - name: app
+          configMap: {name: mail-agent-app}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mail-agent
+  namespace: prod
+  labels:
+    app: mail-agent
+spec:
+  type: ClusterIP
+  selector:
+    app: mail-agent
+  ports:
+    - {name: http, port: 8080, targetPort: http}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mail-agent-ingress
+  namespace: prod
+spec:
+  podSelector:
+    matchLabels:
+      app: mail-agent
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ops-dashboard
+          podSelector:
+            matchLabels:
+              app: collector
+      ports:
+        - {protocol: TCP, port: 8080}
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: mail-agent-secrets
+  namespace: prod
+  annotations:
+    argocd.argoproj.io/sync-options: Replace=true
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: infisical
+  target:
+    name: mail-agent-secrets
+    creationPolicy: Owner
+  data:
+    - {secretKey: OPS_MAIL_AGENT_TOKEN, remoteRef: {key: OPS_MAIL_AGENT_TOKEN}}
