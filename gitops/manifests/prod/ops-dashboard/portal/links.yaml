@@ -1,0 +1,57 @@
+# ポータルのリンク宣言 (Homer 形式の単一ソース)。
+# url_env を持つ項目は内部向けリンクで、その名前の環境変数 (Secret 由来) が空なら項目ごと除かれる。
+# 除外対象: ArgoCD・開発/ステージング・メール設定手順・凍結中のサービス。
+title: "荒牧祭 実行委員ポータル"
+subtitle: "委員会で使うサービスの入口"
+header: true
+footer: false
+links:
+  - name: "ログアウト"
+    icon: "fas fa-right-from-bracket"
+    url: "/oauth2/sign_out"
+services:
+  - name: "委員会のサービス"
+    icon: "fas fa-toolbox"
+    items:
+      - name: "CMS"
+        icon: "fas fa-pen-to-square"
+        subtitle: "公式サイトの記事・企画情報を編集する"
+        url: "https://cms.aramakisai.com/admin"
+      - name: "Webmail"
+        icon: "fas fa-envelope"
+        subtitle: "委員会のメールを送受信する"
+        url: "https://webmail.aramakisai.com"
+      - name: "アカウント設定"
+        icon: "fas fa-user-shield"
+        subtitle: "パスワードと二要素認証を変更する"
+        url: "https://idp.aramakisai.com/ui/console/users/me"
+  - name: "情報共有"
+    icon: "fas fa-folder-open"
+    items:
+      - name: "Notion"
+        icon: "fas fa-book"
+        subtitle: "議事録・タスク・資料"
+        url_env: PORTAL_NOTION_URL
+      - name: "Google Drive"
+        icon: "fab fa-google-drive"
+        subtitle: "共有ファイル"
+        url_env: PORTAL_GOOGLE_DRIVE_URL
+  - name: "公式サイト・SNS"
+    icon: "fas fa-globe"
+    items:
+      - name: "公式サイト"
+        icon: "fas fa-house"
+        subtitle: "aramakisai.com"
+        url: "https://aramakisai.com"
+      - name: "X"
+        icon: "fab fa-x-twitter"
+        subtitle: "@aramakisai_"
+        url: "https://x.com/aramakisai_"
+      - name: "Instagram"
+        icon: "fab fa-instagram"
+        subtitle: "@aramakisai_"
+        url: "https://www.instagram.com/aramakisai_/"
+      - name: "YouTube"
+        icon: "fab fa-youtube"
+        subtitle: "@aramakisai"
+        url: "https://www.youtube.com/@aramakisai"

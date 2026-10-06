@@ -1,0 +1,148 @@
+---
+# 運用ポータル: nginx (認可ルーティング・静的配信) + oauth2-proxy (Zitadel OIDC)
+# Homer は静的ファイルとして initContainer で取り出し、リンク設定は起動時に生成する。
+# 認可ルーティングは nginx.conf を参照。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: portal
+  labels:
+    app: portal
+  annotations:
+    secret.reloader.stakater.com/reload: "portal-oidc,portal-link-urls"
+spec:
+  replicas: 1
+  revisionHistoryLimit: 2
+  selector:
+    matchLabels:
+      app: portal
+  template:
+    metadata:
+      labels:
+        app: portal
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: homer-static
+          image: b4bz/homer:v26.08.3@sha256:febc8967c9f7648ec37633ef3ae1ec90dbe8b7c46fecab80299f08f05be7ecb6
+          command: ["sh", "-c", "cp -R /www/. /out/"]
+          volumeMounts:
+            - name: site
+              mountPath: /out
+          resources:
+            requests: {memory: "16Mi", cpu: "10m"}
+            limits: {memory: "64Mi", cpu: "200m"}
+          securityContext: &restricted
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+        - name: generate-config
+          image: mikefarah/yq:4.54.1@sha256:4b3d9475d65571d28cbb19544d3820ec2945e4c8b2f18279394282b8dc3a592e
+          command: ["sh", "/links/generate-config.sh", "/links", "/out/assets"]
+          env:
+            - name: PORTAL_NOTION_URL
+              valueFrom:
+                secretKeyRef:
+                  name: portal-link-urls
+                  key: PORTAL_NOTION_URL
+                  optional: true
+            - name: PORTAL_GOOGLE_DRIVE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: portal-link-urls
+                  key: PORTAL_GOOGLE_DRIVE_URL
+                  optional: true
+          volumeMounts:
+            - name: site
+              mountPath: /out
+            - name: links
+              mountPath: /links
+              readOnly: true
+          resources:
+            requests: {memory: "16Mi", cpu: "10m"}
+            limits: {memory: "64Mi", cpu: "200m"}
+          securityContext: *restricted
+      containers:
+        - name: nginx
+          image: nginx:1.27.5-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
+          args: ["nginx", "-c", "/etc/nginx/portal/nginx.conf", "-g", "daemon off;"]
+          ports:
+            - name: http
+              containerPort: 8080
+          volumeMounts:
+            - name: nginx-conf
+              mountPath: /etc/nginx/portal
+              readOnly: true
+            - name: pages
+              mountPath: /usr/share/nginx/pages
+              readOnly: true
+            - name: site
+              mountPath: /usr/share/nginx/portal
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests: {memory: "16Mi", cpu: "10m"}
+            limits: {memory: "32Mi", cpu: "200m"}
+          # oauth2-proxy の /ping まで通すため、nginx の応答が両方の生存確認になる
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 3
+            failureThreshold: 3
+          securityContext: *restricted
+        - name: oauth2-proxy
+          image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.5@sha256:8498b0d0ef0a7b29686414000a08aee467f02d0299c9ed1e006a8f33fc017916
+          args:
+            - --provider=oidc
+            - --oidc-issuer-url=https://idp.aramakisai.com
+            - --scope=openid email profile offline_access
+            - --oidc-groups-claim=groups
+            - --code-challenge-method=S256
+            - --redirect-url=https://portal.aramakisai.com/oauth2/callback
+            - --http-address=127.0.0.1:4180
+            - --reverse-proxy=true
+            - --set-xauthrequest=true
+            - --email-domain=*
+            - --skip-provider-button=true
+            - --cookie-secure=true
+            - --cookie-expire=12h
+            - --cookie-refresh=1h
+            # Zitadel のセッションも終了させ、ログアウト後はポータルへ戻す
+            - --backend-logout-url=https://idp.aramakisai.com/oidc/v1/end_session?id_token_hint={id_token}&post_logout_redirect_uri=https%3A%2F%2Fportal.aramakisai.com%2F
+          envFrom:
+            - secretRef:
+                name: portal-oidc
+          resources:
+            requests: {memory: "16Mi", cpu: "10m"}
+            limits: {memory: "48Mi", cpu: "200m"}
+          securityContext: *restricted
+      volumes:
+        - name: site
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+        - name: nginx-conf
+          configMap:
+            name: portal-nginx
+        - name: pages
+          configMap:
+            name: portal-pages
+        - name: links
+          configMap:
+            name: portal-links
