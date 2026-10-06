@@ -10,7 +10,8 @@ metadata:
   namespace: prod
   annotations:
     argocd.argoproj.io/hook: PreSync
-    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
+    # 成功時も ttlSecondsAfterFinished まで残し、適用されたマイグレーションをログで確認できるようにする
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
     argocd.argoproj.io/sync-wave: "1"
 spec:
   ttlSecondsAfterFinished: 3600
@@ -21,7 +22,18 @@ spec:
       containers:
         - name: migrate
           image: ghcr.io/aramakisai/aramakisai-cms-migrate:main
-          command: [node_modules/.bin/payload, migrate]
+          # payload CLI は設定読み込み中に何も出力せず exit 0 で終わることがあり、終了コードでは
+          # 未適用を検出できない。完了ログ "Done." で成否を判定し、冪等なので再試行する
+          command:
+            - sh
+            - -c
+            - |
+              for attempt in 1 2 3; do
+                node_modules/.bin/payload migrate 2>&1 | tee /tmp/migrate.log
+                grep -q 'Done\.' /tmp/migrate.log && exit 0
+                echo "payload migrate が完了ログを出さずに終了した (試行 $attempt)"
+              done
+              exit 1
           envFrom:
             - secretRef:
                 name: cms-secrets
