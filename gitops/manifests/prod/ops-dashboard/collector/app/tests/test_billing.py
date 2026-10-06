@@ -1,3 +1,4 @@
+import re
 import unittest
 from datetime import date, datetime, timezone
 
@@ -198,7 +199,8 @@ class Hetzner(unittest.TestCase):
 def gql(day=1000, month=5000, storage=(4e9, 1e9), ops=()):
     return {"data": {"viewer": {"accounts": [{
         "day": [{"sum": {"requests": day}}], "month": [{"sum": {"requests": month}}],
-        "storage": [{"max": {"payloadSize": storage[0], "metadataSize": storage[1]}}],
+        "storage": [{"max": {"payloadSize": storage[0], "metadataSize": storage[1]},
+                     "dimensions": {"datetime": "2026-06-01T11:00:00Z", "bucketName": "b"}}],
         "ops": [{"sum": {"requests": n}, "dimensions": {"actionType": a}} for a, n in ops]}]}}}
 
 
@@ -223,6 +225,21 @@ class Cloudflare(unittest.TestCase):
         self.assertEqual(by["quota.r2_storage"].values["used"], 5.0)
         self.assertEqual(by["quota.zt_users"].values["used"], 7)
         self.assertEqual(r.status, Status.WARN)
+
+    def test_storage_sums_latest_per_bucket(self):
+        g = gql()
+        g["data"]["viewer"]["accounts"][0]["storage"] = [
+            {"max": {"payloadSize": 3e9, "metadataSize": 0}, "dimensions": {"datetime": "2026-06-01T11:00:00Z", "bucketName": "a"}},
+            {"max": {"payloadSize": 1e9, "metadataSize": 1e9}, "dimensions": {"datetime": "2026-06-01T10:00:00Z", "bucketName": "b"}},
+            {"max": {"payloadSize": 9e9, "metadataSize": 0}, "dimensions": {"datetime": "2026-06-01T09:00:00Z", "bucketName": "a"}}]
+        by, _ = self.run_cf(NOW, g)
+        self.assertEqual(by["quota.r2_storage"].values["used"], 5.0)
+
+    def test_storage_query_orders_by_a_dimension(self):
+        # GraphQL Analytics は orderBy に dimensions へ含めていないフィールドを指定すると拒否する
+        q = re.search(r"r2StorageAdaptiveGroups\(.*", billing_cloudflare.QUERY).group(0)
+        self.assertIn("orderBy: [datetime_DESC]", q)
+        self.assertRegex(q, r"dimensions \{[^}]*\bdatetime\b")
 
     def test_paid_monthly_and_billed(self):
         sub = {"state": "Paid", "price": 5, "frequency": "monthly", "rate_plan": {"public_name": "Workers Paid"}}
@@ -262,12 +279,13 @@ class Others(unittest.TestCase):
                                           {"attributes": {"current-rum-count": None}},
                                           {"attributes": {"current-rum-count": 5}}],
                                  "meta": {"pagination": {"next-page": None}}},
-            base + "/subscription": {"data": {}, "included": [
-                {"type": "feature-sets", "attributes": {"identifier": "free", "name": "Free"}}]}})
+            base: {"data": {"attributes": {"plan-identifier": "free_standard"}}}})
         r = billing_hcp_terraform.SOURCES[0].fetch(make_ctx(CFG, http=http, env={"OPS_TFC_TOKEN": "t"}, now=NOW))
         by = {i.key: i for i in r.items}
         self.assertEqual(by["quota.tfc_rum"].values["used"], 15)
         self.assertEqual(r.status, Status.OK)
+        # organization トークンでは /subscription が 404 になるため、organization の属性で判定する
+        self.assertNotIn(base + "/subscription", [c["url"] for c in http.calls])
 
     def test_hcp_paid_after_revert_is_crit(self):
         cfg = config.parse(TOML + """
@@ -281,8 +299,7 @@ until = "2019-12-31"
         # 上記は重複しない過去の有料宣言 (Free は 2020 開始) と実プラン有料の組
         base = "https://app.terraform.io/api/v2/organizations/o"
         http = FakeHttp({base + "/explorer": {"data": [], "meta": {}},
-                         base + "/subscription": {"included": [
-                             {"type": "feature-sets", "attributes": {"identifier": "plus", "name": "Plus"}}]}})
+                         base: {"data": {"attributes": {"plan-identifier": "plus"}}}})
         r = billing_hcp_terraform.SOURCES[0].fetch(make_ctx(cfg, http=http, env={"OPS_TFC_TOKEN": "t"}, now=NOW))
         self.assertEqual({i.key: i.status for i in r.items}["plan.hcp_terraform"], Status.CRIT)
 

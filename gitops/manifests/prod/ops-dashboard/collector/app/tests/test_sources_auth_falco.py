@@ -53,6 +53,11 @@ class AuthTest(unittest.TestCase):
         self.assertEqual({i.key: i for i in r2.items}["auth.day.2026-06-01"].values["password"], 3)
         self.assertEqual(self.st.query("SELECT count(*) FROM auth_events")[0][0], 5)
 
+    def test_prod_sends_instance_host(self):
+        # Zitadel は Host でインスタンスを解決するため、Service DNS 名のままだと 404 になる
+        _, http = self.run_fetch([])
+        self.assertEqual(http.calls[0]["headers"], {"x-zitadel-instance-host": "idp.aramakisai.com"})
+
     def test_same_sequence_in_different_aggregates_is_kept(self):
         events = [ev(1, "user.locked", "2026-06-01T10:00:00Z", user="a"),
                   ev(1, "user.human.password.check.failed", "2026-06-01T10:00:01Z", user="b")]

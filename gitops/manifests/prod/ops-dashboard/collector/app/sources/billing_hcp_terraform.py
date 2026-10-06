@@ -20,12 +20,10 @@ def fetch(ctx):
         rum += sum(w["attributes"].get("current-rum-count") or 0 for w in d["data"])
         page = ((d.get("meta") or {}).get("pagination") or {}).get("next-page")
 
-    sub = ctx.http.get_json(f"{API}/organizations/{org}/subscription", bearer=token, headers=hdr)
-    fs = next((i["attributes"] for i in sub.get("included", []) if i.get("type") == "feature-sets"), None)
-    actual_paid = None
-    if fs:
-        actual_paid = not (fs.get("name", "").lower().startswith("free")
-                           or fs.get("identifier", "").lower().startswith("free"))
+    # /subscription は organization トークンでは 404 になるため、organization の plan-identifier で判定する
+    ident = ctx.http.get_json(f"{API}/organizations/{org}", bearer=token, headers=hdr)["data"]["attributes"].get(
+        "plan-identifier")
+    actual_paid = None if ident is None else not ident.lower().startswith("free")
 
     plan = ctx.config.active_plan("hcp_terraform", jst_today(now))
     items = [plan_item(ctx.config, "hcp_terraform", now, actual_paid)]

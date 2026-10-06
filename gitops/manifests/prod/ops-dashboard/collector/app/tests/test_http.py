@@ -38,6 +38,12 @@ class HttpTest(unittest.TestCase):
         self.assertEqual(req.get_header("Authorization"), "Bearer T")
         self.assertEqual(req.get_method(), "GET")
 
+    def test_user_agent(self):
+        # Netdata Cloud 前段の Cloudflare は urllib 既定の UA を 403 (error 1010) で拒否する
+        h, calls = self.make(FakeResp(b"{}"))
+        h.get_json("https://x/y")
+        self.assertNotIn("Python-urllib", calls[0][0].get_header("User-agent") or "Python-urllib")
+
     def test_post_json(self):
         h, calls = self.make(FakeResp(b"{}"))
         h.post_json("https://x/y", {"a": 1})

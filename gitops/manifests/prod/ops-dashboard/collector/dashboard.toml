@@ -120,8 +120,10 @@ name = "HCP Terraform organization トークン"
 expires_on = "2027-10-31"
 
 # 凍結中のワークロード (Namespace または名前) は取得結果から除外する。
+# prod Namespace に置かれた付随リソース (バックアップ・DB の Application・ExternalSecret) は名前で列挙する。
 [exclude]
-namespaces_or_names = ["vaultwarden", "vaultwarden-rbac-sync", "room-presence"]
+namespaces_or_names = ["vaultwarden", "vaultwarden-rbac-sync", "vaultwarden-backup",
+                       "room-presence", "room-presence-db", "presence-secrets"]
 
 # 情報源ごとの非秘匿の宣言 (呼び出し先・対象)。キーは source_id。
 [sources."billing.github"]
@@ -130,6 +132,10 @@ org = "aramakisai"
 [sources."ci.github"]
 org = "aramakisai"
 repos = ["aramakisai-infra", "aramakisai-web"]
+
+# Zitadel は Host でインスタンスを解決するため、Service DNS 名で接続するときは公開ホスト名を渡す
+[sources."auth.zitadel"]
+instance_host = "idp.aramakisai.com"
 
 [sources."billing.hcp_terraform"]
 org = "aramakisai"

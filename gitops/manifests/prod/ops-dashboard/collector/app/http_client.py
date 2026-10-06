@@ -25,7 +25,8 @@ class Http:
                 data: bytes | None = None, content_type: str | None = None, timeout: float | None = None) -> bytes:
         if params:
             url = f"{url}?{urllib.parse.urlencode(params)}"
-        hdrs = dict(headers or {})
+        # Netdata Cloud 前段の Cloudflare は urllib 既定の UA を 403 (error 1010) で拒否する
+        hdrs = {"User-Agent": "aramakisai-ops-dashboard", **(headers or {})}
         if bearer:
             hdrs["Authorization"] = f"Bearer {bearer}"
         if content_type:
