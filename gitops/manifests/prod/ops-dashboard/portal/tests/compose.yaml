@@ -42,6 +42,7 @@ services:
       - --set-xauthrequest=true
       - --email-domain=*
       - --skip-provider-button=true
+      - --whitelist-domain=idp.aramakisai.com
       - --cookie-secure=false
       - --cookie-secret=0123456789abcdef0123456789abcdef # gitleaks:allow
       - --insecure-oidc-allow-unverified-email=true

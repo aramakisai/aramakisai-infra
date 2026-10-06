@@ -201,6 +201,18 @@ class Authz(unittest.TestCase):
         self.assertIsNone(r.headers["Set-Cookie"])
         self.assertNotIn("\n", r.headers["Location"])
 
+    def test_sign_out_ends_idp_session(self):
+        # ブラウザを Zitadel の end_session へ送り、ID token を id_token_hint に載せる
+        c = session(["executive"])
+        r = c.req("/oauth2/sign_out")
+        self.assertEqual(r.status, 302)
+        loc = urllib.parse.urlsplit(r.headers["Location"])
+        self.assertEqual((loc.netloc, loc.path), ("idp.aramakisai.com", "/oidc/v1/end_session"))
+        q = urllib.parse.parse_qs(loc.query)
+        self.assertEqual(q["post_logout_redirect_uri"], ["https://portal.aramakisai.com/"])
+        self.assertEqual(q["id_token_hint"][0].count("."), 2)  # JWT に置換済み
+        self.assertEqual(c.req("/").status, 302)
+
     def test_static_routes(self):
         for c in (Client(), session(["executive", "admin"])):
             for p in ("/assets/config-admin.yml", "/assets/links.yaml", "/assets/admin-overlay.yaml", "/assets/config.yml.dist"):

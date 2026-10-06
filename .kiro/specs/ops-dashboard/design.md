@@ -344,7 +344,7 @@ sequenceDiagram
 **Responsibilities & Constraints**
 - provider `oidc`、issuer `https://idp.aramakisai.com`、scope `openid email profile offline_access`、`--oidc-groups-claim=groups`、`--set-xauthrequest`、`--reverse-proxy`、`--email-domain=*`、`--skip-provider-button`、upstream なし (認証専用)。
 - `--cookie-expire=12h`、`--cookie-refresh=1h`。refresh 時に refresh token で ID token を取り直し、groups を更新するため、ロールの剥奪は最長 1 時間で反映される (要件 4.5)。refresh token を受け取るため、OIDC アプリ `ops-portal` は grant type に REFRESH_TOKEN を持つ (下記「Zitadel 設定」)。
-- ログアウトは `/oauth2/sign_out?rd=<Zitadel end_session URL>` で、Zitadel のセッションも終了させてポータルへ戻る。
+- ログアウトは `/oauth2/sign_out` で、nginx が `X-Auth-Request-Redirect` に Zitadel の `end_session` URL (`id_token_hint={id_token}`、`post_logout_redirect_uri=https://portal.aramakisai.com/`) を付けて oauth2-proxy へ渡す。oauth2-proxy は自身の cookie を消したうえでブラウザを end_session へリダイレクトし、Zitadel のセッションを終了させてポータルへ戻す。リダイレクト先は `--whitelist-domain=idp.aramakisai.com` で許可する。`--backend-logout-url` は oauth2-proxy のサーバー側から呼ばれ、ブラウザの Zitadel cookie が付かないため使わない。
 
 #### PortalConfigGenerator (initContainer)
 

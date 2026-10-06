@@ -123,8 +123,7 @@ spec:
             - --cookie-secure=true
             - --cookie-expire=12h
             - --cookie-refresh=1h
-            # Zitadel のセッションも終了させ、ログアウト後はポータルへ戻す
-            - --backend-logout-url=https://idp.aramakisai.com/oidc/v1/end_session?id_token_hint={id_token}&post_logout_redirect_uri=https%3A%2F%2Fportal.aramakisai.com%2F
+            - --whitelist-domain=idp.aramakisai.com
           envFrom:
             - secretRef:
                 name: portal-oidc
