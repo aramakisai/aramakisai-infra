@@ -51,9 +51,9 @@ resource "cloudflare_record" "vault" {
 }
 
 # 実行委員ポータル・運用ダッシュボード
-resource "cloudflare_record" "portal" {
+resource "cloudflare_record" "dash" {
   zone_id = var.cloudflare_zone_id
-  name    = "portal"
+  name    = "dash"
   value   = local.tunnel_cname
   type    = "CNAME"
   proxied = true
