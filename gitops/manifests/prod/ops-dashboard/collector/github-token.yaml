@@ -1,6 +1,5 @@
 # GitHub App のインストールトークン (有効 1 時間) を ESO が 30 分ごとに発行する。
 # collector は RSA 署名を持たず、ファイルとして mount された OPS_GITHUB_TOKEN だけを読む。
-# appID・installID の置換は Application を追加する前に済ませる
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
@@ -26,8 +25,8 @@ kind: GithubAccessToken
 metadata:
   name: ops-dashboard
 spec:
-  appID: "REPLACE_WITH_OPS_GITHUB_APP_ID"
-  installID: "REPLACE_WITH_OPS_GITHUB_APP_INSTALLATION_ID"
+  appID: "5206460"
+  installID: "168383101"
   auth:
     privateKey:
       secretRef:
