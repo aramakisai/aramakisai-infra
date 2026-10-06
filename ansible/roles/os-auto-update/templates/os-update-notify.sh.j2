@@ -1,6 +1,35 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+STATUS_DIR="/var/lib/ops-dashboard"
+
+# ダッシュボード (collector) が読むノード保守状態。Discord 通知の成否に依存させないため通知より前に書く。
+write_node_status() {
+    local upgradable fixable="null" reboot=false pkgs="" out_tmp
+    upgradable=$(apt list --upgradable 2>/dev/null | awk -F/ 'NR>1{print $1}' | sort -u | grep -c . || true)
+    if command -v debsecan >/dev/null 2>&1 && out_tmp=$(debsecan --only-fixed); then
+        fixable=$(echo "${out_tmp}" | awk 'NF{print $2}' | sort -u | grep -c . || true)
+    fi
+    if [[ -f /var/run/reboot-required ]]; then
+        reboot=true
+        [[ -f /var/run/reboot-required.pkgs ]] && pkgs=$(sort -u /var/run/reboot-required.pkgs)
+    fi
+    mkdir -p "${STATUS_DIR}"
+    # 同一ディレクトリの一時ファイルから mv することで、読み手に書きかけを見せない
+    out_tmp=$(mktemp "${STATUS_DIR}/.node-status.XXXXXX")
+    jq -n --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson up "${upgradable}" --argjson fx "${fixable}" \
+        --argjson rb "${reboot}" --arg pkgs "${pkgs}" \
+        '{generated_at: $ts, upgradable_count: $up, security_fixable_count: $fx, reboot_required: $rb,
+          reboot_required_pkgs: ($pkgs | split("\n") | map(select(length > 0)))}' > "${out_tmp}"
+    chmod 0644 "${out_tmp}"
+    mv "${out_tmp}" "${STATUS_DIR}/node-status.json"
+}
+
+write_node_status || echo "Warning: node-status.json の書き出しに失敗" >&2
+if [[ "${1:-}" == "--status-only" ]]; then
+    exit 0
+fi
+
 TODAY=$(date "+%Y-%m-%d")
 LOG_FILE="/var/log/unattended-upgrades/unattended-upgrades.log"
 HOSTNAME=$(hostname)

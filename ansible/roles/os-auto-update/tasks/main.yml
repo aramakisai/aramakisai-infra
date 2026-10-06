@@ -72,6 +72,23 @@
     group: root
   register: os_update_notify_service
 
+- name: ノード状態ファイルのディレクトリを作成
+  ansible.builtin.file:
+    path: /var/lib/ops-dashboard
+    state: directory
+    mode: '0755'
+    owner: root
+    group: root
+
+- name: ノード状態ファイルの起動時出力サービスを配布
+  ansible.builtin.template:
+    src: os-node-status.service.j2
+    dest: /etc/systemd/system/os-node-status.service
+    mode: '0644'
+    owner: root
+    group: root
+  register: os_node_status_service
+
 - name: 通知スクリプトの systemd タイマーを配布
   ansible.builtin.template:
     src: os-update-notify.timer.j2
@@ -84,10 +101,15 @@
 - name: systemd の設定を再読み込み
   ansible.builtin.systemd:
     daemon_reload: true
-  when: os_update_notify_service is changed or os_update_notify_timer is changed
+  when: os_update_notify_service is changed or os_update_notify_timer is changed or os_node_status_service is changed
 
 - name: 通知スクリプトのタイマーを有効化して開始
   ansible.builtin.systemd:
     name: os-update-notify.timer
     enabled: true
     state: started
+
+- name: ノード状態ファイルの起動時出力サービスを有効化
+  ansible.builtin.systemd:
+    name: os-node-status.service
+    enabled: true
