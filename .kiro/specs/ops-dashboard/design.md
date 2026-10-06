@@ -602,8 +602,8 @@ namespaces_or_names = ["vaultwarden", "vaultwarden-rbac-sync", "room-presence"]
 |----------|--------|--------------|
 | `source_results` | `source_id` PK、`json`、`fetched_at` | 最新 1 行 |
 | `falco_events` | `id`、`time`、`priority`、`rule`、`k8s_ns`、`k8s_pod`、`container`、`output`、`received_at` | 90 日で削除 (13.4) |
-| `auth_events` | `sequence` PK、`created_at`、`event_type`、`user_id`、`login_name` | 90 日で削除 |
-| `auth_cursor` | 最後に取得した `sequence` | 1 行 |
+| `auth_events` | `(user_id, sequence)` PK、`created_at`、`event_type`、`user_id`、`login_name` | 90 日で削除 |
+| `auth_cursor` | 最後に取得した `creationDate` | 1 行 |
 | `mail_events` | `time`、`status` (deferred/bounced)、`recipient_domain`、`reason` | 30 日で削除。受信者アドレスは保存しない |
 | `mail_cursor` | mail-agent の cursor | 1 行 |
 | `report_messages` | `key` PK、`kind` (dmarc/tlsrpt/other)、`ingested_at` | 再取り込み判定 |
