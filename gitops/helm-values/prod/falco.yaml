@@ -96,9 +96,15 @@ customRules:
 # Falcosidekick: Falcoアラートを Discord Webhook へ転送する。
 # single nodeのためreplicaCount既定値(2)を1へ削減し、軽量プロキシとしてリソースを絞る。
 # discord.webhookurlは平文記載せず、config.existingSecret (envFrom) で注入する。
+# webhook は運用ダッシュボードの collector へ全イベントを転送する。認証ヘッダー
+# (WEBHOOK_CUSTOMHEADERS) も existingSecret 側で渡す。chart 自身の Secret が空値で同名キーを
+# 持つが、envFrom は後ろの existingSecret が優先される。
 falcosidekick:
   enabled: true
   replicaCount: 1
+  # existingSecret の更新は envFrom では Pod に反映されないため、Reloader で再起動する
+  customAnnotations:
+    secret.reloader.stakater.com/reload: falcosidekick-secrets
   resources:
     requests:
       cpu: 10m
@@ -110,3 +116,6 @@ falcosidekick:
     existingSecret: falcosidekick-secrets
     discord:
       minimumpriority: notice
+    webhook:
+      address: http://collector.ops-dashboard.svc.cluster.local:8081/falco
+      minimumpriority: ""
