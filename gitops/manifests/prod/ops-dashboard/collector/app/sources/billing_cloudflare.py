@@ -19,7 +19,7 @@ query($tag: string!, $dayStart: Time, $monthStart: Time, $now: Time) {
   viewer { accounts(filter: {accountTag: $tag}) {
     day: workersInvocationsAdaptive(limit: 10000, filter: {datetime_geq: $dayStart, datetime_leq: $now}) { sum { requests } }
     month: workersInvocationsAdaptive(limit: 10000, filter: {datetime_geq: $monthStart, datetime_leq: $now}) { sum { requests } }
-    storage: r2StorageAdaptiveGroups(limit: 1, filter: {datetime_geq: $monthStart, datetime_leq: $now}, orderBy: [datetime_DESC]) { max { payloadSize metadataSize } }
+    storage: r2StorageAdaptiveGroups(limit: 10000, filter: {datetime_geq: $monthStart, datetime_leq: $now}, orderBy: [datetime_DESC]) { max { payloadSize metadataSize } dimensions { datetime bucketName } }
     ops: r2OperationsAdaptiveGroups(limit: 10000, filter: {datetime_geq: $monthStart, datetime_leq: $now}) { sum { requests } dimensions { actionType } }
   } }
 }"""
@@ -64,8 +64,10 @@ def fetch(ctx):
 
     r2 = cfg.active_plan("cloudflare_r2", today)
     if r2:
-        st = acct["storage"][0]["max"] if acct["storage"] else {"payloadSize": 0, "metadataSize": 0}
-        gb = (st["payloadSize"] + st["metadataSize"]) / 1e9
+        latest = {}  # 新しい順に返るので、バケットごとに最初の行が最新
+        for r in acct["storage"]:
+            latest.setdefault(r["dimensions"]["bucketName"], r["max"])
+        gb = sum(m["payloadSize"] + m["metadataSize"] for m in latest.values()) / 1e9
         a = sum(r["sum"]["requests"] for r in acct["ops"] if r["dimensions"]["actionType"] in CLASS_A)
         b = sum(r["sum"]["requests"] for r in acct["ops"] if r["dimensions"]["actionType"] in CLASS_B)
         items += [quota_item("quota.r2_storage", "quota.r2_storage", gb, r2.limits.get("storage_gb"), "GB", warn),

@@ -1,4 +1,5 @@
 import os
+import re
 import tempfile
 import unittest
 from dataclasses import replace
@@ -32,6 +33,16 @@ class IntegrationTest(unittest.TestCase):
         config.load(PROD_TOML)
         ids = {s.source_id for s in load_sources()}
         self.assertEqual(ids, set(config.KNOWN_SOURCE_IDS))
+
+    def test_kustomization_ships_every_module(self):
+        # configMapGenerator に無いモジュールは Pod に配布されず、節は黙って読み飛ばされる
+        root = os.path.join(os.path.dirname(__file__), "..")
+        with open(os.path.join(root, "..", "..", "kustomization.yaml")) as f:
+            listed = set(re.findall(r"collector/app/(\S+\.py)", f.read()))
+        shipped = {os.path.relpath(os.path.join(d, n), root)
+                   for d, _, fs in os.walk(root) if "tests" not in os.path.relpath(d, root).split(os.sep)
+                   for n in fs if n.endswith(".py")}
+        self.assertEqual(shipped - listed, set())
 
     def test_every_source_failing_still_renders(self):
         sources = [s for s in load_sources() if s.interval is not None]

@@ -82,6 +82,14 @@ configMapGenerator:
   - name: collector-render-sections
     files:
       - collector/app/render/sections/__init__.py
+      - collector/app/render/sections/auth.py
+      - collector/app/render/sections/billing.py
+      - collector/app/render/sections/cluster.py
+      - collector/app/render/sections/connect.py
+      - collector/app/render/sections/data.py
       - collector/app/render/sections/dmarc.py
       - collector/app/render/sections/fail2ban.py
+      - collector/app/render/sections/falco.py
       - collector/app/render/sections/mail.py
+      - collector/app/render/sections/monitoring.py
+      - collector/app/render/sections/node.py
