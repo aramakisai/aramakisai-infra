@@ -47,6 +47,7 @@
 - name: Discord IdPを更新 (常時、client_secretローテーション検知はできないため毎回設定値で上書き)
   ansible.builtin.include_tasks: _api_call.yml
   vars:
+    zitadel_api_allow_status: [400]
     zitadel_api_method: PUT
     zitadel_api_path: "/management/v1/idps/oauth/{{ _zitadel_idp_search.body.result[0].id }}"
     zitadel_api_body: *discord_oauth_config

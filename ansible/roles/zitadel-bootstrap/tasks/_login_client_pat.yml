@@ -27,6 +27,7 @@
 - name: 現行PATの有効性を確認
   ansible.builtin.include_tasks: _api_call.yml
   vars:
+    zitadel_api_allow_status: [401]
     zitadel_admin_pat: "{{ _zitadel_login_client_pat }}"
     zitadel_api_method: GET
     zitadel_api_path: /auth/v1/users/me

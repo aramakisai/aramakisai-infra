@@ -29,6 +29,7 @@
 - name: "Project Roleを更新 (表示名変更検知時): {{ zitadel_role_item.key }}"
   ansible.builtin.include_tasks: _api_call.yml
   vars:
+    zitadel_api_allow_status: [400]
     zitadel_api_method: PUT
     zitadel_api_path: "/management/v1/projects/{{ zitadel_project_id }}/roles/{{ zitadel_role_item.key }}"
     zitadel_api_body:

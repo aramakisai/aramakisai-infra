@@ -109,6 +109,7 @@
 - name: 既存userの現行パスワードを検証 (一致していれば再設定をスキップし冪等にする)
   ansible.builtin.include_tasks: _api_call.yml
   vars:
+    zitadel_api_allow_status: [400, 401, 404, 412]
     zitadel_api_method: POST
     zitadel_api_path: /v2/sessions
     zitadel_api_body:

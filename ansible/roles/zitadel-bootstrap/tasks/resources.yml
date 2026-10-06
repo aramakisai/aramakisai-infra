@@ -70,6 +70,7 @@
 - name: Projectの設定値を最新化 (既存の場合のみ。作成直後は既に最新のためスキップ)
   ansible.builtin.include_tasks: _api_call.yml
   vars:
+    zitadel_api_allow_status: [400]
     zitadel_api_method: PUT
     zitadel_api_path: "/management/v1/projects/{{ zitadel_project_id }}"
     zitadel_api_body:

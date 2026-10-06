@@ -6,6 +6,7 @@
 #   zitadel_api_body:   JSONに直列化するdict (省略可)
 #   zitadel_api_file:   {base64, name, type} multipart upload用 (省略可、bodyと排他)
 #   zitadel_api_label:  ログ表示名 (省略可)
+#   zitadel_api_allow_status: 2xx以外で呼び出し側が自分で扱うHTTPステータスのlist (省略可)
 #
 # 結果はzitadel_api_result ({status, body}) にセットされる。
 # レスポンスにclient_secret/PAT等の機密情報が含まれうるため常にno_logとする。
@@ -39,3 +40,16 @@
   ansible.builtin.set_fact:
     zitadel_api_result: "{{ zitadel_api_raw.stdout | from_json }}"
   no_log: true
+
+# HostやPATの誤りは404/401でも呼び出し側のdefault([])で0件扱いになり、原因と無関係な
+# エラーに化けるため、ここで止める。body全体はsecretを含みうるので出さない。
+- name: API応答のステータスを検証
+  ansible.builtin.assert:
+    that: >-
+      zitadel_api_result.status | int in range(200, 300)
+      or zitadel_api_result.status | int in (zitadel_api_allow_status | default([]))
+    fail_msg: >-
+      Zitadel API失敗: {{ zitadel_api_label | default(zitadel_api_method ~ ' ' ~ zitadel_api_path) }}
+      status={{ zitadel_api_result.status }}
+      message={{ (zitadel_api_result.body.message | default('')) if zitadel_api_result.body is mapping else '' }}
+    quiet: true

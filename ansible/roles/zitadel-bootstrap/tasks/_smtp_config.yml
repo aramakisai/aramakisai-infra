@@ -137,6 +137,7 @@
 - name: SMTP Email Providerをactivate (activate済みの場合は無害、Label Policyと同じ扱い)
   ansible.builtin.include_tasks: _api_call.yml
   vars:
+    zitadel_api_allow_status: [400]
     zitadel_api_method: POST
     zitadel_api_path: "/admin/v1/email/{{ zitadel_smtp_provider_id }}/_activate"
     zitadel_api_label: "activate smtp email provider"

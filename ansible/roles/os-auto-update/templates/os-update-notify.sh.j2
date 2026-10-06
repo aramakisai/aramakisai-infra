@@ -3,11 +3,15 @@ set -euo pipefail
 
 STATUS_DIR="/var/lib/ops-dashboard"
 
+# debsecan --only-fixed は --suite が必須 (無いと rc=1)
+# shellcheck disable=SC1091
+SUITE=$(. /etc/os-release && echo "${VERSION_CODENAME:-}")
+
 # ダッシュボード (collector) が読むノード保守状態。Discord 通知の成否に依存させないため通知より前に書く。
 write_node_status() {
     local upgradable fixable="null" reboot=false pkgs="" out_tmp
     upgradable=$(apt list --upgradable 2>/dev/null | awk -F/ 'NR>1{print $1}' | sort -u | grep -c . || true)
-    if command -v debsecan >/dev/null 2>&1 && out_tmp=$(debsecan --only-fixed); then
+    if command -v debsecan >/dev/null 2>&1 && out_tmp=$(debsecan --only-fixed --suite "${SUITE}"); then
         fixable=$(echo "${out_tmp}" | awk 'NF{print $2}' | sort -u | grep -c . || true)
     fi
     if [[ -f /var/run/reboot-required ]]; then
@@ -73,7 +77,7 @@ if command -v debsecan >/dev/null 2>&1; then
             # 突き合わせ結果でapt側に候補が出ているものは、security/-updates originが自動更新対象
             # (50unattended-upgrades.j2) のため本来自動適用されるはず = 未適用なら異常。
             # apt側に候補が出ていないものはbackports等opt-in由来で、自動更新対象外の任意対応。
-            FIXABLE_OUT=$(debsecan --only-fixed || true)
+            FIXABLE_OUT=$(debsecan --only-fixed --suite "${SUITE}" || true)
             FIXABLE_COUNT=$(echo "${FIXABLE_OUT}" | grep -c '[^[:space:]]' || true)
             if [[ "${FIXABLE_COUNT}" -eq 0 ]]; then
                 MESSAGE+="${COUNT}件の既知脆弱性が残存 → 全て修正パッケージ未提供(upstream待ち)。対応不要。

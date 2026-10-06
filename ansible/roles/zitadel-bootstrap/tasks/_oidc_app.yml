@@ -75,6 +75,7 @@
 - name: "OIDC Appを更新 (redirect_uris等の差分検知時): {{ zitadel_app_item.name }}"
   ansible.builtin.include_tasks: _api_call.yml
   vars:
+    zitadel_api_allow_status: [400]
     zitadel_api_method: PUT
     zitadel_api_path: "/management/v1/projects/{{ zitadel_project_id }}/apps/{{ _zitadel_app_search.body.result[0].id }}/oidc_config"
     zitadel_api_body:
