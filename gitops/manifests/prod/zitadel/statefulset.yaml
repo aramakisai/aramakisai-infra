@@ -158,6 +158,10 @@ spec:
               value: x-zitadel-instance-host:idp.aramakisai.com
             - name: NEXT_PUBLIC_BASE_PATH
               value: /ui/v2/login
+            # requestId が oidc_/saml_ で始まらない (アプリ経由でない直接ログイン) 場合の遷移先。
+            # アプリ経由のログインは authRequest/samlRequest 側の redirect_uri に戻るため影響しない
+            - name: DEFAULT_REDIRECT_URI
+              value: https://dash.aramakisai.com/
             # login は起動時に認証情報を検証し、PAT が無い・拒否された・読めないときは
             # process.exit(1) する。PAT 未発行の間は CrashLoop になるため optional にしない
             - name: ZITADEL_SERVICE_USER_TOKEN
