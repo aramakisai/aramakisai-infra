@@ -6,7 +6,7 @@
 - **Discovery Scope**: Extension (既存の Terraform / Ansible 資産の条件付き拡張。新規サブシステムなし)
 - **Key Findings**:
   - Ansible と Terraform は 3 ノード構成を**既に想定して書かれている**。`main.tf:4` と `inventory/tailscale.yml:15-16` の双方にノード追加を前提としたコメントがあり、join 分岐も実装済み。コード追加は最小で済む
-  - DR 自動復旧機構が本 spec の最大の障害になる。`prod-node-1` の停止を etcd クォーラムの健全性と無関係に障害と判定し、TFC ワークスペース全体への無条件フル apply を auto-apply で実行する。恒常的な無効化スイッチは実装されていない
+  - DR 機構は `prod-node-1` の停止を etcd クォーラムの健全性と無関係に障害と判定する。`recovery.sh` は TFC ワークスペース全体へ auto-apply でフル apply するが、起動は人の操作と reviewer 承認を要する。通知は出るため、期間中の扱いを作業記録で取り決める
   - `hcloud_placement_group` が未定義のため、追加ノードが prod-node-1 と同一物理ホストに配置されうる。この場合 etcd を 3 台にしても単一障害点は解消しない
   - 外部公開経路は nginx-ingress を中心としない。Cloudflare Tunnel が各 ClusterIP へ直接転送し、公開 Web サイトは Cloudflare Workers で配信される。K3s へ到達する来場者トラフィックは CMS の API に限られる
   - CNPG は `instances` を増やすことで各インスタンスが自ノードの `local-path` PV を使う形で冗長化できる。共有ストレージを必要とせず、prod-node-1 の停止時にフェイルオーバーする
@@ -49,9 +49,9 @@
   - `terraform/providers.tf:45-50` — TFC ワークスペースは `aramakisai-infra` の単一構成で、hcloud・tailscale・cloudflare・authentik の全リソースが同一 state に含まれる
   - `recovery.sh:144-160` — Tailscale デバイス削除も `hostname == "prod-node-1"` 決め打ちで、環境変数による上書き機構がない
   - `recovery.sh:270-309` — Ansible は `ansible/inventory/tailscale.yml` を使用する。inventory が 3 ノードへ更新されていれば、その内容に従って実行される
-  - 恒常的な無効化手段は存在しない。実装されているのは猶予期間中の Issue コメントによる中止 (`dr-trigger.sh:58-67, 239-242`) と Issue クローズ (`:225-237`) のみで、いずれもインシデント発生後の個別対応である
+  - `dr-trigger.yml` は Discord 通知と `dr-incident` Issue の起票・追記のみで、復旧を起動しない。`dr-recovery.yml` は人が起動し、Environment `dr-recovery` の reviewer が承認した場合だけ動く
 - **Implications**:
-  - prod-node-1 が停止すると、残り 2 台で etcd クォーラムが維持されサービスが継続していても DR が発火する。3 ノード化の効果を自動復旧機構自身が打ち消す
+  - prod-node-1 が停止すると、残り 2 台で etcd クォーラムが維持されサービスが継続していても通知が出る。復旧は人の起動と承認を要するため、3 ノード化の効果が自動で打ち消されることはない
   - 発火した場合の apply は TFC ワークスペース全体が対象であり、authentik の到達不能により run 自体が失敗する可能性がある
   - 以上より、スケールアウト期間中は DR を停止する以外に安全な選択肢がない
 
@@ -171,17 +171,17 @@
 - **Trade-offs**: 手順書が 2 つの環境にまたがるため、検証済み範囲の記述を明示する必要がある
 - **Follow-up**: k3d の multi-server クラスタが embedded etcd の増減を本番同等に再現するかを、検証の最初の工程で確認する
 
-### Decision: スケールアウト期間中は DR 自動復旧を停止する
+### Decision: スケールアウト期間中の DR は通知の扱いの取り決めで足りる
 
-- **Context**: `dr-trigger.sh` は prod-node-1 の停止を etcd クォーラムと無関係に障害と判定し、`recovery.sh` は TFC ワークスペース全体へ auto-apply でフル apply を行う
+- **Context**: `dr-trigger.sh` は prod-node-1 の停止を etcd クォーラムと無関係に障害と判定するが、通知のみで復旧は起動しない。`recovery.sh` は TFC ワークスペース全体へ auto-apply でフル apply を行うが、`dr-recovery.yml` の人の起動と reviewer 承認、複数ノード構成での生存確認ゲートの後にのみ動く
 - **Alternatives Considered**:
   1. `dr-trigger.sh` を 3 ノード対応に改修する — 判定ロジックと `recovery.sh` の双方に手を入れる必要があり、変更規模がイベント直前の作業として過大
-  2. `DR_TRIGGER_TARGET_HOSTNAME` を存在しないホスト名へ向ける — 停止は達成できるが意図が読めず、戻し忘れのリスクが高い
-  3. ワークフローを無効化する — 停止範囲が明確で、復帰操作も単純
-- **Selected Approach**: スケールアウト期間中は `dr-trigger.yml` の発火を Git 管理下のフラグまたは条件分岐により停止し、縮退完了後に戻す。GitHub の UI 操作のみで完結する手段は Git に痕跡が残らず再有効化の失念を履歴から検知できないため採らない
-- **Rationale**: 3 ノード構成では単一ノード障害でサービスが継続するため自動復旧の必要性が下がる。一方で誤発火した場合の影響が全ワークスペースへの無条件 apply と極めて大きく、停止による損失より誤発火による損失が上回る
-- **Trade-offs**: 期間中は自動復旧が働かないため、2 台以上が同時に停止した場合は手動対応になる。この期間は人が張り付いているイベント期間と重なるため許容する
-- **Follow-up**: 無効化と再有効化を作業チェックリストの必須項目として扱う。戻し忘れを防ぐ仕組みを設計で扱う
+  2. 無効化フラグをワークフローへ追加する — 自動で起動する復旧がないため得られる効果がない
+  3. 作業期間中の通知を誤報として扱い、`dr-recovery.yml` を起動しない取り決めを作業記録に残す
+- **Selected Approach**: 3 を採る。縮退後に残った `dr-incident` Issue を閉じる
+- **Rationale**: 誤発火による全ワークスペース apply は人の承認を経ないと起きないため、停止の仕組みは不要
+- **Trade-offs**: 期間中は 3 ノード構成での復旧が手動手順になる。この期間は人が張り付いているイベント期間と重なるため許容する
+- **Follow-up**: 取り決めを作業チェックリストの必須項目として扱う
 
 ### Decision: tls-san を全 server ノードへ適用する
 
@@ -257,7 +257,7 @@
 
 ## Risks & Mitigations
 
-- **DR 自動復旧の誤発火によるワークスペース全体への apply** — スケールアウト期間中はワークフローを無効化する。無効化と復帰を作業チェックリストの必須項目にする
+- **DR 自動復旧の誤発火によるワークスペース全体への apply** — 復旧は人の起動と承認を要するため、期間中は `dr-recovery.yml` を起動しない取り決めを作業記録に残すことで足りる。取り決めと `dr-incident` Issue のクローズを作業チェックリストの必須項目にする
 - **prod-node-1 の placement group 追加に伴う停止** — 再作成は発生しないが停止は必要。データ層の冗長化完了後に実施し、停止中も etcd メンバー 2 でクォーラムを維持する。mailserver はこの区間で停止する。失敗時は起動して従前の状態へ戻す
 - **縮退操作によるクォーラム喪失** — 要件 3 の検証を経ていない手順では実行しない。作業前のスナップショット退避を必須とする
 - **`terraform plan` が authentik により失敗し差分確認が限定的になる** — `-target` で対象を限定する。限定範囲外の差分が確認できない事実を作業記録に残す

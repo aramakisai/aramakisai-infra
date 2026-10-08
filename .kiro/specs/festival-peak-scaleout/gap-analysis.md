@@ -73,7 +73,7 @@
 
 - **Context**: 要件 6 が 3 ノード構成での DR 挙動の定義を求める
 - **Findings**:
-  - `dr.md:8-24` — `dr-trigger.yml` が 5 分毎 cron でクラスタ外から複合検出 (Tailscale オフライン、または idp/argocd/webmail のうち 2 つ以上が同時応答なし) を行い、Discord 通知と猶予期間を経て `dr-recovery.yml` を発火する
+  - `dr.md:8-24` — `dr-trigger.yml` が 5 分毎 cron でクラスタ外から複合検出 (Tailscale オフライン、または idp/argocd/webmail のうち 2 つ以上が同時応答なし) を行い、Discord 通知と `dr-incident` Issue の起票を行う (通知のみ。復旧は人が `dr-recovery.yml` を起動し Environment の reviewer が承認する)
   - 判定ロジックは `.github/scripts/dr-trigger.sh` にあり、ユニットテスト `scripts/test-dr-trigger-logic.sh` が存在する
   - 検出条件が prod-node-1 のみを対象としているかは未確認
 - **Implications**: 3 ノード構成では単一ノード障害でもサービスが継続するため誤検出は起きにくいが、`recovery.sh` が prod-node-1 の再作成を行う前提で書かれている場合、3 ノード構成に対して破壊的に作用する可能性がある。**Research Needed**
@@ -106,7 +106,7 @@
 | 4 本番投入 | `k3s-bootstrap.yml` Play 2、`config.yaml.j2` の join 分岐 | `tls-san` が追加ノードへ渡らない | Constraint |
 | 4 (同上) | — | join 先が prod-node-1 固定 | Constraint |
 | 5 縮退実行 | `recovery.sh` の Tailscale デバイス削除ロジック | 段階的な etcd メンバー削除手順 | Missing |
-| 6 DR 整合 | `dr-trigger.sh`、`test-dr-trigger-logic.sh` | 3 ノード構成での挙動が未定義 | Unknown |
+| 6 DR 整合 | `dr-trigger.sh`、`test-dr-trigger-logic.sh` | 3 ノード構成中の通知の扱い (作業記録) | Constraint |
 | 7 ワークロード配置 | `cloudflared` の `topologySpreadConstraints` | ストレージが `local-path` でステートフルは分散不可 | Constraint |
 | 8 ドキュメント同期 | `structure.md` の自律同期ルール | `product.md:9`、`structure.md:37`、`tech.md` のノード記述 | Missing |
 
@@ -174,6 +174,5 @@ etcd メンバーの増減という手順の核を Option A で反復確立し�
 - **設計で決めるべき事項**:
   - `tls-san` を `cluster_init` 分岐の外へ出すか、追加ノード専用の設定を持たせるか。既存ノードへの影響と要件 2.2 との整合
   - 縮退時の etcd メンバー削除を `kubectl delete node` に委ねるか、明示的な手順を踏むか
-  - 要件 6 の DR 無効化を、ワークフローの停止・条件分岐・環境変数のいずれで実現するか
   - 要件 1 の負荷テストを一時スクリプトとして扱うか、リポジトリに定着させるか
 - **先行して着手できる項目**: 要件 1 (測定) と Research Needed の 1〜3 は他要件に依存しない。要件 2 以降の設計判断に必要な入力でもあるため優先度が高い

@@ -91,6 +91,10 @@ kube-apiserver への権限はすべて `gitops/manifests/prod/kube-access/` の
 - クライアント証明書は **失効できない**。証明書自体は有効期限まで認証を通るため、即時の剥奪は binding の削除で行う (証明書は認証されるだけで権限がなくなる)。残存リスクの上限は証明書の有効期限 (最長 7 日)。
 - 発行ワークフローが侵害された疑いがある場合に旧証明書を無効にできるのは client CA の forced rotation だけで、手順は設計 (`.kiro/specs/kube-github-auth/design.md`) にある。
 
+### Tailscale ACL
+
+tailnet policy の正本は `terraform/tailscale-acl.hujson.tftpl`。Admin console で直接編集せず、tftpl を PR で変更し、マージ後に `infisical run --env=prod -- terraform apply -target=tailscale_acl.this` で適用する (`tests` が保存時に検証される)。
+
 ### GitHub 障害時の挙動
 
 認証の信頼の起点は GitHub (Actions と OIDC 発行) のため、障害中は次のとおり動く。
