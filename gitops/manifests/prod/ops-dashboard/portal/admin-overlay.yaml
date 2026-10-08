@@ -35,4 +35,4 @@ services:
         url: "https://app.infisical.com"
       - name: "GitHub"
         icon: "fab fa-github"
-        url: "https://github.com/aramakisai/aramakisai-infra"
+        url: "https://github.com/aramakisai"
