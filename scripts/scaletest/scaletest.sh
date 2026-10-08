@@ -353,7 +353,12 @@ cmd_purge_devices() {
 delete_all() { # delete_all <collection> -> 専用プロジェクト内で purpose=scaletest のものを全削除
   local id
   for id in $(hc "${HAPI}/$1?label_selector=purpose=scaletest" | jq -r --arg c "$1" '.[$c][].id'); do
-    hc -X DELETE "${HAPI}/$1/${id}" >/dev/null && log "$1/${id} を削除"
+    # サーバー消滅後も firewall の適用解除は非同期で、直後の削除は 422 になる
+    for _ in {1..24}; do
+      if hc -X DELETE "${HAPI}/$1/${id}" >/dev/null 2>&1; then log "$1/${id} を削除"; break; fi
+      sleep 5
+    done
+    [[ -z "$(hc "${HAPI}/$1/${id}" 2>/dev/null | jq -r --arg c "$1" '.[($c | rtrimstr("s"))].id // empty')" ]] || die "$1/${id} を削除できません"
   done
 }
 
