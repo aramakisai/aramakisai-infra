@@ -28,9 +28,9 @@ PORTAL_NOTION_URL=https://notion.example/n PORTAL_GOOGLE_DRIVE_URL=https://drive
 [ "$(yq '.services[].items[] | select(.name == "Notion") | .url' "$out/config.yml")" = "https://notion.example/n" ] || fail "Notion の URL"
 [ "$(yq '.services[].items[] | select(.name == "Google Drive") | .url' "$out/config.yml")" = "https://drive.example/d" ] || fail "Drive の URL"
 [ "$(groups "$out/config.yml")" = "委員会のサービス,情報共有,公式サイト・SNS" ] || fail "通常版のグループ: $(groups "$out/config.yml")"
-[ "$(groups "$out/config-admin.yml")" = "委員会のサービス,情報共有,公式サイト・SNS,管理者向け" ] || fail "admin 版のグループ"
-case "$(names "$out/config.yml")" in *運用ダッシュボード*) fail "通常版に admin 導線がある" ;; esac
-case "$(names "$out/config-admin.yml")" in *運用ダッシュボード) ;; *) fail "admin 版の末尾が導線でない" ;; esac
+[ "$(groups "$out/config-admin.yml")" = "委員会のサービス,情報共有,公式サイト・SNS,管理者向け,外部管理画面" ] || fail "admin 版のグループ"
+case "$(names "$out/config.yml")" in *運用ダッシュボード*|*Hetzner*) fail "通常版に admin 導線がある" ;; esac
+case "$(names "$out/config-admin.yml")" in *運用ダッシュボード*) ;; *) fail "admin 版に導線がない" ;; esac
 
 # 内部 URL なし (未設定と空文字の両方)
 out="$work/without"; mkdir "$out"
