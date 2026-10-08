@@ -272,6 +272,9 @@
   - CMS のレプリカ数を増加させ、複数ノードへ分散配置する制約を加える
   - 変更を Git のコミットとして行い、クラスタへの直接操作を行わない
   - 完了状態: レプリカが複数ノードへ分散配置され、変更前の値が記録に残っていること
+  - 変更前の値 (`gitops/manifests/prod/cms/deployment.yaml`): `replicas: 1`、`strategy.type: Recreate`、`topologySpreadConstraints` なし、PodDisruptionBudget なし。resources は変更なし (CPU limit は #252 で 2000m 済み)
+  - 変更後: `replicas: 3`、`RollingUpdate` (`maxUnavailable: 0`、`maxSurge: 1`)、hostname の `topologySpreadConstraints` (`ScheduleAnyway`)、`pdb.yaml` (`maxUnavailable: 1`)。HPA は設けない
+  - ステートレス性の根拠: アップロードは S3、認証は JWT と Cookie、DB スキーマ適用は PreSync Job (`cms-migrate`) で `push: false`、Payload のジョブキューは DB 上の `processing` フラグで排他される
   - _Requirements: 7.6, 7.7, 7.13_
   - _Depends: 1.4_
 
@@ -293,7 +296,7 @@
   - _Requirements: 5.1, 5.8_
 
 - [ ] 6.2 ワークロードの配置を変更前へ戻す
-  - レプリカ数と配置制約を変更前の値へ戻す。cloudflared の `replicas` (3) も対象である
+  - レプリカ数と配置制約を変更前の値へ戻す。cloudflared の `replicas` (3) も対象である。CMS は 5.8 の変更前の値 (`replicas: 1`、`Recreate`、配置制約・PDB なし) へ戻し、`pdb.yaml` を削除する
   - 削除対象ノード上で稼働するものを事前に減らす
   - Zitadel 本体 (`gitops/manifests/prod/zitadel/deployment.yaml`) の replicas を 1 へ戻す
   - 完了状態: 対象ワークロードが変更前の構成で稼働していること
