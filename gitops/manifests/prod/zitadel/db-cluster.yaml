@@ -15,8 +15,15 @@ metadata:
   annotations:
     cnpg.io/skipEmptyWalArchiveCheck: enabled
 spec:
-  instances: 1
+  instances: 3
   imageName: ghcr.io/cloudnative-pg/postgresql:16.8
+
+  # required にしないと prod-node-1 に複数インスタンスが集まり得るため、
+  # ノード追加による冗長化の効果が失われる
+  affinity:
+    enablePodAntiAffinity: true
+    podAntiAffinityType: required
+    topologyKey: kubernetes.io/hostname
 
   postgresql:
     parameters:
