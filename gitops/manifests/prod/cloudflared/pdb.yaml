@@ -1,0 +1,12 @@
+# ノード drain 時も 2 Pod 以上が残る間は公開経路を維持する。
+# minAvailable ではなく maxUnavailable にして、縮退後の 1 Pod でも drain が詰まらないようにする
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: cloudflared
+  namespace: cloudflared
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: cloudflared

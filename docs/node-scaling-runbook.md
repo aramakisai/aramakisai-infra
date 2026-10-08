@@ -233,7 +233,7 @@ A-1 と同じ手順でスナップショット名を `pre-scalein` として取�
 
 ### B-2. ワークロードの配置を変更前へ戻す
 
-A-8 で変更した `replicas` と配置制約を変更前の値へ戻す PR をマージする。削除対象ノード上で稼働するものを事前に減らす。検証: k3d で Deployment のレプリカ数を元に戻す操作を確認 (**k3d**)。
+A-8 で変更した `replicas` と配置制約を変更前の値へ戻す PR をマージする。削除対象ノード上で稼働するものを事前に減らす。cloudflared は `gitops/manifests/prod/cloudflared/deployment.yaml` の `replicas: 3` が 3 ノード構成前提 (`topologySpreadConstraints` は `ScheduleAnyway` のため 1 ノードでも全 Pod がスケジュールされる)。縮退では `replicas` を `1` へ戻す (`prod-node-1` 以外の Pod は削除対象ノードの drain で退避される)。PodDisruptionBudget は `maxUnavailable: 1` で、Pod 1 つでも drain は詰まらない。検証: k3d で Deployment のレプリカ数を元に戻す操作を確認 (**k3d**)。
 
 ### B-3. データ層を単一構成へ戻す
 

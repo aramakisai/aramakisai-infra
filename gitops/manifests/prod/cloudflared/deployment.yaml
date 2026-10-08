@@ -16,8 +16,14 @@ metadata:
     # ArgoCD が Ansible 適用済みリソースを adopt するためのアノテーション
     argocd.argoproj.io/managed-by: argocd
 spec:
-  replicas: 2
+  replicas: 3
   revisionHistoryLimit: 2
+  # 起動中の新 Pod が Ready になるまで旧 Pod を落とさず、公開経路の接続数を減らさない
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   selector:
     matchLabels:
       app: cloudflared
@@ -33,6 +39,10 @@ spec:
           labelSelector:
             matchLabels:
               app: cloudflared
+          # 旧リビジョンの Pod 数に引きずられず、新リビジョンの Pod をノードへ均等に置く。
+          # replicas だけの変更では既存 Pod が再配置されないため、これで rollout も起こす
+          matchLabelKeys:
+            - pod-template-hash
       containers:
         - name: cloudflared
           image: cloudflare/cloudflared:2026.9.3
