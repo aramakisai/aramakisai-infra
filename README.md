@@ -37,7 +37,7 @@ Terraform でクラウドリソースを定義し、Ansible で K3s クラスタ
 ```
 .
 ├── docs/               運用手順書 (dr-runbook.md = DR、node-scaling-runbook.md = ノード増減 ほか)
-├── terraform/          クラウドリソース定義 (Hetzner / Cloudflare / Tailscale)
+├── terraform/          クラウドリソース定義 (Hetzner / Cloudflare / Tailscale)。tailnet policy の正本は tailscale-acl.hujson.tftpl
 ├── .github/            ワークフロー (DR・k3s-upgrade・kube-cert-issue 等) と scripts/ (kube-oidc.sh 等)
 ├── scripts/            運用スクリプト (kube-login.sh = make kube-login の実体、scaletest/ = ノード増減の Hetzner 実機検証ハーネス 等)
 ├── ansible/            K3s クラスター初期化
@@ -229,6 +229,17 @@ make kubectl ARGS="get pods -A"          # kubectl --context aramakisai-prod
 - server CA が変わった場合 (クラスタ再作成など) は指紋を表示して止まります。正当と確認できたときだけ `make kube-login ARGS=--accept-new-ca` を使います
 - 権限は `gitops/manifests/prod/kube-access/` の RBAC binding で付与・剥奪します (PR をマージすると ArgoCD が同期)。証明書は失効できないため、即時の剥奪は binding の削除で行います
 - GitHub 障害時は発行・CI・DR が止まります。発行済みの証明書は有効期限まで使えます。詳細は [CLAUDE.md](CLAUDE.md) を参照
+
+---
+
+### Tailscale ACL (tailnet policy)
+
+正本は `terraform/tailscale-acl.hujson.tftpl` で、`tailscale_acl.this` が適用する。Admin console では編集しない。
+
+- 変更手順: tftpl を編集して PR → マージ後に `infisical run --env=prod -- terraform apply -target=tailscale_acl.this`。ファイル内の `tests` は適用時 (保存時) に検証され、満たさない policy は拒否される。
+- tagOwners の個人アカウントは sensitive 変数 `tailscale_acl_owner_email` (Infisical の `TF_VAR_tailscale_acl_owner_email`) で注入する。リポジトリには書かない。
+- grants は許可リスト方式で、全許可は置かない。人の端末 (`autogroup:member`) から `tag:k3s-node`・自分の端末・`tag:scaletest` へは全ポート、`tag:ci` から `tag:k3s-node` へは tcp 22・6443・10250 のみ許可する。`tag:k3s-node` と `tag:scaletest` 発の許可はない。
+- 新たな tailnet 経路を足すときは、grants と `tests` の両方を更新する。
 
 ---
 

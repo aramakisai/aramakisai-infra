@@ -218,71 +218,8 @@
         mode: kubernetes
       kubeProxyReplacement: false
   tasks:
-    - name: Helm がインストールされているか確認
-      ansible.builtin.command: helm version --short
-      register: helm_check
-      failed_when: false
-      changed_when: ansible_check_mode and helm_check.rc != 0
-      check_mode: false
-
-    - name: Helm をインストール
-      # main ブランチ参照のスクリプトは中身が変わりうるため、タグとバージョンの両方を固定する
-      ansible.builtin.shell: >-
-        curl -fsSL https://raw.githubusercontent.com/helm/helm/{{ helm_version }}/scripts/get-helm-3 | bash
-      environment:
-        DESIRED_VERSION: "{{ helm_version }}"
-      when: helm_check.rc != 0
-
-    - name: Cilium の Helm リリース状態を取得
-      ansible.builtin.command: helm list -n kube-system --filter '^cilium$' -o json
-      register: cilium_list
-      changed_when: false
-      check_mode: false
-      when: helm_check.rc == 0
-
-    - name: Cilium の現在の values を取得
-      ansible.builtin.command: helm get values cilium -n kube-system -o json
-      register: cilium_current_values
-      changed_when: false
-      check_mode: false
-      when: helm_check.rc == 0 and (cilium_list.stdout | from_json | length) > 0
-
-    - name: Cilium の更新要否を判定
-      # chart バージョンと values (helm get values は --set / -f で与えた値のみ) が
-      # 一致し deployed のときは helm を実行しない
-      ansible.builtin.set_fact:
-        cilium_pending: >-
-          {{ cilium_current_values.stdout is not defined
-             or (cilium_list.stdout | from_json)[0].chart != 'cilium-' ~ cilium_version
-             or (cilium_list.stdout | from_json)[0].status != 'deployed'
-             or (cilium_current_values.stdout | from_json) != cilium_values }}
-
-    - name: Cilium の差分を表示 (check mode のみ)
-      ansible.builtin.debug:
-        msg: "Cilium {{ cilium_version }} を適用します"
-      when: ansible_check_mode and cilium_pending
-      changed_when: true
-
-    - name: Cilium をインストール・更新
-      ansible.builtin.command: >-
-        helm upgrade --install cilium cilium
-        --repo https://helm.cilium.io/
-        --version {{ cilium_version }}
-        --namespace kube-system
-        -f -
-        --wait --timeout=300s
-      args:
-        stdin: "{{ cilium_values | to_json }}"
-      when: cilium_pending
-
-    - name: 全ノードが Ready になるまで待機
-      ansible.builtin.command: kubectl wait node --all --for=condition=Ready --timeout=120s
-      retries: 5
-      delay: 10
-      register: node_ready_result
-      until: node_ready_result.rc == 0
-      changed_when: false
-      check_mode: false
+    - name: Cilium を適用 (共通タスク)
+      ansible.builtin.include_tasks: tasks/cilium.yml
 
 
 # ============================================================

@@ -76,7 +76,7 @@ ssh root@prod-node-1 'sha256sum /var/lib/rancher/k3s/server/db/snapshots/<ファ
 `dr-trigger.yml` は通知のみで復旧を自動起動しない。復旧は `dr-recovery.yml` を人が起動し承認した場合だけ動き、複数ノード構成では生存確認ゲートが停止する ([docs/dr-runbook.md](dr-runbook.md))。
 
 - 作業中の過渡状態で `dr-trigger` が障害を通知し、`dr-incident` Issue が起票されることがある。実害はなく、正常化すると自動クローズされる。
-- 作業中は `dr-recovery.yml` を起動しない。
+- 作業中は `dr-recovery.yml` を起動しない。作業記録に「作業期間中の `dr-trigger` 通知は誤報として扱い、`dr-recovery` を起動しない」ことを残す。
 - 3 ノード構成で `prod-node-1` を失った場合の自動復旧は停止し、手動手順 ([複数ノード構成の復旧](dr-runbook.md#複数ノード構成-ノード追加期間中-の復旧)) になる。
 
 検証: ワークフロー・スクリプトの読解のみ (**未検証**: 3 ノード構成での実障害)。
@@ -348,15 +348,15 @@ make kubectl ARGS="delete deployment post-shrink"
 - Infisical の `staging` 環境の `/scaletest` フォルダに次のキーを置く (値は書かない): `SCALETEST_HCLOUD_TOKEN`、`SCALETEST_TS_CLIENT_ID`、`SCALETEST_TS_CLIENT_SECRET`、`SCALETEST_TAILNET`、`K3S_TOKEN`。
 - 手元に `ansible` (PyYAML を含む)・`jq`・`curl`・`ssh`・tailnet 接続が必要。
 
-プロジェクト・SSH 鍵・OAuth クライアントは再検証のために残す運用とする。
+プロジェクト・SSH 鍵・OAuth クライアントは再検証のために残す運用とする。サーバー・network・firewall・primary IP・Tailscale デバイスは毎回 `down` で削除する。
 
 ### 使い方
 
-必ず `staging` の `/scaletest` で実行する。**`--env=prod` では実行しない** (スクリプトは本番用の変数 `HCLOUD_TOKEN`・`TAILSCALE_OAUTH_*`・`TF_VAR_*` 等が環境にあると停止する)。
+必ず `staging` の `/scaletest` で、`.infisical.json` のあるリポジトリ (worktree を含む) の中から実行する。外では接続先プロジェクトを解決できず環境変数が注入されない。**`--env=prod` では実行しない** (スクリプトは本番用の変数 `HCLOUD_TOKEN`・`TAILSCALE_OAUTH_*`・`TF_VAR_*` 等が環境にあると停止する)。
 
 ```bash
 S="infisical run --env=staging --path=/scaletest -- scripts/scaletest/scaletest.sh"
-$S up                                  # network / firewall / scaletest-1..3 を作成し Tailscale 登録を待つ (約 1〜2 分)
+$S up                                  # network / firewall / scaletest-1..3 を (未作成のものだけ) 作成し Tailscale 登録を待つ (約 1〜2 分)
 $S isolation                           # 本番ノード・他の検証ノードへ tailnet で到達できないこと
 $S bootstrap scaletest-1               # 1 台目 cluster-init + Cilium (約 5 分)
 $S bootstrap                           # 2・3 台目の join (約 7 分)
@@ -394,9 +394,10 @@ $S verify-clean                        # 単独でも確認できる
 ### 動作の要点
 
 - 作業ディレクトリは `mktemp -d` で作り、終了時に削除する (`SCALETEST_WORKDIR` で指定可、ホーム配下は不可)。Tailscale の auth key と描画済みの cloud-init はファイルに書かずメモリ上だけで扱う。秘密は環境変数でだけ受け取り、表示しない。
-- Cilium・Helm のバージョンと values、`k3s_version` は本番の `k3s-bootstrap.yml` と `inventory/tailscale.yml` から読み取って渡すため、二重管理にならない。
+- Cilium・Helm のバージョンと values、`k3s_version` は本番の `k3s-bootstrap.yml` と `inventory/tailscale.yml` から読み取って渡し、Cilium の適用は本番と同じ共通タスクを使うため、二重管理にならない。
 - 検証用 playbook は `ansible/playbooks/scaletest-bootstrap.yml`、inventory は `ansible/inventory/scaletest.yml`。本番の `k3s-bootstrap.yml` は使わない。`os-auto-update`・cloudflared・ArgoCD・bootstrap Secret を含めることで、検証クラスタが本番の Discord・Tunnel・Infisical・バックアップ先へ接続するのを避けるため。
-- 本番混入の防止: 本番用変数の検出、`KUBECONFIG` と kube context `aramakisai-prod` の検出、inventory と実行対象が `scaletest-N` だけであることの確認 (playbook 側でも検査)、Hetzner プロジェクトに `scaletest-N` 以外のサーバーがないことの確認、Tailscale デバイスの削除対象を `scaletest-N` に限定する。
+- 本番混入の防止: 本番用変数の検出、`KUBECONFIG` の検出 (`kubectl` サブコマンドはノード上の k3s を SSH 経由で使い、手元の kubeconfig・context は参照しない)、inventory と実行対象が `scaletest-N` だけであることの確認 (playbook 側でも検査)、Hetzner プロジェクトに `scaletest-N` 以外のサーバーがないことの確認、Tailscale デバイスの削除対象を `scaletest-N` に限定する。
+- すべてのコマンドは再実行できる: `up` は存在するサーバーをスキップし (作成対象があるときだけ Tailscale auth key を発行する)、`bootstrap` は Cilium を現行 release との差分があるときだけ適用し (判定は本番と共通の `ansible/playbooks/tasks/cilium.yml`)、`down` は primary IP が消えるまで待って 0 件を確認する。
 - ansible の出力はファイルへ書き、標準入力を閉じて実行する (長い playbook で端末入力待ちに入るのを避ける)。`ANSIBLE_CONFIG` には空の設定を指定する (リポジトリ直下・`ansible/` の `ansible.cfg` が本番 inventory を既定にしているため)。
 - etcd のメンバー確認は etcdctl を使う (etcd の公式リリースを SHA256 で照合してノードの `/tmp` へ置く)。`tailscale ping` は `--c=N` 形式で IP を指定する。
 - 実績: cx23 (2 vCPU / 4GB) 3 台で、準備から後片付けまで通しで約 40 分、費用は時間課金で数円程度。

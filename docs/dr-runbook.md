@@ -413,8 +413,9 @@ Terraform provider・dr-trigger・recovery.sh は同じキー名の OAuth クラ
 |----------|------|
 | `devices:core` (Read + Write) | デバイス一覧 (dr-trigger / recovery)、旧デバイス削除 (recovery) |
 | `auth_keys` (Read + Write) | Terraform `tailscale_tailnet_key` の発行 (タグ `tag:k3s-node` を指定) |
+| `policy_file` (Read + Write) | Terraform `tailscale_acl.this` による tailnet policy の適用 |
 
-ACL を Terraform で管理する場合は `policy_file` スコープも必要。Admin console の Settings → OAuth clients で作成し、値を Infisical (`prod`) の同名キーへ投入する。`tailscale_oauth_client` による Terraform 管理は、provider 自身の認証に使うクライアントを自身で作る鶏卵問題があり、発行されたシークレットが state に残るため採用していない (最初の1つは手動作成が必須)。
+tailnet policy (ACL) は Terraform で管理している (正本は `terraform/tailscale-acl.hujson.tftpl`)。Admin console の Settings → OAuth clients で作成し、値を Infisical (`prod`) の同名キーへ投入する。`tailscale_oauth_client` による Terraform 管理は、provider 自身の認証に使うクライアントを自身で作る鶏卵問題があり、発行されたシークレットが state に残るため採用していない (最初の1つは手動作成が必須)。
 
 ### GitHub Actions Secrets (要設定)
 
@@ -434,6 +435,6 @@ Infisical (`prod`) から注入する主なキー: `INFISICAL_CLIENT_ID/SECRET`�
 `GITHUB_TOKEN` は Issue 操作のため `issues: write` を、dr-recovery.yml では Environment の保護ルール検査のため `actions: read` を `permissions` で付与している。新規 PAT は不要。
 dr-recovery.yml は冒頭で Environment `dr-recovery` の required reviewers を検査し、未設定なら失敗する。`main` 以外の ref では起動しない。
 
-**Tailscale 前提 (dr-recovery.yml)**: Tailscale ACL に `tag:ci` タグを定義し、`TS_OAUTH_*` のクライアントがそのタグでデバイスを登録できること。
+**Tailscale 前提 (dr-recovery.yml)**: `tag:ci` の定義と、`tag:ci` から `tag:k3s-node` への到達 (tcp 22・6443・10250) は `terraform/tailscale-acl.hujson.tftpl` が正本。`TS_OAUTH_*` のクライアントがそのタグでデバイスを登録できること。
 
 **60日非活動による無効化に関する注意**: GitHub Actions の scheduled workflow はリポジトリに60日間コミット等の活動がないと自動的に無効化される。定期的に Actions タブで `dr-trigger.yml` が有効なままか目視確認することを推奨する。

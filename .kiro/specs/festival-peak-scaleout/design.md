@@ -6,7 +6,7 @@
 
 対象利用者はインフラ担当者であり、測定・コード準備・検証・投入・縮退の各フェーズを順に実施する。各フェーズは前フェーズの結果を入力として受け取り、測定結果が不要と示した作業は実施しない。
 
-現在の系は `prod-node-1` 単独が etcd とワークロードを担い、ノード障害時は `dr-trigger.yml` による検知とノード再作成に依存する。本設計はこの依存を期間限定で緩和する一方、DR 自動復旧機構そのものが 3 ノード構成と両立しないことを踏まえ、期間中の停止を明示的な設計要素として組み込む。
+現在の系は `prod-node-1` 単独が etcd とワークロードを担い、ノード障害時は `dr-trigger.yml` による検知通知と、人が承認して起動する `dr-recovery.yml` によるノード再作成に依存する。本設計はこの依存を期間限定で緩和する。復旧に自動起動の経路がないため、期間中の DR 制御は通知の扱いの取り決めと記録で足りる。
 
 ### Goals
 
@@ -22,7 +22,7 @@
 - 恒久的な HA 構成への移行。本設計の終点は `single-node-migration` と等価な状態への復帰である
 - mailserver の冗長化。ポート 25 の bind と RDNS により prod-node-1 に固定され、開催期間中も単一障害点として残る
 - 停止中ワークロード (authentik・vaultwarden・room-presence) の再開および冗長化。稼働していないため冗長化の効果がない
-- `dr-trigger.sh` および `recovery.sh` の 3 ノード対応改修。期間中は停止し、改修は別途扱う
+- `dr-trigger.sh` および `recovery.sh` の 3 ノード対応改修。期間中は 3 ノード構成での復旧を手動手順とし、改修は別途扱う
 - 旧 authentik 資産の撤去。`terraform plan` の限定実行を前提として受け入れる
 - mailserver の可用性向上。`prod-node-1` 固定の制約は維持する
 
@@ -52,7 +52,7 @@
 ### Allowed Dependencies
 
 - `single-node-migration` が確立した現行構成と、その復帰先としての定義
-- `observability-v2` が提供する `dr-trigger.yml` / `dr-recovery.yml`。本設計はこれを停止・復帰の対象として扱い、内部には手を入れない
+- `observability-v2` が提供する `dr-trigger.yml` / `dr-recovery.yml`。本設計は期間中の通知の扱いを定めるだけで、内部には手を入れない
 - 既存の Ansible ロール `k3s-server` / `swap` / `os-auto-update`
 - 既存の DR 検証資産 `.github/scripts/dr-k3d-setup.sh` / `dr-kvm-create.sh`
 - Terraform Cloud ワークスペース `aramakisai-infra`。対象を限定した apply のみを行う
@@ -62,7 +62,7 @@
 - `locals.nodes` の型構造が変化した場合。`dns.tf` / `outputs.tf` の参照が影響を受ける
 - `config.yaml.j2` の `tls-san` 適用範囲が変化した場合。既存ノードの証明書が再生成される
 - `hcloud_placement_group` の所属ノードが変化した場合。サーバーの再作成が発生しうる
-- `dr-trigger.yml` の有効・無効状態が変化した場合。障害時の復旧経路が切り替わる
+- `dr-trigger.yml` / `dr-recovery.yml` が復旧を自動起動する構成に変化した場合、または生存確認ゲートの挙動が変化した場合。障害時の復旧経路が切り替わる
 - `inventory/tailscale.yml` のグループ構成が変化した場合。`recovery.sh` の Ansible 実行対象が変わる
 
 ## Architecture
@@ -152,7 +152,7 @@ graph TB
 | Runtime | K3s v1.36.3+k3s1 embedded etcd | クォーラム維持 | 既存バージョンを踏襲 |
 | Data | CloudNativePG / PostgreSQL 16.8 | 稼働中 DB クラスタの冗長化とフェイルオーバー | 既存。`instances` を期間中のみ 3 へ |
 | Verification | k3d、KVM (libvirt) | 縮退手順の事前検証 | 既存資産を再利用 |
-| Operations | GitHub Actions (`dr-trigger.yml`) | 期間中は無効化の対象 | 既存。改修しない |
+| Operations | GitHub Actions (`dr-trigger.yml` / `dr-recovery.yml`) | 期間中の通知の扱いを記録 | 既存。改修しない |
 
 ## File Structure Plan
 
@@ -180,7 +180,6 @@ docs/
 
 - `gitops/manifests/prod/cms/db-cluster.yaml` — `instances` を 3 へ変更し、インスタンスを別ノードへ配置する制約を加える
 - `gitops/manifests/prod/zitadel/db-cluster.yaml` — 同上
-- `.github/workflows/dr-trigger.yml` — 発火を停止するフラグまたは条件分岐を追加する
 - `terraform/cloudflare_media_cache.tf` — 既存の `cloudflare_ruleset.directus_assets_cache` が持つ `/api/media/` 向けルールを、`/api/media/serve/` の 302 応答に実効させるよう `origin_cache_control` を明示し、ルール一致順を見直す
 
 ステートレスワークロードのレプリカ数を変更する場合は `gitops/manifests/prod/cms/deployment.yaml` を対象とするが、要件 1.5 の判定が必要性を示した場合に限る。nginx-ingress と mailserver のマニフェストは変更しない。
@@ -226,7 +225,7 @@ sequenceDiagram
     participant CNPG as CNPG クラスタ
 
     Ops->>K3s: etcd スナップショット取得とノード外退避
-    Ops->>GH: dr-trigger を無効化する変更をコミット
+    Ops->>GH: 作業期間中の dr-trigger 通知を誤報として扱う旨を作業記録に残す
     Ops->>TFC: 対象を限定した plan で差分確認
     Ops->>TFC: 対象を限定した apply
     TFC->>HC: placement group を作成し追加ノードを所属させて作成
@@ -242,7 +241,7 @@ sequenceDiagram
     Ops->>K3s: 既存サービスの応答確認
 ```
 
-DR の無効化を apply より前に置く。ノード作成中の過渡状態でエンドポイントが一時的に応答しない場合に、検知機構が発火することを防ぐ。
+通知の扱いの記録を apply より前に置く。ノード作成中の過渡状態でエンドポイントが一時的に応答しない場合に出る `dr-trigger` 通知を誤報として扱い、`dr-recovery.yml` を起動しないことを事前に共有する。
 
 prod-node-1 の placement group 追加をデータ層の冗長化より後に置く。Hetzner は既存サーバーの追加にオフラインであることを要求するため、この工程は prod-node-1 の停止を伴う。3 ノードかつ CNPG が冗長化された状態であれば、停止中も etcd はメンバー 2 でクォーラムを維持し、データベース接続は残存ノードの Standby が引き継ぐ。順序を逆にすると同じ操作が全サービスの停止を意味する。なお mailserver は prod-node-1 に固定されるため、この区間のみ停止する。
 
@@ -272,7 +271,7 @@ sequenceDiagram
     end
     Ops->>TFC: 対象を限定した apply でサーバーを削除
     Ops->>TS: 該当デバイスを削除
-    Ops->>GH: dr-trigger を再有効化する変更をコミット
+    Ops->>GH: 残った dr-incident Issue を閉じ、記録を更新する
 ```
 
 データ層の復元をノード削除より前に置く。Primary が削除対象ノード上にあるまま縮退すると、昇格先のない状態でデータを保持するインスタンスが失われる。switchover の完了と Standby の削除完了を確認してからノード削除へ進む。
@@ -307,8 +306,8 @@ sequenceDiagram
 | 5.2, 5.3 | Primary の所在確認と switchover、インスタンス数の復元 | データ層冗長化、縮退手順 | switchover 手順 | 縮退の実行順序 |
 | 5.4, 5.5, 5.6 | 構成復帰、課金停止確認、デバイス削除 | 縮退手順 | チェックリスト | 縮退の実行順序 |
 | 5.7, 5.8 | 構成等価性、復旧手段 | ノード定義、スナップショット管理 | 等価性の定義 | 縮退の実行順序 |
-| 6.1, 6.2, 6.3 | DR 挙動の評価と無効化 | DR 制御 | 無効化フラグ | スケールアウトの実行順序 |
-| 6.4, 6.5 | 復帰と Git 追跡可能性 | DR 制御 | Git 管理下の制御 | 縮退の実行順序 |
+| 6.1, 6.2, 6.3 | DR 挙動の評価と通知の扱い | DR 制御 | 作業記録 | スケールアウトの実行順序 |
+| 6.4, 6.5 | 通常状態への復帰と追跡可能性 | DR 制御 | 作業記録 | 縮退の実行順序 |
 | 7.1, 7.2 | 稼働中 DB の冗長化と停止中 DB の据え置き | データ層冗長化 | 対象クラスタ一覧 | スケールアウトの実行順序 |
 | 7.3, 7.4, 7.5 | 別ノード配置、フェイルオーバー、容量確認 | データ層冗長化 | `podAntiAffinity` | — |
 | 7.6, 7.7, 7.8 | 条件付きレプリカ増加、分散、再測定 | ステートレス分散、負荷テストハーネス | 分散制約 | フェーズ遷移 |
@@ -407,7 +406,7 @@ sequenceDiagram
 
 - State model: `locals.nodes` は `{ ノード名 => { private_ip, server_type } }` の map of object とする。既存エントリは `server_type` に現行値を明示することで実体との差分を生まない
 - Persistence & consistency: state は単一の TFC ワークスペースが保持する。authentik の残存により対象無限定の plan が失敗するため、apply は `hcloud_server.nodes["prod-node-2"]` および `hcloud_server.nodes["prod-node-3"]` への `-target` 指定で行う。依存リソースは Terraform が自動的に含める
-- Concurrency strategy: DR 自動復旧が同一ワークスペースへ auto-apply の run を作成しうるため、本コンポーネントの apply 中は DR 制御により発火を停止しておく
+- Concurrency strategy: DR 自動復旧が同一ワークスペースへ auto-apply の run を作成しうるため、本コンポーネントの apply 中は `dr-recovery.yml` を起動しない (自動起動の経路はないため、作業者の取り決めで足りる)
 
 **Implementation Notes**
 
@@ -481,7 +480,7 @@ sequenceDiagram
 - Integration: Play 0 が `hosts: all` であるため、`--limit` を指定して追加ノードのみを対象とする。Cilium・cloudflared・ArgoCD の各 Play は `run_once: true` により多重実行されない
 - Validation: `--check` と `--limit` を併用し、既存ノードに変更が生じないことを適用前に確認する
 - Risks: 実機のないホストを inventory に置くと、`any_errors_fatal` の Play (`hosts: all`) が unreachable で全台分中断し、`prod-node-1` を含む k3s-bootstrap と k3s-upgrade が実行できなくなる。実機作成後に追加し、縮退でノードを削除したら外す。
-- Risks: inventory を 3 ノードへ更新した状態で DR が発火すると、`recovery.sh` がその内容で Ansible を実行する。DR 制御による停止がこのリスクの回避手段となる
+- Risks: inventory を 3 ノードへ更新した状態で DR が発火すると、`recovery.sh` がその内容で Ansible を実行する。期間中に `dr-recovery.yml` を起動しないことがこのリスクの回避手段となる
 
 #### tls-san 適用
 
@@ -532,7 +531,7 @@ sequenceDiagram
 **Dependencies**
 
 - Inbound: inventory 定義、tls-san 適用 — 適用対象のコード (P0)
-- Inbound: DR 制御 — 停止状態の確立 (P0)
+- Inbound: DR 制御 — 通知の扱いの記録 (P0)
 - Inbound: スナップショット管理 — 復旧手段の確保 (P0)
 - Outbound: 縮退手順 — 中止時の移行先 (P0)
 
@@ -578,7 +577,7 @@ sequenceDiagram
 
 - Trigger: 開催期間の終了後、またはスケールアウト中に既存サービスへの影響を検知した時点
 - Input / validation: 要件 3 で文書化された手順が存在すること、スナップショットが退避済みであることを事前条件とする
-- Output / destination: prod-node-1 単独構成、Hetzner 上の追加サーバー削除と課金停止、Tailscale デバイスの削除、DR の再有効化
+- Output / destination: prod-node-1 単独構成、Hetzner 上の追加サーバー削除と課金停止、Tailscale デバイスの削除、残った `dr-incident` Issue のクローズ
 - Idempotency & recovery: ノード削除は個別に実行でき、中断後に残りから再開できる。クラスタが停止した場合は退避済みスナップショットから復旧する
 
 **Implementation Notes**
@@ -591,33 +590,27 @@ sequenceDiagram
 
 | Field | Detail |
 |-------|--------|
-| Intent | 期間中の自動復旧を停止し、縮退後に確実に復帰させる |
+| Intent | 期間中の障害通知を誤報として扱う取り決めを記録し、縮退後に通常の扱いへ戻す |
 | Requirements | 6.1, 6.2, 6.3, 6.4, 6.5 |
 
 **Responsibilities & Constraints**
 
-- スケールアウト前に `dr-trigger.yml` を無効化し、縮退完了後に再有効化する
-- 無効化の事実と復帰予定を Git 管理下に記録する
+- `dr-trigger.yml` は通知のみで復旧を起動しない。復旧は人が `dr-recovery.yml` を起動し、Environment `dr-recovery` の reviewer が承認した場合だけ動く。`DR_TRIGGER_ENABLED` のような無効化フラグは存在しない
+- スケールアウト前に、作業期間中の `dr-trigger` 通知を誤報として扱い `dr-recovery.yml` を起動しないことを作業記録に残す。縮退完了後に残った `dr-incident` Issue を閉じる
 - `dr-trigger.sh` および `recovery.sh` の内部ロジックには手を入れない
 
 **Dependencies**
 
-- Outbound: `dr-trigger.yml` — 停止と復帰の対象 (P0)
+- Outbound: `dr-trigger.yml` / `dr-recovery.yml` — 通知と手動復旧の経路 (P0)
 - Inbound: スケールアウト手順、縮退手順 — 実行タイミングの供給 (P0)
 
-**Contracts**: Service [ ] / API [ ] / Event [ ] / Batch [ ] / State [x]
-
-##### State Management
-
-- State model: ワークフローの有効・無効という二値状態を取る。有効が通常状態であり、無効はスケールアウト期間に限る例外状態である
-- Persistence & consistency: 無効化は Git 管理下のファイル変更として行う。GitHub の UI 操作のみで完結する手段は Git に痕跡が残らず、再有効化の失念を履歴から検知できないため採らない。無効化の期間と理由、復帰予定日をコミットに記録する
-- Concurrency strategy: 無効化は apply の開始前に完了していること、再有効化は縮退の完了後であることを順序制約とする
+**Contracts**: Service [ ] / API [ ] / Event [ ] / Batch [ ] / State [ ]
 
 **Implementation Notes**
 
-- Integration: 停止の根拠は、`dr-trigger.sh:19` の監視対象が `prod-node-1` 決め打ちであり、`:38-50` の判定が etcd クォーラムの健全性を考慮しないことにある。3 ノード構成でクォーラムが維持されていても `prod-node-1` の停止で発火し、`recovery.sh:172-229` が TFC ワークスペース全体へ auto-apply の run を作成する
-- Validation: 無効化後に cron が実行されていないことを確認する。再有効化後に通常どおり実行されることを確認する
-- Risks: 再有効化の失念により期間終了後も自動復旧が停止したままになる。縮退手順の完了条件に再有効化の確認を含める。期間中は 2 台以上の同時停止に対して自動復旧が働かないが、人が対応できるイベント期間と重なるため許容する
+- Integration: `dr-trigger.sh:19` の監視対象は `prod-node-1` 決め打ちで、判定は etcd クォーラムの健全性を考慮しない。3 ノード構成でクォーラムが維持されていても `prod-node-1` の停止や作業中の過渡状態で通知が出る。`recovery.sh` は TFC ワークスペース全体へ auto-apply の run を作成するため、人が起動する際は 3 ノード構成での影響を承知のうえで判断する。残存ノードがある複数ノード構成では生存確認ゲートが停止し、手順は `docs/dr-runbook.md` の複数ノード構成の復旧に従う
+- Validation: 手順書 (`docs/node-scaling-runbook.md` A-2 / B-6) が現行のワークフローの挙動と一致していること
+- Risks: 作業中に通知を見た作業者が `dr-recovery.yml` を起動すると、ワークスペース全体への apply が走る。作業記録の取り決めで防ぐ。期間中は 3 ノード構成での自動の復旧がなく手動対応になるが、人が対応できるイベント期間と重なるため許容する
 
 #### スナップショット管理
 
@@ -663,7 +656,7 @@ sequenceDiagram
 
 - 本番クラスタとは独立した環境で、増やす方向と減らす方向の双方を検証する
 - 検証範囲は etcd メンバーの増減、`tls-san` 適用の影響、CNPG インスタンスの増減と switchover に限る
-- 検証完了後に環境を解放する。Hetzner を用いた場合は Tailscale デバイスも削除する
+- 検証完了後に検証用のサーバー・network・firewall・primary IP と Tailscale デバイスを削除し、0 件を確認する (`scaletest.sh down` / `verify-clean`)。Hetzner プロジェクト・SSH 鍵・OAuth クライアント・Infisical のキーは再検証用に残す
 
 **Dependencies**
 
@@ -823,7 +816,7 @@ sequenceDiagram
 
 - スケールアウト完了後の全サービス応答確認
 - 縮退完了後の `single-node-migration` 等価状態の確認
-- DR ワークフローの無効化と再有効化が意図どおり反映されることの確認
+- 手順書の DR の扱い (A-2 / B-6) が現行ワークフローの挙動と一致することの確認
 
 ## Performance & Scalability
 

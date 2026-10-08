@@ -6,6 +6,8 @@ set -euo pipefail
 #
 # 使い方 (docs/node-scaling-runbook.md の「検証ハーネス」参照):
 #   infisical run --env=staging --path=/scaletest -- scripts/scaletest/scaletest.sh <command> [args]
+# infisical run は .infisical.json のあるリポジトリ (worktree を含む) の中で実行する。
+# 外では接続先プロジェクトを解決できず環境変数が注入されない。
 #
 # 本番 (--env=prod) では実行しない。検証専用の Hetzner プロジェクト・Tailscale OAuth
 # クライアント (tag:scaletest 限定)・K3s トークンだけを使い、本番の資源には到達しない。
@@ -19,8 +21,8 @@ set -euo pipefail
 #
 # コマンド:
 #   preflight               本番混入ガードのみ実行
-#   up [N...]               network / firewall を (無ければ) 作成し、サーバー N (既定 1 2 3) を作成して
-#                           Tailscale 登録を待つ
+#   up [N...]               network / firewall を (無ければ) 作成し、サーバー N (既定 1 2 3) のうち
+#                           未作成のものだけ作成して Tailscale 登録を待つ (既存はスキップ)
 #   bootstrap [LIMIT]       検証 playbook を実行 (LIMIT は ansible --limit。既定 scaletest-1,scaletest-2,scaletest-3)
 #   status                  サーバー・Tailscale デバイス
 #   members                 etcd メンバー一覧 (etcdctl)
@@ -111,10 +113,8 @@ preflight() {
     [[ -n "${!v:-}" ]] || die "${v} が未設定です"
   done
 
+  # kubectl はノード上の k3s を SSH 経由で使い、手元の kubeconfig / context は参照しない
   [[ -z "${KUBECONFIG:-}" ]] || die "KUBECONFIG が設定されています。unset してください"
-  if command -v kubectl >/dev/null 2>&1 && [[ "$(kubectl config current-context 2>/dev/null || true)" == "aramakisai-prod" ]]; then
-    die "kube context が aramakisai-prod です。このスクリプトは kubectl をローカルで使いませんが、誤操作防止のため停止します (kubectl config use-context で変更)"
-  fi
 
   grep -q 'prod-node' "${INVENTORY}" && die "検証用 inventory に prod-node が含まれています"
   local servers
@@ -160,7 +160,6 @@ issue_ts_key() {
 
 create_server() { # create_server N TS_KEY
   local n="$1" key="$2" name="scaletest-$1" tpl user_data
-  [[ -z "$(lookup_id servers "${name}")" ]] || die "${name} は既に存在します"
   tpl="$(<"${REPO}/terraform/templates/cloud-init.yaml.tpl")"
   # shellcheck disable=SC2016 # テンプレートのプレースホルダ ${...} は展開しない
   user_data="${tpl//'${hostname}'/${name}}"
@@ -212,16 +211,30 @@ wait_registered() { # wait_registered N...
 }
 
 cmd_up() {
-  local nodes=("$@") n key
+  local nodes=("$@") todo=() n key=""
   ((${#nodes[@]} > 0)) || nodes=(1 2 3)
   ensure_network
-  purge_stale "${nodes[@]}"
-  SINCE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  key="$(issue_ts_key)"
-  [[ -n "${key}" ]] || die "Tailscale auth key の発行に失敗しました (OAuth クライアントのスコープとタグを確認)"
-  for n in "${nodes[@]}"; do create_server "${n}" "${key}"; done
-  key=""
-  wait_registered "${nodes[@]}"
+  local existing=() since
+  for n in "${nodes[@]}"; do
+    if [[ -n "$(lookup_id servers "scaletest-${n}")" ]]; then
+      log "scaletest-${n} は既に存在するためスキップ"
+      existing+=("${n}")
+    else
+      todo+=("${n}")
+    fi
+  done
+  # 作成対象があるときだけ旧デバイス削除と auth key 発行を行う (既存ノードのデバイスは消さない・不要な key を残さない)
+  if ((${#todo[@]} > 0)); then
+    purge_stale "${todo[@]}"
+    since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    key="$(issue_ts_key)"
+    [[ -n "${key}" ]] || die "Tailscale auth key の発行に失敗しました (OAuth クライアントのスコープとタグを確認)"
+    for n in "${todo[@]}"; do create_server "${n}" "${key}"; done
+    key=""
+    SINCE="${since}" wait_registered "${todo[@]}"
+  fi
+  # 既存ノードは作成時刻の下限なしで接続中かだけを見る
+  if ((${#existing[@]} > 0)); then SINCE="" wait_registered "${existing[@]}"; fi
 }
 
 cmd_delete_server() {
@@ -358,6 +371,13 @@ cmd_down() {
   done
   delete_all firewalls
   delete_all networks
+  # primary IP はサーバー削除の後に非同期で消える
+  waited=0
+  while [[ "$(hc "${HAPI}/primary_ips" | jq '.primary_ips | length')" != 0 ]]; do
+    ((waited < 120)) || die "primary IP の削除が完了しません"
+    sleep 5
+    waited=$((waited + 5))
+  done
   cmd_purge_devices
   cmd_verify_clean
 }

@@ -50,26 +50,5 @@
   environment:
     KUBECONFIG: /etc/rancher/k3s/k3s.yaml
   tasks:
-    - name: Helm をインストール
-      ansible.builtin.shell: >-
-        curl -fsSL https://raw.githubusercontent.com/helm/helm/{{ helm_version }}/scripts/get-helm-3 | bash
-      environment:
-        DESIRED_VERSION: "{{ helm_version }}"
-      args:
-        creates: /usr/local/bin/helm
-
-    - name: Cilium をインストール・更新
-      ansible.builtin.command: >-
-        helm upgrade --install cilium cilium
-        --repo https://helm.cilium.io/
-        --version {{ cilium_version }}
-        --namespace kube-system
-        -f -
-        --wait --timeout=300s
-      args:
-        stdin: "{{ cilium_values | to_json }}"
-      changed_when: true
-
-    - name: 全ノードが Ready になるまで待機
-      ansible.builtin.command: kubectl wait node --all --for=condition=Ready --timeout=300s
-      changed_when: false
+    - name: Cilium を適用 (本番と共通のタスク)
+      ansible.builtin.include_tasks: tasks/cilium.yml
