@@ -1,0 +1,12 @@
+---
+# 自発的な中断 (ノード drain 等) で api+login が全滅しないようにする
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: zitadel
+  namespace: zitadel
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: zitadel

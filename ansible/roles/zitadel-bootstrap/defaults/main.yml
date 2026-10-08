@@ -3,12 +3,13 @@
 # 領域への例外的初期化ロール。k3d検証環境・本番prod-node-1の両対応。
 
 zitadel_bootstrap_namespace: zitadel
-zitadel_bootstrap_pod: zitadel-0
+# 複数レプリカのうち kubectl が選ぶ 1 Pod。API 呼び出しは Pod 内 loopback なのでどれでもよい
+zitadel_bootstrap_pod: deploy/zitadel
 zitadel_bootstrap_zitadel_container: zitadel
 zitadel_bootstrap_login_container: login   # zitadelコンテナはshellを持たないdistroless系イメージのため、
                                             # 同一Pod内でshellを持つloginコンテナ経由で共有volumeを読む
 
-# PATの取得元 (StatefulSetのZITADEL_FIRSTINSTANCE_PATPATHと一致させること)
+# PATの取得元 (DeploymentのZITADEL_FIRSTINSTANCE_PATPATHと一致させること)
 zitadel_bootstrap_pat_path_in_pod: /zitadel-data/zitadel-admin-sa.pat
 
 # 発行されたPATの保存先 (ローカルファイル、本番Infisicalへは登録しない)
@@ -45,7 +46,7 @@ zitadel_external_domain: "{{ lookup('env', 'ZITADEL_EXTERNAL_DOMAIN') | default(
 # 新規発行し直さない)。k3d検証時はzitadel_bootstrap_pat_output_fileから読む。
 zitadel_admin_pat: "{{ lookup('env', 'TF_VAR_zitadel_token') | default(lookup('file', zitadel_bootstrap_pat_output_file), true) }}"
 
-# StatefulSetのZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_MACHINE_USERNAMEと一致させること
+# DeploymentのZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_MACHINE_USERNAMEと一致させること
 zitadel_login_client_user_name: login-client
 
 # 出展団体CSV (旧terraform/zitadel_student_exhibitor.tfのcsvdecode元と同一内容。

@@ -2,7 +2,7 @@
 # Zitadel初回起動ブートストラップ。
 #
 # 組織・管理者・Terraform provider用machine user(IAM_OWNER)+PATの「作成」自体は
-# StatefulSet(gitops/manifests/prod/zitadel/statefulset.yaml)のZITADEL_FIRSTINSTANCE_*
+# Deployment(gitops/manifests/prod/zitadel/deployment.yaml)のZITADEL_FIRSTINSTANCE_*
 # 環境変数によりZitadel自身が初回セットアップ時に一度だけ行う
 # (公式にサポートされたfirst-instanceブートストラップ機構)。
 # 発行されたPATはコンテナ内の一時ファイル(emptyDir)にのみ書き込まれ、二度と再取得できない
@@ -51,17 +51,20 @@
       changed_when: false
       delegate_to: localhost
 
-    - name: PATファイルがPod内に書き込まれるまで待機
-      # zitadelコンテナがsetup完了直後にPATファイルを書き込む。ready確認の直後は
-      # 書き込みタイミングと競合しうるため、loginコンテナ経由でファイル存在を再確認する
-      ansible.builtin.command: >
-        kubectl {{ zitadel_bootstrap_kubectl_args | join(' ') }} exec {{ zitadel_bootstrap_pod }}
-        -n {{ zitadel_bootstrap_namespace }}
-        -c {{ zitadel_bootstrap_login_container }}
-        -- test -s {{ zitadel_bootstrap_pat_path_in_pod }}
+    - name: PATファイルがPod内に書き込まれるまで待機し、持っているPodを特定
+      # FirstInstanceのPATは初期化を実行した 1 Pod にだけ書かれるため、全レプリカを走査する。
+      # zitadelコンテナがsetup完了直後に書き込むので、ready確認直後は競合しうる。
+      # loginコンテナ経由でファイル存在を確認する
+      ansible.builtin.shell: |
+        for p in $(kubectl {{ zitadel_bootstrap_kubectl_args | join(' ') }} get pods -n {{ zitadel_bootstrap_namespace }} -l app=zitadel -o name); do
+          if kubectl {{ zitadel_bootstrap_kubectl_args | join(' ') }} exec "$p" -n {{ zitadel_bootstrap_namespace }} -c {{ zitadel_bootstrap_login_container }} -- test -s {{ zitadel_bootstrap_pat_path_in_pod }}; then
+            echo "$p"; exit 0
+          fi
+        done
+        exit 1
       environment: "{{ zitadel_bootstrap_kubectl_env }}"
-      register: pat_file_check
-      until: pat_file_check.rc == 0
+      register: pat_pod
+      until: pat_pod.rc == 0
       retries: "{{ zitadel_bootstrap_ready_retries }}"
       delay: "{{ zitadel_bootstrap_ready_delay }}"
       changed_when: false
@@ -70,7 +73,7 @@
     - name: PATファイルをPod内から取得 (zitadelコンテナはshellを持たないためloginコンテナ経由)
       # no_log: PAT平文をAnsibleログに残さない (過去複数回のinfisical CLI出力漏洩実績を踏まえた徹底)
       ansible.builtin.command: >
-        kubectl {{ zitadel_bootstrap_kubectl_args | join(' ') }} exec {{ zitadel_bootstrap_pod }}
+        kubectl {{ zitadel_bootstrap_kubectl_args | join(' ') }} exec {{ pat_pod.stdout | trim }}
         -n {{ zitadel_bootstrap_namespace }}
         -c {{ zitadel_bootstrap_login_container }}
         -- cat {{ zitadel_bootstrap_pat_path_in_pod }}
