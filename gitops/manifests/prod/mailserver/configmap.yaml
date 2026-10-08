@@ -333,8 +333,21 @@ data:
     # zitadel-auth.lua (Dovecot Lua Auth Bridge) が require("socket.http") /
     # require("cjson.safe") に依存するが、docker-mailserver イメージには
     # 同梱されていない (Debian bookworm、Lua 5.4)。
-    apt-get update -qq
-    apt-get install -y --no-install-recommends lua-socket lua-cjson
+    #
+    # ノード再起動直後は DNS が未復旧で apt が失敗しうる。失敗したまま起動すると
+    # Dovecot の Zitadel 認証だけが死んだ状態で Ready になるため、リトライしても
+    # 入らなければコンテナごと落として kubelet の再起動 (CrashLoop バックオフ) に任せる。
+    for _ in $(seq 1 30); do
+      dpkg -s lua-socket lua-cjson >/dev/null 2>&1 && break
+      apt-get update -qq && apt-get install -y --no-install-recommends lua-socket lua-cjson && break
+      sleep 10
+    done
+    if ! dpkg -s lua-socket lua-cjson >/dev/null 2>&1; then
+      echo "lua-socket/lua-cjson の導入に失敗したため終了する" >&2
+      # user-patches の exit 値は起動処理に伝播しない可能性があるため PID 1 も止める
+      kill -TERM 1
+      exit 1
+    fi
     postconf 'smtpd_sender_login_maps = texthash:/tmp/docker-mailserver/sender-login-maps.cf'
     # Pod ネットワーク経由の submission 投入では Postfix が既定で Message-ID/Date を
     # 補わず、Gmail 側が SMTPIN_ADDED_MISSING を付与し迷惑メール判定を厳しくする。
