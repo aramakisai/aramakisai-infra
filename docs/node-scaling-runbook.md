@@ -139,6 +139,8 @@ infisical run -- ansible-playbook -i ansible/inventory/tailscale.yml ansible/pla
   --limit prod-node-2,prod-node-3
 ```
 
+新規ノードは swap ファイルが未作成のため、`--check` は swap ロールで止まり k3s ロール以降の差分を確認できない。同名で再作成したノードは手元 known_hosts の旧ホスト鍵と衝突するため、該当エントリを削除してから実行する。
+
 `k3s-server` ロールは 1 台ずつ join し、各ノードで etcd の readyz と Node Ready を待つ。参加後に全ノードの Ready とメンバー数 3 を確認する。
 
 ```bash
@@ -193,10 +195,12 @@ infisical run --env=prod -- terraform plan -target='hcloud_server.nodes["prod-no
 1. `plan` が再作成を示した場合は中止する。
 2. Hetzner Cloud Console で `prod-node-1` をシャットダウンする (Hetzner は既存サーバーの placement group 追加にオフラインを要求する)。
 3. `infisical run --env=prod -- terraform apply -target='hcloud_server.nodes["prod-node-1"]'` で追加する。
-4. サーバーを起動し、`make kubectl ARGS="get nodes"` で全ノードが Ready に戻ることを確認する。
+4. サーバーを起動し、`make kubectl ARGS="get nodes"` で全ノードが Ready に戻ることを確認する。停止中に CNPG が failover した場合、primary は戻らない。起動直後に DNS が復旧するまで mailserver の起動スクリプトが失敗しうるため、Dovecot 認証が止まっていれば Pod を再作成する。
 5. 失敗した場合は `prod-node-1` を起動して従前の状態へ戻し、追加ノードのみが所属する状態を記録する。
 
 **未検証** (既存サーバーの placement group 追加と、それに伴う停止・復帰は検証環境で行っていない。検証では全台を最初から同一構成で作成した)。prod-node-1 の停止中に残り 2 台でクォーラムが維持されることは、メンバー 3 で 1 台停止しても API が継続する挙動 (**k3d**) に基づく。
+
+共有 vCPU のノードは、投入直後にゲスト側で vCPU 停止 (RCU stall / soft lockup) によりハングすることがある。Hetzner API の reset で復旧し、etcd はメンバー 3 のうち 2 で継続する。
 
 ### A-7. 投入後の全サービスを確認する
 

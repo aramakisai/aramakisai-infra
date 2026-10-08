@@ -748,7 +748,7 @@ sequenceDiagram
 
 **Implementation Notes**
 
-- Integration: 分散制約は `gitops/manifests/prod/cloudflared/deployment.yaml:29-35` が既存の記述例となる。cloudflared は `replicas: 2` と `whenUnsatisfiable: ScheduleAnyway` の topologySpread を既に持ち、ノード追加により自動的に分散するため変更を要しない
+- Integration: 分散制約は `gitops/manifests/prod/cloudflared/deployment.yaml:29-35` が既存の記述例となる。cloudflared は `replicas: 3`、`whenUnsatisfiable: ScheduleAnyway` の topologySpread (`matchLabelKeys: pod-template-hash`)、`maxUnavailable: 1` の PodDisruptionBudget で 3 ノードへ分散する。`ScheduleAnyway` のためノード不在時に配置された Pod は偏り、Pod 削除で再配置される。縮退時は `replicas` を戻す対象となる
 - Validation: 配置変更後に負荷テストを再実施し、ブレークポイントが変更前を上回ることを確認する
 - Risks: 追加ノードに taint を設定しないため、Pod の再起動や再スケジュールにより意図しないワークロードが追加ノードへ移動しうる。データ層冗長化により CNPG インスタンスを追加ノードへ配置する必要があり、taint を設けると toleration の付与対象が広がるため、本設計では taint を採らない。etcd への影響は `config.yaml.j2` の `system-reserved` と `kube-reserved` による予約で抑える
 
