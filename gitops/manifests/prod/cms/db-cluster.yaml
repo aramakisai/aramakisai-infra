@@ -14,6 +14,8 @@ metadata:
     argocd.argoproj.io/sync-wave: "-1"
 spec:
   instances: 3
+  # restart (既定) だと Pod spec 変更時に primary が switchover なしで再作成され書き込みが止まる
+  primaryUpdateMethod: switchover
   imageName: ghcr.io/cloudnative-pg/postgresql:16.8
 
   # required にしないと prod-node-1 に複数インスタンスが集まり得るため、

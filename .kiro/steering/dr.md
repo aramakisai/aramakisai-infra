@@ -104,6 +104,10 @@ spec:
 - 古い PostgreSQL イメージ（`16.3` など）に埋め込まれた instance manager はアノテーションを認識しない
 - CNPG Operator (1.23.3) と PostgreSQL イメージのバージョンは独立しており、明示しないと古いイメージが使われる
 
+### primary の更新方式
+
+`directus-db` / `zitadel-db` は `primaryUpdateMethod: switchover` を明示している。既定の `restart` は Pod spec 変更時に primary を switchover なしで再作成するため書き込みが止まる。instances が 1 のときは switchover 先がなく、単一インスタンスとして再作成される。
+
 ### クラスターを削除・再作成する際の手順
 
 ```bash
