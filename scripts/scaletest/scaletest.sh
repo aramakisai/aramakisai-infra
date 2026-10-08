@@ -44,6 +44,9 @@ SSH_KEY_NAME=scaletest-key
 STYPE="${SCALETEST_SERVER_TYPE:-cx23}"
 # recovery.sh と同じく .hostname 基準。重複デバイスは .name だけが -N になり .hostname は変わらない
 DEV_RE='^scaletest-[0-9]+$'
+# 登録判定・旧デバイス選別は recovery.sh と同じ実装を使う (ts_token/ts_devices は下で上書きする)
+# shellcheck source=/dev/null
+source "${REPO}/.github/scripts/tailscale-devices.sh"
 PLAYBOOK="${REPO}/ansible/playbooks/scaletest-bootstrap.yml"
 INVENTORY="${REPO}/ansible/inventory/scaletest.yml"
 # etcd 公式リリースの SHA256SUMS と照合済みの値
@@ -173,18 +176,32 @@ create_server() { # create_server N TS_KEY
   log "${name} 作成 (id=${sid}, ip=10.250.1.${n})"
 }
 
+# 作成前に、同名系の offline デバイスを削除する。残すと新デバイスの MagicDNS 名が scaletest-N-1 になる
+purge_stale() { # purge_stale N...
+  local n id devs
+  devs="$(ts_devices)"
+  for n in "$@"; do
+    for id in $(ts_device_ids "{\"devices\":${devs}}" "scaletest-${n}" offline); do
+      ts_api DELETE "/device/${id}" >/dev/null && log "scaletest-${n} の旧デバイス ${id} を削除"
+    done
+  done
+}
+
+# SINCE (RFC 3339) 以降に作られ、MagicDNS 名が scaletest-N のまま接続中のものだけ登録済みとする
 wait_registered() { # wait_registered N...
   local n elapsed=0 timeout=600 devs missing
   while true; do
     devs="$(ts_devices)"
     missing=()
     for n in "$@"; do
-      jq -e --arg h "scaletest-${n}" '[.[] | select(.hostname == $h and .connectedToControl == true)] | length > 0' <<<"${devs}" >/dev/null ||
-        missing+=("scaletest-${n}")
+      ts_node_registered "{\"devices\":${devs}}" "scaletest-${n}" "${SINCE:-}" || missing+=("scaletest-${n}")
     done
     if ((${#missing[@]} == 0)); then
       jq -r '.[] | select(.connectedToControl == true) | "  hostname=\(.hostname) name=\(.name) tags=\(.tags // [] | join(","))"' <<<"${devs}"
       return 0
+    fi
+    if ((elapsed >= timeout)); then
+      for n in "${missing[@]}"; do ts_node_diag "{\"devices\":${devs}}" "${n}" >&2; done
     fi
     ((elapsed < timeout)) || die "Tailscale 登録がタイムアウトしました (${timeout}s): ${missing[*]}"
     log "未登録: ${missing[*]} (${elapsed}s)"
@@ -197,17 +214,27 @@ cmd_up() {
   local nodes=("$@") todo=() n key=""
   ((${#nodes[@]} > 0)) || nodes=(1 2 3)
   ensure_network
+  local existing=() since
   for n in "${nodes[@]}"; do
-    if [[ -n "$(lookup_id servers "scaletest-${n}")" ]]; then log "scaletest-${n} は既に存在するためスキップ"; else todo+=("${n}"); fi
+    if [[ -n "$(lookup_id servers "scaletest-${n}")" ]]; then
+      log "scaletest-${n} は既に存在するためスキップ"
+      existing+=("${n}")
+    else
+      todo+=("${n}")
+    fi
   done
-  # 作成対象があるときだけ auth key を発行する (不要な key を残さない)
+  # 作成対象があるときだけ旧デバイス削除と auth key 発行を行う (既存ノードのデバイスは消さない・不要な key を残さない)
   if ((${#todo[@]} > 0)); then
+    purge_stale "${todo[@]}"
+    since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     key="$(issue_ts_key)"
     [[ -n "${key}" ]] || die "Tailscale auth key の発行に失敗しました (OAuth クライアントのスコープとタグを確認)"
     for n in "${todo[@]}"; do create_server "${n}" "${key}"; done
     key=""
+    SINCE="${since}" wait_registered "${todo[@]}"
   fi
-  wait_registered "${nodes[@]}"
+  # 既存ノードは作成時刻の下限なしで接続中かだけを見る
+  if ((${#existing[@]} > 0)); then SINCE="" wait_registered "${existing[@]}"; fi
 }
 
 cmd_delete_server() {
@@ -326,7 +353,12 @@ cmd_purge_devices() {
 delete_all() { # delete_all <collection> -> 専用プロジェクト内で purpose=scaletest のものを全削除
   local id
   for id in $(hc "${HAPI}/$1?label_selector=purpose=scaletest" | jq -r --arg c "$1" '.[$c][].id'); do
-    hc -X DELETE "${HAPI}/$1/${id}" >/dev/null && log "$1/${id} を削除"
+    # サーバー消滅後も firewall の適用解除は非同期で、直後の削除は 422 になる
+    for _ in {1..24}; do
+      if hc -X DELETE "${HAPI}/$1/${id}" >/dev/null 2>&1; then log "$1/${id} を削除"; break; fi
+      sleep 5
+    done
+    [[ -z "$(hc "${HAPI}/$1/${id}" 2>/dev/null | jq -r --arg c "$1" '.[($c | rtrimstr("s"))].id // empty')" ]] || die "$1/${id} を削除できません"
   done
 }
 

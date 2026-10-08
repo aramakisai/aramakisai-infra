@@ -53,7 +53,6 @@ DR_ANSIBLE_INVENTORY="${DR_ANSIBLE_INVENTORY:-${REPO_ROOT}/ansible/inventory/tai
 [[ "${DR_LOCAL_TEST}" == "1" ]] && DR_SKIP_INFRA=1
 
 HCLOUD_API="https://api.hetzner.cloud/v1"
-TS_API="https://api.tailscale.com/api/v2"
 TFC_API="https://app.terraform.io/api/v2"
 ENDPOINTS=(
   "https://idp.aramakisai.com"
@@ -128,36 +127,8 @@ inventory_init_host() {
 # Tailscale (OAuth クライアント。devices:core の書込スコープが必要)
 # ============================================================
 
-ts_token() {
-  local response
-  response=$(curl -sf -X POST "${TS_API}/oauth/token" \
-    -d "client_id=${TAILSCALE_OAUTH_CLIENT_ID}" \
-    -d "client_secret=${TAILSCALE_OAUTH_CLIENT_SECRET}") || return 1
-  echo "${response}" | jq -r '.access_token // empty'
-}
-
-ts_devices() {
-  local token="$1"
-  curl -sf -H "Authorization: Bearer ${token}" "${TS_API}/tailnet/${TAILSCALE_TAILNET}/devices"
-}
-
-# 非 ephemeral のため再作成すると旧デバイスと `<name>-N` で重複する。両方を対象にする。
-# 引数: devices JSON, ノード名, 状態 (online|offline|any)
-ts_device_ids() {
-  local json="$1" node="$2" state="${3:-any}"
-  echo "${json}" | jq -r --arg n "${node}" --arg s "${state}" '
-    .devices[]
-    | select((.hostname // "") | test("^" + $n + "(-[0-9]+)?$"))
-    | select($s == "any" or ($s == "online" and .connectedToControl == true)
-                         or ($s == "offline" and .connectedToControl != true))
-    | .id'
-}
-
-# hostname が完全一致で接続中のデバイスがあるか (新ノードの登録確認)
-ts_node_registered() {
-  echo "$1" | jq -e --arg n "$2" \
-    '[.devices[] | select((.hostname // "") == $n and .connectedToControl == true)] | length > 0' >/dev/null
-}
+# shellcheck source=/dev/null
+source "$(dirname "${BASH_SOURCE[0]}")/tailscale-devices.sh"
 
 # ============================================================
 # 生存確認ゲート (読み取り専用)
@@ -407,17 +378,10 @@ tfc_target_apply() {
   record "Terraform apply 完了 (${label}, run: ${run_id})"
 }
 
-# 非 ephemeral のため再作成すると旧デバイスと `<name>-N` で重複する。
+# 非 ephemeral のため再作成すると旧デバイスと重複し、MagicDNS 名が旧デバイスに解決される。
 # plan 検査を通った後・apply の直前に、対象名一致 かつ offline のものだけ ID 指定で削除する。
 delete_stale_tailscale_devices() {
-  local token devices id
-  token=$(ts_token) || die "Tailscale OAuth token の取得に失敗しました"
-  devices=$(ts_devices "${token}") || die "Tailscale デバイス一覧の取得に失敗しました"
-  for id in $(ts_device_ids "${devices}" "${TFC_SCOPE_NODE}" offline); do
-    log "Tailscale 旧デバイス削除: ${id}"
-    curl -sf -X DELETE -H "Authorization: Bearer ${token}" "${TS_API}/device/${id}" >/dev/null \
-      || die "デバイス削除に失敗しました (${id})。OAuth クライアントに devices:core の書込スコープが必要です"
-  done
+  ts_purge_stale "${TFC_SCOPE_NODE}" || die "Tailscale 旧デバイスの削除に失敗しました"
 }
 
 recreate_node() {
@@ -447,14 +411,21 @@ poweron_node() {
   record "${node} を電源投入しました (Tailscale デバイスは保持)"
 }
 
+# 登録済みの判定は .name (MagicDNS 名) が <node> のまま、かつサーバー作成後に登録されたデバイスに限る。
+# 旧デバイスが残ると新デバイスの名前は <node>-N になり、Ansible は旧デバイスへ接続して失敗する。
 wait_tailscale_registered() {
-  local node="$1" elapsed=0 timeout=600 token devices
+  local node="$1" elapsed=0 timeout=600 token devices since
+  since=$(curl -sf -H "Authorization: Bearer ${HCLOUD_TOKEN}" "${HCLOUD_API}/servers?name=${node}" \
+    | jq -r '.servers[0].created // empty') || since=""
   while true; do
-    if token=$(ts_token) && devices=$(ts_devices "${token}") && ts_node_registered "${devices}" "${node}"; then
+    if token=$(ts_token) && devices=$(ts_devices "${token}") && ts_node_registered "${devices}" "${node}" "${since}"; then
       record "${node} が Tailscale に接続しました"
       return 0
     fi
-    ((elapsed >= timeout)) && die "${node} の Tailscale 接続がタイムアウトしました (${timeout}s)"
+    if ((elapsed >= timeout)); then
+      [[ -z "${devices:-}" ]] || ts_node_diag "${devices}" "${node}" | while read -r line; do log "  ${line}"; done
+      die "${node} の Tailscale 接続がタイムアウトしました (${timeout}s)。旧デバイスが残ると MagicDNS 名が <node>-N になります"
+    fi
     log "未接続 (${elapsed}s)"
     sleep 15
     elapsed=$((elapsed + 15))

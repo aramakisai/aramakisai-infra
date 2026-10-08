@@ -187,18 +187,13 @@ curl -sf -H "Authorization: Bearer $HCLOUD_TOKEN" "https://api.hetzner.cloud/v1/
 
 ### ステップ 2: Tailscale 旧デバイス削除 (サーバーが不在のときのみ)
 
-OAuth クライアント (devices:core 書込) でアクセストークンを取得し、対象名一致 かつ offline のデバイスを ID 指定で削除する。
+対象名と同名系 (`^prod-node-1(-[0-9]+)?$`) で offline のデバイスだけを ID 指定で削除する。online のデバイスは別の生きたノードの可能性があるため削除しない。`recovery.sh` と同じ実装 (`.github/scripts/tailscale-devices.sh`) を使う。
 
 ```bash
-infisical run --env=prod -- bash -c '
-TOKEN=$(curl -sf -X POST https://api.tailscale.com/api/v2/oauth/token \
-  -d "client_id=$TAILSCALE_OAUTH_CLIENT_ID" -d "client_secret=$TAILSCALE_OAUTH_CLIENT_SECRET" | jq -r .access_token)
-curl -sf -H "Authorization: Bearer $TOKEN" \
-  "https://api.tailscale.com/api/v2/tailnet/$TAILSCALE_TAILNET/devices" \
-  | jq -r ".devices[] | select(.hostname | test(\"^prod-node-1(-[0-9]+)?$\")) | select(.connectedToControl != true) | .id"
-'
-# 出力された ID を確認し、デバイスごとに DELETE https://api.tailscale.com/api/v2/device/<id>
+infisical run --env=prod -- .github/scripts/tailscale-devices.sh purge prod-node-1
 ```
+
+旧デバイスが残ると、新デバイスの MagicDNS 名が `prod-node-1-1` になり、`prod-node-1` は旧 (offline) デバイスに解決されて Ansible が接続できない。
 
 ### ステップ 3: Terraform (対象ノードのみ)
 

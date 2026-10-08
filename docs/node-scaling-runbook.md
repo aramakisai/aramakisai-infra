@@ -83,6 +83,12 @@ ssh root@prod-node-1 'sha256sum /var/lib/rancher/k3s/server/db/snapshots/<ファ
 
 ### A-3. 追加ノードを作成する
 
+tailnet に `prod-node-2` / `prod-node-3` の旧デバイスが残っていると、新デバイスの MagicDNS 名が `<node>-1` になり接続に失敗する。作成前に同名系の offline デバイスを削除する (online のものは削除しない)。
+
+```bash
+infisical run --env=prod -- .github/scripts/tailscale-devices.sh purge prod-node-2 prod-node-3
+```
+
 対象を限定した plan で追加ノードの新規作成だけが示されることを確認してから apply する。対象無限定の plan は到達不能なプロバイダにより完了しないため、`-target` を使う。
 
 ```bash
@@ -98,9 +104,12 @@ cd ..
 
 `tailscale_tailnet_key.k3s_nodes` の `must be replaced` は設計どおりの既知の差分 (有効期限 1 時間)。
 
-作成後、`prod-node-2` / `prod-node-3` が Tailscale に接続し、互いに異なる物理ホストに配置されていることを確認する。
+作成後、`prod-node-2` / `prod-node-3` が Tailscale に接続し、互いに異なる物理ホストに配置されていることを確認する。`check` は MagicDNS 名が `<node>` のままで接続中のときだけ成功し、旧デバイスが残っていれば同名系デバイスの一覧を出して失敗する。
 
 ```bash
+for n in prod-node-2 prod-node-3; do
+  infisical run --env=prod -- .github/scripts/tailscale-devices.sh check "$n"
+done
 tailscale status | grep prod-node
 ```
 
@@ -301,18 +310,10 @@ make kubectl ARGS="delete deployment post-shrink"
     `terraform destroy -target` は使わない。
 
 3. Hetzner Console で課金が停止したこと (サーバーが存在しない) を確認する。
-4. **Tailscale の旧デバイスを削除する。** 残すと次回の作成時に別名で登録され、構成管理が接続できなくなる。対象名に一致し offline のデバイスだけを ID 指定で削除する ([docs/dr-runbook.md](dr-runbook.md) の手動フォールバック ステップ 2 と同じ手順。対象の正規表現を `^prod-node-(2|3)(-[0-9]+)?$` に変える)。
+4. **Tailscale の旧デバイスを削除する。** 残すと次回の作成時に別名で登録され、構成管理が接続できなくなる。対象名と同名系で offline のデバイスだけを ID 指定で削除する。
 
     ```bash
-    infisical run --env=prod -- bash -c '
-    TOKEN=$(curl -sf -X POST https://api.tailscale.com/api/v2/oauth/token \
-      -d "client_id=$TAILSCALE_OAUTH_CLIENT_ID" -d "client_secret=$TAILSCALE_OAUTH_CLIENT_SECRET" | jq -r .access_token)
-    curl -sf -H "Authorization: Bearer $TOKEN" \
-      "https://api.tailscale.com/api/v2/tailnet/$TAILSCALE_TAILNET/devices" \
-      | jq -r ".devices[] | select(.hostname | test(\"^prod-node-(2|3)(-[0-9]+)?$\")) | select(.connectedToControl != true) | [.id, .hostname] | @tsv"
-    '
-    # 出力された ID が prod-node-2 / prod-node-3 のものだけであることを目視し、デバイスごとに
-    # DELETE https://api.tailscale.com/api/v2/device/<id>
+    infisical run --env=prod -- .github/scripts/tailscale-devices.sh purge prod-node-2 prod-node-3
     ```
 
     削除後に `tailscale status | grep prod-node` で `prod-node-1` だけが残ることを確認する。2 日間は切断デバイスが実在ノードとして数えられ、`dr-trigger` のクォーラム判定が厳しめに出る。
@@ -326,13 +327,13 @@ make kubectl ARGS="delete deployment post-shrink"
 
 ---
 
-## 注意: recovery.sh のデバイス判定
+## Tailscale デバイスの重複と登録判定
 
-複数ノード構成の期間中は自動復旧が停止するが、単一ノードの `recovery.sh` には次の誤判定のリスクがある (今回は修正していない)。
+デバイスは非 ephemeral のため、サーバーを削除しても offline で残る。同名で再作成すると、新デバイスは `.hostname` が元の名前のまま `.name` (MagicDNS 名) だけが `<node>-N` になり、MagicDNS 名 `<node>` は旧デバイスに解決され続ける。
 
-- 同名ノードを旧デバイスの削除なしに再作成すると、新デバイスは `.name` (MagicDNS 名) だけが `<node>-1` になり、`.hostname` は同名のままである。
-- `ts_node_registered` は `.hostname` の完全一致と接続中のみを見るため、旧デバイスが残っていても「登録済み」と判定する。一方、Ansible が解決する MagicDNS 名は旧 (offline) デバイスを指し、接続に失敗する。
-- 手動で作成するときは、旧デバイスの削除後に残存 0 件を確認してから作成する。
+- `recovery.sh` は `terraform apply` の直前に、同名系 (`.hostname` が `^<node>(-[0-9]+)?$`) で offline のデバイスを削除する。
+- 登録済みの判定は、`.name` の先頭ラベルが `<node>` と完全一致し、接続中で、`.created` がサーバー作成時刻以降のデバイスがあることを条件にする。満たさないままタイムアウトすると、同名系デバイスの一覧をログに出して失敗する。
+- 手動で作成するときは A-3 の `tailscale-devices.sh purge` を先に実行する。実装は `.github/scripts/tailscale-devices.sh` に一本化し、`scripts/scaletest/scaletest.sh` も同じ関数を使う。
 
 ---
 
