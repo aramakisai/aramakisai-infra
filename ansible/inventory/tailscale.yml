@@ -28,7 +28,9 @@ all:
     # prod-node-1 の k3s-bootstrap / k3s-upgrade も実行できなくなる。
     # 実機を作成してから、prod-node-1 と同じ形式 (k3s_role: server, k3s_private_ip) で追加する。
     k3s_server_worker:
-      hosts: {}
+      hosts:
+        prod-node-2: {ansible_host: prod-node-2, k3s_role: server, k3s_private_ip: 10.0.1.2}
+        prod-node-3: {ansible_host: prod-node-3, k3s_role: server, k3s_private_ip: 10.0.1.3}
 
   vars:
     ansible_user: root
