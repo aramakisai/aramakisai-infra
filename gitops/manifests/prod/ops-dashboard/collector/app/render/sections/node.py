@@ -11,17 +11,14 @@ def _bar(item):
 
 
 def _gauges(items):
-    by = {i.key: i for i in items}
     rows = []
     for k in ("cpu", "memory", "disk"):
-        i = by.get(k)
-        if i is None:
-            continue
-        v = i.values
-        f = fmt_int if k == "cpu" else fmt_bytes
-        rows.append([label(f"gauge.{k}"), _bar(i),
-                     label("gauge.value", ratio=fmt_int(v["ratio"]), used=f(v["used"]), total=f(v["total"])),
-                     status_cell(i)])
+        for i in (i for i in items if i.key.split(":")[0] == k):
+            v = i.values
+            f = fmt_int if k == "cpu" else fmt_bytes
+            rows.append([f'{label(f"gauge.{k}")} ({i.label})', _bar(i),
+                         label("gauge.value", ratio=fmt_int(v["ratio"]), used=f(v["used"]), total=f(v["total"])),
+                         status_cell(i)])
     return table(["", "", "", label("col.state")], rows, num_cols=(2,))
 
 
@@ -36,9 +33,9 @@ def _maintenance(items):
         v = o.values
         if v:
             sec = v.get("security_fixable_count")
-            rows += [[label("col.patches"), fmt_int(v.get("upgradable_count"))],
-                     [label("col.security"), "-" if sec is None else fmt_int(sec)],
-                     [label("col.reboot"), label("reboot.required" if v.get("reboot_required") else "reboot.not_required")]]
+            rows += [[f'{label("col.patches")} ({o.label})', fmt_int(v.get("upgradable_count"))],
+                     [f'{label("col.security")} ({o.label})', "-" if sec is None else fmt_int(sec)],
+                     [f'{label("col.reboot")} ({o.label})', label("reboot.required" if v.get("reboot_required") else "reboot.not_required")]]
         if o.status.value == "stale":
             out = f'<p>{status_cell(o)}</p>'
     return f'{table(["", ""], rows)}{out}'

@@ -99,6 +99,12 @@ limits = { storage_gb = 1_000, price_month = 6.49 }
 [[servers]]
 name = "prod-node-1"
 
+[[servers]]
+name = "prod-node-2"
+
+[[servers]]
+name = "prod-node-3"
+
 [thresholds]
 warn_ratio = 0.8
 cert_warn_days = 21
