@@ -16,7 +16,7 @@ infisical run -- ansible-playbook k3s-bootstrap.yml
 
 ノードへの SSH は Tailscale 経由のみ。パブリックポート 22 は開放しない。
 
-tailnet policy (ACL) は `terraform/tailscale-acl.hujson.tftpl` を正本とし、`tailscale_acl.this` で管理する (Admin console で直接編集しない)。tagOwners の個人アカウントは公開リポジトリに載せないため、テンプレート変数 `tailscale_acl_owner_email` (sensitive、Infisical の `TF_VAR_tailscale_acl_owner_email`) から注入する。Terraform 用 OAuth クライアントには `policy_file` scope (Read/Write) が必要。
+tailnet policy (ACL) は `terraform/tailscale-acl.hujson.tftpl` を正本とし、`tailscale_acl.this` で管理する (Admin console で直接編集しない)。tagOwners の個人アカウントは公開リポジトリに載せないため、テンプレート変数 `tailscale_acl_owner_email` (sensitive、Infisical の `TF_VAR_tailscale_acl_owner_email`) から注入する。Terraform 用 OAuth クライアントには `policy_file` scope (Read/Write) が必要。 grants は許可リスト方式で、autogroup:member から tag:k3s-node・autogroup:self・tag:scaletest へは全ポート、tag:ci から tag:k3s-node へは tcp 22・6443・10250 のみ許可する。tag:k3s-node と tag:scaletest は src にならない (ノード間は private network、検証 VM は他デバイスへ到達不可)。tag:scaletest (owner は autogroup:admin) は festival-peak-scaleout の検証 VM 用。`tests` セクションで tag:ci の到達可否と tag:scaletest の遮断を保存のたびに検証する。
 
 ## Core Technologies
 

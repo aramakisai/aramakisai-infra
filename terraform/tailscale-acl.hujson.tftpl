@@ -13,13 +13,14 @@
 	// Define grants that govern access for users, groups, autogroups, tags,
 	// Tailscale IP addresses, and subnet ranges.
 	"grants": [
-		// Allow all connections.
-		// Comment this section out if you want to define specific restrictions.
-		{
-			"src": ["*"],
-			"dst": ["*"],
-			"ip":  ["*"],
-		},
+		// 全許可は置かない。tag:k3s-node と tag:scaletest は src にしない:
+		// ノード間は Hetzner private network で tailnet を使わず、検証 VM から他デバイスへは一切届かせないため。
+		{"src": ["autogroup:member"], "dst": ["tag:k3s-node"], "ip": ["*"]},
+		{"src": ["autogroup:member"], "dst": ["autogroup:self"], "ip": ["*"]},
+		{"src": ["autogroup:member"], "dst": ["tag:scaletest"], "ip": ["*"]},
+
+		// CI: ssh (ansible)、kube-apiserver、kubelet stats (infra-health-check)。
+		{"src": ["tag:ci"], "dst": ["tag:k3s-node"], "ip": ["tcp:22", "tcp:6443", "tcp:10250"]},
 
 		// Allow users in "group:example" to access "tag:example", but only from
 		// devices that are running macOS and have enabled Tailscale client auto-updating.
@@ -66,14 +67,19 @@
 		"tag:aramakisai": ["${owner_email}"],
 		"tag:k3s-node":   ["autogroup:admin"],
 		"tag:ci":         ["autogroup:admin", "${owner_email}"],
+		"tag:scaletest":  ["autogroup:admin"],
 	},
 
-	// Test access rules every time they're saved.
-	// "tests": [
-	//   {
-	//       "src": "alice@example.com",
-	//       "accept": ["tag:example"],
-	//       "deny": ["100.101.102.103:443"],
-	//   },
-	// ],
+	// 保存のたびに検証される。
+	"tests": [
+		{
+			"src":    "tag:ci",
+			"accept": ["tag:k3s-node:22", "tag:k3s-node:6443", "tag:k3s-node:10250"],
+			"deny":   ["tag:k3s-node:80", "tag:k3s-node:2379"],
+		},
+		{
+			"src":  "tag:scaletest",
+			"deny": ["tag:k3s-node:22", "tag:k3s-node:6443", "tag:k3s-node:10250", "tag:k3s-node:443"],
+		},
+	],
 }
