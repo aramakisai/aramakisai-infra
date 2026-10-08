@@ -20,7 +20,7 @@ services:
         url: "https://webmail.aramakisai.com"
       - name: "Discord"
         icon: "fab fa-discord"
-        url: "https://discord.gg/F7d5AkS5PC"
+        url_env: PORTAL_DISCORD_URL
       - name: "アカウント設定"
         icon: "fas fa-user-shield"
         url: "https://idp.aramakisai.com/ui/console/users/me"
