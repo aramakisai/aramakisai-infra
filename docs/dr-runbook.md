@@ -325,6 +325,8 @@ ReplicationSource は schedule を待たず **作成直後に同期を開始す�
 
 残存 etcd メンバーがいる場合、自動復旧は停止する。クォーラムが生きていれば、障害ノードを cluster から外して再作成し join する。クォーラムが失われている場合は残存メンバーで etcd を `--cluster-reset` してから join する。どちらも `k3s-bootstrap.yml` を使い、`k3s_cluster_init` が付いたホストを再実行しないこと (etcd が分断される)。
 
+計画的なノードの追加・削除は [docs/node-scaling-runbook.md](node-scaling-runbook.md) に従う。
+
 ---
 
 ## 侵入対応 (intrusion-response.yml)
