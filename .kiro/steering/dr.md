@@ -16,6 +16,10 @@
 - **生存確認ゲート**: `recovery.sh` は冒頭で Hetzner サーバー状態・Tailscale・公開エンドポイント・
   `kubectl get nodes` を読み取り専用で確認し、生存または判定不能を示すシグナルが1つでもあれば停止する
   (`force` でのみ上書き)
+- **Tailscale 旧デバイスの扱い**: デバイスは非 ephemeral でサーバー削除後も残り、同名再作成で新デバイスの
+  MagicDNS 名が `<node>-N` になる。作成前に同名系の offline デバイスだけを削除し (online は削除しない)、
+  登録済みは `.name` の先頭ラベルが `<node>` と完全一致・接続中・`.created` がサーバー作成後で判定する。
+  実装は `.github/scripts/tailscale-devices.sh` (recovery.sh と scaletest.sh が共用)
 - **対象は単一ノード構成のみ**: 他の Hetzner サーバー (残存 etcd メンバー候補) があるときや、
   inventory の cluster-init ホスト以外が対象のときは自動復旧せず停止し、手動手順に委ねる
 - **idp単体障害ではノード扱いしない**: 1エンドポイントのみ応答なしでTailscaleオンラインの場合は

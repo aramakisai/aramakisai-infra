@@ -77,7 +77,7 @@ DEVICES='{"devices":[
 assert_eq "offline の削除対象は対象ノード名一致のみ" "old stale-dup" "$(ts_device_ids "${DEVICES}" prod-node-1 offline | tr '\n' ' ' | sed 's/ $//')"
 assert_eq "接続中の重複デバイスは削除対象外" "dup" "$(ts_device_ids "${DEVICES}" prod-node-1 online)"
 ts_node_registered "${DEVICES}" prod-node-1; assert_eq "完全一致で接続中でなければ未登録" 1 $?
-ts_node_registered '{"devices":[{"hostname":"prod-node-1","connectedToControl":true},{"connectedToControl":true}]}' prod-node-1
+ts_node_registered '{"devices":[{"hostname":"prod-node-1","name":"prod-node-1.tn.ts.net","connectedToControl":true},{"connectedToControl":true}]}' prod-node-1
 assert_eq "hostname 欠落デバイスが混ざっても登録済みを判定できる" 0 $?
 
 echo ""
