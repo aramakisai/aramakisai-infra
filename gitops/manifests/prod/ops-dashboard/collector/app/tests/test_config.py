@@ -89,7 +89,11 @@ class ProductionFileTest(unittest.TestCase):
     def test_production_toml_loads(self):
         path = Path(__file__).resolve().parents[2] / "dashboard.toml"
         cfg = config.load(path)
-        self.assertIn("prod-node-1", [s.name for s in cfg.servers])
+        self.assertEqual([s.name for s in cfg.servers], ["prod-node-1", "prod-node-2", "prod-node-3"])
+        from plan import server_diff
+        from helpers import FIXED_NOW
+        running = [{"name": s.name, "status": "running"} for s in cfg.servers]
+        self.assertEqual(server_diff(cfg, running, FIXED_NOW), ([], []))
         services = {p.service for p in cfg.plans}
         self.assertEqual(services, set(config.KNOWN_SERVICES))
         workers = [p for p in cfg.plans if p.service == "cloudflare_workers"]

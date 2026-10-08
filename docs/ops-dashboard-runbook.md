@@ -14,6 +14,10 @@
 - admin 専用の項目は `portal/admin-overlay.yaml` に書く。
 - 生成の検証: `portal/test-generate.sh`。
 
+## ノード表示の範囲
+
+CPU・メモリ使用率と K3s バージョン (ノード間で異なれば両方を表示して警告) は `[[servers]]` に列挙した全ノードを表示する。ディスク使用率と OS パッチ・再起動要否は collector Pod の hostPath から読むため、collector の動く `prod-node-1` の値のみを表示し、行名にノード名を付ける。
+
 ## プラン・期待サーバーの宣言
 
 `gitops/manifests/prod/ops-dashboard/collector/dashboard.toml` を編集して PR を出す。collector は起動時に検証し、誤りがあると起動に失敗する (ConfigMap 反映後に Pod を再起動して確認する)。

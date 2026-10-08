@@ -40,14 +40,14 @@ class Node(unittest.TestCase):
         return {
             "node.resources": res(
                 "node.resources",
-                Item("cpu", "prod-node-1", Status.OK, {"ratio": 12.5, "used": 0.5, "total": 4.0}),
-                Item("memory", "prod-node-1", Status.OK, {"ratio": 50.0, "used": 4e9, "total": 8e9}),
+                Item("cpu:prod-node-1", "prod-node-1", Status.OK, {"ratio": 12.5, "used": 0.5, "total": 4.0}),
+                Item("memory:prod-node-1", "prod-node-1", Status.OK, {"ratio": 50.0, "used": 4e9, "total": 8e9}),
                 Item("disk", "prod-node-1", Status.CRIT, {"ratio": disk, "used": 91e9, "total": 100e9},
                      "ディスク使用率が 85% を超えています (Discord 通知の対象)")),
             "node.maintenance": res(
                 "node.maintenance",
                 Item("k3s", "k3s", Status.WARN, {"running": "v1.31.0+k3s1", "latest": "v1.32.3+k3s1"}, "新しいバージョンがあります"),
-                os_item or Item("os", "os", Status.WARN, {"generated_at": "x", "upgradable_count": 3,
+                os_item or Item("os", "prod-node-1", Status.WARN, {"generated_at": "x", "upgradable_count": 3,
                                                           "security_fixable_count": 1, "reboot_required": True})),
         }
 
@@ -56,6 +56,19 @@ class Node(unittest.TestCase):
         for s in ("CPU 使用率", "メモリ使用率", "ディスク使用率", "91% (91.0 GB / 100.0 GB)", "85% を超えています",
                   "<svg", "v1.31.0+k3s1", "v1.32.3+k3s1", "新しいバージョンがあります", "再起動が必要", "未適用の更新"):
             self.assertIn(s, h)
+
+    def test_three_nodes_rendered_per_node(self):
+        snap = self.snap()
+        extra = [Item(f"{k}:prod-node-{n}", f"prod-node-{n}", Status.OK, {"ratio": 10.0 * n, "used": 1.0, "total": 4.0})
+                 for n in (2, 3) for k in ("cpu", "memory")]
+        snap["node.resources"] = res("node.resources", *snap["node.resources"].items, *extra)
+        h = node.render(snap, {})
+        for n in (1, 2, 3):
+            self.assertIn(f"CPU 使用率 (prod-node-{n})", h)
+            self.assertIn(f"メモリ使用率 (prod-node-{n})", h)
+        self.assertIn("ディスク使用率 (prod-node-1)", h)
+        self.assertNotIn("ディスク使用率 (prod-node-2)", h)
+        self.assertIn("再起動 (prod-node-1)", h)
 
     def test_stale_state_file(self):
         h = node.render(self.snap(os_item=Item("os", "os", Status.STALE, {}, "情報が古くなっています")), {})
