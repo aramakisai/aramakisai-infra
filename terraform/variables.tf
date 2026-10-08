@@ -48,6 +48,13 @@ variable "tailscale_api_key" {
   # 環境変数 TF_VAR_tailscale_api_key または TAILSCALE_API_KEY から設定
 }
 
+variable "tailscale_acl_owner_email" {
+  description = "tailnet policy の tagOwners に記載する個人アカウント (tag:aramakisai / tag:ci の owner)"
+  type        = string
+  sensitive   = true
+  # 公開リポジトリにメールアドレスを置かないため Infisical の TF_VAR_tailscale_acl_owner_email から注入する
+}
+
 # ============================================================
 # Cloudflare
 # ============================================================

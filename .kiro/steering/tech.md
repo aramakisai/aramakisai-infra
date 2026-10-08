@@ -16,6 +16,8 @@ infisical run -- ansible-playbook k3s-bootstrap.yml
 
 ノードへの SSH は Tailscale 経由のみ。パブリックポート 22 は開放しない。
 
+tailnet policy (ACL) は `terraform/tailscale-acl.hujson.tftpl` を正本とし、`tailscale_acl.this` で管理する (Admin console で直接編集しない)。tagOwners の個人アカウントは公開リポジトリに載せないため、テンプレート変数 `tailscale_acl_owner_email` (sensitive、Infisical の `TF_VAR_tailscale_acl_owner_email`) から注入する。Terraform 用 OAuth クライアントには `policy_file` scope (Read/Write) が必要。
+
 ## Core Technologies
 
 - **IaC**: Terraform >= 1.9、tfstate は Terraform Cloud で管理
@@ -89,7 +91,7 @@ Authentik 時代の定義は `terraform/authentik_*.tf.disabled` として残す
   - 残存リスク: main への悪意ある変更がレビューを通る、または管理者 bypass でマージされた場合、発行済みの不正証明書は有効期限まで失効できない。検知後にできるのは main の修正と binding の削除で、発行済み証明書を無効にできるのは client CA の forced rotation だけ (手順と戻し方は `.kiro/specs/kube-github-auth/design.md` の「client CA forced rotation の手順」)。write 権限保持者のアカウントが乗っ取られた場合は、その本人の binding の範囲で証明書を取得され得る
   - **レビューの扱い**: `kube-cert-issue.yml`・`kube-cert-validate.sh`・`kube-oidc.sh`・`kube-access/` の RBAC・`k3s-server` ロールの認証設定の変更は、cluster-admin 権限の変更と同じ扱いでレビューする
 - **Environment `dr-recovery`**: 承認者は team `infra` で、起動者本人の承認を認める (別メンバーの確認は保証しない)。管理者 bypass 無効・deployment branch は main のみ。`dr-recovery.yml` が実行時に `verify-environment-protection.sh` で required reviewers (1 件以上)・管理者 bypass 無効・main 限定を検査し、満たさなければ DR を開始しない (Environment が未作成だと GitHub が承認なしで自動作成するため)。team へのメンバー追加は手動 (Terraform 管理外)
-- **再検証が必要になる条件**: 許可ワークフローの追加・改名、リポジトリ・組織の移転・改名、GitHub OIDC の claim 形式の変更、k3s アップグレード (signer 設定・匿名認証の既定値)、Environment の名前・保護設定・team 構成の変更、ノード名・`tls-san` の変更、Tailscale ACL の変更 (`tag:ci` から 6443・10250 への到達が前提で、ACL は手動管理のため機械的に検知できない)
+- **再検証が必要になる条件**: 許可ワークフローの追加・改名、リポジトリ・組織の移転・改名、GitHub OIDC の claim 形式の変更、k3s アップグレード (signer 設定・匿名認証の既定値)、Environment の名前・保護設定・team 構成の変更、ノード名・`tls-san` の変更、Tailscale ACL の変更 (`tag:ci` から 6443・10250 への到達が前提で、ACL の変更は PR 差分でしか検知できない)
 
 ### Terraform の出力パラメータと外部連携
 - **healthchecksio_mailserver_backup_ping_url**: mailserver バックアップの生存確認用。Infisical の `HEALTHCHECKS_MAILSERVER_BACKUP_PING_URL` へ反映。
@@ -207,7 +209,7 @@ ssh root@prod-node-1 "systemctl status os-update-notify.timer; cat /var/run/rebo
 ```
 
 ### Infisical で管理するシークレット一覧
-- **IaC & 認証**: `HCLOUD_TOKEN`, `CLOUDFLARE_API_TOKEN`, `TAILSCALE_OAUTH_CLIENT_ID`, `TAILSCALE_OAUTH_CLIENT_SECRET`, `TF_VAR_k3s_token`, `TF_VAR_tailscale_api_key`, `TF_VAR_authentik_cf_client_id`, `TF_VAR_authentik_cf_client_secret`, `TF_VAR_zitadel_cf_access_client_id`, `TF_VAR_zitadel_cf_access_client_secret`（`terraform/access.tf`のCloudflare Access向けZitadel OIDC IdP登録用。`ansible/roles/zitadel-bootstrap`が作成するcloudflare-access OIDC Applicationの発行値を登録する、`authentik_cf_client_id`と同じチキンエッグ回避パターン）
+- **IaC & 認証**: `HCLOUD_TOKEN`, `CLOUDFLARE_API_TOKEN`, `TAILSCALE_OAUTH_CLIENT_ID`, `TAILSCALE_OAUTH_CLIENT_SECRET`, `TF_VAR_k3s_token`, `TF_VAR_tailscale_api_key`, `TF_VAR_tailscale_acl_owner_email`, `TF_VAR_authentik_cf_client_id`, `TF_VAR_authentik_cf_client_secret`, `TF_VAR_zitadel_cf_access_client_id`, `TF_VAR_zitadel_cf_access_client_secret`（`terraform/access.tf`のCloudflare Access向けZitadel OIDC IdP登録用。`ansible/roles/zitadel-bootstrap`が作成するcloudflare-access OIDC Applicationの発行値を登録する、`authentik_cf_client_id`と同じチキンエッグ回避パターン）
 - **Ansible & 復旧**: `K3S_TOKEN`, `CLOUDFLARE_TUNNEL_TOKEN`, `CLOUDFLARE_TUNNEL_ID`, `INFISICAL_CLIENT_ID`, `INFISICAL_CLIENT_SECRET` (Infisical 読取用 CI identity。infisical-auth の素材も兼ねる), `ARGOCD_GITHUB_DEPLOY_KEY`, `CI_SSH_PRIVATE_KEY`, `TFC_API_TOKEN`, `TFC_WORKSPACE_ID`, `TAILSCALE_TAILNET` (復旧は `TAILSCALE_OAUTH_CLIENT_ID/SECRET` の書込権限付きクライアントを使用)
 - **Cloudflare Access (E2E CI)**: `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET`（`aramakisai-web` の Playwright E2E テストが Cloudflare Access の Authentik ログインを迂回するための Service Token。`terraform/access.tf` の `cloudflare_zero_trust_access_service_token.e2e_ci` が発行元。`aramakisai-web` 側 `staging-e2e-verification` spec が前提としていた secret 名と一致しており乖離なし）
 - **アプリ用シークレット**:
