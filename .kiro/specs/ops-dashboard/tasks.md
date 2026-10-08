@@ -170,13 +170,13 @@ main へのマージは ArgoCD により即時に本番へ反映される。各�
   - ArgoCD Application はまだ追加せず、`kustomize build` が成功する
   - _Requirements: 4.2, 16.1, 16.3, 16.4, 17.1_
 
-- [ ] 8. ポータルと運用ダッシュボードを本番に投入する
+- [x] 8. ポータルと運用ダッシュボードを本番に投入する
 - [x] 8.1 ops-dashboard Application を追加して本番に投入する
   - 1.3 と 2.2 の確認が済んでから、Application を追加してマージする
   - ArgoCD 上で Synced・Healthy になり、`https://dash.aramakisai.com/` にアクセスすると Zitadel のログインへ誘導されることを確認する
   - _Depends: 1.3, 2.2, 3.3, 7_
   - _Requirements: 1.2, 1.3, 16.1, 16.5_
-- [ ] 8.2 ロールごとのアクセスを本番で確認する
+- [x] 8.2 ロールごとのアクセスを本番で確認する
   - executive のみ・executive と admin・ロールなしの 3 種類のアカウントで、共通ページ・admin 導線・運用ダッシュボード・拒否ページ・設定ファイルの直接取得が設計どおりになることを確認する
   - admin ロールを外したアカウントが、cookie の refresh 間隔 (1 時間) 以内に運用ダッシュボードを拒否されることを確認する
   - 内部向け URL の Secret を一時的に欠落させても、該当リンク以外が表示されることを確認する
@@ -192,7 +192,7 @@ main へのマージは ArgoCD により即時に本番へ反映される。各�
   - mail-agent が Ready になり、mailserver Pod に再起動が発生しないことを確認する
   - _Depends: 6.2_
   - _Requirements: 11.1, 14.1, 16.1, 16.3_
-- [ ] 9.2 mailserver の状態とログを PVC に永続化する
+- [x] 9.2 mailserver の状態とログを PVC に永続化する
   - 状態用とログ用の PVC を追加し、mailserver と mail-agent (読み取り専用) にマウントする。mailserver Pod の再作成を伴うため、計画した時間帯にマージする
   - 再作成後に、送受信・IMAP/SMTP 認証・Roundcube ログインが通ること、fail2ban の BAN が DB から復元されること、キューが引き継がれることを確認する
   - 運用ダッシュボードにキュー・配送失敗・fail2ban が表示されることを確認する
@@ -203,7 +203,7 @@ main へのマージは ArgoCD により即時に本番へ反映される。各�
   - 次に届いた DMARC・TLS-RPT レポートが運用ダッシュボードに表示されることを確認する
   - _Requirements: 11.2, 11.3, 15.1, 15.2, 15.4_
 
-- [ ] 10. Falco を統合する
+- [x] 10. Falco を統合する
   - collector を `user_known_contact_k8s_api_server_activities` に Namespace とイメージで追記し、Falcosidekick に collector への webhook 出力と認証ヘッダーを追加する
   - テストイベントが Discord と運用ダッシュボードの両方に現れることを確認する
   - 投入後 24 時間、本仕様のコンポーネント由来の検知が発生していないことを確認する
@@ -219,14 +219,14 @@ main へのマージは ArgoCD により即時に本番へ反映される。各�
   - ユーザーが playbook を実行した後、状態ファイルが生成され、運用ダッシュボードに未適用の更新と再起動要否が表示されることを確認する
   - _Requirements: 7.5, 7.6_
 
-- [ ] 12. Zitadel に直接ログインした後の遷移先をポータルにする
+- [x] 12. Zitadel に直接ログインした後の遷移先をポータルにする
   - zitadel-login に遷移先の環境変数を設定する。8.2 の確認が済むまでマージしない
   - (ユーザー実行) zitadel Application を手動 sync する
   - executive のアカウントで Zitadel に直接ログインするとポータルに着地し、executive を持たないアカウントでは拒否ページに着地することを確認する。各アプリ経由のログインの遷移先が変わらないことを確認する
   - _Depends: 8.2_
   - _Requirements: 1.1, 1.5_
 
-- [ ] 13. メモリ使用量を実測して上限を合わせる
+- [x] 13. メモリ使用量を実測して上限を合わせる
   - 全コンポーネントの投入後、各コンテナの実メモリを一定期間測り、requests/limits を実測値に合わせる。上限を超える場合は、引き上げる前に増加要因を調べる
   - prod-node-1 全体のメモリ使用率が既存の判断基準の範囲内であることを確認する
   - _Depends: 9.3, 10, 11.2_
