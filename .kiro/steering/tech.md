@@ -174,6 +174,8 @@ Grafana Cloud は解約済みで使用しない。単一ノード (CX33) のメ�
 
 Netdata・Falco はいずれもリソース予算 (requests/limits) を明示的に絞ってデプロイしている。値を変更する際は `make kubectl ARGS="top pod -n monitoring"` で実メモリを確認すること。
 
+Netdata child は chart を `3.7.175` に固定し、`[db] mode = ram` / `retention = 1024` (閲覧できる履歴は約 17 分。parent は無効で streaming もしないため、これより古いデータは残らない) とし、`[plugins]` で `netflow`・`scripts.d`・`network-viewer` を無効化している。ram モードは dimension ごとに retention 分の点を確保するため、メモリは retention に比例する。chart のバージョンを上げる際は同梱プラグインの増減とメモリ増加を確認すること。
+
 ### 監視の誤検知除外設定 (Falco カスタムルール)
 eBPF ランタイム侵入検知（Falco）において、コントロールプレーン連携やコンテナ固有の正常な動作によるアラート誤検知を回避するため、以下の除外ルール（`gitops/helm-values/prod/falco.yaml`）を適用している：
 - **k8s API サーバーアクセス除外**: `argocd`、`authentik`、`cloudnative-pg-operator`、`netdata`、CNPG postgres ポッドのインスタンスマネージャ（`proc.name=manager`、PostgreSQL 16.8）、および `vaultwarden-rbac-sync`（`docker.io/alpine/k8s` イメージ、cronjob=`sync` / trigger receiver=`trigger-receiver`）による API 定常アクセスを除外。※`container.image.repository` はレジストリ接頭辞込み（`docker.io/alpine/k8s`）で一致させる必要があり、接頭辞を欠くと除外が無効化される点に注意。
