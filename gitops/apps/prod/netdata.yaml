@@ -15,7 +15,7 @@ spec:
   source:
     repoURL: https://netdata.github.io/helmchart
     chart: netdata
-    targetRevision: "3.*"
+    targetRevision: "3.7.175"
     helm:
       valuesObject:
         parent:
@@ -39,6 +39,13 @@ spec:
               data: |
                 [db]
                   mode = ram
+                  # ram モードは dimension ごとに retention 分の点を確保するため、保持を縮めてメモリを抑える。
+                  retention = 1024
+                [plugins]
+                  # 閲覧専用の child では不要で、メモリを消費するか毎分エラーを出すため無効化する。
+                  netflow = no
+                  scripts.d = no
+                  network-viewer = no
                 [web]
                   bind to = localhost:19999
                 [health]
