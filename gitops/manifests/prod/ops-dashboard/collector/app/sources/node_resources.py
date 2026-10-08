@@ -44,7 +44,12 @@ def fetch(ctx):
     items = []
     for n in nodes:
         name = n["metadata"]["name"]
-        usage, cap = metrics[name], n["status"]["capacity"]
+        usage, cap = metrics.get(name), n["status"]["capacity"]
+        if usage is None:
+            # 再起動直後のノードは metrics-server に現れないことがある。他ノードの表示は残す。
+            items += [Item(f"{k}:{name}", name, Status.STALE, {}, label("note.metrics_missing"))
+                      for k in ("cpu", "memory")]
+            continue
         items += [
             _ratio_item(f"cpu:{name}", name, lambda r: (Status.OK, None), quantity(usage["cpu"]), quantity(cap["cpu"])),
             _ratio_item(f"memory:{name}", name, mem, quantity(usage["memory"]), quantity(cap["memory"])),

@@ -102,6 +102,7 @@ LABELS: dict[str, str] = {
     "gauge.memory": "メモリ使用率",
     "gauge.disk": "ディスク使用率",
     "gauge.value": "{ratio}% ({used} / {total})",
+    "note.metrics_missing": "メトリクスを取得できません",
     "note.disk_alert": "ディスク使用率が 85% を超えています (Discord 通知の対象)",
     "col.k3s_running": "稼働中の K3s",
     "col.k3s_latest": "最新の K3s (stable)",
