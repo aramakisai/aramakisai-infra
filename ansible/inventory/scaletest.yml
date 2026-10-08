@@ -1,0 +1,34 @@
+---
+# festival-peak-scaleout の増減手順を Hetzner 実機で検証する inventory (scripts/scaletest/scaletest.sh が使う)。
+# 本番の inventory/tailscale.yml とは独立させ、本番ホストを一切含めない。
+# k3s_version は本番 inventory の値を scaletest.sh が extra vars で渡すため、ここには書かない。
+#
+# private IP (10.250.1.N) は scaletest.sh が作る専用 network のもの。tag:scaletest 同士は tailnet で
+# 通信できないため、K3s の join・etcd ピア・Cilium はすべて private IP で行う。
+
+all:
+  children:
+    # join 先の解決 (k3s-server ロールの config.yaml.j2) がこのグループの先頭要素に依存する
+    k3s_server:
+      hosts:
+        scaletest-1:
+          ansible_host: scaletest-1
+          k3s_role: server
+          k3s_cluster_init: true
+          k3s_private_ip: 10.250.1.1
+
+    k3s_server_worker:
+      hosts:
+        scaletest-2:
+          ansible_host: scaletest-2
+          k3s_role: server
+          k3s_private_ip: 10.250.1.2
+        scaletest-3:
+          ansible_host: scaletest-3
+          k3s_role: server
+          k3s_private_ip: 10.250.1.3
+
+  vars:
+    ansible_user: root
+    ansible_ssh_extra_args: "-o ConnectTimeout=10 -o UserKnownHostsFile=/dev/null"
+    k3s_token: "{{ lookup('env', 'K3S_TOKEN') }}"

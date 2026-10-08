@@ -1,0 +1,75 @@
+---
+# festival-peak-scaleout の増減手順を Hetzner 実機で検証するための playbook。
+# 本番 k3s-bootstrap.yml の Play 0 (swap のみ) / 1 / 2 / 3 に相当し、本番と同じ k3s-server・swap ロールを使う。
+# os-auto-update・cloudflared・ArgoCD・bootstrap Secret は含めない。含めると検証クラスタが本番の
+# Discord・Cloudflare Tunnel・Infisical・バックアップ先に接続してしまうため。
+#
+# 直接実行せず scripts/scaletest/scaletest.sh bootstrap を使う。helm_version / cilium_version /
+# cilium_values / k3s_version は同スクリプトが本番の playbook・inventory から読み取って渡し、
+# 本番側の更新に追従させる (二重管理しない)。
+
+- name: 実行対象が検証ホストだけで、バージョン変数が渡されていることを確認
+  # hosts: all + run_once: --limit で対象を絞っても、inventory 全体の検査が必ず走る
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: 検証ホスト以外が inventory に含まれず、本番由来の変数が揃っている
+      run_once: true
+      ansible.builtin.assert:
+        that:
+          - groups['all'] | reject('match', '^scaletest-[0-9]+$') | list | length == 0
+          - k3s_version is defined
+          - helm_version is defined
+          - cilium_version is defined
+          - cilium_values is defined
+        fail_msg: scripts/scaletest/scaletest.sh bootstrap 経由で、検証用 inventory を指定して実行すること
+
+- name: ホストの swap ファイル作成
+  hosts: all
+  become: true
+  roles:
+    - role: swap
+
+- name: K3s server (cluster-init) のセットアップ
+  hosts: k3s_server
+  become: true
+  roles:
+    - role: k3s-server
+
+- name: K3s server (join) のセットアップ
+  hosts: k3s_server_worker
+  become: true
+  serial: 1
+  roles:
+    - role: k3s-server
+
+- name: Cilium のインストール
+  hosts: k3s_server
+  run_once: true
+  become: true
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  tasks:
+    - name: Helm をインストール
+      ansible.builtin.shell: >-
+        curl -fsSL https://raw.githubusercontent.com/helm/helm/{{ helm_version }}/scripts/get-helm-3 | bash
+      environment:
+        DESIRED_VERSION: "{{ helm_version }}"
+      args:
+        creates: /usr/local/bin/helm
+
+    - name: Cilium をインストール・更新
+      ansible.builtin.command: >-
+        helm upgrade --install cilium cilium
+        --repo https://helm.cilium.io/
+        --version {{ cilium_version }}
+        --namespace kube-system
+        -f -
+        --wait --timeout=300s
+      args:
+        stdin: "{{ cilium_values | to_json }}"
+      changed_when: true
+
+    - name: 全ノードが Ready になるまで待機
+      ansible.builtin.command: kubectl wait node --all --for=condition=Ready --timeout=300s
+      changed_when: false

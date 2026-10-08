@@ -227,6 +227,7 @@ Zitadel からの SMTP 送信も失敗→認証失敗で再 BAN のループに�
 ## 参照先
 
 - DR 手順全文: `docs/dr-runbook.md`
+- ノード増減 (1 ⇄ 3 ノード) の手順と検証済み範囲: `docs/node-scaling-runbook.md`
 - 検出ワークフロー: `.github/workflows/dr-trigger.yml` / `.github/scripts/dr-trigger.sh`
 - 自動復旧スクリプト: `.github/scripts/recovery.sh`
 - 復旧ワークフロー: `.github/workflows/dr-recovery.yml`

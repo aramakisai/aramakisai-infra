@@ -31,6 +31,16 @@ variables.tf / outputs.tf  ← 変数・出力
 - ロールは `k3s-server`（K3s インストール・設定）、`swap`（全ノード共通のホスト側 OOM 安全弁）、`os-auto-update`（ホスト OS 自動更新設定の配布・結果通知）、`zitadel-bootstrap`（Zitadel リソース管理）、`zitadel-cutover`（Zitadel カットオーバーの事前条件確認・検証）で構成する
 - K3s 設定フラグは `k3s-server` ロールの `k3s_extra_args` で渡す
 
+### ノード増減 (festival-peak-scaleout)
+**目的**: 1 ノードと 3 ノードの一時拡張・縮退の手順と、その Hetzner 実機検証を再実行できる形で保持する
+```
+docs/node-scaling-runbook.md                ← スケールアウト・縮退の手順。各工程の検証環境 (k3d / Hetzner / 未検証) を明記
+scripts/scaletest/scaletest.sh              ← 検証専用 Hetzner プロジェクトに使い捨ての 3 ノードを作る・消すハーネス
+ansible/playbooks/scaletest-bootstrap.yml   ← 検証専用 playbook (k3s-server・swap ロール + Cilium。本番 k3s-bootstrap.yml は使わない)
+ansible/inventory/scaletest.yml             ← 検証専用 inventory (scaletest-1..3、本番ホストを含まない)
+```
+検証は Infisical の `staging` 環境 `/scaletest` の資格情報で行い、`prod` は使わない。Cilium・Helm・`k3s_version` は本番の playbook・inventory から読み取る。
+
 ### kube-apiserver 認証 (GitHub OIDC・短命証明書)
 **目的**: 共有 kubeconfig を使わず、CI・DR・人が kube-apiserver に認証する
 ```
