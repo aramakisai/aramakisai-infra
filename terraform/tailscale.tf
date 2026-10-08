@@ -13,3 +13,16 @@ resource "tailscale_tailnet_key" "k3s_nodes" {
 #   - terraform apply のたびに新しいキーが発行される (既存ノードは再接続不要)。
 #   - Tailscale ACL で var.tailscale_tags に対応するタグを事前に定義すること。
 #     例: "tag:k3s-node" を ACL の tagOwners に追加
+
+# tailnet policy は Admin console ではなくここを正本とする。
+# 現行 policy の取り込み時に差分を出さないよう、テンプレートはコメント含め原文のまま保つ。
+resource "tailscale_acl" "this" {
+  acl = templatefile("${path.module}/tailscale-acl.hujson.tftpl", {
+    owner_email = var.tailscale_acl_owner_email
+  })
+}
+
+import {
+  to = tailscale_acl.this
+  id = "acl"
+}
