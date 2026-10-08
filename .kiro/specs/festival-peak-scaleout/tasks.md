@@ -288,6 +288,7 @@
 - [ ] 6.2 ワークロードの配置を変更前へ戻す
   - レプリカ数と配置制約を変更前の値へ戻す
   - 削除対象ノード上で稼働するものを事前に減らす
+  - Zitadel 本体 (`gitops/manifests/prod/zitadel/deployment.yaml`) の replicas を 1 へ戻す
   - 完了状態: 対象ワークロードが変更前の構成で稼働していること
   - _Requirements: 7.12, 7.13_
 

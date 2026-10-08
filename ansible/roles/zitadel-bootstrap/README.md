@@ -2,7 +2,7 @@
 
 `infisical-auth` Secret作成と同型の、GitOps外の例外的初期化ロール。
 
-Zitadelは`gitops/manifests/prod/zitadel/statefulset.yaml`の`ZITADEL_FIRSTINSTANCE_*`
+Zitadelは`gitops/manifests/prod/zitadel/deployment.yaml`の`ZITADEL_FIRSTINSTANCE_*`
 環境変数により、初回起動時に一度だけ組織・管理者・Terraform provider用machine user
 (`terraform-provider`, role: `IAM_OWNER`)とPersonal Access Tokenを自動発行し、
 Pod内の一時ファイル(`/zitadel-data/zitadel-admin-sa.pat`)へ書き込む。このPATは

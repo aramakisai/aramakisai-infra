@@ -1,5 +1,7 @@
 ---
-# Zitadel api + login (Node.js別プロセス) StatefulSet
+# Zitadel api + login (Node.js別プロセス) Deployment
+# 永続ボリュームを持たない(/zitadel-data は emptyDir)ためノード障害時に別ノードへ再スケジュールされる
+# Deployment とし、複数レプリカを別ノードへ分散する。
 # login v2 UIは公式Nextjsコンテナ (ghcr.io/zitadel/zitadel-login) を同一Pod内の
 # 別コンテナとして起動する。Pod内のコンテナはnetwork namespaceを共有するため、
 # loginコンテナからzitadelコンテナへは localhost:8080 で到達できる
@@ -10,13 +12,18 @@
 # API(8080)へ振り分ける(Zitadel公式reverse proxy設定例と同じパス分割)。そのためlogin v2の
 # BASEURI/LoginURL/LogoutURLも公開ホスト名(idp.aramakisai.com)を指す。
 apiVersion: apps/v1
-kind: StatefulSet
+kind: Deployment
 metadata:
   name: zitadel
   namespace: zitadel
 spec:
-  serviceName: zitadel
-  replicas: 1
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      # setup は新バージョンのレプリカが 1 つずつ走るようにし、稼働中の Pod を落とさない
+      maxUnavailable: 0
   selector:
     matchLabels:
       app: zitadel
@@ -25,12 +32,23 @@ spec:
       labels:
         app: zitadel
     spec:
+      # 縮退後に 1 ノードになっても起動できるよう preferred 相当 (ScheduleAnyway)
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: zitadel
+          matchLabelKeys:
+            - pod-template-hash
       # Service名が"zitadel"のため、k8sが自動注入するDocker links形式の環境変数
       # (ZITADEL_PORT=tcp://...等) がZitadel自身のZITADEL_PORT設定と衝突し
       # "'Port' cannot parse value as 'uint16'"で起動失敗するため無効化する
       enableServiceLinks: false
       # ZITADEL_FIRSTINSTANCE_*PATPATH の書き出し先。インスタンス初期化時に一度だけ書かれ、
-      # DBが既にある状態でPodを再作成しても再発行されない (Pod再作成で中身は失われる)
+      # DBが既にある状態でPodを再作成しても再発行されない (Pod再作成で中身は失われる)。
+      # 新規構築時は初期化を実行した 1 Pod にだけ書かれる
       volumes:
         - name: zitadel-data
           emptyDir: {}
