@@ -4,7 +4,7 @@
 
 2026年11月14日〜15日の荒牧祭開催期間に向けて K3s クラスタを一時的に 3 ノード構成へスケールアウトし、イベント終了後にシングルノード構成へ戻す。
 
-現構成は `single-node-migration` spec によりコスト削減を目的として 3×CX23 の HA クラスタから 1×CX33 (2vCPU/8GB) のシングルノードへ移行済みである。単一ノードであるため etcd クォーラムの概念が存在せず、ノード障害時は `dr-trigger.yml` による検知とノード再作成 (コールドスタンバイ) に依存する。
+現構成は `single-node-migration` spec によりコスト削減を目的として 3×CX23 の HA クラスタから 1×CX33 (2vCPU/8GB) のシングルノードへ移行済みである。単一ノードであるため etcd クォーラムの概念が存在せず、ノード障害時は `dr-trigger.yml` による検知通知と、人が承認して起動する `dr-recovery.yml` によるノード再作成 (コールドスタンバイ) に依存する。
 
 イベント当日はアクセスが集中する一方、現構成が想定負荷に耐えるかを判断する実測値が存在しない。また復旧に要する時間の間サービスが停止する。
 
@@ -18,7 +18,7 @@
 - **Out of scope**: 共有ストレージ (Hetzner CSI 等) への移行、恒久的な HA 化、mailserver の冗長化 (ポート 25 の bind と RDNS により prod-node-1 に固定される)、停止中ワークロード (authentik・vaultwarden・room-presence) の再開および冗長化
 - **Adjacent expectations**:
   - `single-node-migration` (completed) が確立したシングルノード構成を、イベント期間に限り一時的に逸脱する。終了後は同 spec の構成へ復帰する
-  - `observability-v2` が提供する `dr-trigger.yml` / `dr-recovery.yml` は prod-node-1 単独構成を前提としており、3 ノード構成中の動作は未定義である
+  - `observability-v2` が提供する `dr-trigger.yml` (通知のみ) / `dr-recovery.yml` (人の起動と承認が必要) は prod-node-1 単独構成を前提としている
   - `ha-improvement` (cancelled) が要件 1 で定めた CNPG のレプリカ増加と別ノード配置は、本 spec が開催期間に限って再導入する。同 spec の PodDisruptionBudget 追加は対象外とする
 
 ## Requirements
@@ -74,7 +74,7 @@
 11. The 縮退手順 shall Hetzner サーバー削除後に Tailscale デバイスを削除する手順を含む
 12. If 検証中にクォーラム喪失またはクラスタ停止が発生した場合、then the インフラ担当者 shall 原因を特定し手順を修正したうえで再検証する
 13. The インフラ担当者 shall 検証完了後に手順を文書化し、どの工程をどの検証環境で確認したかを明記する
-14. The インフラ担当者 shall 検証完了後に検証クラスタのリソースを削除し、Tailscale デバイスも併せて削除する
+14. The インフラ担当者 shall 検証完了後に検証用のサーバー・network・firewall・primary IP と Tailscale デバイスを削除して 0 件を確認する。再検証用の Hetzner プロジェクト・SSH 鍵・Tailscale OAuth クライアント・Infisical のキーは残す
 
 ### Requirement 4: 本番スケールアウトの実行
 
@@ -115,11 +115,11 @@
 
 #### Acceptance Criteria
 
-1. The インフラ担当者 shall スケールアウト前に `dr-trigger.yml` および `dr-recovery.yml` が 3 ノード構成でどう動作するかを評価する
-2. If DR 自動復旧が 3 ノード構成で意図しないノード再作成を行うと判明した場合、then the インフラ担当者 shall スケールアウト期間中の自動復旧を無効化するか、3 ノード構成に対応させる
-3. While 3 ノード構成が稼働している間、the DR 機構 shall 単一ノード障害でノード再作成を実行しない
-4. When 縮退が完了したとき、the インフラ担当者 shall DR 自動復旧を通常の動作状態へ戻す
-5. The DR 無効化 shall Git 管理下のファイル変更として行い、無効化の事実と復帰予定が Git 履歴から追跡できる状態にする。GitHub の UI 操作のみで完結し Git に痕跡が残らない手段を用いない
+1. The インフラ担当者 shall スケールアウト前に `dr-trigger.yml` および `dr-recovery.yml` が 3 ノード構成でどう動作するかを評価し、手順書に記載する
+2. The インフラ担当者 shall スケールアウト期間中の `dr-trigger` 通知を過渡状態による誤報として扱い、`dr-recovery.yml` を起動しないことを作業記録に残す
+3. While 3 ノード構成が稼働している間、the DR 機構 shall 単一ノード障害でノード再作成を自動実行しない。復旧は人の起動と Environment `dr-recovery` の reviewer 承認を要し、残存ノードがある複数ノード構成では生存確認ゲートが停止する
+4. When 縮退が完了したとき、the インフラ担当者 shall 残っている `dr-incident` Issue を閉じ、単一ノードの手動復旧が再び対象になることを記録する
+5. The 作業記録 shall 作業期間と通知を誤報として扱う範囲を含め、PR または Issue として履歴から追跡できる状態にする
 
 ### Requirement 7: ワークロードの冗長化と分散
 

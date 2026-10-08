@@ -18,16 +18,20 @@ network.tf           ← Hetzner プライベートネットワーク
 dns.tf               ← Cloudflare DNS レコード
 tunnel.tf            ← Cloudflare Tunnel 設定
 access.tf            ← Cloudflare Access (dev/workers.dev 保護 + Zitadel OIDC IdP)
-tailscale.tf         ← Tailscale auth key 発行
+tailscale.tf         ← Tailscale auth key 発行と tailnet policy 適用 (tailscale_acl.this)
+tailscale-acl.hujson.tftpl ← tailnet policy (ACL) の正本。grants と tests を持つ。tagOwners のメールは変数 tailscale_acl_owner_email で注入
 storage.tf           ← Hetzner Object Storage (バケットは手動作成、TF リソースはコメントアウト)
 authentik_*.tf.disabled ← Authentik 時代の定義一式。ルートモジュール外で plan/apply の対象外
 variables.tf / outputs.tf  ← 変数・出力
 ```
 
+tailnet policy の変更手順: tftpl を編集 → PR → マージ後 `infisical run --env=prod -- terraform apply -target=tailscale_acl.this`。`tests` が保存時に検証される。grants は許可リスト方式で、`autogroup:member` → `tag:k3s-node`・`autogroup:self`・`tag:scaletest` は全ポート、`tag:ci` → `tag:k3s-node` は tcp 22・6443・10250 のみ。`tag:k3s-node`・`tag:scaletest` 発の許可はない。新たな経路を足すときは grants と tests の両方を更新する。
+
 ### Ansible (`ansible/`)
 **目的**: K3s クラスターのブートストラップと構成管理  
 **構造**: `inventory/` + `playbooks/` + `roles/`  
 - インベントリは Tailscale MagicDNS 名を使用 (IP ではなくホスト名)
+- 本番と scaletest の playbook が共有する処理は `playbooks/tasks/` に置く (`cilium.yml` = Cilium の差分判定つき適用)
 - ロールは `k3s-server`（K3s インストール・設定）、`swap`（全ノード共通のホスト側 OOM 安全弁）、`os-auto-update`（ホスト OS 自動更新設定の配布・結果通知）、`zitadel-bootstrap`（Zitadel リソース管理）、`zitadel-cutover`（Zitadel カットオーバーの事前条件確認・検証）で構成する
 - K3s 設定フラグは `k3s-server` ロールの `k3s_extra_args` で渡す
 
