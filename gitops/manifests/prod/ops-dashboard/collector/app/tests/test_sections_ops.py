@@ -70,6 +70,16 @@ class Node(unittest.TestCase):
         self.assertNotIn("ディスク使用率 (prod-node-2)", h)
         self.assertIn("再起動 (prod-node-1)", h)
 
+    def test_node_without_metrics_renders_note(self):
+        snap = self.snap()
+        gap = [Item(f"{k}:prod-node-3", "prod-node-3", Status.STALE, {}, "メトリクスを取得できません")
+               for k in ("cpu", "memory")]
+        snap["node.resources"] = res("node.resources", *snap["node.resources"].items, *gap)
+        h = node.render(snap, {})
+        self.assertIn("CPU 使用率 (prod-node-3)", h)
+        self.assertIn("メトリクスを取得できません", h)
+        self.assertIn("CPU 使用率 (prod-node-1)", h)
+
     def test_stale_state_file(self):
         h = node.render(self.snap(os_item=Item("os", "os", Status.STALE, {}, "情報が古くなっています")), {})
         self.assertIn("情報が古い", h)

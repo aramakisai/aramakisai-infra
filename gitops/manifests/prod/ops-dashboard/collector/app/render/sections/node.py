@@ -15,6 +15,9 @@ def _gauges(items):
     for k in ("cpu", "memory", "disk"):
         for i in (i for i in items if i.key.split(":")[0] == k):
             v = i.values
+            if "ratio" not in v:
+                rows.append([f'{label(f"gauge.{k}")} ({i.label})', "", "", status_cell(i)])
+                continue
             f = fmt_int if k == "cpu" else fmt_bytes
             rows.append([f'{label(f"gauge.{k}")} ({i.label})', _bar(i),
                          label("gauge.value", ratio=fmt_int(v["ratio"]), used=f(v["used"]), total=f(v["total"])),

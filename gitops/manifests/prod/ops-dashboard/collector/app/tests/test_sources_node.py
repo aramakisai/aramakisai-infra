@@ -68,6 +68,18 @@ class ResourcesTest(unittest.TestCase):
         self.assertEqual(by["memory:prod-node-3"].label, "prod-node-3")
         self.assertEqual(by["disk"].label, "prod-node-1")
 
+    def test_node_missing_from_metrics_is_stale_and_others_survive(self):
+        nodes, metrics = node3()
+        metrics["items"] = [m for m in metrics["items"] if m["metadata"]["name"] != "prod-node-3"]
+        k8s = FakeK8s({"/api/v1/nodes": nodes, "/apis/metrics.k8s.io/v1beta1/nodes": metrics})
+        with mock.patch("os.statvfs", return_value=statvfs(0.5)):
+            by = {i.key: i for i in nr.SOURCES[0].fetch(make_ctx(k8s=k8s)).items}
+        self.assertEqual(by["cpu:prod-node-2"].values["ratio"], 50.0)
+        for k in ("cpu:prod-node-3", "memory:prod-node-3"):
+            self.assertEqual(by[k].status, Status.STALE)
+            self.assertEqual(by[k].label, "prod-node-3")
+            self.assertEqual(by[k].values, {})
+
     def test_no_k8s_data_raises(self):
         with self.assertRaises(KeyError):
             nr.SOURCES[0].fetch(make_ctx())
