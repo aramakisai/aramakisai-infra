@@ -186,7 +186,7 @@ main へのマージは ArgoCD により即時に本番へ反映される。各�
   - 宣言ファイルの値 (プラン・期待サーバー・閾値) が現行の契約と一致していることを確認する
   - _Requirements: 5.1, 5.4, 5.5, 5.7, 5.8, 6.1, 6.2, 7.1, 7.4, 8.1, 8.2, 8.3, 8.4, 9.1, 9.2, 10.1, 10.2, 10.3, 10.4, 12.1_
 
-- [ ] 9. mailserver を段階的に統合する
+- [x] 9. mailserver を段階的に統合する
 - [x] 9.1 mail-agent を本番に投入する
   - mail-agent の Deployment・Service・NetworkPolicy・ExternalSecret・コードの ConfigMap を mailserver Application に追加する。この時点では状態用の PVC がないため mail 系の情報源は取得失敗の表示になる
   - mail-agent が Ready になり、mailserver Pod に再起動が発生しないことを確認する
@@ -197,7 +197,7 @@ main へのマージは ArgoCD により即時に本番へ反映される。各�
   - 再作成後に、送受信・IMAP/SMTP 認証・Roundcube ログインが通ること、fail2ban の BAN が DB から復元されること、キューが引き継がれることを確認する
   - 運用ダッシュボードにキュー・配送失敗・fail2ban が表示されることを確認する
   - _Requirements: 11.1, 11.5, 14.1, 14.2, 14.3_
-- [ ] 9.3 postmaster 宛てをレポート用メールボックスにも配送する
+- [x] 9.3 postmaster 宛てをレポート用メールボックスにも配送する
   - 配送専用アドレス `ops-reports@` とそのメールボックス用 PVC を追加し、`postmaster@` を `admin@` と `ops-reports@` の両方へ配送する。DMARC・TLS-RPT の DNS レコードは変えない
   - テストメールが `admin@` と `ops-reports@` の両方に届き、`ops-reports@` ではログインできないことを確認する
   - 次に届いた DMARC・TLS-RPT レポートが運用ダッシュボードに表示されることを確認する
