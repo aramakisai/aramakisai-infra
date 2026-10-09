@@ -178,3 +178,17 @@
 7. The インフラ担当者 shall `Location` 先 URL が有効期限つきの署名付き URL であるかを確認し、該当する場合はエッジ TTL をその有効期限未満に設定する
 8. The インフラ担当者 shall キャッシュされた内容を即時に無効化する手段 (Cloudflare のキャッシュパージ) を確認しておく
 9. The インフラ担当者 shall 本対策を要件 2〜6 のノード増減作業と独立に適用できる状態にする
+
+### Requirement 10: CMS に到達する負荷の低減
+
+**Objective:** As an インフラ担当者, I want CMS と DB が受ける実負荷を、キャッシュ・読み取り分散・処理の軽量化で下げたい, so that ピーク時にも CMS が応答を継続できる
+
+#### Acceptance Criteria
+
+1. The インフラ担当者 shall Workers の Cache API が put を拒否されない状態にする。zone のキャッシュ回避ルールを残さない
+2. The CMS shall 読み取りを CNPG の `-ro` サービスへ分散し、primary の負荷を下げる
+3. The インフラ担当者 shall DB の CPU requests と limits を、スロットリングが起きない水準に設定する
+4. The CMS shall 不要な populate と、未認証時の media 公開判定による JOIN を減らす
+5. The CMS の readiness probe shall 描画を伴わない軽量なヘルスエンドポイントで判定する
+6. The インフラ担当者 shall 合格ラインを「CMS に実際に届く req/s」で評価する
+7. When 対策を反映したとき、the インフラ担当者 shall 実トラフィックに近い混合シナリオで再測定する
