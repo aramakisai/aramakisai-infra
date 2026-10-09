@@ -144,6 +144,12 @@ email claim を読むため、`ansible/roles/zitadel-bootstrap/vars/resources.ym
 - **配信時変換は使わない**: 用途別サイズ (サムネイル/カード/詳細) の出し分けは Directus の Storage Asset Presets ではなく Cloudflare Image Transformations（zone setting `image_resizing`）+ Cache Rule で行う（`terraform/cloudflare_directus_assets.tf`）。理由は prod が `replicas: 1` / `limits.memory: 512Mi` の単一 pod で、配信時変換の計算をエッジに逃がして origin 負荷をゼロにするため。
 - **Cache Rule が必要な理由**: Directus の asset URL は `/assets/<uuid>` で拡張子を持たず、Cloudflare の既定キャッシュルール（拡張子ベース）の対象外になる。`api.aramakisai.com` / `stg-api.aramakisai.com` の `/assets/*` を明示的にキャッシュ対象にする Cache Rule (`cloudflare_ruleset`, phase `http_request_cache_settings`) が別途必要。
 
+### apex のスキャナ遮断 (WAF カスタムルール)
+- `terraform/cloudflare_waf_scanners.tf` (`cloudflare_ruleset`, phase `http_request_firewall_custom`) が、`aramakisai.com` (apex、Cloudflare Workers) への脆弱性スキャナを Worker 起動前に `block` する。Worker が 404 を返すだけの要求で起動回数と CPU 時間を消費するのを避けるため。
+- 遮断対象は正規利用の無いものに限る: 拡張子 `php/asp/aspx/jsp/sql/env/pem/key`、`/.well-known/` 以外のドットファイル (`/.env`・`/.git` 等)、`/wp-*`、`/xmlrpc`、`/@fs/`、`/graphql`、`/api/graphql` など。`/2025/*` の旧 URL リダイレクトと `api/*` 以外の正規ページには当たらない。
+- 他ホスト (cms の `/api/graphql` 等) は正規利用があるため `http.host eq "aramakisai.com"` で限定する。
+- Free プランはカスタムルール 5 件まで・regex 不可 (`matches` は Business 以上)。パターンは 1 ルールに `or` で束ねて枠を使い切らないようにしている。zone あたり entrypoint は 1 つなので、追加するルールはこの ruleset に足す。
+
 ### ホストOS自動更新・K3sバージョン追従の設計判断
 - 自動再起動時刻は `os_auto_update_reboot_time`（03:30）を基準に、`groups['all']` 内の順序 × `os_auto_update_reboot_stagger_minutes`（30 分）ずつ後ろへずらす（先頭ノードは基準のまま）。server 複数台の同時再起動による etcd クォーラム喪失を避けるため。30 分は 1 台の再起動・k3s の etcd 復帰・Pod 再スケジュールに十分な余裕として置いた値。
 - ホストOSパッケージ更新は Debian 標準機能(`unattended-upgrades` + `apt-daily-upgrade.timer` + `Automatic-Reboot`)に完全委任し、Ansibleロール `os-auto-update` は設定ファイル配布と結果通知のみを担う(独自の適用/再起動ロジックは実装しない)。
