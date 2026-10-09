@@ -66,4 +66,18 @@ resource "cloudflare_ruleset" "cms_media_legacy_redirects" {
       }
     }
   }
+
+  rules {
+    description = "www を apex へリダイレクト (www_redirect.tf)"
+    expression  = "true"
+    action      = "redirect"
+    enabled     = true
+
+    action_parameters {
+      from_list {
+        name = cloudflare_list.www_redirect.name
+        key  = "http.request.full_uri"
+      }
+    }
+  }
 }
