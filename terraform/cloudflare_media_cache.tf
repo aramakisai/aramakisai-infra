@@ -8,8 +8,7 @@
 # を含む全設定を書き戻そうとして "cannot be set as it is read only" で apply
 # が失敗する既知の provider 制約があり、Terraform 管理を見送った。
 
-# zone あたり http_request_cache_settings フェーズの entrypoint ruleset は1つのみ
-# (ダッシュボードで作成済みの "Bypass AppFlowy APIs" ルールが既存)。
+# zone あたり http_request_cache_settings フェーズの entrypoint ruleset は1つのみ。
 # `terraform import cloudflare_ruleset.directus_assets_cache zone/<zone_id>/<ruleset_id>`
 # 済みのため resource 名は当時のまま残す (rename は再作成扱いになるため)。
 resource "cloudflare_ruleset" "directus_assets_cache" {
@@ -17,17 +16,6 @@ resource "cloudflare_ruleset" "directus_assets_cache" {
   name    = "default" # zone phase entrypoint はダッシュボード作成時から name="default" 固定
   kind    = "zone"
   phase   = "http_request_cache_settings"
-
-  rules {
-    description = "Bypass AppFlowy APIs"
-    expression  = "true"
-    action      = "set_cache_settings"
-    enabled     = true
-
-    action_parameters {
-      cache = false
-    }
-  }
 
   # CMS (Payload) のメディア配信。/api/media/serve/:id/:size は id パスの 302 で、
   # /api/media/file/:filename が実バイトを返す本体。両方 /api/media/ 配下で拡張子の
