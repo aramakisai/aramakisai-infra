@@ -78,6 +78,14 @@ Authentik 時代の定義は `terraform/authentik_*.tf.disabled` として残す
 - **Swap設定**: 全ノード共通で 4GB swap を Ansible（swap ロール）で作成。kubelet `fail-swap-on=false` を設定（ホスト側プロセスの OOM 安全弁）。Pod cgroup には swap を割り当てない「NoSwap」挙動を維持し、K8s 資源モデルの予測可能性を保つ。
 - **障害復旧**: dr-trigger が障害を通知し、人が dr-recovery を起動・承認して復旧する (単一ノード構成のみ自動化)。詳細は [dr.md](dr.md) 参照。
 
+### CMS の読み取りレプリカ
+- CMS (Payload) はトランザクション外の読み取りを `directus-db-ro` (role=replica の 2 台) へ分散する。接続先は `cms-secrets` の `DATABASE_REPLICA_URL`。`-r` は primary も含むので使わない。書き込みとトランザクションは `-rw` (primary)
+- 書き込んだ Pod は、その後 2 秒間 (`readReplicasAfterWriteInterval`) は読み取りも primary で行う。この規則は Pod 単位で、別 Pod の読み取りは replica へ行く
+- **replica が全滅すると読み取りはエラーになる**。primary へのフォールバックはない。復旧は `cms-secrets` から `DATABASE_REPLICA_URL` を外す (Reloader が cms を再起動する)
+- 起動時に replica へ TCP で到達できなければ CMS は警告を出して primary のみで起動する
+- `cms-migrate` Job は `DATABASE_REPLICA_URL: ""` を `env` で上書きし、primary だけを使う
+- 接続数は Pod ごとに primary 10 本と replica 10 本。rollout 中の 4 Pod でも `max_connections` 100 に収まる
+
 ### kube-apiserver の認証と RBAC (kube-access)
 - **認証方式**: 共有 kubeconfig は使わず、kube-apiserver が 2 種類の資格情報を直接検証する。
   - CI・DR: GitHub Actions OIDC。`k3s-server` ロールが `authentication-config` (AuthenticationConfiguration) を配布し、組織・リポジトリの数値 ID、`ref` = main、`job_workflow_ref` (main 上の許可ファイル)、`event_name`、`runner_environment`、(高権限のみ) `environment` を CEL で照合する。ユーザー名は `gha:<ワークフローファイル名>` で、許可リストは `k3s_github_oidc_workflows` (pull_request 系は許可しない)。匿名認証は明示的に無効。`k3s-upgrade` は kube-apiserver の権限を持たない (ノード上のローカル admin を使う)

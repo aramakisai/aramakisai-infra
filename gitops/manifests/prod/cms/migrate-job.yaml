@@ -40,6 +40,9 @@ spec:
           env:
             - name: NODE_OPTIONS
               value: --no-deprecation
+            # envFrom の cms-secrets より env が優先される。migrate は primary だけを使う
+            - name: DATABASE_REPLICA_URL
+              value: ""
           resources:
             requests:
               memory: "256Mi"
