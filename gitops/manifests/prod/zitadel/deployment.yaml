@@ -17,7 +17,7 @@ metadata:
   name: zitadel
   namespace: zitadel
 spec:
-  replicas: 2
+  replicas: 3
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -135,19 +135,42 @@ spec:
               value: "Terraform Provider Service Account"
             - name: ZITADEL_FIRSTINSTANCE_ORG_MACHINE_PAT_EXPIRATIONDATE
               value: "2029-01-01T00:00:00Z"
+          # exec の `/app/zitadel ready` は毎回バイナリを起動して 1 秒の timeout を超えるため HTTP probe にする。
+          # パス・Host ヘッダは公式 Helm chart (zitadel-charts) と同じ。TLS 無効なので scheme は HTTP。
+          # startup は初回 setup (migration) を考慮して最大 5 分待つ
           startupProbe:
-            exec:
-              command: ["/app/zitadel", "ready"]
-            failureThreshold: 30
-            periodSeconds: 10
+            httpGet:
+              path: /debug/ready
+              port: http
+              scheme: HTTP
+              httpHeaders:
+                - name: Host
+                  value: idp.aramakisai.com
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 60
           readinessProbe:
-            exec:
-              command: ["/app/zitadel", "ready"]
-            periodSeconds: 10
+            httpGet:
+              path: /debug/ready
+              port: http
+              scheme: HTTP
+              httpHeaders:
+                - name: Host
+                  value: idp.aramakisai.com
+            periodSeconds: 5
+            timeoutSeconds: 1
+            failureThreshold: 3
           livenessProbe:
-            exec:
-              command: ["/app/zitadel", "ready"]
-            periodSeconds: 30
+            httpGet:
+              path: /debug/healthz
+              port: http
+              scheme: HTTP
+              httpHeaders:
+                - name: Host
+                  value: idp.aramakisai.com
+            periodSeconds: 5
+            timeoutSeconds: 1
+            failureThreshold: 3
           resources:
             # PoC暫定値。task 1.3 の実測を踏まえて見直す
             requests:
