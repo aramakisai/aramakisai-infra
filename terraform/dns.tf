@@ -332,3 +332,12 @@ resource "cloudflare_workers_domain" "aramakisai_web_prod" {
   service     = "aramakisai-web"
   environment = "production"
 }
+
+# シフト管理アプリ (aramakisai-shifuto リポジトリ, wrangler deploy)
+resource "cloudflare_workers_domain" "aramakisai_shifuto" {
+  account_id  = var.cloudflare_account_id
+  zone_id     = var.cloudflare_zone_id
+  hostname    = "shift.aramakisai.com"
+  service     = "aramakisai-shifuto"
+  environment = "production"
+}
