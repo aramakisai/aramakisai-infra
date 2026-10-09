@@ -1,6 +1,6 @@
 # 性能測定記録
 
-タスク 1.2〜1.4・5.9・5.10 の測定結果の要約。対象は CMS (Payload, `cms` Deployment) の `/api/globals/festival_meta?depth=1`。実行環境は `scripts/load-test/breakpoint.js` を `grafana/k6` Docker イメージで実行したもの。
+タスク 1.2〜1.4・5.8・5.9（CPU limit 引き上げ後および 3 ノード・CMS 3 replicas 分散後の再測定）・5.10 の測定結果の要約。対象は CMS (Payload, `cms` Deployment) の `/api/globals/festival_meta?depth=1`。実行環境は `scripts/load-test/breakpoint.js` を `grafana/k6` Docker イメージで実行したもの。
 
 スループット・ブレークポイント・目標レート・レイテンシ・CPU/メモリ使用量の実測値、およびそれらから逆算できる比率・外挿値は公開リポジトリに記載しない。本書には手順・構成・判定の結論のみを残す。リソース設定値 (CPU limit 等、マニフェストに既にあるもの) は記載する。
 
@@ -311,3 +311,74 @@ k6 を CMS と同一ノード上で実行したため、k6 自身がノード CP
 - `connection refused` が Node.js の listen backlog 由来か、OS の `somaxconn`／ephemeral port 枯渇由来か、アプリケーションが明示的に接続を絞っているのかは、プロセス内部・カーネルパラメータの調査をしておらず未特定。
 - k6 とノード CPU の競合を完全に排除した測定（別ノードまたはクラスタ外から ClusterIP へ到達させる等）は未実施。
 - CPU 使用率が上限まで到達しなかった直接原因は、タスク 5.9 と同じく未特定。
+
+# タスク 5.8: CMS のステートレス分散 (2026-10-09)
+
+CMS Deployment（`gitops/manifests/prod/cms/`）を 3 ノードへ分散した。PR #346 で Git にコミットし、ArgoCD の sync で反映した。クラスタへの直接操作は行っていない。
+
+## 変更内容
+
+| | 変更前 | 変更後 |
+|---|---|---|
+| `replicas` | 1 | 3（各ノード 1 Pod） |
+| `strategy` | `Recreate` | `RollingUpdate`（`maxUnavailable: 0`、`maxSurge: 1`） |
+| `topologySpreadConstraints` | なし | `topologyKey: kubernetes.io/hostname`、`maxSkew: 1`、`whenUnsatisfiable: ScheduleAnyway`、`matchLabelKeys: [pod-template-hash]` |
+| PodDisruptionBudget | なし | `pdb.yaml`（`maxUnavailable: 1`、`app: cms` を選択） |
+| resources | 変更なし | 変更なし |
+
+- `ScheduleAnyway` のため、ノード障害時は残りのノードへ寄って起動できる。
+- `matchLabelKeys` により、rollout 中も新リビジョンの Pod がノードへ均等に置かれる。
+- HPA は設けていない。
+- ステートレス性の根拠は、アップロードが S3、認証が JWT と Cookie、DB スキーマ適用が PreSync Job（`cms-migrate`）で `push: false`、Payload のジョブキューが DB 上の `processing` フラグで排他されることによる。
+
+# タスク 5.9 再測定: 3 ノード・CMS 3 replicas 分散後 (2026-10-09)
+
+タスク 5.8 の反映後、タスク 5.10 と同じ手法で `/api/globals/festival_meta?depth=1` のブレークポイントを再測定した。
+
+## 事前条件
+
+- CMS 3 Pod が `Running`、各ノード 1 Pod、`RESTARTS 0`。CMS の `limits` は `cpu: 2`、`memory: 512Mi`。
+- `directus-db` は 3/3 Ready、`ContinuousArchiving=True`、`LastBackupSucceeded=True`、直近の daily backup は completed。`directus-db` の `limits` は `cpu: 500m`、`memory: 512Mi`。
+
+## 実行方法
+
+- `prod-node-1` 上で k6（v2.2.0、GitHub Releases から `/tmp` へ取得）を直接実行し、CMS の ClusterIP を叩いた。
+- シナリオは `breakpoint.js` を無変更で使用し、`--summary-trend-stats` で p99 も取得した。
+- ランプ時間と開始レートを変えて 2 回測定した。
+
+## 結果
+
+2 回とも `abortOnFail` が発動し、2 回の値は近くに収束した。ランプ条件に依存せず、システム側の上限によるものと判断する。
+
+エラーは k6 側 10 秒の `request timeout` のみで、`connection refused` は 0 件だった。タスク 5.10 で見られた accept 側の詰まりは消えている。p95・p99 はタイムアウト値に張り付いた。
+
+## 律速箇所の判定
+
+- 3 Pod 間の負荷はほぼ均等だった。各 CMS Pod の CPU は `limits.cpu: 2000m` に届かないまま頭打ちになった（Node.js メインスレッドの飽和の可能性）。
+- `directus-db` の primary Pod は CPU が `limits.cpu: 500m` に張り付いた。replica 2 台はほぼアイドルで、読み取りも primary に集中している。
+- ノードの CPU・メモリには余裕があり、OOMKilled はなかった。k6 プロセス自体の CPU 消費は小さかった。
+
+律速はアプリ単体から、共有の DB primary（CPU limit）と CMS 各 Pod の単一スレッド飽和へ移ったと判断する。
+
+## 変更前（タスク 5.10、replicas 1）との比較
+
+| | 変更前（replicas 1） | 変更後（replicas 3） |
+|---|---|---|
+| ブレークポイント | 低い | 上回る（改善幅は replicas 数に比例せず小幅） |
+| エラー種別 | `connection refused` と `request timeout` | `request timeout` のみ |
+| 律速要因 | CMS（Node.js）の新規接続 accept | DB primary の CPU limit と CMS 各 Pod の単一スレッド飽和 |
+
+## 合格ラインとの比較
+
+実測スループットは合格ラインに**届いていない**。
+
+## 測定後の復帰確認
+
+ClusterIP・Cloudflare 経由（`https://cms.aramakisai.com/...`）とも `200`、全 Pod `Running`、CMS `RESTARTS 0`、OOMKilled なし、CNPG は healthy。ノード上の k6 一式は削除済みで、プロセスの残存なし。
+
+## 未確認・未解決の点
+
+- DB primary の CPU limit と CMS の単一スレッド飽和のどちらが主因かは未特定。切り分けには変更を伴う測定が必要で、未実施。
+- `depth=1` 1 リクエストあたりの DB クエリ数とキャッシュの有無は未確認。
+- k6 と CMS Pod が同一ノードに同居することによる影響は未確認。
+- 測定中の実トラフィックの混在は未確認。
