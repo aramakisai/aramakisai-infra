@@ -9,11 +9,14 @@ metadata:
   annotations:
     secret.reloader.stakater.com/reload: "cms-secrets"
 spec:
-  replicas: 1
+  replicas: 3
   revisionHistoryLimit: 2
-  # 単一ノードの空きメモリが 1.2Gi 程度しかなく、更新時に新旧 2 pod を同時に置けない
+  # 3 ノードへ分散しているため、新 Pod を追加で起動してから旧 Pod を落とせる (無停止 rollout)
   strategy:
-    type: Recreate
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   selector:
     matchLabels:
       app: cms
@@ -22,6 +25,18 @@ spec:
       labels:
         app: cms
     spec:
+      # DB 接続・セッション (JWT)・アップロード (S3) をすべて Pod 外に持つため、どのノードでも動く。
+      # ScheduleAnyway なのでノード障害時は残りのノードへ寄って起動を妨げない
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: cms
+          # rollout 中に旧リビジョンの Pod 数へ引きずられず、新リビジョンをノードへ均等に置く
+          matchLabelKeys:
+            - pod-template-hash
       containers:
         - name: cms
           image: ghcr.io/aramakisai/aramakisai-cms:main
