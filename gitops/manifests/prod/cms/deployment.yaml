@@ -80,9 +80,31 @@ spec:
               memory: "512Mi"
               # namespace-config/limit-range.yaml の max.cpu と同値(この namespace での上限)
               cpu: "2000m"
+          # /api/health は DB にも Payload にも触れず HTTP 200 だけを返す。
+          # readiness に DB を含めると switchover で 3 Pod が同時に NotReady になり全停止するため含めない。
+          # /admin/login のような SSR ページは過負荷時に重くなり probe が落ちるため使わない。
+          # 起動の完了は startupProbe が待ち、その間 readiness / liveness は動かない (最大 5s x 36 = 180s)
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 36
+          # 過負荷で数回遅れても外れないよう 10s x 6 = 60s 連続で失敗したときだけ外す
           readinessProbe:
             httpGet:
-              path: /admin/login
+              path: /api/health
               port: 3000
-            initialDelaySeconds: 20
             periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          # 再起動は受付から外すより重いので readiness より長く待つ (10s x 12 = 120s 連続失敗)。
+          # プロセスが HTTP を返せないほど固まったときだけ対象になる
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 12
