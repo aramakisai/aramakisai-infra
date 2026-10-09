@@ -49,6 +49,12 @@ output "e2e_service_token_client_secret" {
   sensitive   = true
 }
 
+output "cms_cache_purge_token" {
+  description = "CMS のエッジキャッシュ purge 用 API トークン (apply後にInfisicalのCLOUDFLARE_PURGE_TOKENへ手動反映 / 機密情報)"
+  value       = cloudflare_api_token.cms_cache_purge.value
+  sensitive   = true
+}
+
 # Hetzner Object Storage は hcloud provider 非対応のため手動管理
 # バケット名: aramakisai-backups
 # output "object_storage_bucket" {

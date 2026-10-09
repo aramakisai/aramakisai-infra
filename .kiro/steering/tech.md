@@ -230,6 +230,7 @@ ssh root@prod-node-1 "systemctl status os-update-notify.timer; cat /var/run/rebo
   - **Alloy**: `LOKI_URL`, `LOKI_USERNAME`, `LOKI_PASSWORD`, `PROMETHEUS_REMOTE_WRITE_URL`, `PROMETHEUS_USERNAME`, `PROMETHEUS_PASSWORD`
   - **Roundcube**: `MAIL_OAUTH2_CLIENT_SECRET`（Authentik時代）, `MAIL_OAUTH2_CLIENT_SECRET_ZITADEL`, `ROUNDCUBE_OIDC_CLIENT_ID`（Zitadel OIDC App）, `ROUNDCUBE_DES_KEY`
   - **CMS (Zitadel OIDC)**: `CMS_PROD_OIDC_CLIENT_ID`, `CMS_PROD_OIDC_CLIENT_SECRET`
+  - **CMS (エッジキャッシュ purge)**: `CLOUDFLARE_PURGE_TOKEN`（zone の Cache Purge 権限だけを持つ API トークン。`terraform/cloudflare_cms_purge_token.tf` の `cloudflare_api_token.cms_cache_purge` が発行元で、`terraform output -raw cms_cache_purge_token` を手動登録する）。zone ID は既存の `TF_VAR_cloudflare_zone_id` を `cms-secrets` の ExternalSecret が `CLOUDFLARE_ZONE_ID` として再利用する
   - **Presence Tracker**: `TF_VAR_authentik_room_presence_client_secret` (TF/ESO共用), `PRESENCE_AUTH_SECRET`, `PRESENCE_AUTHENTIK_API_TOKEN`, `PRESENCE_RESET_SECRET`, `PRESENCE_DISCORD_BOT_TOKEN`
   - **Vaultwarden**: `VAULTWARDEN_ADMIN_TOKEN`, `VAULTWARDEN_DB_PASSWORD`, `VAULTWARDEN_ORG_CREATION_USERS`, `VAULTWARDEN_OIDC_CLIENT_ID`, `VAULTWARDEN_OIDC_CLIENT_SECRET`, `VAULTWARDEN_RESTIC_REPOSITORY`, `VAULTWARDEN_RESTIC_PASSWORD`（SMTP は専用キーを持たず、Authentik の `NOREPLY_SMTP_PASSWORD` を再利用）
   - **Directus SSO**: `DIRECTUS_PROD_OIDC_CLIENT_SECRET`（prod 用 Authentik OIDC Client Secret）, `DIRECTUS_STG_OIDC_CLIENT_SECRET`（stg 用）。`DIRECTUS_PROD_OIDC_CLIENT_ID` / `DIRECTUS_STG_OIDC_CLIENT_ID` は `"directus-prod"` / `"directus-stg"` 固定でコードに直書き（変数なし）。
