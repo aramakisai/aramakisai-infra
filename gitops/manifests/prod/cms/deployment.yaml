@@ -9,7 +9,7 @@ metadata:
   annotations:
     secret.reloader.stakater.com/reload: "cms-secrets"
 spec:
-  replicas: 3
+  replicas: 6
   revisionHistoryLimit: 2
   # 3 ノードへ分散しているため、新 Pod を追加で起動してから旧 Pod を落とせる (無停止 rollout)
   strategy:
@@ -72,14 +72,14 @@ spec:
           resources:
             requests:
               memory: "256Mi"
-              cpu: "250m"
+              cpu: "500m"
             limits:
               # 本番相当ビルドのローカル実測 RSS はアイドル 144MiB、
               # 管理画面 15 回 + REST 30 回のアクセス後で 192MiB。
               # sharp の画像変換ピークだけ未計測のため Directus と同じ 512Mi から始める
               memory: "512Mi"
-              # namespace-config/limit-range.yaml の max.cpu と同値(この namespace での上限)
-              cpu: "2000m"
+              # Node.js のメインスレッド律速で 1 Pod は約 1.3 コアで頭打ちになる。バースト時に同一ノードの etcd・DB の CPU を奪わないよう 1500m に抑える
+              cpu: "1500m"
           # /api/health は DB にも Payload にも触れず HTTP 200 だけを返す。
           # readiness に DB を含めると switchover で 3 Pod が同時に NotReady になり全停止するため含めない。
           # /admin/login のような SSR ページは過負荷時に重くなり probe が落ちるため使わない。

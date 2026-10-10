@@ -273,7 +273,7 @@
   - 変更を Git のコミットとして行い、クラスタへの直接操作を行わない
   - 完了状態: レプリカが複数ノードへ分散配置され、変更前の値が記録に残っていること
   - 変更前の値 (`gitops/manifests/prod/cms/deployment.yaml`): `replicas: 1`、`strategy.type: Recreate`、`topologySpreadConstraints` なし、PodDisruptionBudget なし。resources は変更なし (CPU limit は #252 で 2000m 済み)
-  - 変更後: `replicas: 3`、`RollingUpdate` (`maxUnavailable: 0`、`maxSurge: 1`)、hostname の `topologySpreadConstraints` (`ScheduleAnyway`)、`pdb.yaml` (`maxUnavailable: 1`)。HPA は設けない
+  - 変更後: `replicas: 6` (5.10 で 3 から変更。requests cpu 500m、limits cpu 1500m)、`RollingUpdate` (`maxUnavailable: 0`、`maxSurge: 1`)、hostname の `topologySpreadConstraints` (`ScheduleAnyway`)、`pdb.yaml` (`maxUnavailable: 1`)。HPA は設けない
   - ステートレス性の根拠: アップロードは S3、認証は JWT と Cookie、DB スキーマ適用は PreSync Job (`cms-migrate`) で `push: false`、Payload のジョブキューは DB 上の `processing` フラグで排他される
   - _Requirements: 7.6, 7.7, 7.13_
   - _Depends: 1.4_

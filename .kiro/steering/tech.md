@@ -84,7 +84,7 @@ Authentik 時代の定義は `terraform/authentik_*.tf.disabled` として残す
 - **replica が全滅すると読み取りはエラーになる**。primary へのフォールバックはない。復旧は `cms-secrets` から `DATABASE_REPLICA_URL` を外す (Reloader が cms を再起動する)
 - 起動時に replica へ TCP で到達できなければ CMS は警告を出して primary のみで起動する
 - `cms-migrate` Job は `DATABASE_REPLICA_URL: ""` を `env` で上書きし、primary だけを使う
-- 接続数は Pod ごとに primary 10 本と replica 10 本。rollout 中の 4 Pod でも `max_connections` 100 に収まる
+- 接続数は Pod ごとに primary 10 本と replica 10 本。rollout 中の 7 Pod でも `max_connections` 100 に収まる
 
 ### kube-apiserver の認証と RBAC (kube-access)
 - **認証方式**: 共有 kubeconfig は使わず、kube-apiserver が 2 種類の資格情報を直接検証する。
