@@ -84,6 +84,31 @@ resource "cloudflare_zero_trust_access_application" "aramakisai_web_dev_workers_
   allowed_idps              = [cloudflare_zero_trust_access_identity_provider.zitadel.id]
 }
 
+# サイネージの画面とAPIを認証済みの端末に限る。外部の要求をWorkerの前で止め、
+# Workersのリクエスト数とCMSの負荷を抑える。公式サイトの他のパスは保護しない。
+# 端末はブラウザでログインし、セッションは上限の730hにして開催前日の再ログインで開催期間をまたぐ。
+# /api/signage/pin は /api/signage 配下のため同じアプリに含まれる
+resource "cloudflare_zero_trust_access_application" "aramakisai_signage" {
+  account_id       = var.cloudflare_account_id
+  name             = "aramakisai-web (signage)"
+  domain           = "aramakisai.com/signage"
+  type             = "self_hosted"
+  session_duration = "730h"
+
+  destinations {
+    type = "public"
+    uri  = "aramakisai.com/signage"
+  }
+
+  destinations {
+    type = "public"
+    uri  = "aramakisai.com/api/signage"
+  }
+
+  auto_redirect_to_identity = true
+  allowed_idps              = [cloudflare_zero_trust_access_identity_provider.zitadel.id]
+}
+
 # ============================================================
 # Cloudflare Access Policies
 # ============================================================
@@ -93,6 +118,7 @@ locals {
     aramakisai_web_workers_dev     = cloudflare_zero_trust_access_application.aramakisai_web_workers_dev.id
     aramakisai_web_dev             = cloudflare_zero_trust_access_application.aramakisai_web_dev.id
     aramakisai_web_dev_workers_dev = cloudflare_zero_trust_access_application.aramakisai_web_dev_workers_dev.id
+    aramakisai_signage             = cloudflare_zero_trust_access_application.aramakisai_signage.id
   }
 }
 
