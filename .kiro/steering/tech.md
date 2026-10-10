@@ -101,6 +101,14 @@ Authentik 時代の定義は `terraform/authentik_*.tf.disabled` として残す
 - **Environment `dr-recovery`**: 承認者は team `infra` で、起動者本人の承認を認める (別メンバーの確認は保証しない)。管理者 bypass 無効・deployment branch は main のみ。`dr-recovery.yml` が実行時に `verify-environment-protection.sh` で required reviewers (1 件以上)・管理者 bypass 無効・main 限定を検査し、満たさなければ DR を開始しない (Environment が未作成だと GitHub が承認なしで自動作成するため)。team へのメンバー追加は手動 (Terraform 管理外)
 - **再検証が必要になる条件**: 許可ワークフローの追加・改名、リポジトリ・組織の移転・改名、GitHub OIDC の claim 形式の変更、k3s アップグレード (signer 設定・匿名認証の既定値)、Environment の名前・保護設定・team 構成の変更、ノード名・`tls-san` の変更、Tailscale ACL の変更 (`tag:ci` から 6443・10250 への到達が前提で、ACL の変更は PR 差分でしか検知できない)
 
+### CMS の purge 用 Cloudflare API トークン
+
+- 名前 `aramakisai-cms-cache-purge`。所有者は委員会の共有アカウント上のユーザー。権限は Zone > Cache Purge > Purge、対象 zone は aramakisai.com のみ。
+- 用途: CMS が非公開化・削除した画像のエッジキャッシュを purge する。
+- 値は Infisical prod の `CLOUDFLARE_PURGE_TOKEN`。`cms-secrets` の ExternalSecret 経由で cms に env として渡る。
+- Terraform では発行しない。普段の `terraform apply` 用トークンにトークン発行権限 (User > API Tokens > Edit) を持たせると、漏えい時の被害がアカウント全体に及ぶため、ダッシュボードで手動発行する。
+- ローテーション: ダッシュボードで再発行 → Infisical の `CLOUDFLARE_PURGE_TOKEN` を更新 → ESO の更新を待つ。Reloader が cms を再起動する。
+
 ### Terraform の出力パラメータと外部連携
 - **healthchecksio_mailserver_backup_ping_url**: mailserver バックアップの生存確認用。Infisical の `HEALTHCHECKS_MAILSERVER_BACKUP_PING_URL` へ反映。
 - **netdata_room_id**: Netdata Cloud aramakisai-prod Room ID。Infisical の `NETDATA_CLAIM_ROOMS` へ反映し、エージェントの Claim に使用。
@@ -238,6 +246,7 @@ ssh root@prod-node-1 "systemctl status os-update-notify.timer; cat /var/run/rebo
   - **Alloy**: `LOKI_URL`, `LOKI_USERNAME`, `LOKI_PASSWORD`, `PROMETHEUS_REMOTE_WRITE_URL`, `PROMETHEUS_USERNAME`, `PROMETHEUS_PASSWORD`
   - **Roundcube**: `MAIL_OAUTH2_CLIENT_SECRET`（Authentik時代）, `MAIL_OAUTH2_CLIENT_SECRET_ZITADEL`, `ROUNDCUBE_OIDC_CLIENT_ID`（Zitadel OIDC App）, `ROUNDCUBE_DES_KEY`
   - **CMS (Zitadel OIDC)**: `CMS_PROD_OIDC_CLIENT_ID`, `CMS_PROD_OIDC_CLIENT_SECRET`
+  - **CMS (エッジキャッシュ purge)**: `CLOUDFLARE_PURGE_TOKEN`（手動発行。詳細は「CMS の purge 用 Cloudflare API トークン」）。zone ID は既存の `TF_VAR_cloudflare_zone_id` を `cms-secrets` の ExternalSecret が `CLOUDFLARE_ZONE_ID` として再利用する
   - **Presence Tracker**: `TF_VAR_authentik_room_presence_client_secret` (TF/ESO共用), `PRESENCE_AUTH_SECRET`, `PRESENCE_AUTHENTIK_API_TOKEN`, `PRESENCE_RESET_SECRET`, `PRESENCE_DISCORD_BOT_TOKEN`
   - **Vaultwarden**: `VAULTWARDEN_ADMIN_TOKEN`, `VAULTWARDEN_DB_PASSWORD`, `VAULTWARDEN_ORG_CREATION_USERS`, `VAULTWARDEN_OIDC_CLIENT_ID`, `VAULTWARDEN_OIDC_CLIENT_SECRET`, `VAULTWARDEN_RESTIC_REPOSITORY`, `VAULTWARDEN_RESTIC_PASSWORD`（SMTP は専用キーを持たず、Authentik の `NOREPLY_SMTP_PASSWORD` を再利用）
   - **Directus SSO**: `DIRECTUS_PROD_OIDC_CLIENT_SECRET`（prod 用 Authentik OIDC Client Secret）, `DIRECTUS_STG_OIDC_CLIENT_SECRET`（stg 用）。`DIRECTUS_PROD_OIDC_CLIENT_ID` / `DIRECTUS_STG_OIDC_CLIENT_ID` は `"directus-prod"` / `"directus-stg"` 固定でコードに直書き（変数なし）。
