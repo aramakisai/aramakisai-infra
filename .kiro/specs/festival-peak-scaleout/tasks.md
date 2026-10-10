@@ -284,47 +284,47 @@
   - 完了状態: 3 ノード構成でのブレークポイントが記録され、変更前との比較ができること
   - _Requirements: 7.8_
 
-- [ ] 5.11 zone のキャッシュ回避ルールを削除し、dash に Cache-Control を付ける
+- [x] 5.11 zone のキャッシュ回避ルールを削除し、dash に Cache-Control を付ける
   - AppFlowy 用に残っていた zone のキャッシュルールを削除する (infra #352)
   - dash が返す応答に Cache-Control を付与する (infra #354)
   - 完了状態: 適用後に Workers の Cache API のヒットが確認されていること
   - _Requirements: 10.1_
 
-- [ ] 5.12 directus-db の CPU requests と limits を引き上げる
+- [x] 5.12 directus-db の CPU requests と limits を引き上げる
   - primary のスロットリングを解消する (infra #353)
   - 完了状態: cgroup の `nr_throttled` が増加し続けないこと
   - _Requirements: 10.3_
 
-- [ ] 5.13 スキャナを WAF で遮断する
+- [x] 5.13 スキャナを WAF で遮断する
   - スキャナ由来のリクエストを Cloudflare の WAF で遮断する (infra #355)
   - 完了状態: 遮断ルールが適用され、通常の来場者経路に影響しないこと
   - _Requirements: 10.6_
 
-- [ ] 5.14 CMS のヘルスエンドポイントと probe を見直す
+- [x] 5.14 CMS のヘルスエンドポイントと probe を見直す
   - 描画を伴わないヘルスエンドポイントを追加する (aramakisai-web #156)
   - readiness probe の対象を `/admin/login` から切り替える (infra #356)
   - 完了状態: 高負荷時に probe の失敗で Pod が受付から外れないこと
   - _Requirements: 10.5_
   - _Depends: 5.12_
 
-- [ ] 5.15 CMS の読み取りを replica へ分散する
+- [x] 5.15 CMS の読み取りを replica へ分散する
   - CMS が `-ro` へ読み取りを向けられるようにする (aramakisai-web #157)
   - `DATABASE_URL` に加えて読み取り用の接続先を設定する (infra #357)
   - 完了状態: replica が読み取りを処理し、primary の負荷が下がっていること
   - _Requirements: 10.2_
 
-- [ ] 5.16 CMS の不要な populate と media 公開判定を軽くする
+- [x] 5.16 CMS の不要な populate と media 公開判定を軽くする
   - 不要な populate を削減する (aramakisai-web #155)
   - 未認証時の media 公開判定を軽量化し、`owner.role` 参照による JOIN を避ける (aramakisai-web #158)
   - 完了状態: 同じ参照で発行される SQL が減っていること
   - _Requirements: 10.4_
 
-- [ ] 5.17 重い動的ページを ISR 化する
+- [x] 5.17 重い動的ページを ISR 化する
   - aramakisai-web で対応する
   - 完了状態: 対象ページが CMS にほぼ届かなくなっていること
   - _Requirements: 10.4, 10.6_
 
-- [ ] 5.18 対策反映後に混合シナリオで再測定する
+- [x] 5.18 対策反映後に混合シナリオで再測定する
   - limit=0 のクエリとサイネージのポーリングを含む、実トラフィックに近い混合シナリオを用いる
   - 評価基準は「CMS に実際に届く req/s」とする
   - 完了状態: 結果が `measurements.md` に記録され、合格ラインとの比較ができること

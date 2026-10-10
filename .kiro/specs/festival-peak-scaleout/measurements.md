@@ -408,4 +408,74 @@ Free プランでは、CPU 上限超過による 503 と 1 日のリクエスト
 
 ## 未確認・未解決の点
 
-- 対策 (タスク 5.11〜5.18) の反映後の実測は未実施。
+- 対策 (タスク 5.11〜5.17) の反映後の実測は、タスク 5.18 で行った。
+
+# タスク 5.18: 対策反映後の混合シナリオ再測定 (2026-10-10)
+
+タスク 5.11〜5.17 の反映後に、フロント (aramakisai-web) が実際に CMS へ投げるクエリを混ぜたシナリオで、CMS に届く req/s のブレークポイントを測った。
+
+## 事前条件
+
+- CMS 3 Pod と `directus-db` 3 インスタンスが Ready。CNPG は healthy で、primary は `directus-db-1`。
+- prod-node-2 と prod-node-3 は、測定の 30〜50 分前に unattended-upgrades の定時再起動を済ませていた。そのため CMS と DB の一部 Pod は `RESTARTS 1` から始まっている。測定はこの値を基準にした。
+
+## 実行方法
+
+- 経路はオリジン直のみとした。手元 PC から SSH ローカルポートフォワードを 3 本張り、それぞれ prod-node-1/2/3 を経由して CMS の ClusterIP へ向けた。k6 (`grafana/k6` の Docker イメージ) は VU ごとにフォワードを振り分ける。単一の SSH プロセスが律速になるのを避けるためである。`aramakisai.com` (Workers) と `cms.aramakisai.com` (エッジキャッシュ) には負荷をかけていない。
+- エッジのキャッシュ (Workers の Cache API、ISR) を通らないため、k6 のリクエストはすべて CMS に届く。k6 の送信レートを、そのまま「CMS に届く req/s」として扱う。
+- `ramping-arrival-rate` で 2 回測った。1 回目は低レートから緩やかに、2 回目は高めのレートから急に上げた。`abortOnFail` は、エラー率と mix シナリオの p95 の 2 種類に付けた。2 回とも、閾値に届く前に応答時間の悪化を確認した時点で手動で止めた。
+- CMS Pod と `directus-db` 各インスタンスの CPU は、`make kubectl ARGS="top pod -n prod"` で約 10 秒ごとに取った。各ノードの cgroup (`cpu.stat` の `usage_usec`・`nr_throttled`) は 5 秒ごとに取った。監視ループは、restarts の増加か NotReady を検知すると k6 を止める。`https://aramakisai.com/` の外形も約 1 分ごとに確認した。
+
+## シナリオ構成
+
+GET のみである。重みは mix シナリオの中でのリクエスト数の割合 (%) を示す。
+
+| 要素 | 内容 (フロントの呼び出し元) | 重み |
+|---|---|---|
+| findGlobal (depth 0) | `festival_meta?depth=0`。レイアウトとほぼ全ページで呼ばれる | 20 |
+| findGlobal (depth 1) | `page_home?depth=1` (トップ) | 2 |
+| limit=0 の一覧 | `performance_slots` (depth 1 と depth 0)、公開済み `student_exhibitions`、`stages`、`map_areas`、`map_points`、公開済み `topics` と `announcements` (depth 1。publishedFilter で分単位の URL)、`faq_items`、`sponsors` | 30 |
+| 詳細ページ | `performance_slots` の企画 ID 絞り込み (depth 0 と depth 1)、`pages` の slug 一致、`announcements` と `topics` の ID 一致 | 15 |
+| 駐車場 | `parking_statuses?depth=1&limit=100` (`/api/parking` のポーリング) | 5 |
+| media serve | `/api/media/serve/<id>/card` (302。リダイレクト先は追わない) | 15 |
+| media file | `/api/media/file/<name>` (実在する公開画像の card 版と原寸の小さいもの) | 13 |
+
+- サイネージの pin ポーリングは、別シナリオとして一定レートで並走させた。条件は想定台数の上限で、1 台あたり 3 秒間隔とした。`/api/signage/pin` (feat/signage-frontend) は、1 回の呼び出しで CMS へ 2 本を並列に投げる (`signage_settings?depth=2` と、`signage_slides` の limit=0 の ID 一覧)。どちらのコレクションも本番 CMS にまだ無く 404 になるため、同等のコストの既存クエリで代用した (`festival_meta?depth=2` と、公開済み `student_exhibitions` の limit=0 の ID 一覧)。
+- 企画詳細の `findById` は含めていない。本番に公開済みの企画がまだ無いためである。
+
+## 結果
+
+- 2 回とも、エラーが出る前に p95 が悪化した。悪化が始まる点とスループットの頭打ちは、2 回で近い位置に収束した。ランプの条件に依存しないため、システム側の上限と判断する。
+- 悪化が始まるまで、p95 は経路の RTT とほぼ同じ水準で推移した。悪化した後は、送信レートを上げても処理できる量が増えなかった。応答時間は秒単位まで伸び、やがて k6 の 10 秒タイムアウトが出始めた。
+- 悪化が先に表れたのは depth 1 の populate を伴うクエリだった (`performance_slots` の depth 1 の一覧と `parking_statuses`)。軽いクエリ (`festival_meta?depth=0`、`stages`、media serve) は遅れて悪化した。
+- 測定中の `https://aramakisai.com/` の外形は、すべて `200` だった。
+
+## 合格ラインとの比較
+
+CMS に届く req/s で見たブレークポイントは、合格ラインを**上回った**。合格ラインの算出式は、1 ページビューあたりの CMS 呼び出しを従来どおり多めに見積もった安全側の値である (「2026-10-09 原因調査」の節を参照)。5.9 の再測定は `festival_meta?depth=1` 単独のシナリオだったため、ブレークポイントを直接は比べられない。ただし同じ CMS 3 Pod の構成で、処理できる量は大きく増えた。
+
+## 律速箇所の判定
+
+先に頭打ちになったのは CMS 各 Pod (Node.js) である。
+
+- CMS の 3 Pod は、悪化が始まる時点で揃って同じ CPU 使用量で頭打ちになった。この値は `limits.cpu: 2000m` に届いておらず、5.9 の再測定で見た 1 Pod あたりの天井とほぼ同じである。メインスレッドの飽和と判断する。cgroup の CFS スロットリングは、短時間のバーストでわずかに出ただけで、律速の主因ではない。
+- `directus-db` の primary は、測定中ほぼアイドルだった (読み取りは届いていない)。replica 2 台が読み取りを分担し、どちらも `limits.cpu: 1500m` には遠かった。`nr_throttled` は 3 インスタンスとも増えなかった (タスク 5.12 と 5.15 の完了状態を満たす)。
+- ノードの CPU とメモリには余裕があった。
+- 1 リクエストあたりの CMS の CPU 時間は、5.9 の時点 (depth 1 単独) より大きく下がっていた。主な理由は depth 0 化、JOIN の除去、readReplicas の 3 つと考える。
+
+## 測定後の復帰確認
+
+- k6 を止めてから約 1 分で、CMS と DB の CPU はアイドルの水準に戻った。
+- CMS 3 Pod・`directus-db` 3 インスタンスとも Ready のままだった。restarts は測定前の基準値から増えていない。OOMKilled はなかった。
+- 測定中に probe の失敗 (`Unhealthy`) イベントは出ず、Pod が受付から外れることはなかった (タスク 5.14 の完了状態を満たす)。
+- CNPG は `Cluster in healthy state`、primary は `directus-db-1` のままだった。
+- `/api/health` はオリジン直で `200`、`https://cms.aramakisai.com/api/health` と `https://aramakisai.com/` も `200` だった。
+- SSH フォワード、k6 コンテナ、ノード上のサンプリングループは、すべて停止・削除した。
+
+## 未確認・未解決の点
+
+- 重みは、フロントのコードから見た呼び出し構成をもとにした想定である。本番の CMS アクセスログから求めたものではない。
+- サイネージの CMS 側 (`signage_settings` と `signage_slides`) は本番に未投入のため、コストの近い既存クエリで代用した。投入後に実物で確認していない。
+- 公開済みの企画がまだ無いため、企画の一覧と詳細は開催時より軽い状態で測った。企画の公開が進むと、limit=0 の一覧の 1 リクエストあたりのコストは増える。
+- 手元 PC から SSH を経由しているため、p95 の基準値には経路の RTT が含まれる。CMS の CPU の頭打ちと悪化の時点が一致していることから、SSH が律速の主因ではないと判断した。ただし完全には切り分けていない。
+- Workers 側の上限 (Free プランの CPU 上限と 1 日のリクエスト上限) は、この測定の対象外である。開催期間は Workers Paid に切り替える前提である。
