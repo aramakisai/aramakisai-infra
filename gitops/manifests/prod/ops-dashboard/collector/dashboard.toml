@@ -125,8 +125,9 @@ expires_on = "2027-10-31"
 name = "HCP Terraform organization トークン"
 expires_on = "2027-10-31"
 
-# サイネージ通知用 Service Token (terraform の cloudflare_zero_trust_access_service_token.signage_notify) は
-# apply 後の expires_at が確定してから、name = "サイネージ通知 Service Token" で追記する
+[[credentials]]
+name = "サイネージ通知 Service Token"
+expires_on = "2027-10-12"
 
 # 凍結中のワークロード (Namespace または名前) は取得結果から除外する。
 # prod Namespace に置かれた付随リソース (バックアップ・DB の Application・ExternalSecret) は名前で列挙する。
