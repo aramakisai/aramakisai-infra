@@ -161,6 +161,8 @@ email claim を読むため、`ansible/roles/zitadel-bootstrap/vars/resources.ym
 ### ホストOS自動更新・K3sバージョン追従の設計判断
 - 自動再起動時刻は `os_auto_update_reboot_time`（03:30）を基準に、`groups['all']` 内の順序 × `os_auto_update_reboot_stagger_minutes`（30 分）ずつ後ろへずらす（先頭ノードは基準のまま）。server 複数台の同時再起動による etcd クォーラム喪失を避けるため。30 分は 1 台の再起動・k3s の etcd 復帰・Pod 再スケジュールに十分な余裕として置いた値。
 - ホストOSパッケージ更新は Debian 標準機能(`unattended-upgrades` + `apt-daily-upgrade.timer` + `Automatic-Reboot`)に完全委任し、Ansibleロール `os-auto-update` は設定ファイル配布と結果通知のみを担う(独自の適用/再起動ロジックは実装しない)。
+- 自動適用の対象 origin は `-security`・`-updates` に加え、Debian 既定と同じポイントリリース (`origin=Debian,codename=${distro_codename},label=Debian`)。backports は対象外。
+- Discord 通知は異常時のみ(平常時は無送信): 修正版が apt にあるのに未適用 / debsecan 失敗・未インストール / `reboot-required` が26時間以上残存。再起動の要否自体は通知せず `Automatic-Reboot` のノード毎ずらしに任せる。
 - **既知の落とし穴**: Debian 13 (trixie) の `unattended-upgrades` 2.12 では `Unattended-Upgrade::Allowed-Origins` は非推奨のlegacyキー名で、実機では `get_allowed_origins_legacy()` 内でクラッシュする。正しいキー名は `Unattended-Upgrade::Origins-Pattern` で、security origin行は `"origin=Debian,codename=${distro_codename}-security,label=Debian-Security";` の形式(`-security` サフィックス必須)。実機検証(prod-node-1)で発見・修正済み。
 - **既知の落とし穴**: Ansible `template` モジュール(Jinja2)でbashスクリプトを配布する際、bashのパラメータ展開 `${#変数名}`(文字列長取得)の `{#` がJinja2のコメント開始タグと誤認識され `Missing end of comment tag` エラーになる。文字列長取得は `wc -c` 等で代替する。
 - Discord webhook通知は本文が2000文字を超えると送信が失敗する(`{"content": ["Must be 2000 or fewer in length."]}`)。`debsecan` 等の可変長コマンド出力を含める場合は要約(件数のみ)+最終メッセージのtruncateガードの二重対策が必要。
