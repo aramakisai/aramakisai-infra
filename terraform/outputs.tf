@@ -49,6 +49,18 @@ output "e2e_service_token_client_secret" {
   sensitive   = true
 }
 
+output "signage_notify_service_token_client_id" {
+  description = "サイネージ通知用 Service Token の client_id (apply後にInfisicalのSIGNAGE_NOTIFY_ACCESS_CLIENT_IDへ反映 / 機密情報)"
+  value       = cloudflare_zero_trust_access_service_token.signage_notify.client_id
+  sensitive   = true
+}
+
+output "signage_notify_service_token_client_secret" {
+  description = "サイネージ通知用 Service Token の client_secret (apply後にInfisicalのSIGNAGE_NOTIFY_ACCESS_CLIENT_SECRETへ反映 / 機密情報)"
+  value       = cloudflare_zero_trust_access_service_token.signage_notify.client_secret
+  sensitive   = true
+}
+
 # Hetzner Object Storage は hcloud provider 非対応のため手動管理
 # バケット名: aramakisai-backups
 # output "object_storage_bucket" {

@@ -7,23 +7,23 @@ service = "cloudflare_workers"
 name = "Workers Free"
 paid = false
 from = "2020-01-01"
-until = "2026-10-31"
-limits = { requests_day = 100_000 }
+until = "2026-10-22"
+limits = { requests_day = 100_000, do_requests_day = 100_000, do_gbs_day = 13_000 }
 
 [[plans]]
 service = "cloudflare_workers"
 name = "Workers Paid"
 paid = true
-from = "2026-11-01"
-until = "2026-11-30"
-limits = { requests_month = 10_000_000 }
+from = "2026-10-23"
+until = "2026-11-22"
+limits = { requests_month = 10_000_000, cpu_ms_month = 30_000_000, do_requests_month = 1_000_000, do_gbs_month = 400_000 }
 
 [[plans]]
 service = "cloudflare_workers"
 name = "Workers Free"
 paid = false
-from = "2026-12-01"
-limits = { requests_day = 100_000 }
+from = "2026-11-23"
+limits = { requests_day = 100_000, do_requests_day = 100_000, do_gbs_day = 13_000 }
 
 [[plans]]
 service = "cloudflare_r2"
@@ -124,6 +124,10 @@ expires_on = "2027-10-31"
 [[credentials]]
 name = "HCP Terraform organization トークン"
 expires_on = "2027-10-31"
+
+[[credentials]]
+name = "サイネージ通知 Service Token"
+expires_on = "2027-10-12"
 
 # 凍結中のワークロード (Namespace または名前) は取得結果から除外する。
 # prod Namespace に置かれた付随リソース (バックアップ・DB の Application・ExternalSecret) は名前で列挙する。

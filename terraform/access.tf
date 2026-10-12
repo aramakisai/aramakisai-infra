@@ -179,3 +179,38 @@ resource "cloudflare_zero_trust_access_policy" "allow_e2e_service_token" {
     service_token = [cloudflare_zero_trust_access_service_token.e2e_ci.id]
   }
 }
+
+# ============================================================
+# Cloudflare Access: サイネージ通知専用 Service Token
+#
+# CMSが保存時に /api/signage/notify へPOSTするための非対話トークン。
+# e2e_ci は workers.dev のアプリにしか許可されておらず、用途ごとに分ければ
+# 失効や更新が互いに影響しないため使い回さない。
+# 期限の30日前以降の apply で create_before_destroy により作り直される。
+# ============================================================
+
+resource "cloudflare_zero_trust_access_service_token" "signage_notify" {
+  account_id           = var.cloudflare_account_id
+  name                 = "aramakisai-web signage notify"
+  duration             = "8760h"
+  min_days_for_renewal = 30
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+# allow_zitadel (decision = "allow") と共存できないため独立リソースにする。
+# local.access_applications の for_each には相乗りさせない
+# (他アプリへ意図せずバイパスが広がるのを避けるため)
+resource "cloudflare_zero_trust_access_policy" "allow_signage_notify_service_token" {
+  account_id     = var.cloudflare_account_id
+  application_id = cloudflare_zero_trust_access_application.aramakisai_signage.id
+  name           = "Allow Signage Notify Service Token"
+  precedence     = 2
+  decision       = "non_identity"
+
+  include {
+    service_token = [cloudflare_zero_trust_access_service_token.signage_notify.id]
+  }
+}

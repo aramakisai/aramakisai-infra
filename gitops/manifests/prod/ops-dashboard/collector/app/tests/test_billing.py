@@ -16,21 +16,21 @@ service = "cloudflare_workers"
 name = "Workers Free"
 paid = false
 from = "2020-01-01"
-until = "2026-10-31"
-limits = { requests_day = 100_000 }
+until = "2026-10-22"
+limits = { requests_day = 100_000, do_requests_day = 100_000, do_gbs_day = 13_000 }
 [[plans]]
 service = "cloudflare_workers"
 name = "Workers Paid"
 paid = true
-from = "2026-11-01"
-until = "2026-11-30"
-limits = { requests_month = 10_000_000 }
+from = "2026-10-23"
+until = "2026-11-22"
+limits = { requests_month = 10_000_000, cpu_ms_month = 30_000_000, do_requests_month = 1_000_000, do_gbs_month = 400_000 }
 [[plans]]
 service = "cloudflare_workers"
 name = "Workers Free"
 paid = false
-from = "2026-12-01"
-limits = { requests_day = 100_000 }
+from = "2026-11-23"
+limits = { requests_day = 100_000, do_requests_day = 100_000, do_gbs_day = 13_000 }
 [[plans]]
 service = "cloudflare_r2"
 name = "R2 Free"
@@ -112,13 +112,14 @@ def at(y, m, d, h=12):
 
 class Plan(unittest.TestCase):
     def test_period_switch(self):
-        self.assertEqual(plan_item(CFG, "cloudflare_workers", at(2026, 10, 31)).values["plan"], "Workers Free")
-        self.assertEqual(plan_item(CFG, "cloudflare_workers", at(2026, 11, 1)).values["plan"], "Workers Paid")
-        self.assertEqual(plan_item(CFG, "cloudflare_workers", at(2026, 12, 1)).values["plan"], "Workers Free")
+        self.assertEqual(plan_item(CFG, "cloudflare_workers", at(2026, 10, 22)).values["plan"], "Workers Free")
+        self.assertEqual(plan_item(CFG, "cloudflare_workers", at(2026, 10, 23)).values["plan"], "Workers Paid")
+        self.assertEqual(plan_item(CFG, "cloudflare_workers", at(2026, 11, 22)).values["plan"], "Workers Paid")
+        self.assertEqual(plan_item(CFG, "cloudflare_workers", at(2026, 11, 23)).values["plan"], "Workers Free")
 
     def test_jst_boundary(self):
-        # 10/31 15:00 UTC は JST で 11/1 00:00
-        self.assertEqual(plan_item(CFG, "cloudflare_workers", at(2026, 10, 31, 15)).values["plan"], "Workers Paid")
+        # 10/22 15:00 UTC は JST で 10/23 00:00
+        self.assertEqual(plan_item(CFG, "cloudflare_workers", at(2026, 10, 22, 15)).values["plan"], "Workers Paid")
 
     def test_undeclared_warns(self):
         self.assertEqual(plan_item(CFG, "uptimerobot", NOW).status, Status.WARN)
@@ -131,9 +132,9 @@ class Plan(unittest.TestCase):
         self.assertEqual(plan_item(CFG, "cloudflare_workers", at(2026, 11, 10), actual_paid=True).status, Status.OK)
 
     def test_revert_declared_paid_continues(self):
-        cfg = config.parse(TOML.replace('until = "2026-11-30"', 'until = "2026-11-30"').replace(
-            'name = "Workers Free"\npaid = false\nfrom = "2026-12-01"',
-            'name = "Workers Paid2"\npaid = true\nfrom = "2026-12-01"'))
+        cfg = config.parse(TOML.replace(
+            'name = "Workers Free"\npaid = false\nfrom = "2026-11-23"',
+            'name = "Workers Paid2"\npaid = true\nfrom = "2026-11-23"'))
         it = plan_item(cfg, "cloudflare_workers", at(2026, 12, 5))
         self.assertEqual(it.status, Status.CRIT)
 
@@ -196,19 +197,35 @@ class Hetzner(unittest.TestCase):
             billing_hetzner.SOURCES[0].fetch(make_ctx(CFG, env={}))
 
 
-def gql(day=1000, month=5000, storage=(4e9, 1e9), ops=()):
+def gql(storage=(4e9, 1e9), ops=()):
     return {"data": {"viewer": {"accounts": [{
-        "day": [{"sum": {"requests": day}}], "month": [{"sum": {"requests": month}}],
         "storage": [{"max": {"payloadSize": storage[0], "metadataSize": storage[1]},
                      "dimensions": {"datetime": "2026-06-01T11:00:00Z", "bucketName": "b"}}],
         "ops": [{"sum": {"requests": n}, "dimensions": {"actionType": a}} for a, n in ops]}]}}}
 
 
+def usage(requests=0, cpu_us=0, do_requests=0, gbs=0.0, ws=0):
+    return {"data": {"viewer": {"accounts": [{
+        "workers": [{"sum": {"requests": requests, "cpuTimeUs": cpu_us}}],
+        "doInv": [{"sum": {"requests": do_requests}}],
+        "doPeriodic": [{"sum": {"duration": gbs, "inboundWebsocketMsgCount": ws}}]}]}}}
+
+
 class Cloudflare(unittest.TestCase):
-    def run_cf(self, now, gq, subs=(), users=7):
+    def run_cf(self, now, gq=None, subs=(), users=7, usages=None):
+        """usages は (start, end) の窓ごとの使用量応答を返す関数 (省略時は空)。窓の呼び出しは self.windows に残る。"""
+        self.windows = []
+
+        def graphql(body, **kw):
+            v = body["variables"]
+            if "start" not in v:
+                return gq or gql()
+            self.windows.append((v["start"], v["end"], v["startDate"], v["endDate"]))
+            return (usages or (lambda s, e: usage()))(v["start"], v["end"])
+
         http = FakeHttp({
             "https://api.cloudflare.com/client/v4/accounts/acc/subscriptions": {"result": list(subs)},
-            "https://api.cloudflare.com/client/v4/graphql": gq,
+            "https://api.cloudflare.com/client/v4/graphql": graphql,
             "https://api.cloudflare.com/client/v4/accounts/acc/access/users": {
                 "result": [], "result_info": {"total_count": users}}})
         ctx = make_ctx(CFG, http=http, env={"OPS_CLOUDFLARE_READ_TOKEN": "t", "TF_VAR_cloudflare_account_id": "acc"}, now=now)
@@ -216,15 +233,24 @@ class Cloudflare(unittest.TestCase):
         return {i.key: i for i in r.items}, r
 
     def test_free_daily(self):
-        by, r = self.run_cf(NOW, gql(day=90_000, ops=[("PutObject", 10), ("GetObject", 20), ("DeleteObject", 99)]))
+        by, r = self.run_cf(NOW, gql(ops=[("PutObject", 10), ("GetObject", 20), ("DeleteObject", 99)]),
+                            usages=lambda s, e: usage(requests=90_000, do_requests=50_000, gbs=6_500.0))
         self.assertIn("quota.workers_day", by)
         self.assertNotIn("quota.workers_month", by)
+        self.assertNotIn("quota.workers_cpu_month", by)
+        self.assertNotIn("quota.do_requests_month", by)
         self.assertEqual(by["quota.workers_day"].status, Status.WARN)
+        self.assertEqual(by["quota.do_requests_day"].values["limit"], 100_000)
+        self.assertEqual(by["quota.do_requests_day"].status, Status.OK)
+        self.assertEqual(by["quota.do_gbs_day"].values["used"], 6_500.0)
+        self.assertEqual(by["quota.do_gbs_day"].values["limit"], 13_000)
         self.assertEqual(by["quota.r2_class_a"].values["used"], 10)
         self.assertEqual(by["quota.r2_class_b"].values["used"], 20)
         self.assertEqual(by["quota.r2_storage"].values["used"], 5.0)
         self.assertEqual(by["quota.zt_users"].values["used"], 7)
         self.assertEqual(r.status, Status.WARN)
+        # Free の日次は UTC の 0 時から現在まで
+        self.assertEqual(self.windows, [("2026-06-01T00:00:00Z", "2026-06-01T12:00:00Z", "2026-06-01", "2026-06-01")])
 
     def test_storage_sums_latest_per_bucket(self):
         g = gql()
@@ -243,14 +269,48 @@ class Cloudflare(unittest.TestCase):
 
     def test_paid_monthly_and_billed(self):
         sub = {"state": "Paid", "price": 5, "frequency": "monthly", "rate_plan": {"public_name": "Workers Paid"}}
-        by, _ = self.run_cf(at(2026, 11, 10), gql(month=11_000_000), subs=[sub])
+        by, _ = self.run_cf(at(2026, 11, 10), subs=[sub],
+                            usages=lambda s, e: usage(requests=11_000_000, cpu_us=25_000_000_000,
+                                                      do_requests=900_000, gbs=300_000.0))
         self.assertEqual(by["quota.workers_month"].status, Status.CRIT)
+        self.assertEqual(by["quota.workers_cpu_month"].values["used"], 25_000_000)
+        self.assertEqual(by["quota.workers_cpu_month"].status, Status.WARN)
+        self.assertEqual(by["quota.do_requests_month"].status, Status.WARN)
+        self.assertEqual(by["quota.do_gbs_month"].values["limit"], 400_000)
+        self.assertNotIn("quota.workers_day", by)
+        self.assertNotIn("quota.do_requests_day", by)
         self.assertEqual(by["billed.cloudflare"].values["amount"], 5)
         self.assertEqual(by["plan.cloudflare_workers"].status, Status.OK)
 
+    def test_paid_period_starts_at_plan_from_not_calendar_month(self):
+        self.run_cf(at(2026, 11, 10))
+        self.assertEqual(self.windows, [("2026-10-23T00:00:00Z", "2026-11-10T12:00:00Z", "2026-10-23", "2026-11-10")])
+
+    def test_long_range_is_split_into_windows(self):
+        self.run_cf(at(2026, 11, 22, 10), usages=lambda s, e: usage(requests=1_000_000))
+        self.assertGreater(len(self.windows), 1)
+        starts = [w[0] for w in self.windows]
+        ends = [w[1] for w in self.windows]
+        self.assertEqual(starts[0], "2026-10-23T00:00:00Z")
+        self.assertEqual(ends[-1], "2026-11-22T10:00:00Z")
+        self.assertEqual(starts[1:], ends[:-1])
+
+    def test_summed_over_windows(self):
+        by, _ = self.run_cf(at(2026, 11, 22, 10), usages=lambda s, e: usage(requests=1_000_000))
+        self.assertEqual(by["quota.workers_month"].values["used"], 1_000_000 * len(self.windows))
+
+    def test_do_requests_subtract_websocket_messages(self):
+        # 請求では受信の WebSocket メッセージ 20 件が 1 要求。requests は 1 件ずつ数えるので 19/20 を引く
+        by, _ = self.run_cf(at(2026, 11, 10), usages=lambda s, e: usage(do_requests=1_000, ws=800))
+        self.assertEqual(by["quota.do_requests_month"].values["used"], 1_000 - 760)
+
+    def test_do_requests_never_negative(self):
+        by, _ = self.run_cf(at(2026, 11, 10), usages=lambda s, e: usage(do_requests=10, ws=800))
+        self.assertEqual(by["quota.do_requests_month"].values["used"], 0)
+
     def test_forgotten_revert(self):
         sub = {"state": "Paid", "price": 5, "frequency": "monthly", "rate_plan": {"public_name": "Workers Paid"}}
-        by, _ = self.run_cf(at(2026, 12, 3), gql(), subs=[sub])
+        by, _ = self.run_cf(at(2026, 12, 3), subs=[sub])
         self.assertEqual(by["plan.cloudflare_workers"].status, Status.CRIT)
 
     def test_graphql_errors_raise(self):
