@@ -69,6 +69,8 @@ spec:
             # (このenv:には置かない、envFromの後にenv:が来ると後勝ちで上書きされるため)。
             - name: AUTHENTIK_ISSUER_URL
               value: https://idp.aramakisai.com
+            - name: SIGNAGE_NOTIFY_URL
+              value: https://aramakisai.com/api/signage/notify
           resources:
             requests:
               memory: "256Mi"
