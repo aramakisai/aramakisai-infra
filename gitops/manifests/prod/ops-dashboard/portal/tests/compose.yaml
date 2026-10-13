@@ -33,7 +33,7 @@ services:
       - --oidc-issuer-url=http://mock:8080/default
       - --client-id=portal
       - --client-secret=secret
-      - --scope=openid email profile
+      - --scope=openid email profile offline_access
       - --oidc-groups-claim=groups
       - --code-challenge-method=S256
       - --redirect-url=http://localhost:18080/oauth2/callback
@@ -44,5 +44,9 @@ services:
       - --skip-provider-button=true
       - --whitelist-domain=idp.aramakisai.com
       - --cookie-secure=false
+      - --cookie-expire=12h
+      - --cookie-refresh=1h
+      - --cookie-csrf-per-request=true
+      - --cookie-csrf-expire=5m
       - --cookie-secret=0123456789abcdef0123456789abcdef # gitleaks:allow
       - --insecure-oidc-allow-unverified-email=true
