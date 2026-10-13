@@ -28,7 +28,7 @@ resource "cloudflare_list" "www_redirect" {
   item {
     value {
       redirect {
-        source_url            = "www.aramakisai.com"
+        source_url            = "www.aramakisai.com/"
         target_url            = "https://aramakisai.com"
         status_code           = 301
         preserve_query_string = "enabled"
