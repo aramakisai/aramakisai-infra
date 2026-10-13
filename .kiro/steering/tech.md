@@ -162,7 +162,13 @@ email claim を読むため、`ansible/roles/zitadel-bootstrap/vars/resources.ym
 
 ### apex のスキャナ遮断 (WAF カスタムルール)
 - `terraform/cloudflare_waf_scanners.tf` (`cloudflare_ruleset`, phase `http_request_firewall_custom`) が、`aramakisai.com` (apex、Cloudflare Workers) への脆弱性スキャナを Worker 起動前に `block` する。Worker が 404 を返すだけの要求で起動回数と CPU 時間を消費するのを避けるため。
-- 遮断対象は正規利用の無いものに限る: 拡張子 `php/asp/aspx/jsp/sql/env/pem/key`、`/.well-known/` 以外のドットファイル (`/.env`・`/.git` 等)、`/wp-*`、`/xmlrpc`、`/@fs/`、`/graphql`、`/api/graphql` など。`/2025/*` の旧 URL リダイレクトと `api/*` 以外の正規ページには当たらない。
+- 遮断対象は正規利用の無いものに限る:
+  - 拡張子 `php/asp/aspx/jsp/sql/env/pem/key/yml/yaml/bak/old/zip/sqlite`
+  - `/.well-known/` 以外のドットファイル (`/.env`・`/.git` 等)
+  - 前方一致 `/wp-`・`/wordpress`・`/xmlrpc`・`/@fs/`・`/cgi-bin/`・`/phpmyadmin`・`/_debugbar/`・`/_profiler/`・`/flowise/`・`/api/fs/`・`/api/designer/`
+  - 完全一致 `/graphql`・`/api/graphql`・`/v1/graphql`・`/server-status`・`/credentials`・`/secure`・`/backoffice`・`/read-document`・`/gcp-service.json`・`/service_account.json`・`/stripe.config.js`・`/config.json`・`/config.js`・`/runtime-config.js`・`/configuration.js`・`/openapi.json`・`/api/config`・`/api/env`・`/api/v1/settings`・`/api/inngest`・`/api/templates/preview`
+  - `*.json`・`*.js` は manifest や Next.js チャンクがあるため拡張子では遮断しない。
+  - `/2025/*` の旧 URL リダイレクトと正規ページ・`/api/{parking,signage,stamps}` には当たらない。
 - 他ホスト (cms の `/api/graphql` 等) は正規利用があるため `http.host eq "aramakisai.com"` で限定する。
 - Free プランはカスタムルール 5 件まで・regex 不可 (`matches` は Business 以上)。パターンは 1 ルールに `or` で束ねて枠を使い切らないようにしている。zone あたり entrypoint は 1 つなので、追加するルールはこの ruleset に足す。
 
