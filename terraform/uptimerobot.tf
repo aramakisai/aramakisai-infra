@@ -13,12 +13,6 @@ locals {
       url  = "https://aramakisai.com"
       port = null
     }
-    staging = {
-      name = "Staging フロントエンド"
-      type = "HTTP"
-      url  = "https://stg.aramakisai.com"
-      port = null
-    }
     argocd = {
       name = "ArgoCD 管理画面"
       type = "HTTP"
@@ -68,8 +62,6 @@ resource "uptimerobot_monitor" "this" {
   port     = each.value.port
   interval = 300
 
-  # staging は Cloudflare Access (Authentik OIDC) 経由で 302 が返るため、
-  # リダイレクト先 (最終的に 200 を返すログイン画面) まで追従させる
   follow_redirections = true
 
   tags = ["observability-v2"]
