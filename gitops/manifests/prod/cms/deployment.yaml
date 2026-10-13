@@ -71,6 +71,8 @@ spec:
               value: https://idp.aramakisai.com
             - name: SIGNAGE_NOTIFY_URL
               value: https://aramakisai.com/api/signage/notify
+            - name: SIGNAGE_QUAKE_URL
+              value: https://aramakisai-signage-quake.aramakisai.workers.dev
           resources:
             requests:
               memory: "256Mi"
