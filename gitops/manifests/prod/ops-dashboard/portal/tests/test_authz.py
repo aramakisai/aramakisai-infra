@@ -107,10 +107,16 @@ class Client:
         r.body = r.read().decode()
         return r
 
-    def login(self, groups):
+    def start(self):
         r = self.req("/oauth2/start?rd=/")
         self.assertion(r.status in (302, 303), "start")
-        auth = r.headers["Location"]
+        return r.headers["Location"]
+
+    def login(self, groups):
+        self.finish(self.start(), groups)
+
+    def finish(self, auth, groups):
+        """authorize から callback まで進め、callback の応答を返す。"""
         claims = {"email": "u@example.com", "name": "u"}
         if groups is not None:
             claims["groups"] = groups
@@ -119,6 +125,7 @@ class Client:
         self.assertion(r.status in (302, 303), f"authorize {r.status} {r.body[:200]}")
         r = self.req(r.headers["Location"])
         self.assertion(r.status in (302, 303), f"callback {r.status} {r.body[:200]}")
+        return r
 
     @staticmethod
     def assertion(ok, msg):
@@ -194,6 +201,29 @@ class Authz(unittest.TestCase):
         self.assertEqual(r.status, 401)
         self.assertNotIn("Notion", r.body)
         self.assertEqual(r.headers["Cache-Control"], "private, no-store")
+
+    def test_login_redirect_by_sec_fetch_mode(self):
+        # fetch/XHR は転送先の IdP を CORS で追えないため 401、ページ遷移だけ 302
+        for mode, want in (("navigate", 302), (None, 302), ("no-cors", 401), ("cors", 401), ("same-origin", 401)):
+            r = Client().req("/", headers={"Sec-Fetch-Mode": mode} if mode else None)
+            self.assertEqual(r.status, want, mode)
+            if want == 302:
+                self.assertTrue(r.headers["Location"].startswith("/oauth2/start"), mode)
+
+    def test_concurrent_login_flows_share_cookie_jar(self):
+        # 同一ブラウザで start を 2 回続けても、先の flow の callback が PKCE verifier を失わず通る。
+        # CSRF cookie が flow ごとに別名で共存することが前提
+        c = Client()
+        auth_a = c.start()
+        auth_b = c.start()
+        csrf = sorted(k.name for k in c.jar if "csrf" in k.name)
+        self.assertEqual(len(csrf), 2, csrf)
+        self.assertEqual(len(set(csrf)), 2)
+        r = c.finish(auth_a, ["executive"])
+        self.assertEqual(r.headers["Location"], "/")
+        self.assertEqual(c.req("/").status, 200)
+        c.finish(auth_b, ["executive"])
+        self.assertEqual(c.req("/").status, 200)
 
     def test_login_redirect_has_no_header_injection(self):
         r = Client().req("/a%0d%0aSet-Cookie:%20pwn=1")

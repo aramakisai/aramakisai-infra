@@ -129,6 +129,8 @@ spec:
             - --cookie-secure=true
             - --cookie-expire=12h
             - --cookie-refresh=1h
+            - --cookie-csrf-per-request=true
+            - --cookie-csrf-expire=5m
             - --whitelist-domain=idp.aramakisai.com
           envFrom:
             - secretRef:
