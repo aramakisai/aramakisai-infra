@@ -17,12 +17,12 @@ resource "cloudflare_ruleset" "waf_block_scanners" {
   phase   = "http_request_firewall_custom"
 
   rules {
-    description = "apex への脆弱性スキャナ (.php/.env/.git/wp-*/xmlrpc/graphql 等) を遮断"
+    description = "apex への脆弱性スキャナ (.php/.env/.git/wp-*/xmlrpc/graphql/設定ファイル名等) を遮断"
     action      = "block"
     enabled     = true
     expression = replace(trimspace(<<-EOT
       (http.host eq "aramakisai.com") and (
-        lower(http.request.uri.path.extension) in {"php" "asp" "aspx" "jsp" "sql" "env" "pem" "key"}
+        lower(http.request.uri.path.extension) in {"php" "asp" "aspx" "jsp" "sql" "env" "pem" "key" "yml" "yaml" "bak" "old" "zip" "sqlite"}
         or (http.request.uri.path contains "/." and not starts_with(http.request.uri.path, "/.well-known/"))
         or starts_with(http.request.uri.path, "/wp-")
         or starts_with(http.request.uri.path, "/wordpress")
@@ -30,7 +30,12 @@ resource "cloudflare_ruleset" "waf_block_scanners" {
         or starts_with(http.request.uri.path, "/@fs/")
         or starts_with(http.request.uri.path, "/cgi-bin/")
         or starts_with(http.request.uri.path, "/phpmyadmin")
-        or http.request.uri.path in {"/api/graphql" "/graphql" "/server-status"}
+        or starts_with(http.request.uri.path, "/_debugbar/")
+        or starts_with(http.request.uri.path, "/_profiler/")
+        or starts_with(http.request.uri.path, "/flowise/")
+        or starts_with(http.request.uri.path, "/api/fs/")
+        or starts_with(http.request.uri.path, "/api/designer/")
+        or http.request.uri.path in {"/api/graphql" "/graphql" "/v1/graphql" "/server-status" "/credentials" "/secure" "/backoffice" "/read-document" "/gcp-service.json" "/service_account.json" "/stripe.config.js" "/config.json" "/config.js" "/runtime-config.js" "/configuration.js" "/openapi.json" "/api/config" "/api/env" "/api/v1/settings" "/api/inngest" "/api/templates/preview"}
       )
     EOT
     ), "/\\s+/", " ")
