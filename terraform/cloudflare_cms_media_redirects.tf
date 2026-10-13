@@ -80,4 +80,18 @@ resource "cloudflare_ruleset" "cms_media_legacy_redirects" {
       }
     }
   }
+
+  rules {
+    description = "idp ルートを Login v2 へリダイレクト (idp_root_redirect.tf)"
+    expression  = "true"
+    action      = "redirect"
+    enabled     = true
+
+    action_parameters {
+      from_list {
+        name = cloudflare_list.idp_root_redirect.name
+        key  = "http.request.full_uri"
+      }
+    }
+  }
 }
