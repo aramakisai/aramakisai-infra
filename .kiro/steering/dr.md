@@ -197,7 +197,8 @@ mailserver は `hostNetwork: true` + `NET_ADMIN` のため、fail2ban の BAN �
 Dovecot Lua Auth Bridge が到達不能になり `doveadm auth test` が `code=temp_fail` を返し、
 Zitadel からの SMTP 送信も失敗→認証失敗で再 BAN のループになる。
 
-- 対策: `configmap.yaml` の `fail2ban-jail.cf` で Pod CIDR (`10.42.0.0/16`) を `ignoreip` に入れている
+- 対策: `configmap.yaml` の `fail2ban-jail.cf` で Pod CIDR (`10.42.0.0/16`) とノード private network (`10.0.0.0/16`) を `ignoreip` に入れている。
+  他ノード発の接続は masquerade でノード IP が送信元になるため、ノード IP が BAN されると etcd・kube-apiserver のノード間通信も切れる
 - 再発時の確認手順:
   ```bash
   ssh root@prod-node-1 "nft list table inet f2b-table"
