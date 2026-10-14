@@ -173,10 +173,19 @@ collector の `collector-data` PVC (SQLite) に保存する Falco 検知・認�
 LDAP は使わない。関連設定は `gitops/manifests/prod/mailserver/configmap.yaml` に集約されている。
 
 - **ML アドレス(配送専用)**: DMS の `ACCOUNT_PROVISIONER=FILE` で `postfix-accounts.cf`(ML 7件 + noreply)と
-  `postfix-virtual.cf`(admin@ の5エイリアス)を静的定義する。passwd-file passdb を置かない
-  (`auth-passwdfile.inc` で上書き)ため、これらのアドレスではログインできない。
+  `postfix-virtual.cf`(admin@ の5エイリアス)を静的定義する。`postfix-accounts.cf` のパスワード欄は
+  使われない(`auth-passwdfile.inc` で上書き)ため、これらのアドレスではログインできない。
 - **ログイン認証**: PLAIN/LOGIN は Dovecot Lua Auth Bridge(`zitadel-auth.lua`)が Zitadel Session API へ委譲、
-  OAUTHBEARER(Roundcube)は Zitadel introspection。noreply も Zitadel の human user として認証する。
+  OAUTHBEARER(Roundcube)は Zitadel introspection。
+  - **noreply は例外**: CMS の招待メール一斉送信で SMTP AUTH が集中し、Zitadel のパスワード照合
+    (bcrypt、1 回約 1.4 秒・直列)が lua のタイムアウトを超えるため、noreply だけは Zitadel を通さず
+    passwd-file passdb(`username_filter`、失敗時は lua へ流さない)で認証する。passwd-file は
+    `user-patches.sh` が起動時に Secret `mailserver-noreply-smtp`(Infisical `NOREPLY_SMTP_PASSWORD`)から
+    生成するため、パスワードのローテーションは Reloader による再起動で反映される。
+  - **認証キャッシュ**: Zitadel 経由の認証は成功のみ 5 分キャッシュする(`auth_cache_*`、`dovecot.cf`)。
+    lua は `auth_password_verify` 方式のため、キャッシュ中も入力パスワードの照合は行われる。
+    Zitadel が内部エラーを返している間は期限切れキャッシュへフォールバックするため、
+    Zitadel 側で無効化したユーザーは障害中、同じパスワードで通り続け得る。
 - **ML 閲覧**: Zitadel 認証済みの全ユーザーが全 ML 共有メールボックスを同等権限で読み書きできる
   (`user-patches.sh` が起動時に各部署の `dovecot-acl` に `authenticated` を書き出す)。
 - **送信者認可**: `user-patches.sh` が `mua_sender_restrictions` を上書きする。From が ML アドレス(エイリアス含む)なら

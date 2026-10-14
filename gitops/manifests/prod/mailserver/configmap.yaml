@@ -6,12 +6,29 @@ metadata:
   namespace: prod
 data:
   # Dovecot passdb/userdb (FILE provisioner 時に 10-auth.conf から include される):
-  # - passdb は Zitadel Session API への委譲 (lua) のみ。postfix-accounts.cf の ML
-  #   アドレスは配送専用で、passwd-file passdb を置かないことでログイン不可にする。
+  # - passdb は 2 段。noreply@ は user-patches.sh が Secret から生成する passwd-file
+  #   (/etc/dovecot/noreply-passwd) で認証し、それ以外は Zitadel Session API への委譲 (lua)。
+  #   noreply@ は CMS 招待メールの一斉送信で SMTP AUTH が集中する。Zitadel のパスワード照合は
+  #   bcrypt で 1 回あたり秒単位かつ直列のため、同時接続が増えると lua のタイムアウトで
+  #   認証失敗になる。
+  # - noreply passdb の result_failure は return-fail にする。既定の continue のままだと
+  #   誤パスワードが lua へ流れ、ブルートフォースが Zitadel の負荷になる。一方 result_failure は
+  #   USER_UNKNOWN にも掛かるため、username_filter で noreply@ 以外をこの passdb ごと
+  #   スキップして lua へ進ませる。
+  # - postfix-accounts.cf の ML アドレスは配送専用で、passwd-file passdb の対象に含めない
+  #   ことでログイン不可にする (noreply@ の postfix-accounts.cf 側パスワード欄は無効のまま)。
   # - userdb は passwd-file (ML アドレス、DMS が postfix-accounts.cf から生成) を先に引き、
   #   見つからなければ lua (Zitadel ユーザー) へフォールスルーする。
   # mechanisms = plain login により、OAUTHBEARER (Roundcube) は dovecot.cf の oauth2 passdb のみを使う。
   auth-passwdfile.inc: |
+    passdb {
+      driver = passwd-file
+      args = username_format=%u /etc/dovecot/noreply-passwd
+      mechanisms = plain login
+      username_filter = noreply@aramakisai.com
+      result_success = return-ok
+      result_failure = return-fail
+    }
     passdb {
       driver = lua
       args = file=/etc/dovecot/zitadel-auth.lua blocking=yes
@@ -28,16 +45,15 @@ data:
       args = file=/etc/dovecot/zitadel-auth.lua blocking=yes
     }
   # 上記passdb/userdbが呼び出すLuaスクリプト本体
-  # (ansible/roles/zitadel-cutover/templates/zitadel-auth.lua.j2 のレンダリング結果、
-  # dovecot-lua-2.3.21.1 + lua5.3-socket + lua5.3-cjson で実機検証済み)。
+  # (ansible/roles/zitadel-cutover/templates/zitadel-auth.lua.j2 のレンダリング結果。
+  # 稼働版 Dovecot 2.3.19.1 の lua passdb API (auth_password_verify) に合わせている)。
   zitadel-auth.lua: |
     -- Dovecot Lua Auth Bridge: passdb/userdb driver for Zitadel Session API
     --
-    -- passdb は auth_passdb_lookup (lookup方式) を使う。Zitadel Session API側で
-    -- 平文パスワードの検証が完結するため、Dovecotには独自のパスワードスキーム比較を
-    -- させない ("nopassword=y" を返す。付けないとDovecotがpassword=フィールドを
-    -- 要求しPASSDB_RESULT_SCHEME_NOT_AVAILABLEで失敗する。dovecot-lua-2.3.21.1 +
-    -- luasocket + lua5.3-cjsonの組み合わせでk3d実機検証済み)。
+    -- passdb は auth_password_verify (検証方式) を使う。lookup 方式 ("nopassword=y") だと
+    -- auth_cache を有効にした時に Dovecot が "Cached NULL password" として扱い、
+    -- キャッシュ有効期間中は任意のパスワードで認証が通ってしまう。検証方式なら
+    -- 認証成功時に Dovecot が入力パスワードのハッシュをキャッシュし、以降は一致比較になる。
     --
     -- この設定はログイン主体(Zitadelユーザー)の認証のみを対象とする。ML アドレスの
     -- 配送先解決は DMS の FILE provisioner (postfix-accounts.cf) が担う。
@@ -118,11 +134,11 @@ data:
       return true, status_or_err, parsed
     end
 
-    function auth_passdb_lookup(req)
+    function auth_password_verify(req, password)
       local ok, status, parsed = zitadel_api("POST", "/v2/sessions", {
         checks = {
           user = { loginName = req.user },
-          password = { password = req.password },
+          password = { password = password },
         },
       })
 
@@ -132,7 +148,7 @@ data:
       end
 
       if status == 201 then
-        return dovecot.auth.PASSDB_RESULT_OK, "nopassword=y"
+        return dovecot.auth.PASSDB_RESULT_OK, ""
       elseif status == 400 then
         -- code=3 "Password is invalid" が実機で確認済みの応答(task7.1参照)
         return dovecot.auth.PASSDB_RESULT_PASSWORD_MISMATCH, "password mismatch"
@@ -172,6 +188,15 @@ data:
   # Dovecot 認証設定オーバーライド
   dovecot.cf: |
     auth_mechanisms = plain login oauthbearer xoauth2
+
+    # Zitadel のパスワード照合は 1 回あたり秒単位で直列のため、同一ユーザーの再接続
+    # (IMAP クライアントの再接続等) をキャッシュで吸収する。成功のみキャッシュし、
+    # 失敗 (誤パスワード・不明ユーザー) は auth_cache_negative_ttl = 0 で保持しない。
+    # Zitadel が内部エラーを返す間は Dovecot が期限切れキャッシュにフォールバックするため、
+    # Zitadel 側で無効化したユーザーも、障害中は同じパスワードで通り続け得る。
+    auth_cache_size = 10M
+    auth_cache_ttl = 5 mins
+    auth_cache_negative_ttl = 0
 
     # OAUTHBEARER: Zitadel introspection endpoint でトークン検証 (ファイル参照)
     passdb {
@@ -281,8 +306,8 @@ data:
       list = children
     }
   # ML アドレス (配送専用)。DMS FILE provisioner が vmailbox と Dovecot userdb を生成し、
-  # /var/mail/aramakisai.com/<localpart> へ配送する。パスワード欄は passwd-file passdb を
-  # 置いていない (auth-passwdfile.inc) ため使われず、ログインには使えない。
+  # /var/mail/aramakisai.com/<localpart> へ配送する。パスワード欄は passdb に使われない
+  # (auth-passwdfile.inc の passwd-file passdb は別ファイルの noreply 1 件のみ) ため、ログインには使えない。
   postfix-accounts.cf: |
     pr@aramakisai.com|{SHA512-CRYPT}!
     planning@aramakisai.com|{SHA512-CRYPT}!
@@ -348,6 +373,22 @@ data:
       kill -TERM 1
       exit 1
     fi
+    # noreply@ の SMTP AUTH 用 passwd-file (auth-passwdfile.inc 参照)。平文は
+    # Secret のマウントから読み、ハッシュ化したものだけを書く。argv に平文を出さないよう
+    # openssl は stdin から受ける。起動のたびに再生成するため Secret のローテーションは
+    # Reloader による再起動で反映される。
+    NOREPLY_PW_FILE=/run/secrets/noreply-smtp-password
+    if [[ ! -s ${NOREPLY_PW_FILE} ]]; then
+      echo "noreply の SMTP パスワードが空のため終了する" >&2
+      kill -TERM 1
+      exit 1
+    fi
+    (
+      umask 027
+      printf 'noreply@aramakisai.com:{SHA512-CRYPT}%s\n' \
+        "$(tr -d '\n' < "${NOREPLY_PW_FILE}" | openssl passwd -6 -stdin)" > /etc/dovecot/noreply-passwd
+    )
+    chown root:dovecot /etc/dovecot/noreply-passwd
     postconf 'smtpd_sender_login_maps = texthash:/tmp/docker-mailserver/sender-login-maps.cf'
     # Pod ネットワーク経由の submission 投入では Postfix が既定で Message-ID/Date を
     # 補わず、Gmail 側が SMTPIN_ADDED_MISSING を付与し迷惑メール判定を厳しくする。
