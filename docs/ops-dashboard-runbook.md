@@ -1,6 +1,6 @@
 # 運用ポータル・運用ダッシュボード 運用手順
 
-`dash.aramakisai.com` で提供する。executive はポータル (委員会サービスへのリンク集)、admin は加えて運用ダッシュボード (`/admin/`) を使える。構成は ArgoCD Application `ops-dashboard` (namespace `ops-dashboard`、portal = nginx + oauth2-proxy + Homer、collector = Python)。マニフェストは `gitops/manifests/prod/ops-dashboard/`。変更はすべて PR → マージ → ArgoCD 同期で反映する (クラスタへの直接操作はしない)。
+`dash.aramakisai.com` で提供する。executive はポータル (委員会サービスへのリンク集)、admin は加えて運用ダッシュボード (`/admin/`) を使える。構成は ArgoCD Application `ops-dashboard` (namespace `ops-dashboard`、portal = nginx + oauth2-proxy + Homer、portal-redis = oauth2-proxy のセッションストア (Valkey)、collector = Python)。マニフェストは `gitops/manifests/prod/ops-dashboard/`。変更はすべて PR → マージ → ArgoCD 同期で反映する (クラスタへの直接操作はしない)。
 
 ## リンクの追加・変更
 
@@ -34,9 +34,11 @@ CPU・メモリ使用率と K3s バージョン (ノード間で異なれば両�
 
 1. Zitadel のロール `executive` / `admin` が ID token の `groups` claim に入る。
 2. oauth2-proxy が `groups` claim を読む (`--oidc-groups-claim=groups`)。ポータル全体は `executive`、`/admin/` 配下 (運用ダッシュボード) と admin 用リンクは `admin` を持つ場合だけ通す。
-3. セッション cookie は `--cookie-refresh=1h` で 1 時間ごとに refresh token から ID token を取り直し、ロールの変更を取り込む。
+3. セッションは Valkey (`portal-redis`) に保存され、`--cookie-refresh=1h` で 1 時間ごとに refresh token から ID token を取り直してロールの変更を取り込む。refresh は redis のロックで直列化される。
 
 付与は最大 1 時間以内に反映され、剥奪は最大 1 時間以内に効く (cookie の有効期限は 12 時間だが、refresh 時にロールを失っていれば拒否される)。即時に反映したい場合は、利用者がログアウト (`/oauth2/sign_out`) して再ログインする。
+
+Valkey は永続化しないため、`portal-redis` Pod が再起動 (再作成) されると保存中のセッションが失われ、全員が 1 回再ログインになる。障害ではなく想定された挙動で、対応は不要。
 
 ## 資格情報
 

@@ -12,6 +12,17 @@ services:
         aliases: [collector.ops-dashboard.svc.cluster.local]
     volumes:
       - ${T_COLLECTOR_CONF}:/etc/nginx/conf.d/default.conf:ro
+  valkey:
+    image: valkey/valkey:8-alpine@sha256:081c2f5cb575efc901aa80ff9cdbd1ec6a301682fd35e1ebb4b0990a4a4a8507
+    # 本番の redis.yaml と同じ権限・引数で動くことを確かめる
+    user: "65532:65532"
+    read_only: true
+    cap_drop: [ALL]
+    command: ["--save", "", "--appendonly", "no", "--maxmemory", "32mb", "--maxmemory-policy", "allkeys-lru"]
+    tmpfs: ["/data:uid=65532,gid=65532"]
+    networks:
+      default:
+        aliases: [portal-redis]
   nginx:
     image: nginx:1.27.5-alpine
     # 本番と同じく nginx と oauth2-proxy は 1 つのネットワーク名前空間 (127.0.0.1:4180) を共有する
@@ -27,7 +38,7 @@ services:
     network_mode: service:nginx
     # mock の起動前に discovery で落ちるため再試行する
     restart: on-failure
-    depends_on: [mock]
+    depends_on: [mock, valkey]
     command:
       - --provider=oidc
       - --oidc-issuer-url=http://mock:8080/default
@@ -49,4 +60,6 @@ services:
       - --cookie-csrf-per-request=true
       - --cookie-csrf-expire=5m
       - --cookie-secret=0123456789abcdef0123456789abcdef # gitleaks:allow
+      - --session-store-type=redis
+      - --redis-connection-url=redis://portal-redis:6379
       - --insecure-oidc-allow-unverified-email=true

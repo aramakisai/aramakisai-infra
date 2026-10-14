@@ -69,7 +69,7 @@ Terraform でクラウドリソースを定義し、Ansible で K3s クラスタ
 | [ESO](https://external-secrets.io) | `external-secrets` | Kubernetes ↔ Infisical シークレット同期 |
 | [CloudNativePG](https://cloudnative-pg.io) | `cnpg-system` | PostgreSQL Operator |
 | [Vaultwarden](https://github.com/dani-garcia/vaultwarden) | `prod` | パスワードマネージャー (SSO対応) |
-| 運用ポータル・運用ダッシュボード (`ops-dashboard`、`dash.aramakisai.com`) | `ops-dashboard` | 実行委員向けポータル (executive) と管理者向け運用ダッシュボード (admin)。運用は [docs/ops-dashboard-runbook.md](docs/ops-dashboard-runbook.md) |
+| 運用ポータル・運用ダッシュボード (`ops-dashboard`、`dash.aramakisai.com`) | `ops-dashboard` | 実行委員向けポータル (executive) と管理者向け運用ダッシュボード (admin)。セッションは Valkey (`portal-redis`) に保存。運用は [docs/ops-dashboard-runbook.md](docs/ops-dashboard-runbook.md) |
 
 ---
 

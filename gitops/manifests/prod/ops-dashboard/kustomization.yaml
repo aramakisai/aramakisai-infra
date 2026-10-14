@@ -6,6 +6,7 @@ resources:
   - namespace.yaml
   - portal/deployment.yaml
   - portal/service.yaml
+  - portal/redis.yaml
   - portal/external-secret.yaml
   - networkpolicy.yaml
   - collector/deployment.yaml
