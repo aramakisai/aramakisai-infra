@@ -24,3 +24,21 @@ spec:
               app.kubernetes.io/name: falcosidekick
       ports:
         - {protocol: TCP, port: 8081}
+---
+# セッションストアにパスワードを付けない代わりに、到達元を portal Pod に限る
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: portal-redis-ingress
+spec:
+  podSelector:
+    matchLabels:
+      app: portal-redis
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: portal
+      ports:
+        - {protocol: TCP, port: 6379}

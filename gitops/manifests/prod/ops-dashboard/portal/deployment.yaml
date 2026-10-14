@@ -132,6 +132,8 @@ spec:
             - --cookie-csrf-per-request=true
             - --cookie-csrf-expire=5m
             - --whitelist-domain=idp.aramakisai.com
+            - --session-store-type=redis
+            - --redis-connection-url=redis://portal-redis:6379
           envFrom:
             - secretRef:
                 name: portal-oidc

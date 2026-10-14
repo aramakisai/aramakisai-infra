@@ -1,0 +1,77 @@
+---
+# oauth2-proxy のセッションストア。cookie ストアは refresh に排他がなく、並行 auth_request が同じ refresh token を
+# 使い回して Zitadel の rotation で失敗するため、redis のロックで refresh を直列化する。
+# パスワードは付けない: セッションは oauth2-proxy が cookie の鍵で暗号化して保存するので redis 単体の漏洩では復号できず、
+# 到達元は NetworkPolicy で portal Pod に限る。永続化しないため再起動で全員が再ログインになる。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: portal-redis
+  labels:
+    app: portal-redis
+spec:
+  replicas: 1
+  revisionHistoryLimit: 2
+  selector:
+    matchLabels:
+      app: portal-redis
+  template:
+    metadata:
+      labels:
+        app: portal-redis
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: valkey
+          image: valkey/valkey:8-alpine@sha256:081c2f5cb575efc901aa80ff9cdbd1ec6a301682fd35e1ebb4b0990a4a4a8507
+          args: ["--save", "", "--appendonly", "no", "--maxmemory", "32mb", "--maxmemory-policy", "allkeys-lru"]
+          ports:
+            - name: redis
+              containerPort: 6379
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            requests: {memory: "16Mi", cpu: "10m"}
+            limits: {memory: "64Mi", cpu: "200m"}
+          readinessProbe:
+            exec:
+              command: ["valkey-cli", "ping"]
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            exec:
+              command: ["valkey-cli", "ping"]
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 3
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: portal-redis
+  labels:
+    app: portal-redis
+spec:
+  type: ClusterIP
+  selector:
+    app: portal-redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis

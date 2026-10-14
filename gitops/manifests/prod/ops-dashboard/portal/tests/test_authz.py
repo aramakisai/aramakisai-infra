@@ -51,6 +51,13 @@ def setUpModule():
     os.makedirs(os.path.join(site, "assets"))
     write(os.path.join(site, "index.html"), "HOMER-STUB")
     write(os.path.join(site, "assets", "config.yml.dist"), "dist")
+    write(os.path.join(site, "sw.js"), "SW-STUB")
+    write(os.path.join(site, "registerSW.js"), "REG-STUB")
+    write(os.path.join(site, "logo.png"), "LOGO-STUB")
+    write(os.path.join(site, "assets", "manifest.json"), "{}")
+    for d, f in (("resources", "font.woff2"), ("assets/icons", "icon.png"), ("assets/themes", "theme.css")):
+        os.makedirs(os.path.join(site, d))
+        write(os.path.join(site, d, f), "STATIC-STUB")
     # 本番の生成スクリプトを実行する (yq は docker 上)
     subprocess.run(
         ["docker", "run", "--rm", "--user", f"{os.getuid()}:{os.getgid()}", "--entrypoint", "sh",
@@ -59,8 +66,11 @@ def setUpModule():
          "/portal/generate-config.sh", "/portal", "/out"],
         check=True, capture_output=True,
     )
-    for f in os.listdir(os.path.join(site, "assets")):
-        os.chmod(os.path.join(site, "assets", f), 0o644)
+    for root, dirs, files in os.walk(site):
+        for n in dirs:
+            os.chmod(os.path.join(root, n), 0o755)
+        for n in files:
+            os.chmod(os.path.join(root, n), 0o644)
     ENV = {**os.environ, "T_WORK": WORK, "T_PORTAL": PORTAL, "T_COLLECTOR_CONF": os.path.join(HERE, "collector.conf")}
     try:
         compose("up", "-d", "--quiet-pull")
@@ -259,6 +269,28 @@ class Authz(unittest.TestCase):
             self.assertEqual(r.status, 200)
             self.assertNotIn("Notion", r.body)
             self.assertEqual(c.req("/oauth2/sign_out").status in (200, 302), True)
+
+    def test_static_assets_skip_auth(self):
+        # サブリソースが auth_request を踏むと並行 refresh の原因になるため、認証なしで返す
+        for p in ("/resources/font.woff2", "/assets/icons/icon.png", "/assets/themes/theme.css", "/logo.png", "/assets/manifest.json"):
+            r = Client().req(p)
+            self.assertEqual((r.status, r.headers.get("Set-Cookie")), (200, None), p)
+        self.assertEqual(Client().req("/resources/missing.js").status, 404)
+
+    def test_protected_stay_protected(self):
+        # Homer 本体・設定・Service Worker は従来どおり認証が要る。設定系の 404 も静的 prefix に負けない
+        c = Client()
+        for p in ("/", "/index.html", "/sw.js", "/registerSW.js"):
+            self.assertEqual(c.req(p, headers={"Sec-Fetch-Mode": "navigate"}).status, 302, p)
+        self.assertEqual(c.req("/assets/config.yml").status, 401)
+        for p in ("/assets/config-admin.yml", "/assets/links.yaml", "/assets/admin-overlay.yaml"):
+            self.assertEqual(c.req(p).status, 404, p)
+
+    def test_refresh_cookie_returned(self):
+        # redis ストアでも cookie-refresh 後のセッション cookie がブラウザへ届く
+        c = session(["executive"])
+        self.assertEqual(c.req("/").status, 200)
+        self.assertEqual(len([k for k in c.jar if k.name == "_oauth2_proxy"]), 1)
 
 
 if __name__ == "__main__":

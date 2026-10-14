@@ -127,7 +127,8 @@ graph TB
 | Layer | Choice / Version | Role in Feature | Notes |
 |-------|------------------|-----------------|-------|
 | 認証ゲートウェイ | nginx (公式イメージ、1.27 系 digest 固定) | 配信、`auth_request`、グループによる設定ファイル切替、`/admin/` の転送 | spike の設定を踏襲 |
-| OIDC | oauth2-proxy v7.15.x (digest 固定) | Zitadel との OIDC、セッション cookie、`X-Auth-Request-Groups` | `--set-xauthrequest`、`--cookie-refresh` |
+| OIDC | oauth2-proxy v7.15.x (digest 固定) | Zitadel との OIDC、セッション cookie、`X-Auth-Request-Groups` | `--set-xauthrequest`、`--cookie-refresh`、`--session-store-type=redis` |
+| セッションストア | Valkey 8 (`valkey/valkey:8-alpine`、digest 固定) | oauth2-proxy のセッション保存と refresh の排他 | 永続化なし・パスワードなし。`portal-redis` Service を NetworkPolicy で portal Pod に限定 |
 | ポータル UI | Homer v26.08.3 の静的ファイル | リンク集の表示 | Homer イメージを initContainer として使い、静的ファイルを取り出すだけ |
 | 設定生成 | yq (mikefarah/yq、digest 固定) | `config.yml` / `config-admin.yml` の生成 | initContainer |
 | collector | Python 3.13 slim (digest 固定) + 標準ライブラリのみ | 取得・保存・描画・Falco 受信 | コードは configMapGenerator で配布 |
@@ -144,10 +145,11 @@ gitops/apps/prod/ops-dashboard.yaml            # Application (自動同期、kus
 gitops/manifests/prod/ops-dashboard/
 ├── kustomization.yaml                         # configMapGenerator (portal・collector) を含む
 ├── namespace.yaml
-├── networkpolicy.yaml                         # collector への ingress を portal と falcosidekick に限定
+├── networkpolicy.yaml                         # collector への ingress を portal と falcosidekick に、portal-redis への ingress を portal に限定
 ├── portal/
 │   ├── deployment.yaml                        # nginx + oauth2-proxy、initContainer (homer 展開・yq 生成)
 │   ├── service.yaml
+│   ├── redis.yaml                             # oauth2-proxy のセッションストア (Valkey Deployment と Service)
 │   ├── external-secret.yaml                   # OIDC クライアント・cookie secret・内部向け URL
 │   ├── nginx.conf                             # 認可ルーティングの正本
 │   ├── links.yaml                             # リンク宣言 (Homer 形式の単一ソース)
@@ -325,13 +327,18 @@ sequenceDiagram
 ##### API Contract (ルート表)
 | Method | Path | 必要グループ | 応答 |
 |--------|------|--------------|------|
-| GET | `/` と Homer の静的ファイル | executive | 200 静的ファイル / 401→`/oauth2/start` へ 302 / 403→拒否ページ |
+| GET | `/resources/*`、`/assets/icons/*`、`/assets/themes/*`、`/logo.png`、`/assets/manifest.json` | — | 認証なしで静的ファイル (Homer の OSS ビルド成果物のみで機密を含まない)。ページ読み込みで並行に発生するサブリソースが `auth_request` を踏み、refresh が競合するのを避ける |
+| GET | `/` と上記以外の Homer のファイル (`index.html`・`sw.js`・`registerSW.js` を含む) | executive | 200 静的ファイル / 401→`/oauth2/start` へ 302 / 403→拒否ページ |
 | GET | `/assets/config.yml` | executive | admin を含めば admin 版の内容、含まなければ通常版。未認証 401 (302 にしない。Homer が転送を「設定なし」と扱うため) |
 | GET | `/assets/config-admin.yml` ほか生成元ファイル | — | 常に 404 |
 | GET | `/admin/` 配下 | admin | collector:8080 へ転送 / 401→`/oauth2/start` へ 302 / 403→拒否ページ (運用ダッシュボード用) |
 | ANY | `/oauth2/*` | — | oauth2-proxy へ転送 (start・callback・sign_out) |
 | GET | `/denied/*` | — | 拒否ページの静的ファイル (データを含まない) |
 
+- 静的アセットの location には `^~` を付けない。`/assets/config-admin.yml` 等を 404 にする正規表現 location が優先して評価される必要がある。
+- 認証が絡む location の `add_header Set-Cookie $auth_cookie` は `always` を付ける。refresh で更新されたセッション cookie を、200 以外の応答でも取りこぼさずブラウザへ返す。
+- アクセスログは combined 形式に `Sec-Fetch-Mode`・`Sec-Fetch-Dest`・`Service-Worker` を加えた形式で、並行リクエストの発生源 (ページ遷移・サブリソース・Service Worker) を区別できる。
+- `/oauth2/sign_out` が 401 (セッション無効) のとき、`@sign_out_local` は Cookie を渡さずに oauth2-proxy を呼ぶ。redis ストアは壊れた・旧形式の Cookie のクリアに失敗して 500 を返すため。
 - internal location: `/_auth/executive` (`proxy_pass .../oauth2/auth?allowed_groups=executive`)、`/_auth/admin` (`?allowed_groups=admin`)。URI を明示し、元のリクエスト URI を oauth2-proxy に渡さない。
 
 #### oauth2-proxy
@@ -344,6 +351,7 @@ sequenceDiagram
 **Responsibilities & Constraints**
 - provider `oidc`、issuer `https://idp.aramakisai.com`、scope `openid email profile offline_access`、`--oidc-groups-claim=groups`、`--set-xauthrequest`、`--reverse-proxy`、`--email-domain=*`、`--skip-provider-button`、upstream なし (認証専用)。
 - `--cookie-expire=12h`、`--cookie-refresh=1h`。refresh 時に refresh token で ID token を取り直し、groups を更新するため、ロールの剥奪は最長 1 時間で反映される (要件 4.5)。refresh token を受け取るため、OIDC アプリ `ops-portal` は grant type に REFRESH_TOKEN を持つ (下記「Zitadel 設定」)。
+- セッションは redis (Valkey、`--session-store-type=redis`、`--redis-connection-url=redis://portal-redis:6379`) に保存し、ブラウザの cookie `_oauth2_proxy` は小さなチケットだけを持つ。cookie ストアは refresh に排他がなく、1 回のページ読み込みで並行する `auth_request` が同じ refresh token を使い回し、Zitadel の rotation で後続が失敗する。redis ストアは refresh をロックで直列化する。セッション本体は cookie 側の鍵で暗号化して保存されるため、redis にパスワードは付けず NetworkPolicy で到達元を限定する。Valkey は永続化せず (`--save "" --appendonly no`、`--maxmemory 32mb`、`allkeys-lru`)、再起動すると全員が再ログインになる。
 - ログアウトは `/oauth2/sign_out` で、nginx が `X-Auth-Request-Redirect` に Zitadel の `end_session` URL (`id_token_hint={id_token}`、`post_logout_redirect_uri=https://dash.aramakisai.com/`) を付けて oauth2-proxy へ渡す。oauth2-proxy は自身の cookie を消したうえでブラウザを end_session へリダイレクトし、Zitadel のセッションを終了させてポータルへ戻す。リダイレクト先は `--whitelist-domain=idp.aramakisai.com` で許可する。`--backend-logout-url` は oauth2-proxy のサーバー側から呼ばれ、ブラウザの Zitadel cookie が付かないため使わない。
 
 #### PortalConfigGenerator (initContainer)
@@ -892,7 +900,7 @@ namespaces_or_names = ["vaultwarden", "vaultwarden-rbac-sync", "room-presence"]
 
 ## Security Considerations
 
-- **認可の一元化**: 認可は nginx の `auth_request` だけが行い、collector と mail-agent はクラスタ内からの到達を NetworkPolicy で制限する。collector:8080 は portal Pod から、8081 は monitoring Namespace の falcosidekick から、mail-agent は collector からのみ受け付ける。
+- **認可の一元化**: 認可は nginx の `auth_request` だけが行い、collector と mail-agent はクラスタ内からの到達を NetworkPolicy で制限する。collector:8080 は portal Pod から、8081 は monitoring Namespace の falcosidekick から、mail-agent は collector からのみ受け付ける。portal-redis:6379 は portal Pod からのみ受け付ける。
 - **最小権限**: collector の ClusterRole は get/list のみで、Secret・`pods/exec`・`nodes/proxy` を含めない。外部 API のトークンは読み取り権限で発行する (Hetzner Cloud・Cloudflare・UptimeRobot・Healthchecks.io・Tailscale・GitHub App・Netdata Cloud の `scope:grafana-plugin`)。読み取り専用を作れないもの (HCP Terraform の organization トークン、Hetzner Object Storage の認証情報、Zitadel の `IAM_OWNER_VIEWER`) は collector だけが読む Secret に置き、参照系の呼び出しだけに使う。
 - **個人情報**: 配送失敗は宛先ドメインだけを保存する。認証イベントはログイン名を表示するが、admin のみが閲覧できる。fail2ban・DMARC の IP アドレスも admin のみ。
 - **内部向け URL**: Notion・Google Drive の URL は Infisical から注入し、リポジトリに書かない。
@@ -904,11 +912,12 @@ namespaces_or_names = ["vaultwarden", "vaultwarden-rbac-sync", "room-presence"]
 |----------------|-------------------|-----------------|------|
 | nginx | 16Mi | 32Mi | spike 実測 約 13MiB |
 | oauth2-proxy | 16Mi | 48Mi | spike 実測 約 13MiB |
+| portal-redis (Valkey) | 16Mi | 64Mi | セッション保存のみ。`--maxmemory 32mb` |
 | collector | 64Mi | 160Mi | Python + SQLite。DMARC 取り込み時の展開を考慮 |
 | mail-agent | 24Mi | 64Mi | Python の HTTP サーバーのみ |
 | initContainer (homer 展開・yq) | 16Mi | 64Mi | 起動時のみ |
 
-- 合計 limits 304Mi (initContainer を除く)。投入後に `make kubectl ARGS="top pod -n ops-dashboard"` 等で実測し、requests/limits を実測値に合わせる (要件 17.2)。超過時は上限を上げる前に増加要因を調べる (17.4)。
+- 合計 limits 368Mi (initContainer を除く)。投入後に `make kubectl ARGS="top pod -n ops-dashboard"` 等で実測し、requests/limits を実測値に合わせる (要件 17.2)。超過時は上限を上げる前に増加要因を調べる (17.4)。
 - 外部 API の呼び出し回数は表の間隔で 1 日あたり最大でも数百回に収まり、UptimeRobot の Free 枠 (10 req/分) 内。
 - スケールアウト時: collector と mail-agent は prod-node-1 に固定のまま。一時ノードの状態は取得対象外 (要件 7 は prod-node-1 が対象)。
 

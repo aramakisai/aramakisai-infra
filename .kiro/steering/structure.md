@@ -85,7 +85,7 @@ root.yaml      ← App of Apps エントリーポイント (apps/ 全体を監�
 ```
 gitops/apps/prod/ops-dashboard.yaml             ← ArgoCD Application (wave 0、namespace ops-dashboard)
 gitops/manifests/prod/ops-dashboard/
-  portal/                                       ← nginx + oauth2-proxy + Homer。links.yaml がリンクの単一ソース
+  portal/                                       ← nginx + oauth2-proxy + Homer。links.yaml がリンクの単一ソース。redis.yaml は oauth2-proxy のセッションストア (Valkey)
   collector/                                    ← Python の collector。dashboard.toml がプラン・期待サーバー等の宣言
 ```
 公開経路は Cloudflare Tunnel (`terraform/tunnel.tf`) から portal の ClusterIP へ直結。運用は `docs/ops-dashboard-runbook.md`。
