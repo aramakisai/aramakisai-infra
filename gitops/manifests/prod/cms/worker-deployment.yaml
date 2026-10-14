@@ -1,0 +1,88 @@
+---
+# Payload のジョブ (招待メール送信等) を実行する専用 Pod。
+# cms Deployment は CMS_JOBS_AUTORUN=false でジョブを実行せず、ここだけが autoRun を持つ。
+# Payload のジョブ取得は排他がないため、実行する Pod は必ず 1 つに限る。
+# Recreate にして、rollout 中も旧 Pod と新 Pod が同時に動かないようにする。
+# Service・PDB は持たない。ラベルを app: cms と分け、cms 用の Service / PDB / topologySpread の
+# selector に拾われないようにする。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cms-worker
+  namespace: prod
+  labels:
+    app: cms-worker
+  annotations:
+    secret.reloader.stakater.com/reload: "cms-secrets"
+spec:
+  replicas: 1
+  revisionHistoryLimit: 2
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: cms-worker
+  template:
+    metadata:
+      labels:
+        app: cms-worker
+    spec:
+      containers:
+        - name: cms-worker
+          image: ghcr.io/aramakisai/aramakisai-cms:main
+          ports:
+            - containerPort: 3000
+          envFrom:
+            - secretRef:
+                name: cms-secrets
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: CMS_PUBLIC_URL
+              value: https://cms.aramakisai.com
+            - name: CMS_CORS_ORIGINS
+              value: https://aramakisai.com
+            - name: S3_BUCKET
+              value: aramakisai-backups
+            - name: S3_ENDPOINT
+              value: https://fsn1.your-objectstorage.com
+            - name: S3_REGION
+              value: fsn1
+            # Directus が使う directus-uploads と衝突しないキー空間に置く
+            - name: S3_PREFIX
+              value: payload-uploads
+            # AUTHENTIK_*という変数名だがCMSアプリ側のenv名(historical、値はZitadel)。
+            # issuerはZitadelではアプリ単位パスを持たずインスタンスドメイン直下
+            # (実機の/.well-known/openid-configuration確認済み)。
+            # AUTHENTIK_CLIENT_IDはZitadelが発行する値でauthentikのような
+            # カスタムclient_id指定ができないため、cms-secrets(envFrom)側から注入する
+            # (このenv:には置かない、envFromの後にenv:が来ると後勝ちで上書きされるため)。
+            - name: AUTHENTIK_ISSUER_URL
+              value: https://idp.aramakisai.com
+            - name: SIGNAGE_NOTIFY_URL
+              value: https://aramakisai.com/api/signage/notify
+            - name: SIGNAGE_QUAKE_URL
+              value: https://aramakisai-signage-quake.aramakisai.workers.dev
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "800m"
+          # ジョブ実行が主役なので readiness は不要 (Service が無い)。
+          # プロセスが固まったときだけ再起動する
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 36
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 12

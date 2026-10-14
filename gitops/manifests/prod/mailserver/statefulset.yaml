@@ -7,7 +7,7 @@ metadata:
   labels:
     app: mailserver
   annotations:
-    secret.reloader.stakater.com/reload: "mail-tls,dovecot-oauth2-config,dovecot-lua-auth-secret"
+    secret.reloader.stakater.com/reload: "mail-tls,dovecot-oauth2-config,dovecot-lua-auth-secret,mailserver-noreply-smtp"
     configmap.reloader.stakater.com/reload: "mailserver-config"
 spec:
   serviceName: mailserver
@@ -118,6 +118,10 @@ spec:
             - name: dovecot-lua-auth
               mountPath: /run/secrets/zitadel-dovecot-pat
               subPath: pat
+              readOnly: true
+            - name: noreply-smtp
+              mountPath: /run/secrets/noreply-smtp-password
+              subPath: password
               readOnly: true
             - name: dms-config
               mountPath: /etc/dovecot/conf.d/05-acl-plugin.conf
@@ -240,6 +244,9 @@ spec:
         - name: dovecot-lua-auth
           secret:
             secretName: dovecot-lua-auth-secret
+        - name: noreply-smtp
+          secret:
+            secretName: mailserver-noreply-smtp
         - name: tls
           secret:
             secretName: mail-tls

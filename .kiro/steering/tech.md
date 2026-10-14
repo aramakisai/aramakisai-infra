@@ -86,6 +86,11 @@ Authentik 時代の定義は `terraform/authentik_*.tf.disabled` として残す
 - `cms-migrate` Job は `DATABASE_REPLICA_URL: ""` を `env` で上書きし、primary だけを使う
 - 接続数は Pod ごとに primary 10 本と replica 10 本。rollout 中の 7 Pod でも `max_connections` 100 に収まる
 
+### CMS のジョブ実行 (cms-worker)
+- Payload のジョブ(招待メール送信等)の取得には排他がなく、autoRun が全レプリカで発火すると同じジョブが重複実行される。このため実行は専用 Deployment `cms-worker` (replicas 1、`Recreate`、Service・PDB なし) に限る
+- `cms` Deployment は env `CMS_JOBS_AUTORUN=false` で autoRun を止める。`cms-worker` は同じイメージ・同じ `cms-secrets` で、この env を持たない(= 有効)。CMS 側は `'false'` のときだけ止める実装のため、env 未対応の旧イメージでは従来どおり全レプリカで動く
+- Pod ラベルは `app: cms-worker`。`cms` の Service・PDB・topologySpread は `app: cms` で選ぶため worker を含まない
+
 ### kube-apiserver の認証と RBAC (kube-access)
 - **認証方式**: 共有 kubeconfig は使わず、kube-apiserver が 2 種類の資格情報を直接検証する。
   - CI・DR: GitHub Actions OIDC。`k3s-server` ロールが `authentication-config` (AuthenticationConfiguration) を配布し、組織・リポジトリの数値 ID、`ref` = main、`job_workflow_ref` (main 上の許可ファイル)、`event_name`、`runner_environment`、(高権限のみ) `environment` を CEL で照合する。ユーザー名は `gha:<ワークフローファイル名>` で、許可リストは `k3s_github_oidc_workflows` (pull_request 系は許可しない)。匿名認証は明示的に無効。`k3s-upgrade` は kube-apiserver の権限を持たない (ノード上のローカル admin を使う)
@@ -248,7 +253,7 @@ ssh root@prod-node-1 "systemctl status os-update-notify.timer; cat /var/run/rebo
 - **Ansible & 復旧**: `K3S_TOKEN`, `CLOUDFLARE_TUNNEL_TOKEN`, `CLOUDFLARE_TUNNEL_ID`, `INFISICAL_CLIENT_ID`, `INFISICAL_CLIENT_SECRET` (Infisical 読取用 CI identity。infisical-auth の素材も兼ねる), `ARGOCD_GITHUB_DEPLOY_KEY`, `CI_SSH_PRIVATE_KEY`, `TFC_API_TOKEN`, `TFC_WORKSPACE_ID`, `TAILSCALE_TAILNET` (復旧は `TAILSCALE_OAUTH_CLIENT_ID/SECRET` の書込権限付きクライアントを使用)
 - **Cloudflare Access (E2E CI)**: `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET`（`aramakisai-web` の Playwright E2E テストが Cloudflare Access の Authentik ログインを迂回するための Service Token。`terraform/access.tf` の `cloudflare_zero_trust_access_service_token.e2e_ci` が発行元。`aramakisai-web` 側 `staging-e2e-verification` spec が前提としていた secret 名と一致しており乖離なし）
 - **アプリ用シークレット**:
-  - **Authentik**: `AUTHENTIK_SECRET_KEY`, `AUTHENTIK_DB_PASSWORD`, `NOREPLY_SMTP_PASSWORD`（`noreply@aramakisai.com` 用 SMTP パスワード。Vaultwarden・Directus の SMTP 設定でも同一キーを再利用） <!-- confidential:allow -->
+  - **Authentik**: `AUTHENTIK_SECRET_KEY`, `AUTHENTIK_DB_PASSWORD`, `NOREPLY_SMTP_PASSWORD`（`noreply@aramakisai.com` 用 SMTP パスワード。Vaultwarden・Directus・CMS の SMTP 設定と mailserver の noreply passwd-file 生成でも同一キーを再利用） <!-- confidential:allow -->
   - **DMS**: `MAILSERVER_LDAP_BIND_PASSWORD`(Authentik LDAP 用、現在はどこからも参照しない), `MAILSERVER_DKIM_KEY`, `MAILSERVER_RESTIC_PASSWORD`, `B2_APPLICATION_KEY_ID`, `B2_APPLICATION_KEY`
   - **Directus**: `DIRECTUS_SECRET`, `DIRECTUS_ADMIN_EMAIL`, `DIRECTUS_ADMIN_PASSWORD`, `DIRECTUS_DB_PASSWORD`, `EMAIL_SMTP_PASSWORD`（Authentik の `NOREPLY_SMTP_PASSWORD` を再利用、新規キーなし）, `DIRECTUS_STAGING_SECRET`, `DIRECTUS_STAGING_ADMIN_EMAIL`, `DIRECTUS_STAGING_ADMIN_PASSWORD`, `DIRECTUS_STAGING_DB_PASSWORD`（staging 用）, `DIRECTUS_LICENSE_KEY`（Open Innovation Grant Key。prod/staging で同一キーを共有し `LICENSE_KEY` env に注入。5 activations枠を消費するため、DB復元先PUBLIC_URL変更時やインスタンス破棄前は要注意）。`directus-db` のメモリ制限は、通常稼働時は約60MiBだが、barman-cloud-backup や wal-archive などのバックアップ処理に伴うメモリスパイクで OOM クラッシュループするのを回避するため、制限を `512Mi` に設定。
   - **Alloy**: `LOKI_URL`, `LOKI_USERNAME`, `LOKI_PASSWORD`, `PROMETHEUS_REMOTE_WRITE_URL`, `PROMETHEUS_USERNAME`, `PROMETHEUS_PASSWORD`

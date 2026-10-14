@@ -11,6 +11,7 @@ resources:
   - dovecot-lua-auth-external-secret.yaml
   - dovecot-oauth2-external-secret.yaml
   - healthchecks-external-secret.yaml
+  - noreply-smtp-external-secret.yaml
   - pvc.yaml
   - replication-source.yaml
   - restic-external-secret.yaml

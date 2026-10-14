@@ -48,6 +48,10 @@ spec:
           env:
             - name: NODE_ENV
               value: production
+            # ジョブの autoRun は cms-worker だけが担う。Payload のジョブ取得は排他がなく、
+            # 全レプリカで実行すると同じジョブが重複実行される ("false" のときだけ無効化される)
+            - name: CMS_JOBS_AUTORUN
+              value: "false"
             - name: CMS_PUBLIC_URL
               value: https://cms.aramakisai.com
             - name: CMS_CORS_ORIGINS
