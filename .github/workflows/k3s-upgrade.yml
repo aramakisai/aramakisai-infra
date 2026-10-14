@@ -22,7 +22,7 @@ jobs:
       # GitHub Actions ランナーを tailnet に参加させる (Ansible SSH 経路の確保)
       # 前提: Tailscale ACL に tag:ci が定義されていること
       - name: Setup Tailscale
-        uses: tailscale/github-action@v3
+        uses: tailscale/github-action@v4
         with:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
