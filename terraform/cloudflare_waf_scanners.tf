@@ -8,8 +8,11 @@
 # 他ホスト (cms の /api/graphql や webmail の .php など) は正規利用があり得るため、
 # 必ず http.host で apex に限定する。
 #
-# 旧 WordPress サイトの URL (/2025/*) は Worker が 301 で新 URL へ転送する正規経路なので、
-# /2025 配下には一切触れない。/wp-* は旧サイトの正規ページが無く、リダイレクト対象にもなっていない。
+# /2025 は Worker が旧 WordPress サーバーへリバースプロキシしている。/wp-* は旧サイトの正規ページが無く、
+# リダイレクト対象にもなっていない。
+# /2025/wp-admin/ と /2025/wp-login.php だけは .php 遮断から除外する。
+# この 2 パスは Cloudflare Access (access.tf の aramakisai_2025_wp_admin) で保護済みで、
+# 許可されたユーザー以外は WAF に到達する前に Access で止まるため。xmlrpc.php 等の他の /2025/*.php は遮断のまま。
 resource "cloudflare_ruleset" "waf_block_scanners" {
   zone_id = var.cloudflare_zone_id
   name    = "default" # zone phase entrypoint の name は固定
@@ -21,7 +24,10 @@ resource "cloudflare_ruleset" "waf_block_scanners" {
     action      = "block"
     enabled     = true
     expression = replace(trimspace(<<-EOT
-      (http.host eq "aramakisai.com") and (
+      (http.host eq "aramakisai.com") and not (
+        starts_with(http.request.uri.path, "/2025/wp-admin/")
+        or http.request.uri.path eq "/2025/wp-login.php"
+      ) and (
         lower(http.request.uri.path.extension) in {"php" "asp" "aspx" "jsp" "sql" "env" "pem" "key" "yml" "yaml" "bak" "old" "zip" "sqlite"}
         or (http.request.uri.path contains "/." and not starts_with(http.request.uri.path, "/.well-known/"))
         or starts_with(http.request.uri.path, "/wp-")
