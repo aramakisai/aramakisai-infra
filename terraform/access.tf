@@ -109,6 +109,30 @@ resource "cloudflare_zero_trust_access_application" "aramakisai_signage" {
   allowed_idps              = [cloudflare_zero_trust_access_identity_provider.zitadel.id]
 }
 
+# 旧 2025 年版 WordPress (Worker が /2025 へリバースプロキシ) の管理画面とログイン画面を許可ユーザーに限る。
+# WAF は同パスの .php 遮断を除外している (cloudflare_waf_scanners.tf)。
+# destinations を使うと domain が自動では含まれない (API エラー 12130) ため、両方を明示列挙する
+resource "cloudflare_zero_trust_access_application" "aramakisai_2025_wp_admin" {
+  account_id       = var.cloudflare_account_id
+  name             = "aramakisai-web (2025 wp-admin)"
+  domain           = "aramakisai.com/2025/wp-admin"
+  type             = "self_hosted"
+  session_duration = "24h"
+
+  destinations {
+    type = "public"
+    uri  = "aramakisai.com/2025/wp-admin"
+  }
+
+  destinations {
+    type = "public"
+    uri  = "aramakisai.com/2025/wp-login.php"
+  }
+
+  auto_redirect_to_identity = true
+  allowed_idps              = [cloudflare_zero_trust_access_identity_provider.zitadel.id]
+}
+
 # ============================================================
 # Cloudflare Access Policies
 # ============================================================
@@ -119,6 +143,7 @@ locals {
     aramakisai_web_dev             = cloudflare_zero_trust_access_application.aramakisai_web_dev.id
     aramakisai_web_dev_workers_dev = cloudflare_zero_trust_access_application.aramakisai_web_dev_workers_dev.id
     aramakisai_signage             = cloudflare_zero_trust_access_application.aramakisai_signage.id
+    aramakisai_2025_wp_admin       = cloudflare_zero_trust_access_application.aramakisai_2025_wp_admin.id
   }
 }
 
