@@ -30,6 +30,17 @@ resource "cloudflare_record" "idp" {
 
 # Staging フロントエンドは廃止 — PR ごとの wrangler versions upload preview URL (*.workers.dev) を使用
 
+# 旧 2025 年版サイトの origin。Worker が resolveOverride でこのホストの IP へ接続する。
+# 旧サーバーは Host: aramakisai.com の HTTPS にだけ 2025 年版を返すため、直接アクセスでは使えない。
+resource "cloudflare_record" "origin_2025" {
+  zone_id = var.cloudflare_zone_id
+  name    = "origin-2025"
+  value   = "114.184.247.100"
+  type    = "A"
+  proxied = true
+  comment = "旧2025年版サイトの origin (Worker resolveOverride 用)"
+}
+
 # Room Presence Tracker (実行委員室 在室管理)
 resource "cloudflare_record" "presence" {
   zone_id = var.cloudflare_zone_id
