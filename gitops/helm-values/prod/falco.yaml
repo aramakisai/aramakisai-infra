@@ -16,6 +16,13 @@ resources:
 
 customRules:
   rules-custom.yaml: |-
+    # aname[N] は N 世代上の祖先。postinst -> update-ca-certificates -> 子プロセスの深さに足りる 6 世代まで見る。
+    - macro: dpkg_descendant
+      condition: >
+        (proc.aname[1] in (package_mgmt_binaries) or proc.aname[2] in (package_mgmt_binaries)
+         or proc.aname[3] in (package_mgmt_binaries) or proc.aname[4] in (package_mgmt_binaries)
+         or proc.aname[5] in (package_mgmt_binaries) or proc.aname[6] in (package_mgmt_binaries))
+
     # mailserver (docker-mailserver) は起動時に Postfix/Dovecot の設定を /etc 配下に再生成する。
     # この再生成は start-mailserver.sh・sort・bash(user-patches.sh)・postconf 等 多数のプロセスから
     # /etc/dms-settings・/etc/postfix/* 等へ広範に書き込むため、proc.name 単位の列挙では漏れる。
@@ -24,13 +31,21 @@ customRules:
     # k3s-bootstrap.yml (k3sバージョンアップ実行時) は systemd drop-in の k3s.service.env を
     # touch/tee で書き換える正常動作。host側のためimageを持たずfd.name単位で除外する。
     # k3s は起動のたびに /etc/rancher/k3s/k3s.yaml を再生成するため、host 上の k3s-server に限り除外する。
+    # proc.name は 15 文字で切り詰められ update-ca-certificates は一致しないため proc.exepath で比較する。
+    # host の unattended-upgrades (ca-certificates 更新) では dpkg の子孫 (postinst・update-ca-certificates・
+    # ldconfig) が /etc 配下へ書く。package_mgmt_binaries は dpkg/apt 本体しか除外できないため、祖先に
+    # dpkg/apt がいる host 上の書き込みに限り、ca-certificates と ldconfig が触るパスだけを除外する。
     # ※container.image.repository はレジストリ接頭辞込み (docker.io/...) で一致させる必要がある。
     - macro: known_etc_writer
       condition: >
         ((k8s.ns.name=prod and container.image.repository=docker.io/mailserver/docker-mailserver)
-         or (k8s.ns.name=cert-manager and proc.name in (update-ca-certificates))
+         or (k8s.ns.name=cert-manager and proc.exepath in (/usr/sbin/update-ca-certificates, /usr/bin/update-ca-certificates))
          or (container.id=host and fd.name=/etc/systemd/system/k3s.service.env)
-         or (container.id=host and proc.name=k3s-server and fd.name=/etc/rancher/k3s/k3s.yaml))
+         or (container.id=host and proc.name=k3s-server and fd.name=/etc/rancher/k3s/k3s.yaml)
+         or (container.id=host and dpkg_descendant
+             and (fd.name startswith /etc/ssl/certs/
+                  or fd.name startswith /etc/ca-certificates.conf
+                  or fd.name=/etc/ld.so.cache~)))
 
     # falco-rules:5 (デフォルトで投入される OCI artifact) には "Write below etc" 系のルールが
     # 含まれていない (falcosecurity/rules の falco-sandbox_rules.yaml にのみ存在し、デフォルトでは pull されない)。
