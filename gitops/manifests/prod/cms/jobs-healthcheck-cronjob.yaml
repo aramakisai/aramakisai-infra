@@ -1,0 +1,114 @@
+---
+# Payload Jobs の滞留 (未完了のまま 30 分以上経過した行) が無いときだけ
+# Healthchecks.io へ生存通知 (ping) を送る。滞留・DB 到達不能・判定失敗のいずれも
+# ping しないため、Healthchecks.io 側の grace 経過後に通知される。
+# SELECT のみで副作用を持たないため、何度実行しても安全。
+#
+# CNPG の postgres イメージには curl が無いため、判定 (initContainer) と
+# ping (main) でイメージを分け、結果を emptyDir 上のファイルで受け渡す。
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cms-jobs-healthcheck
+  namespace: prod
+spec:
+  schedule: "*/15 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 120
+      template:
+        spec:
+          restartPolicy: Never
+          volumes:
+            - name: result
+              emptyDir: {}
+          initContainers:
+            - name: check
+              image: ghcr.io/cloudnative-pg/postgresql:16.15
+              env:
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: cms-secrets
+                      key: PAYLOAD_DB_PASSWORD
+                - name: PGCONNECT_TIMEOUT
+                  value: "10"
+              volumeMounts:
+                - name: result
+                  mountPath: /result
+              command:
+                - sh
+                - -c
+                - |
+                  set -u
+                  # wait_until が未来のジョブ (リトライ待ち) は滞留ではないため、
+                  # 実行可能になった時刻 (wait_until、無ければ created_at) から 30 分で判定する。
+                  # has_error で止まった行も completed_at が NULL のまま残るので同じ条件で拾える。
+                  # 読み取り専用の -ro (replica) を使い、primary に負荷を掛けない
+                  STALLED=$(psql -h directus-db-ro.prod.svc.cluster.local -U payload -d payload -tA \
+                    -c "SELECT count(*) FROM payload_jobs WHERE completed_at IS NULL AND coalesce(wait_until, created_at) < now() - interval '30 minutes'")
+                  echo "stalled=$STALLED"
+                  if [ "$STALLED" = "0" ]; then
+                    touch /result/ok
+                  fi
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  cpu: 100m
+                  memory: 64Mi
+          containers:
+            - name: ping
+              image: alpine/k8s:1.37.1
+              env:
+                - name: HEALTHCHECKS_CMS_JOBS_PING_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: cms-jobs-healthcheck
+                      key: HEALTHCHECKS_CMS_JOBS_PING_URL
+              volumeMounts:
+                - name: result
+                  mountPath: /result
+              command:
+                - sh
+                - -c
+                - |
+                  if [ -f /result/ok ]; then
+                    curl -fsS -m 10 --retry 3 "$HEALTHCHECKS_CMS_JOBS_PING_URL"
+                    echo
+                    echo "no stalled jobs, ping sent"
+                  else
+                    echo "stalled jobs or check failed, skipping ping (Healthchecks.io will alert after grace period)"
+                  fi
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  cpu: 100m
+                  memory: 64Mi
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: cms-jobs-healthcheck
+  namespace: prod
+  annotations:
+    argocd.argoproj.io/sync-options: Replace=true
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: infisical
+  target:
+    name: cms-jobs-healthcheck
+    creationPolicy: Owner
+  data:
+    - secretKey: HEALTHCHECKS_CMS_JOBS_PING_URL
+      remoteRef:
+        key: HEALTHCHECKS_CMS_JOBS_PING_URL
