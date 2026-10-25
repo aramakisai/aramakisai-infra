@@ -26,6 +26,12 @@ output "healthchecksio_mailserver_backup_ping_url" {
   sensitive   = true
 }
 
+output "healthchecksio_cms_jobs_ping_url" {
+  description = "Healthchecks.io cms-jobs check の ping URL (Infisical の HEALTHCHECKS_CMS_JOBS_PING_URL へ反映 / 機密情報)"
+  value       = healthchecksio_check.cms_jobs.ping_url
+  sensitive   = true
+}
+
 output "netdata_room_id" {
   description = "Netdata Cloud aramakisai-prod Room ID (Infisical の NETDATA_CLAIM_ROOMS へ反映)"
   value       = netdata_room.prod.id
