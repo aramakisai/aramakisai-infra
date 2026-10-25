@@ -116,7 +116,6 @@ Authentik 時代の定義は `terraform/authentik_*.tf.disabled` として残す
 
 ### Terraform の出力パラメータと外部連携
 - **healthchecksio_mailserver_backup_ping_url**: mailserver バックアップの生存確認用。Infisical の `HEALTHCHECKS_MAILSERVER_BACKUP_PING_URL` へ反映。
-- **healthchecksio_cms_jobs_ping_url**: CMS (Payload) ジョブ滞留検知用。Infisical の `HEALTHCHECKS_CMS_JOBS_PING_URL` へ反映。
 - **netdata_room_id**: Netdata Cloud aramakisai-prod Room ID。Infisical の `NETDATA_CLAIM_ROOMS` へ反映し、エージェントの Claim に使用。
 
 ### Authentik OIDC エンドポイント仕様 (Cloudflare Access IdP 連携)
@@ -202,7 +201,7 @@ Grafana Cloud は解約済みで使用しない。単一ノード (CX33) のメ�
 | Netdata (child agent, `gitops/apps/prod/netdata.yaml`) | btop 相当の即時メトリクス可視化 (Netdata Cloud経由で閲覧) | なし (`[health]`/`[ml]` 無効、閲覧のみ) |
 | Falco + Falcosidekick (`gitops/apps/prod/falco.yaml`) | eBPF ランタイム侵入検知 | Discord (`DISCORD_OPS_WEBHOOK_URL`) |
 | UptimeRobot (`terraform/uptimerobot.tf`) | 公開エンドポイントの外形監視 | UptimeRobot 通知設定 |
-| Healthchecks.io (`terraform/healthchecksio.tf`) | mailserver バックアップ (VolSync) と CMS ジョブ滞留 (`cms-jobs-healthcheck` CronJob が 15 分毎に `payload_jobs` の未完了 30 分超を確認) の dead man's switch | Healthchecks.io 通知設定 |
+| Healthchecks.io (`terraform/healthchecksio.tf`) | mailserver バックアップ (VolSync) の dead man's switch | Healthchecks.io 通知設定 |
 | DR Trigger (`.github/workflows/dr-trigger.yml`, 5分毎cron) | Tailscale 疎通 + idp/argocd/webmail 複合検出によるノード障害判定 | Discord + `dr-incident` Issue (通知のみ。復旧は人が `dr-recovery.yml` を起動し Environment 承認) |
 | Infra Health Check (`.github/workflows/infra-health-check.yml`, 15分毎cron) | CNPG WAL アーカイブ失敗 (`Cluster.status.conditions` の `ContinuousArchiving`)、ノードルートディスク使用率 (閾値 85%、`kubectl get --raw /api/v1/nodes/<node>/proxy/stats/summary`) | Discord。状態は GitHub Issue (ラベル `infra-alert`) で管理し、解消時に自動クローズ |
 
@@ -259,7 +258,6 @@ ssh root@prod-node-1 "systemctl status os-update-notify.timer; cat /var/run/rebo
   - **Directus**: `DIRECTUS_SECRET`, `DIRECTUS_ADMIN_EMAIL`, `DIRECTUS_ADMIN_PASSWORD`, `DIRECTUS_DB_PASSWORD`, `EMAIL_SMTP_PASSWORD`（Authentik の `NOREPLY_SMTP_PASSWORD` を再利用、新規キーなし）, `DIRECTUS_STAGING_SECRET`, `DIRECTUS_STAGING_ADMIN_EMAIL`, `DIRECTUS_STAGING_ADMIN_PASSWORD`, `DIRECTUS_STAGING_DB_PASSWORD`（staging 用）, `DIRECTUS_LICENSE_KEY`（Open Innovation Grant Key。prod/staging で同一キーを共有し `LICENSE_KEY` env に注入。5 activations枠を消費するため、DB復元先PUBLIC_URL変更時やインスタンス破棄前は要注意）。`directus-db` のメモリ制限は、通常稼働時は約60MiBだが、barman-cloud-backup や wal-archive などのバックアップ処理に伴うメモリスパイクで OOM クラッシュループするのを回避するため、制限を `512Mi` に設定。
   - **Alloy**: `LOKI_URL`, `LOKI_USERNAME`, `LOKI_PASSWORD`, `PROMETHEUS_REMOTE_WRITE_URL`, `PROMETHEUS_USERNAME`, `PROMETHEUS_PASSWORD`
   - **Roundcube**: `MAIL_OAUTH2_CLIENT_SECRET`（Authentik時代）, `MAIL_OAUTH2_CLIENT_SECRET_ZITADEL`, `ROUNDCUBE_OIDC_CLIENT_ID`（Zitadel OIDC App）, `ROUNDCUBE_DES_KEY`
-  - **CMS (ジョブ滞留監視)**: `HEALTHCHECKS_CMS_JOBS_PING_URL`（`terraform output healthchecksio_cms_jobs_ping_url` の値を手動登録）
   - **CMS (Zitadel OIDC)**: `CMS_PROD_OIDC_CLIENT_ID`, `CMS_PROD_OIDC_CLIENT_SECRET`
   - **CMS (エッジキャッシュ purge)**: `CLOUDFLARE_PURGE_TOKEN`（手動発行。詳細は「CMS の purge 用 Cloudflare API トークン」）。zone ID は既存の `TF_VAR_cloudflare_zone_id` を `cms-secrets` の ExternalSecret が `CLOUDFLARE_ZONE_ID` として再利用する
   - **CMS (サイネージ通知)**: `SIGNAGE_NOTIFY_ACCESS_CLIENT_ID`, `SIGNAGE_NOTIFY_ACCESS_CLIENT_SECRET`（`terraform/access.tf` の `cloudflare_zero_trust_access_service_token.signage_notify` の出力を apply 後に手動登録。`cms-secrets` の ExternalSecret 経由で cms に渡る。通知先 URL は非秘匿のため cms Deployment の env `SIGNAGE_NOTIFY_URL`）
