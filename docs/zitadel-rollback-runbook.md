@@ -168,7 +168,7 @@ argocd app sync roundcube --server-side
       Zitadelではなくauthentikのものに戻っていること(Step3の効果を直接確認する)
 - [ ] CMS: `https://cms.aramakisai.com/admin/login` からauthentikへリダイレクトされ、
       ログインできること
-- [ ] Vaultwarden(凍結解除環境の場合): `https://vault.aramakisai.com` から
+- [ ] Vaultwarden: `https://vault.aramakisai.com` から
       authentikへリダイレクトされ、ログインできること
 - [ ] Roundcube: `https://webmail.aramakisai.com` からauthentikへリダイレクトされ、
       ログイン後Inboxが表示されること

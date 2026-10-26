@@ -38,3 +38,5 @@
   loop_control:
     loop_var: zitadel_app_item
     label: "{{ zitadel_app_item.name }}"
+  # zitadel_oidc_app_only: 指定時は該当名のアプリだけを処理する(他アプリの更新を避ける)
+  when: zitadel_oidc_app_only | default('') | length == 0 or zitadel_app_item.name == zitadel_oidc_app_only

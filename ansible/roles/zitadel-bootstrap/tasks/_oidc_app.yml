@@ -116,3 +116,14 @@
       or (_zitadel_app_search.body.result[0].oidcConfig.idTokenUserinfoAssertion | default(false)) != (zitadel_app_item.id_token_userinfo_assertion | default(false))
     )
   no_log: true
+
+# client_secretは作成時にしか返らないため、Infisicalの値が失われた既存アプリはここで再生成する。
+# 再生成は稼働中RPのログインを即座に壊すので、zitadel_oidc_app_onlyで対象を絞った明示指定の
+# ときだけ実行する。
+- name: "既存OIDC Appのclient_secretを再生成してInfisicalへ登録: {{ zitadel_app_item.name }}"
+  ansible.builtin.include_tasks: _oidc_app_regenerate_secret.yml
+  when:
+    - zitadel_oidc_regenerate_secret | default(false) | bool
+    - zitadel_oidc_app_only | default('') == zitadel_app_item.name
+    - zitadel_app_item.infisical_keys is defined
+    - (_zitadel_app_search.body.result | default([])) | length > 0

@@ -53,6 +53,9 @@ zitadel_oidc_apps:
     # VAULTWARDEN_OIDC_CLIENT_ID/SECRETはauthentik時代の値をそのまま使っている既存キーのため、
     # 上書きせず別名の新規キーに保存する(切り戻し時にauthentikの値を失わないため)。
     infisical_hint: "VAULTWARDEN_OIDC_CLIENT_ID_ZITADEL / VAULTWARDEN_OIDC_CLIENT_SECRET_ZITADEL (新設、旧VAULTWARDEN_OIDC_CLIENT_ID/SECRETは上書きしない)"
+    infisical_keys:
+      client_id: VAULTWARDEN_OIDC_CLIENT_ID_ZITADEL
+      client_secret: VAULTWARDEN_OIDC_CLIENT_SECRET_ZITADEL
   - name: roundcube
     redirect_uris:
       - https://webmail.aramakisai.com/index.php/login/oauth
