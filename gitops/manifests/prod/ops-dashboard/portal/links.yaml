@@ -18,6 +18,10 @@ services:
       - name: "Webmail"
         icon: "fas fa-envelope"
         url: "https://webmail.aramakisai.com"
+      - name: "Vaultwarden"
+        icon: "fas fa-key"
+        subtitle: "パスワード管理"
+        url: "https://vault.aramakisai.com"
       - name: "Discord"
         icon: "fab fa-discord"
         url_env: PORTAL_DISCORD_URL
