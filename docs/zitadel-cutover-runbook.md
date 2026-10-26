@@ -107,43 +107,6 @@ API呼び出しはcheckモードでも実行されないため`--check`は使え
 
 ### 検証チェックリスト
 
-- [ ] `make kubectl ARGS="get pods -n prod -l app=mailserver"` で `mailserver-0` が
-      `Running`(再起動後、CrashLoopBackOffでないこと)
-- [ ] `make kubectl ARGS="logs -n prod mailserver-0 | grep -i lua"` にエラーが
-      出ていないこと
-- [ ] 実在ユーザーの正しいパスワードでIMAP LOGINが成功すること
-      (`python3 imaplib`等、`docs/zitadel-security-poc-tests-results.md`の
-      手法を参照)
-- [ ] 誤ったパスワードでIMAP LOGINが拒否されること
-- [ ] RoundcubeからのOAUTHBEARERログインが成功すること(dovecot-oauth2側の
-      introspection先切替、後述Step2完了後に確認可能)
-- [ ] メーリングリスト宛メールの配送(Postfix経由、LDAP側は無変更)が
-      従来通り機能すること
-
-## Step2: RPアプリ(CMS/Vaultwarden/Roundcube) OIDC Client切替
-
-対象ファイル: `gitops/manifests/prod/cms/deployment.yaml`、
-`gitops/manifests/prod/cms-secrets/external-secret.yaml`、
-`gitops/manifests/prod/vaultwarden/deployment.yaml`、
-`gitops/manifests/prod/roundcube/{config-configmap.yaml,deployment.yaml,
-external-secret.yaml}`。
-
-### 実行
-
-```bash
-argocd app sync cms --server-side
-argocd app sync vaultwarden --server-side
-argocd app sync roundcube --server-side
-```
-
-**注記(Vaultwarden凍結)**: `vaultwarden/deployment.yaml`は2026-07-11から
-`replicas: 0`で凍結中(認証基盤の切替とは無関係な理由、ファイル内コメント参照)。
-このステップはOIDC設定の切替のみを行い、凍結解除(`replicas: 1`への変更、
-`db-cluster.yaml`のinstances復元、`scheduled-backup.yaml`/
-`vaultwarden-rbac-sync`のsuspend解除)は別途の運用判断とする。
-
-### 検証チェックリスト
-
 - [ ] CMS: `https://cms.aramakisai.com/admin/login` からZitadelへリダイレクトされ、
       ログイン後セッションが開始されること
 - [ ] Vaultwarden: `https://vault.aramakisai.com` からZitadelへ
