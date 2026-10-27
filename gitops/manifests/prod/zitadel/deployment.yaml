@@ -54,7 +54,7 @@ spec:
           emptyDir: {}
       containers:
         - name: zitadel
-          image: ghcr.io/zitadel/zitadel:v4.19.4
+          image: ghcr.io/zitadel/zitadel:v4.20.0
           command: ["/app/zitadel"]
           args:
             - start-from-init
@@ -180,7 +180,7 @@ spec:
               memory: "512Mi"
               cpu: "1000m"
         - name: login
-          image: ghcr.io/zitadel/zitadel-login:v4.19.4
+          image: ghcr.io/zitadel/zitadel-login:v4.20.0
           ports:
             - name: login
               containerPort: 3000
