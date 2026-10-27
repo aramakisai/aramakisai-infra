@@ -21,8 +21,7 @@ Step3(招待ベース移行)は本番Zitadel自体にSMTP設定が存在しな�
 できない」状態を生む。
 
 vaultwarden-rbac-sync(Actions v2 webhook経由のロール同期)はスコープ外とした
-(Vaultwarden自体が本番でreplicas: 0のまま凍結中で使われていないため、tasks.md
-task9.2参照)。
+(tasks.md task9.2参照)。
 
 ## 前提条件
 
@@ -88,21 +87,29 @@ external-secret.yaml}`。
 
 ```bash
 argocd app sync cms --server-side
-argocd app sync vaultwarden --server-side   # Vaultwarden本体が凍結中(replicas:0)の場合は別途解凍が必要、後述の注記参照
+argocd app sync vaultwarden --server-side
 argocd app sync roundcube --server-side
 ```
 
-**注記(Vaultwarden凍結)**: `vaultwarden/deployment.yaml`は2026-07-11から
-`replicas: 0`で凍結中(認証基盤の切替とは無関係な理由、ファイル内コメント参照)。
-このステップはOIDC設定の切替のみを行い、凍結解除(`replicas: 1`への変更、
-`db-cluster.yaml`のinstances復元、`scheduled-backup.yaml`/
-`vaultwarden-rbac-sync`のsuspend解除)は別途の運用判断とする。
+**注記(Vaultwarden)**: Vaultwardenは稼働中(`replicas: 1`)。`vaultwarden`アプリの
+client_id/secretは`infisical_keys`により、アプリ新規作成時にInfisicalへ自動登録される。
+既存アプリのsecretを発行し直す場合は、対象アプリだけを絞って明示的に再生成する。
+
+```bash
+infisical run --env=prod -- env ZITADEL_EXTERNAL_DOMAIN=idp.aramakisai.com ansible-playbook -i ansible/inventory/tailscale.yml ansible/playbooks/zitadel-oidc-apps.yml -e zitadel_oidc_app_only=vaultwarden -e zitadel_oidc_regenerate_secret=true
+# 本実行後、ExternalSecretの再同期を待ってからPodを再起動する
+make kubectl ARGS="rollout restart deploy/vaultwarden -n prod"
+```
+
+`zitadel_oidc_app_only`は投入対象を1アプリに絞り、`zitadel_oidc_regenerate_secret=true`は
+絞り込み対象の既存アプリのclient_secretを再生成してInfisicalへ登録する(既定は再生成しない)。
+API呼び出しはcheckモードでも実行されないため`--check`は使えない。
 
 ### 検証チェックリスト
 
 - [ ] CMS: `https://cms.aramakisai.com/admin/login` からZitadelへリダイレクトされ、
       ログイン後セッションが開始されること
-- [ ] Vaultwarden(凍結解除後): `https://vault.aramakisai.com` からZitadelへ
+- [ ] Vaultwarden: `https://vault.aramakisai.com` からZitadelへ
       リダイレクトされ、ログイン後セッションが開始されること
 - [ ] Roundcube: `https://webmail.aramakisai.com` からZitadelへリダイレクトされ、
       ログイン後Inboxが表示されること(Step1のDovecot oauth2 introspection切替と
