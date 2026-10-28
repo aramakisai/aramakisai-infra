@@ -34,7 +34,7 @@ spec:
           type: RuntimeDefault
       initContainers:
         - name: assemble
-          image: python:3.13-slim@sha256:bf44cdfcb76cd3b41e879bc058fc37ec5872002ccfde7fcb765e218cde0cd79c
+          image: python:3.13-slim@sha256:2d44738ebf4ce5f63b9d9ea871e9c7cfdc0426f7b0c97cac915fd88ded1d86bb
           command:
             - sh
             - -c
@@ -59,7 +59,7 @@ spec:
               drop: ["ALL"]
       containers:
         - name: collector
-          image: python:3.13-slim@sha256:bf44cdfcb76cd3b41e879bc058fc37ec5872002ccfde7fcb765e218cde0cd79c
+          image: python:3.13-slim@sha256:2d44738ebf4ce5f63b9d9ea871e9c7cfdc0426f7b0c97cac915fd88ded1d86bb
           command: ["python", "/app/main.py"]
           env:
             # ルートファイルシステムが読み取り専用
