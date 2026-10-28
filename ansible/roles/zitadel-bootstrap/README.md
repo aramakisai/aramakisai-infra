@@ -45,6 +45,10 @@ infisical secrets set --env=prod TF_VAR_zitadel_token="$(cat <取得したPATフ
 ansible-playbook ansible/playbooks/zitadel-resources.yml
 ```
 
+`resources.yml`は既定言語(`ja`)・許可言語(`ja`のみ)・ログインポリシーの`allowRegister=false`
+(インスタンス既定とorg専用ポリシーの両方)も管理する。値は`vars/resources.yml`の
+`zitadel_default_language`/`zitadel_allowed_languages`/`zitadel_login_allow_register`。
+
 ## Terraform/Ansible管理外のインスタンス設定のimport (task 9.3)
 
 Lockout Policy等、`resources.yml`が管理しないインスタンス設定を

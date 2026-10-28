@@ -1,0 +1,24 @@
+---
+- name: "ログインポリシーを取得: {{ zitadel_login_policy_path }}"
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    zitadel_api_method: GET
+    zitadel_api_path: "{{ zitadel_login_policy_path }}"
+    zitadel_api_label: "get login policy {{ zitadel_login_policy_path }}"
+
+# isDefault/secondFactors/multiFactors/detailsはGET専用で、PUTのリクエストには含まれない。
+- name: "ログインポリシーを更新: {{ zitadel_login_policy_path }}"
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    _policy: "{{ zitadel_api_result.body.policy }}"
+    zitadel_api_method: PUT
+    zitadel_api_path: "{{ zitadel_login_policy_path }}"
+    zitadel_api_body: >-
+      {{ _policy | dict2items
+         | rejectattr('key', 'in', ['details', 'isDefault', 'secondFactors', 'multiFactors'])
+         | items2dict
+         | combine({'allowRegister': zitadel_login_allow_register}) }}
+    zitadel_api_label: "update login policy {{ zitadel_login_policy_path }}"
+  when:
+    - not (zitadel_api_result.body.policy.isDefault | default(false)) or zitadel_login_policy_path.startswith('/admin/')
+    - zitadel_api_result.body.policy.allowRegister | default(false) != zitadel_login_allow_register

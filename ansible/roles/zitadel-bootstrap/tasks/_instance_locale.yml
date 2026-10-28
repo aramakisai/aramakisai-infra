@@ -1,0 +1,49 @@
+---
+# 既定言語 → 許可言語 → ログインポリシー(allowRegister) の順に、現在値が目標と異なる
+# ときだけPUTする。許可言語を先に絞ると既定言語(en)が許可外になり拒否されうるため、
+# 既定言語を先に変える。
+- name: 既定言語を取得
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    zitadel_api_method: GET
+    zitadel_api_path: /admin/v1/languages/default
+    zitadel_api_label: "get default language"
+
+- name: 既定言語を更新
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    zitadel_api_allow_status: [400]
+    zitadel_api_method: PUT
+    zitadel_api_path: "/admin/v1/languages/default/{{ zitadel_default_language }}"
+    zitadel_api_label: "set default language"
+  when: zitadel_api_result.body.language | default('') != zitadel_default_language
+
+- name: 許可言語を取得
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    zitadel_api_method: GET
+    zitadel_api_path: /admin/v1/restrictions
+    zitadel_api_label: "get restrictions"
+
+# GETの応答のallowedLanguagesはPUTと違い{list: [...]}ではなく平坦な配列。空は「全言語許可」で、
+# 未設定時はキー自体が応答に無い。
+- name: 許可言語を更新
+  ansible.builtin.include_tasks: _api_call.yml
+  vars:
+    zitadel_api_method: PUT
+    zitadel_api_path: /admin/v1/restrictions
+    zitadel_api_body:
+      allowedLanguages: { list: "{{ zitadel_allowed_languages }}" }
+    zitadel_api_label: "set allowed languages"
+  when: (zitadel_api_result.body.allowedLanguages | default([])) != zitadel_allowed_languages
+
+# 更新APIは全フィールド送信が必要で、省略すると既定値(false/0)に戻る。現在値をそのまま
+# 送り返してallowRegisterだけ差し替える。orgが専用ポリシーを持たない(isDefault)場合、
+# management側のPUTは404になるためスキップする。
+- name: ログインポリシーのallowRegisterを揃える
+  ansible.builtin.include_tasks: _login_policy_register.yml
+  loop:
+    - /admin/v1/policies/login
+    - /management/v1/policies/login
+  loop_control:
+    loop_var: zitadel_login_policy_path
