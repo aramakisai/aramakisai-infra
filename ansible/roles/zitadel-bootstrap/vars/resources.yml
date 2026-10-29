@@ -169,3 +169,11 @@ zitadel_machine_users:
     member_scope: instance
     roles: ["IAM_OWNER_VIEWER"]
     infisical_hint: "OPS_ZITADEL_READER_PAT (要新設)"
+
+# 既定言語は許可言語に含まれている必要があるため、_instance_locale.ymlは既定言語→許可言語の順に適用する。
+zitadel_default_language: ja
+zitadel_allowed_languages: [ja]
+
+# ログインポリシーのallowRegister (招待なしの自己登録)。インスタンス既定と、org専用ポリシーが
+# ある場合はその両方に適用する。
+zitadel_login_allow_register: false
