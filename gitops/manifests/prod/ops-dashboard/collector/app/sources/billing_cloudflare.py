@@ -19,18 +19,26 @@ query($tag: string!, $monthStart: Time, $now: Time) {
   viewer { accounts(filter: {accountTag: $tag}) {
     storage: r2StorageAdaptiveGroups(limit: 10000, filter: {datetime_geq: $monthStart, datetime_leq: $now}, orderBy: [datetime_DESC]) { max { payloadSize metadataSize } dimensions { datetime bucketName } }
     ops: r2OperationsAdaptiveGroups(limit: 10000, filter: {datetime_geq: $monthStart, datetime_leq: $now}) { sum { requests } dimensions { actionType } }
+    d1Storage: d1StorageAdaptiveGroups(limit: 10000, filter: {datetime_geq: $monthStart, datetime_leq: $now}, orderBy: [datetime_DESC]) { max { databaseSizeBytes } dimensions { datetime databaseId } }
   } }
 }"""
 
-# 範囲 [start, end) の Workers と Durable Objects の使用量。durableObjectsPeriodicGroups は datetime ではなく date で絞る
+# 範囲 [start, end) の Workers・Durable Objects・D1 の使用量。durableObjectsPeriodicGroups は datetime ではなく date で絞る
 USAGE_QUERY = """
 query($tag: string!, $start: Time, $end: Time, $startDate: Date, $endDate: Date) {
   viewer { accounts(filter: {accountTag: $tag}) {
     workers: workersInvocationsAdaptive(limit: 10000, filter: {datetime_geq: $start, datetime_lt: $end}) { sum { requests cpuTimeUs } }
     doInv: durableObjectsInvocationsAdaptiveGroups(limit: 10000, filter: {datetime_geq: $start, datetime_lt: $end}) { sum { requests } }
     doPeriodic: durableObjectsPeriodicGroups(limit: 10000, filter: {date_geq: $startDate, date_leq: $endDate}) { sum { duration inboundWebsocketMsgCount } }
+    d1: d1AnalyticsAdaptiveGroups(limit: 10000, filter: {date_geq: $startDate, date_leq: $endDate}) { sum { rowsRead rowsWritten } }
   } }
 }"""
+
+# Analytics Engine の書き込み件数は GraphQL に無く SQL API で取る。データセットは初回の書き込みで作られるが、
+# 無い間も 0 行ではなく n=0 が返る。ほかにデータセットが無いので、アカウントの書き込み件数とみなす
+AE_SQL = f"{ACCOUNT}/{{account}}/analytics_engine/sql"
+AE_QUERY = ("SELECT SUM(_sample_interval) AS n FROM aramakisai_stamp_metrics "
+            "WHERE timestamp >= toDateTime('{start}') AND timestamp < toDateTime('{end}')")
 
 # GraphQL Analytics は 1 回の問い合わせの時間範囲が 4w4d (32 日) までなので、余裕を見て 30 日で区切る
 _WINDOW = timedelta(days=30)
@@ -44,12 +52,19 @@ _USAGE_QUOTAS = (
     ("do_requests_month", "quota.do_requests_month", "month", "req", lambda u: u["do_requests"]),
     ("do_gbs_day", "quota.do_gbs_day", "day", "GB-s", lambda u: u["gbs"]),
     ("do_gbs_month", "quota.do_gbs_month", "month", "GB-s", lambda u: u["gbs"]),
+    ("d1_rows_read_day", "quota.d1_rows_read_day", "day", "rows", lambda u: u["d1_read"]),
+    ("d1_rows_read_month", "quota.d1_rows_read_month", "month", "rows", lambda u: u["d1_read"]),
+    ("d1_rows_written_day", "quota.d1_rows_written_day", "day", "rows", lambda u: u["d1_written"]),
+    ("d1_rows_written_month", "quota.d1_rows_written_month", "month", "rows", lambda u: u["d1_written"]),
+    ("ae_writes_day", "quota.ae_writes_day", "day", "points", lambda u: u["ae_writes"]),
+    ("ae_writes_month", "quota.ae_writes_month", "month", "points", lambda u: u["ae_writes"]),
 )
 
 
 def _usage(ctx, token, account, start, end):
     """[start, end) の使用量。範囲が広いときは窓に分けて足す。"""
-    total = {"requests": 0, "cpu_us": 0, "do_requests": 0, "gbs": 0.0}
+    total = {"requests": 0, "cpu_us": 0, "do_requests": 0, "gbs": 0.0,
+             "d1_read": 0, "d1_written": 0, "ae_writes": 0}
     ws = 0
     cur = start
     while cur < end:
@@ -65,6 +80,12 @@ def _usage(ctx, token, account, start, end):
         total["do_requests"] += sum(r["sum"]["requests"] for r in acct["doInv"])
         total["gbs"] += sum(r["sum"]["duration"] for r in acct["doPeriodic"])
         ws += sum(r["sum"]["inboundWebsocketMsgCount"] for r in acct["doPeriodic"])
+        total["d1_read"] += sum(r["sum"]["rowsRead"] for r in acct["d1"])
+        total["d1_written"] += sum(r["sum"]["rowsWritten"] for r in acct["d1"])
+        ae = ctx.http.post_text(AE_SQL.format(account=account),
+                                AE_QUERY.format(start=cur.strftime("%Y-%m-%d %H:%M:%S"), end=nxt.strftime("%Y-%m-%d %H:%M:%S")),
+                                bearer=token)
+        total["ae_writes"] += sum(int(r["n"] or 0) for r in ae["data"])
         cur = nxt
     # 請求では受信の WebSocket メッセージ 20 件が 1 要求。requests は hibernation 中の受信を 1 件ずつ数えるため 19/20 を引く
     total["do_requests"] = max(0, round(total["do_requests"] - ws * 19 / 20))
@@ -115,6 +136,13 @@ def fetch(ctx):
             if scope not in usages:
                 usages[scope] = _usage(ctx, token, account, starts[scope], utc)
             items.append(quota_item(key, key, pick(usages[scope]), wp.limits[limit_key], unit, warn))
+
+        if "d1_storage_gb" in wp.limits:
+            latest_db = {}  # 新しい順に返るので、データベースごとに最初の行が最新
+            for r in acct["d1Storage"]:
+                latest_db.setdefault(r["dimensions"]["databaseId"], r["max"]["databaseSizeBytes"])
+            items.append(quota_item("quota.d1_storage", "quota.d1_storage", sum(latest_db.values()) / 1e9,
+                                    wp.limits["d1_storage_gb"], "GB", warn))
 
     r2 = cfg.active_plan("cloudflare_r2", today)
     if r2:

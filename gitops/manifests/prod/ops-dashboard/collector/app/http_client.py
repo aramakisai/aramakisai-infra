@@ -58,6 +58,9 @@ class Http:
     def post_json(self, url: str, body: Any, **kw) -> Any:
         return self._json("POST", url, data=json.dumps(body).encode(), content_type="application/json", **kw)
 
+    def post_text(self, url: str, text: str, **kw) -> Any:
+        return self._json("POST", url, data=text.encode(), content_type="text/plain", **kw)
+
     def post_form(self, url: str, data: Mapping[str, str], **kw) -> Any:
         return self._json("POST", url, data=urllib.parse.urlencode(data).encode(),
                           content_type="application/x-www-form-urlencoded", **kw)
