@@ -67,3 +67,13 @@ output "signage_notify_service_token_client_secret" {
 #   description = "Hetzner Object Storage バケット名"
 #   value       = hcloud_object_storage_bucket.backups.name
 # }
+
+output "stamps_d1_database_id" {
+  description = "D1 aramakisai-stamps (本番) の database_id (frontend/wrangler.toml へ反映)"
+  value       = cloudflare_d1_database.stamps.id
+}
+
+output "stamps_dev_d1_database_id" {
+  description = "D1 aramakisai-stamps-dev の database_id (frontend/wrangler.toml の env.dev へ反映)"
+  value       = cloudflare_d1_database.stamps_dev.id
+}
