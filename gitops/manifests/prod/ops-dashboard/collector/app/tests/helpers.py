@@ -39,6 +39,9 @@ class FakeHttp:
     def post_form(self, url, data, **kw):
         return self._do("POST", url, data=data, **kw)
 
+    def post_text(self, url, text, **kw):
+        return self._do("POST", url, text=text, **kw)
+
 
 class FakeK8s:
     """paths は API パス -> JSON (dict)。list_items は paths[path]["items"] を exclude 適用して返す。"""

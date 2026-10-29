@@ -8,7 +8,7 @@ name = "Workers Free"
 paid = false
 from = "2020-01-01"
 until = "2026-10-22"
-limits = { requests_day = 100_000, do_requests_day = 100_000, do_gbs_day = 13_000 }
+limits = { requests_day = 100_000, do_requests_day = 100_000, do_gbs_day = 13_000, d1_rows_read_day = 5_000_000, d1_rows_written_day = 100_000, d1_storage_gb = 5, ae_writes_day = 100_000 }
 
 [[plans]]
 service = "cloudflare_workers"
@@ -16,14 +16,14 @@ name = "Workers Paid"
 paid = true
 from = "2026-10-23"
 until = "2026-11-22"
-limits = { requests_month = 10_000_000, cpu_ms_month = 30_000_000, do_requests_month = 1_000_000, do_gbs_month = 400_000 }
+limits = { requests_month = 10_000_000, cpu_ms_month = 30_000_000, do_requests_month = 1_000_000, do_gbs_month = 400_000, d1_rows_read_month = 25_000_000_000, d1_rows_written_month = 50_000_000, d1_storage_gb = 5, ae_writes_month = 10_000_000 }
 
 [[plans]]
 service = "cloudflare_workers"
 name = "Workers Free"
 paid = false
 from = "2026-11-23"
-limits = { requests_day = 100_000, do_requests_day = 100_000, do_gbs_day = 13_000 }
+limits = { requests_day = 100_000, do_requests_day = 100_000, do_gbs_day = 13_000, d1_rows_read_day = 5_000_000, d1_rows_written_day = 100_000, d1_storage_gb = 5, ae_writes_day = 100_000 }
 
 [[plans]]
 service = "cloudflare_r2"

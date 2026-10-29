@@ -17,20 +17,20 @@ name = "Workers Free"
 paid = false
 from = "2020-01-01"
 until = "2026-10-22"
-limits = { requests_day = 100_000, do_requests_day = 100_000, do_gbs_day = 13_000 }
+limits = { requests_day = 100_000, do_requests_day = 100_000, do_gbs_day = 13_000, d1_rows_read_day = 5_000_000, d1_rows_written_day = 100_000, d1_storage_gb = 5, ae_writes_day = 100_000 }
 [[plans]]
 service = "cloudflare_workers"
 name = "Workers Paid"
 paid = true
 from = "2026-10-23"
 until = "2026-11-22"
-limits = { requests_month = 10_000_000, cpu_ms_month = 30_000_000, do_requests_month = 1_000_000, do_gbs_month = 400_000 }
+limits = { requests_month = 10_000_000, cpu_ms_month = 30_000_000, do_requests_month = 1_000_000, do_gbs_month = 400_000, d1_rows_read_month = 25_000_000_000, d1_rows_written_month = 50_000_000, d1_storage_gb = 5, ae_writes_month = 10_000_000 }
 [[plans]]
 service = "cloudflare_workers"
 name = "Workers Free"
 paid = false
 from = "2026-11-23"
-limits = { requests_day = 100_000, do_requests_day = 100_000, do_gbs_day = 13_000 }
+limits = { requests_day = 100_000, do_requests_day = 100_000, do_gbs_day = 13_000, d1_rows_read_day = 5_000_000, d1_rows_written_day = 100_000, d1_storage_gb = 5, ae_writes_day = 100_000 }
 [[plans]]
 service = "cloudflare_r2"
 name = "R2 Free"
@@ -197,24 +197,28 @@ class Hetzner(unittest.TestCase):
             billing_hetzner.SOURCES[0].fetch(make_ctx(CFG, env={}))
 
 
-def gql(storage=(4e9, 1e9), ops=()):
+def gql(storage=(4e9, 1e9), ops=(), d1_storage=()):
     return {"data": {"viewer": {"accounts": [{
+        "d1Storage": [{"max": {"databaseSizeBytes": n}, "dimensions": {"datetime": "2026-06-01T11:00:00Z", "databaseId": d}}
+                      for d, n in d1_storage],
         "storage": [{"max": {"payloadSize": storage[0], "metadataSize": storage[1]},
                      "dimensions": {"datetime": "2026-06-01T11:00:00Z", "bucketName": "b"}}],
         "ops": [{"sum": {"requests": n}, "dimensions": {"actionType": a}} for a, n in ops]}]}}}
 
 
-def usage(requests=0, cpu_us=0, do_requests=0, gbs=0.0, ws=0):
+def usage(requests=0, cpu_us=0, do_requests=0, gbs=0.0, ws=0, d1_read=0, d1_written=0):
     return {"data": {"viewer": {"accounts": [{
+        "d1": [{"sum": {"rowsRead": d1_read, "rowsWritten": d1_written}}],
         "workers": [{"sum": {"requests": requests, "cpuTimeUs": cpu_us}}],
         "doInv": [{"sum": {"requests": do_requests}}],
         "doPeriodic": [{"sum": {"duration": gbs, "inboundWebsocketMsgCount": ws}}]}]}}}
 
 
 class Cloudflare(unittest.TestCase):
-    def run_cf(self, now, gq=None, subs=(), users=7, usages=None):
+    def run_cf(self, now, gq=None, subs=(), users=7, usages=None, ae=0):
         """usages は (start, end) の窓ごとの使用量応答を返す関数 (省略時は空)。窓の呼び出しは self.windows に残る。"""
         self.windows = []
+        self.ae_calls = []
 
         def graphql(body, **kw):
             v = body["variables"]
@@ -226,6 +230,8 @@ class Cloudflare(unittest.TestCase):
         http = FakeHttp({
             "https://api.cloudflare.com/client/v4/accounts/acc/subscriptions": {"result": list(subs)},
             "https://api.cloudflare.com/client/v4/graphql": graphql,
+            "https://api.cloudflare.com/client/v4/accounts/acc/analytics_engine/sql":
+                lambda **kw: self.ae_calls.append(kw["text"]) or {"data": [{"n": str(ae)}]},
             "https://api.cloudflare.com/client/v4/accounts/acc/access/users": {
                 "result": [], "result_info": {"total_count": users}}})
         ctx = make_ctx(CFG, http=http, env={"OPS_CLOUDFLARE_READ_TOKEN": "t", "TF_VAR_cloudflare_account_id": "acc"}, now=now)
@@ -251,6 +257,32 @@ class Cloudflare(unittest.TestCase):
         self.assertEqual(r.status, Status.WARN)
         # Free の日次は UTC の 0 時から現在まで
         self.assertEqual(self.windows, [("2026-06-01T00:00:00Z", "2026-06-01T12:00:00Z", "2026-06-01", "2026-06-01")])
+
+    def test_free_daily_d1_and_analytics_engine(self):
+        by, _ = self.run_cf(NOW, gql(d1_storage=[("a", 4e9), ("b", 0.5e9)]), ae=95_000,
+                            usages=lambda s, e: usage(d1_read=4_000_000, d1_written=50_000))
+        self.assertEqual(by["quota.d1_rows_read_day"].values["limit"], 5_000_000)
+        self.assertEqual(by["quota.d1_rows_read_day"].status, Status.WARN)
+        self.assertEqual(by["quota.d1_rows_written_day"].status, Status.OK)
+        self.assertEqual(by["quota.ae_writes_day"].values["used"], 95_000)
+        self.assertEqual(by["quota.ae_writes_day"].status, Status.WARN)
+        self.assertEqual(by["quota.d1_storage"].values["used"], 4.5)
+        self.assertEqual(by["quota.d1_storage"].values["limit"], 5)
+        self.assertEqual(by["quota.d1_storage"].status, Status.WARN)
+        self.assertNotIn("quota.d1_rows_written_month", by)
+        self.assertNotIn("quota.ae_writes_month", by)
+        self.assertEqual(len(self.ae_calls), 1)
+        self.assertIn("timestamp >= toDateTime('2026-06-01 00:00:00')", self.ae_calls[0])
+
+    def test_paid_monthly_d1_and_analytics_engine(self):
+        by, _ = self.run_cf(at(2026, 11, 10), ae=11_000_000,
+                            usages=lambda s, e: usage(d1_read=1, d1_written=60_000_000))
+        self.assertEqual(by["quota.d1_rows_written_month"].values["limit"], 50_000_000)
+        self.assertEqual(by["quota.d1_rows_written_month"].status, Status.CRIT)
+        self.assertEqual(by["quota.d1_rows_read_month"].values["limit"], 25_000_000_000)
+        self.assertEqual(by["quota.ae_writes_month"].status, Status.CRIT)
+        self.assertNotIn("quota.d1_rows_written_day", by)
+        self.assertNotIn("quota.ae_writes_day", by)
 
     def test_storage_sums_latest_per_bucket(self):
         g = gql()

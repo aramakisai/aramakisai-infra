@@ -99,6 +99,16 @@ zitadel_oidc_apps:
     infisical_keys:
       client_id: OPS_PORTAL_OIDC_CLIENT_ID
       client_secret: OPS_PORTAL_OIDC_CLIENT_SECRET
+  - name: aramakisai-web-staff
+    redirect_uris:
+      - https://aramakisai.com/staff/auth/callback
+      - https://dev.aramakisai.com/staff/auth/callback
+    post_logout_redirect_uris: []
+    # 本番と dev の Worker が同じアプリを共用するため、発行値は Infisical の prod にだけ登録される
+    infisical_hint: "STAFF_OIDC_CLIENT_ID / STAFF_OIDC_CLIENT_SECRET"
+    infisical_keys:
+      client_id: STAFF_OIDC_CLIENT_ID
+      client_secret: STAFF_OIDC_CLIENT_SECRET
 
 zitadel_discord_idp_name: Discord
 # client_id/secretは非機密のダミー値のみdefaults化 (実値はInfisicalのTF_VAR_discord_client_id/
