@@ -353,3 +353,12 @@ resource "cloudflare_workers_domain" "aramakisai_shifuto" {
   service     = "aramakisai-shifuto"
   environment = "production"
 }
+
+# 唐揚げ注文アプリ (karaage-order リポジトリ, CI で wrangler deploy)
+resource "cloudflare_workers_domain" "karaage_order" {
+  account_id  = var.cloudflare_account_id
+  zone_id     = var.cloudflare_zone_id
+  hostname    = "karaage.aramakisai.com"
+  service     = "karaage-order"
+  environment = "production"
+}
