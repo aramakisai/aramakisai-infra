@@ -105,9 +105,6 @@ name = "prod-node-2"
 [[servers]]
 name = "prod-node-3"
 
-[[servers]]
-name = "prod-node-4"
-
 [thresholds]
 warn_ratio = 0.8
 cert_warn_days = 21
