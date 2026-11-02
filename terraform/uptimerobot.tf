@@ -26,7 +26,7 @@ locals {
       port = null
     }
     idp = {
-      name = "Authentik IdP"
+      name = "Zitadel IdP"
       type = "HTTP"
       url  = "https://idp.aramakisai.com"
       port = null
@@ -45,7 +45,7 @@ locals {
       port = null
     }
     mail_tcp = {
-      name = "Stalwart メールサーバー TCP到達性 (443)"
+      name = "docker-mailserver TCP到達性 (443)"
       type = "PORT"
       url  = "mail.aramakisai.com"
       port = 443

@@ -114,7 +114,7 @@ disk_warn = 0.85
 disk_crit = 0.95
 memory_warn = 0.85
 volsync_max_age = "12h"
-backup_max_age = { "prod/cms-db" = "36h", "prod/authentik-db" = "8d", "zitadel/zitadel-db" = "36h" }
+backup_max_age = { "prod/directus-db" = "36h", "prod/authentik-db" = "8d", "zitadel/zitadel-db" = "36h" }
 
 # 有効期限を設定した資格情報。期限日は発行時に控えた値を宣言する。
 [[credentials]]
@@ -132,8 +132,7 @@ expires_on = "2027-10-12"
 # 凍結中のワークロード (Namespace または名前) は取得結果から除外する。
 # prod Namespace に置かれた付随リソース (バックアップ・DB の Application・ExternalSecret) は名前で列挙する。
 [exclude]
-namespaces_or_names = ["vaultwarden", "vaultwarden-rbac-sync", "vaultwarden-backup",
-                       "room-presence", "room-presence-db", "presence-secrets"]
+namespaces_or_names = ["vaultwarden-rbac-sync", "room-presence", "room-presence-db", "presence-secrets"]
 
 # 情報源ごとの非秘匿の宣言 (呼び出し先・対象)。キーは source_id。
 [sources."billing.github"]
