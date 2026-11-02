@@ -1,7 +1,7 @@
 ---
 # k3s 同梱 CoreDNS を常に 2 台にする
-# 同梱マニフェストの Deployment には spec.replicas が無く、k3s 再起動時の AddOn 再適用で台数が
-# 1 に戻るため、HPA で下限を固定する。metrics は HPA の必須項目を満たすためだけで、
+# 同梱マニフェストは k3s 起動のたびに書き戻されて編集できず、replicas を宣言的に変える手段が
+# 無いため、HPA で台数を固定する。metrics は HPA の必須項目を満たすためだけで、
 # min = max により CPU 使用率で台数は変わらない。
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
