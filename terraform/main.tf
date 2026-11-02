@@ -5,6 +5,7 @@ locals {
     "prod-node-1" = { private_ip = "10.0.1.1", server_type = "cx33" }
     "prod-node-2" = { private_ip = "10.0.1.2", server_type = "cx33" }
     "prod-node-3" = { private_ip = "10.0.1.3", server_type = "cx33" }
+    "prod-node-4" = { private_ip = "10.0.1.4", server_type = "cx33" }
   }
 }
 

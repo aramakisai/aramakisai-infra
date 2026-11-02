@@ -31,6 +31,7 @@ all:
       hosts:
         prod-node-2: {ansible_host: prod-node-2, k3s_role: server, k3s_private_ip: 10.0.1.2}
         prod-node-3: {ansible_host: prod-node-3, k3s_role: server, k3s_private_ip: 10.0.1.3}
+        prod-node-4: {ansible_host: prod-node-4, k3s_role: server, k3s_private_ip: 10.0.1.4}
 
   vars:
     ansible_user: root
