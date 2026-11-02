@@ -183,7 +183,7 @@ email claim を読むため、`ansible/roles/zitadel-bootstrap/vars/resources.ym
 - Free プランはカスタムルール 5 件まで・regex 不可 (`matches` は Business 以上)。パターンは 1 ルールに `or` で束ねて枠を使い切らないようにしている。zone あたり entrypoint は 1 つなので、追加するルールはこの ruleset に足す。
 
 ### ホストOS自動更新・K3sバージョン追従の設計判断
-- 自動再起動時刻は `os_auto_update_reboot_time`（03:30）を基準に、`groups['all']` 内の順序 × `os_auto_update_reboot_stagger_minutes`（30 分）ずつ後ろへずらす（先頭ノードは基準のまま）。server 複数台の同時再起動による etcd クォーラム喪失を避けるため。30 分は 1 台の再起動・k3s の etcd 復帰・Pod 再スケジュールに十分な余裕として置いた値。
+- 自動再起動時刻は `os_auto_update_reboot_time_jst`（JST 03:30）を基準に、`groups['all']` 内の順序 × `os_auto_update_reboot_stagger_minutes`（30 分）ずつ後ろへずらす（先頭ノードは基準のまま）。ノードの OS は UTC のため、`Automatic-Reboot-Time` にはタイムゾーン指定が無く、UTC に換算した値 (`os_auto_update_host_reboot_time_utc`) を渡す。server 複数台の同時再起動による etcd クォーラム喪失を避けるため。30 分は 1 台の再起動・k3s の etcd 復帰・Pod 再スケジュールに十分な余裕として置いた値。
 - ホストOSパッケージ更新は Debian 標準機能(`unattended-upgrades` + `apt-daily-upgrade.timer` + `Automatic-Reboot`)に完全委任し、Ansibleロール `os-auto-update` は設定ファイル配布と結果通知のみを担う(独自の適用/再起動ロジックは実装しない)。
 - 自動適用の対象 origin は `-security`・`-updates` に加え、Debian 既定と同じポイントリリース (`origin=Debian,codename=${distro_codename},label=Debian`)。backports は対象外。
 - Discord 通知は異常時のみ(平常時は無送信): 修正版が apt にあるのに未適用 / debsecan 失敗・未インストール / `reboot-required` が26時間以上残存。再起動の要否自体は通知せず `Automatic-Reboot` のノード毎ずらしに任せる。

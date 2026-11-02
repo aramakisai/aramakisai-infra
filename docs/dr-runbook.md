@@ -366,7 +366,7 @@ gh workflow run dr-recovery.yml --repo aramakisai/aramakisai-infra -f target_nod
 
 ## 計画的メンテナンス時の通知抑止
 
-ホストOSの自動更新 (`ansible/roles/os-auto-update/` による毎日03:30の再起動)、K3s アップグレード (`.github/workflows/k3s-upgrade.yml`)、手動メンテナンスでノードが一時的に応答しなくなると、`dr-trigger.yml` が障害を通知する。復旧は自動起動しないため実害はなく、`dr-incident` Issue は正常化すると自動クローズされる。復旧ワークフローは冒頭の生存確認ゲートで、生きているノードに対しては何も変更せず停止する。
+ホストOSの自動更新 (`ansible/roles/os-auto-update/` による毎日 JST 03:30 起点 (ノード順に30分ずつ後ろ) の再起動)、K3s アップグレード (`.github/workflows/k3s-upgrade.yml`)、手動メンテナンスでノードが一時的に応答しなくなると、`dr-trigger.yml` が障害を通知する。復旧は自動起動しないため実害はなく、`dr-incident` Issue は正常化すると自動クローズされる。復旧ワークフローは冒頭の生存確認ゲートで、生きているノードに対しては何も変更せず停止する。
 
 通知自体を止めたい長時間のメンテナンスでは、作業前後で `dr-trigger.yml` を無効化・再有効化する。
 
