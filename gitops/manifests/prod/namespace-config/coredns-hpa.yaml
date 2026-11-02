@@ -1,0 +1,24 @@
+---
+# k3s 同梱 CoreDNS を常に 2 台にする
+# 同梱マニフェストは k3s 起動のたびに書き戻されて編集できず、replicas を宣言的に変える手段が
+# 無いため、HPA で台数を固定する。metrics は HPA の必須項目を満たすためだけで、
+# min = max により CPU 使用率で台数は変わらない。
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: coredns
+  namespace: kube-system
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: coredns
+  minReplicas: 2
+  maxReplicas: 2
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 80
