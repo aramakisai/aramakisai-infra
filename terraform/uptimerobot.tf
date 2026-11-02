@@ -38,6 +38,17 @@ locals {
       url  = "https://cms.aramakisai.com/admin/login"
       port = null
     }
+    cms_api_db = {
+      # 管理画面 (/admin/login) は DB が落ちていても 200 を返すため、DB を読む API の応答で DB 障害を検知する
+      name          = "Payload CMS API (DB 経由)"
+      type          = "KEYWORD"
+      url           = "https://cms.aramakisai.com/api/globals/site_settings?depth=0&select%5BupdatedAt%5D=true"
+      port          = null
+      keyword_type  = "ALERT_NOT_EXISTS"
+      keyword_value = "updatedAt"
+      # provider が KEYWORD で必須とするため明示する
+      keyword_case_type = "CaseSensitive"
+    }
     autoconfig = {
       name = "メールクライアント自動設定 (autoconfig)"
       type = "HTTP"
@@ -61,6 +72,10 @@ resource "uptimerobot_monitor" "this" {
   url      = each.value.url
   port     = each.value.port
   interval = 300
+
+  keyword_type      = try(each.value.keyword_type, null)
+  keyword_value     = try(each.value.keyword_value, null)
+  keyword_case_type = try(each.value.keyword_case_type, null)
 
   follow_redirections = true
 
