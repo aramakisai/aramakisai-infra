@@ -208,9 +208,9 @@ Grafana Cloud は解約済みで使用しない。単一ノード (CX33) のメ�
 | UptimeRobot (`terraform/uptimerobot.tf`) | 公開エンドポイントの外形監視 | UptimeRobot 通知設定 |
 | Healthchecks.io (`terraform/healthchecksio.tf`) | mailserver バックアップ (VolSync) の dead man's switch | Healthchecks.io 通知設定 |
 | DR Trigger (`.github/workflows/dr-trigger.yml`, 5分毎cron) | Tailscale 疎通 + idp/argocd/webmail 複合検出によるノード障害判定 | Discord + `dr-incident` Issue (通知のみ。復旧は人が `dr-recovery.yml` を起動し Environment 承認) |
-| Infra Health Check (`.github/workflows/infra-health-check.yml`, 15分毎cron) | CNPG WAL アーカイブ失敗 (`Cluster.status.conditions` の `ContinuousArchiving`)、ノードルートディスク使用率 (閾値 85%、`kubectl get --raw /api/v1/nodes/<node>/proxy/stats/summary`) | Discord。状態は GitHub Issue (ラベル `infra-alert`) で管理し、解消時に自動クローズ |
+| Infra Health Check (`.github/workflows/infra-health-check.yml`, 15分毎cron) | CNPG WAL アーカイブ失敗 (`Cluster.status.conditions` の `ContinuousArchiving`)、全ノードのルートディスク使用率 (閾値 85%。`kubectl get nodes` の一覧を対象に、各ノードの kubelet `https://<node>:10250/stats/summary` を ClusterRole `gha-infra-health-check` の `nodes` get/list と `nodes/stats` get で読む。`INFRA_HEALTH_NODE_NAME` 指定時はそのノードのみ。Issue キーは `disk-<node>`) | Discord。状態は GitHub Issue (ラベル `infra-alert`) で管理し、解消時に自動クローズ |
 
-| 運用ダッシュボード (`gitops/apps/prod/ops-dashboard.yaml`、`dash.aramakisai.com`) | 上記の各情報源 (Falco webhook・Kubernetes・メール・外部 SaaS の利用枠と期限) を collector が集約して admin に表示。通知はせず、通知系の代替ではなく閲覧用の集約画面 | なし (Falcosidekick は Discord に加えて collector へも webhook 転送) |
+| 運用ダッシュボード (`gitops/apps/prod/ops-dashboard.yaml`、`dash.aramakisai.com`) | 上記の各情報源 (Falco webhook・Kubernetes・メール・外部 SaaS の利用枠と期限) を collector が集約して admin に表示。通知はせず、通知系の代替ではなく閲覧用の集約画面。ノードのディスク使用率は `dashboard.toml` の servers 全ノードの kubelet `https://<InternalIP>:10250/stats/summary` (`node.fs`) を ServiceAccount トークンと ServiceAccount の `ca.crt` (k3s の server CA で kubelet 提供証明書を検証できる) で読む。ClusterRole `ops-dashboard-collector` に `nodes/stats` get を持つ | なし (Falcosidekick は Discord に加えて collector へも webhook 転送) |
 
 Netdata・Falco はいずれもリソース予算 (requests/limits) を明示的に絞ってデプロイしている。値を変更する際は `make kubectl ARGS="top pod -n monitoring"` で実メモリを確認すること。
 

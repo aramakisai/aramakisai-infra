@@ -46,8 +46,15 @@ class FakeHttp:
 class FakeK8s:
     """paths は API パス -> JSON (dict)。list_items は paths[path]["items"] を exclude 適用して返す。"""
 
-    def __init__(self, paths=None):
+    def __init__(self, paths=None, kubelet=None):
         self.paths = dict(paths or {})
+        self.kubelet = dict(kubelet or {})
+
+    def kubelet_stats(self, ip):
+        r = self.kubelet[ip]
+        if isinstance(r, Exception):
+            raise r
+        return r
 
     def get(self, path, **kw):
         if path not in self.paths:

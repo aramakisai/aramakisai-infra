@@ -32,7 +32,7 @@ def workload_k8s(**over):
     paths = {
         "/apis/argoproj.io/v1alpha1/applications": {"items": [
             app("cms"), app("authentik", sync="OutOfSync"), app("bad", health="Degraded"),
-            app("vaultwarden"), app("rp", dest="room-presence")]},
+            app("vaultwarden-rbac-sync"), app("rp", dest="room-presence")]},
         "/api/v1/pods": {"items": [
             pod("ok"), pod("loop", waiting="CrashLoopBackOff", restarts=9), pod("many", restarts=6),
             pod("oom", restarts=1, last_term={"reason": "OOMKilled", "finishedAt": AGO(hours=1)}),
@@ -64,7 +64,7 @@ class WorkloadsTest(unittest.TestCase):
         self.assertEqual(self.by["argocd/bad"].status, Status.CRIT)
 
     def test_frozen_excluded(self):
-        self.assertNotIn("argocd/vaultwarden", self.by)
+        self.assertNotIn("argocd/vaultwarden-rbac-sync", self.by)
         self.assertNotIn("argocd/rp", self.by)
         self.assertNotIn("pod/room-presence/frozen", self.by)
 
@@ -113,28 +113,28 @@ class DataProtectionTest(unittest.TestCase):
 
     def test_healthy(self):
         last = AGO(hours=10)
-        res = self.fetch([cluster("cms-db", "prod")],
-                         [backup("cms-db", "prod", AGO(days=2)), backup("cms-db", "prod", last),
-                          backup("cms-db", "prod", AGO(hours=1), phase="failed")],
+        res = self.fetch([cluster("directus-db", "prod")],
+                         [backup("directus-db", "prod", AGO(days=2)), backup("directus-db", "prod", last),
+                          backup("directus-db", "prod", AGO(hours=1), phase="failed")],
                          [volsync("mail", AGO(hours=2))])
         by = {i.key: i for i in res.items}
         self.assertEqual(res.status, Status.OK)
-        self.assertEqual(by["cnpg/prod/cms-db"].values["last_backup"], last)
-        self.assertIs(by["cnpg/prod/cms-db"].values["wal_ok"], True)
+        self.assertEqual(by["cnpg/prod/directus-db"].values["last_backup"], last)
+        self.assertIs(by["cnpg/prod/directus-db"].values["wal_ok"], True)
         self.assertEqual(by["volsync/mailserver/mail"].values["result"], "Successful")
 
     def test_wal_failing(self):
-        res = self.fetch([cluster("cms-db", "prod", archiving=False)], [backup("cms-db", "prod", AGO(hours=1))], [])
+        res = self.fetch([cluster("directus-db", "prod", archiving=False)], [backup("directus-db", "prod", AGO(hours=1))], [])
         self.assertEqual(res.items[0].status, Status.CRIT)
         self.assertIs(res.items[0].values["wal_ok"], False)
 
     def test_backup_too_old(self):
-        res = self.fetch([cluster("cms-db", "prod")], [backup("cms-db", "prod", AGO(hours=40))], [])
+        res = self.fetch([cluster("directus-db", "prod")], [backup("directus-db", "prod", AGO(hours=40))], [])
         self.assertEqual(res.items[0].status, Status.CRIT)
         self.assertIn("40 時間", res.items[0].note)
 
     def test_no_backup_with_max_age_is_crit(self):
-        res = self.fetch([cluster("cms-db", "prod")], [], [])
+        res = self.fetch([cluster("directus-db", "prod")], [], [])
         self.assertEqual(res.items[0].status, Status.CRIT)
 
     def test_cluster_without_declared_max_age_not_checked(self):
@@ -142,7 +142,7 @@ class DataProtectionTest(unittest.TestCase):
         self.assertEqual(res.items[0].status, Status.OK)
 
     def test_frozen_cluster_excluded(self):
-        res = self.fetch([cluster("db", "vaultwarden", ready=False)], [], [])
+        res = self.fetch([cluster("db", "room-presence", ready=False)], [], [])
         self.assertEqual(list(res.items), [])
         self.assertEqual(res.status, Status.EMPTY)
 

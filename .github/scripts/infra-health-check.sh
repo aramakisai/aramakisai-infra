@@ -15,7 +15,8 @@ die() { log "ERROR: $*"; exit 1; }
 
 REPO="${GITHUB_REPOSITORY:-aramakisai/aramakisai-infra}"
 ALERT_LABEL="infra-alert"
-NODE_NAME="${INFRA_HEALTH_NODE_NAME:-prod-node-1}"
+# 未指定なら API のノード一覧の全ノードを検査する
+NODE_NAME="${INFRA_HEALTH_NODE_NAME:-}"
 DISK_THRESHOLD_PERCENT="${INFRA_HEALTH_DISK_THRESHOLD_PERCENT:-85}"
 
 # ============================================================
@@ -53,13 +54,13 @@ check_kube_auth() {
 # nodes/proxy 権限を持たないため API サーバーの node proxy は使えない。
 # nodes/stats だけで通る kubelet (10250) を、kubeconfig と同じ CA で検証して直接呼ぶ
 kubelet_stats() {
-  local ca token rc
+  local node="$1" ca token rc
   ca="$(mktemp)"
   kc config view --raw --minify -o jsonpath='{.clusters[0].cluster.certificate-authority-data}' | base64 -d >"${ca}"
   token="$(bash "${KUBE_OIDC}" token | jq -r '.status.token')" || { rm -f "${ca}"; return 1; }
   # トークンを argv に出さないよう設定を stdin から渡す
   printf 'header = "Authorization: Bearer %s"\n' "${token}" \
-    | curl -sf --max-time 30 --cacert "${ca}" -K - "https://${NODE_NAME}:10250/stats/summary"
+    | curl -sf --max-time 30 --cacert "${ca}" -K - "https://${node}:10250/stats/summary"
   rc=$?
   rm -f "${ca}"
   return "${rc}"
@@ -69,16 +70,25 @@ kubelet_stats() {
 # チェック1: ノードルートディスク使用率
 # ============================================================
 
+list_nodes() {
+  if [[ -n "${NODE_NAME}" ]]; then
+    echo "${NODE_NAME}"
+    return
+  fi
+  kc get nodes -o json | jq -r '.items[].metadata.name'
+}
+
+# 引数: node
 # 出力: "breach|<usage_percent>" / "ok|<usage_percent>" / 取得失敗時 "error|0"
 check_disk_usage() {
-  local stats used capacity percent
-  stats=$(kubelet_stats) \
-    || { log "警告: ${NODE_NAME} の stats/summary 取得に失敗しました"; echo "error|0"; return; }
+  local node="$1" stats used capacity percent
+  stats=$(kubelet_stats "${node}") \
+    || { log "警告: ${node} の stats/summary 取得に失敗しました"; echo "error|0"; return; }
 
   used=$(echo "${stats}" | jq -r '.node.fs.usedBytes // empty')
   capacity=$(echo "${stats}" | jq -r '.node.fs.capacityBytes // empty')
   if [[ -z "${used}" || -z "${capacity}" || "${capacity}" == "0" ]]; then
-    log "警告: ${NODE_NAME} の fs 使用量を取得できませんでした"
+    log "警告: ${node} の fs 使用量を取得できませんでした"
     echo "error|0"
     return
   fi
@@ -205,27 +215,35 @@ main() {
   # 観測できなかった項目。取得失敗は「回復」ではないため Issue をクローズせず、最後に非 0 で終える
   local unobserved=()
 
-  local disk_result disk_state disk_percent
-  disk_result=$(check_disk_usage)
-  disk_state="${disk_result%%|*}"
-  disk_percent="${disk_result##*|}"
-  log "ディスク使用率チェック: ${NODE_NAME} = ${disk_percent}% (閾値 ${DISK_THRESHOLD_PERCENT}%, state=${disk_state})"
+  local nodes node disk_result disk_state disk_percent
+  # 一覧が取れないと全ノードが未観測になるため、空のまま進めず未観測として扱う
+  if nodes=$(list_nodes) && [[ -n "${nodes}" ]]; then
+    while read -r node; do
+      disk_result=$(check_disk_usage "${node}")
+      disk_state="${disk_result%%|*}"
+      disk_percent="${disk_result##*|}"
+      log "ディスク使用率チェック: ${node} = ${disk_percent}% (閾値 ${DISK_THRESHOLD_PERCENT}%, state=${disk_state})"
 
-  case "${disk_state}" in
-    breach)
-      # shellcheck disable=SC2016 # バッククォートはMarkdown装飾の文字リテラル (展開不要)
-      sync_breach "disk-${NODE_NAME}" \
-        "ルートディスク使用率が閾値を超えました (${NODE_NAME})" \
-        "$(printf '使用率: %s%% (閾値: %s%%)\n\n参照: `.kiro/steering/dr.md` のCNPGの節 (WALアーカイブ失敗によるディスク肥大化の既知パターン)' "${disk_percent}" "${DISK_THRESHOLD_PERCENT}")"
-      ;;
-    ok)
-      sync_recovered "disk-${NODE_NAME}"
-      ;;
-    *)
-      log "ディスク使用率を取得できませんでした"
-      unobserved+=("disk-${NODE_NAME}")
-      ;;
-  esac
+      case "${disk_state}" in
+        breach)
+          # shellcheck disable=SC2016 # バッククォートはMarkdown装飾の文字リテラル (展開不要)
+          sync_breach "disk-${node}" \
+            "ルートディスク使用率が閾値を超えました (${node})" \
+            "$(printf '使用率: %s%% (閾値: %s%%)\n\n参照: `.kiro/steering/dr.md` のCNPGの節 (WALアーカイブ失敗によるディスク肥大化の既知パターン)' "${disk_percent}" "${DISK_THRESHOLD_PERCENT}")"
+          ;;
+        ok)
+          sync_recovered "disk-${node}"
+          ;;
+        *)
+          log "${node} のディスク使用率を取得できませんでした"
+          unobserved+=("disk-${node}")
+          ;;
+      esac
+    done <<<"${nodes}"
+  else
+    log "警告: ノード一覧の取得に失敗しました"
+    unobserved+=("disk-nodes")
+  fi
 
   local cluster_key state message
   while IFS='|' read -r cluster_key state message; do

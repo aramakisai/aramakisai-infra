@@ -17,6 +17,13 @@ class K8sTest(unittest.TestCase):
             self.assertEqual(c.get("/api/v1/nodes"), {"items": [1]})
             self.assertEqual(http.calls[0]["bearer"], "TOK")
 
+    def test_kubelet_stats_uses_node_ip_and_token(self):
+        http = FakeHttp({"https://10.0.1.2:10250/stats/summary": {"node": {}}})
+        c = k8s.K8sClient(http, host="h", port="1", token_path="/nonexistent")
+        c._token = lambda: "T"
+        self.assertEqual(c.kubelet_stats("10.0.1.2"), {"node": {}})
+        self.assertEqual(http.calls[0]["bearer"], "T")
+
     def test_list_items_and_exclude(self):
         http = FakeHttp({"https://h:1/api/v1/pods": {"items": [{"metadata": {"namespace": "a", "name": "x"}},
                                                                {"metadata": {"namespace": "b", "name": "y"}}]}})

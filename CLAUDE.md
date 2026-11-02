@@ -104,6 +104,8 @@ tailnet policy の正本は `terraform/tailscale-acl.hujson.tftpl`。Admin conso
 - 証明書が期限切れで再発行できない緊急時は、Tailscale SSH でノードに入り、ノード上のローカル admin (`/etc/rancher/k3s/k3s.yaml`) を使える。平常時の運用には使わない。
 - DR が必要なときは `dr-recovery` が動かないため、`docs/dr-runbook.md` の「手動フォールバック」に従う。
 
+IdP (Zitadel) 停止時の影響範囲と代替手段は [docs/idp-outage-runbook.md](docs/idp-outage-runbook.md) を参照。
+
 ### GitOps 原則：クラスタへの直接操作禁止
 
 `gitops/` 配下のリソースはすべて ArgoCD が正本。**直接 `kubectl patch/edit/apply` でクラスタを変更することを禁止する。**

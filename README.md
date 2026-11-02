@@ -36,7 +36,7 @@ Terraform でクラウドリソースを定義し、Ansible で K3s クラスタ
 
 ```
 .
-├── docs/               運用手順書 (dr-runbook.md = DR、node-scaling-runbook.md = ノード増減 ほか)
+├── docs/               運用手順書 (dr-runbook.md = DR、node-scaling-runbook.md = ノード増減、idp-outage-runbook.md = IdP 停止時 ほか)
 ├── terraform/          クラウドリソース定義 (Hetzner / Cloudflare / Tailscale)。tailnet policy の正本は tailscale-acl.hujson.tftpl
 ├── .github/            ワークフロー (DR・k3s-upgrade・kube-cert-issue 等) と scripts/ (kube-oidc.sh 等)
 ├── scripts/            運用スクリプト (kube-login.sh = make kube-login の実体、scaletest/ = ノード増減の Hetzner 実機検証ハーネス 等)

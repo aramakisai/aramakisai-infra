@@ -6,12 +6,14 @@ from datetime import timedelta
 from unittest import mock
 
 from helpers import FIXED_NOW, FakeHttp, FakeK8s, make_ctx
+from http_client import HttpError
 from model import Status, iso
 from sources import node_maintenance as nm
 from sources import node_resources as nr
 
 NODES = {"items": [{"metadata": {"name": "prod-node-1"},
-                    "status": {"capacity": {"cpu": "4", "memory": "8Gi"},
+                    "status": {"addresses": [{"type": "InternalIP", "address": "10.0.1.1"}],
+                               "capacity": {"cpu": "4", "memory": "8Gi"},
                                "nodeInfo": {"kubeletVersion": "v1.32.3+k3s1"}}}]}
 METRICS = {"items": [{"metadata": {"name": "prod-node-1"}, "usage": {"cpu": "1000000000n", "memory": "4Gi"}}]}
 
@@ -20,23 +22,23 @@ def node3(version="v1.32.3+k3s1", versions=None):
     names = ["prod-node-1", "prod-node-2", "prod-node-3"]
     vs = versions or [version] * 3
     nodes = {"items": [{"metadata": {"name": n},
-                        "status": {"capacity": {"cpu": "4", "memory": "8Gi"}, "nodeInfo": {"kubeletVersion": v}}}
-                       for n, v in zip(names, vs)]}
+                        "status": {"addresses": [{"type": "InternalIP", "address": f"10.0.1.{i + 1}"}],
+                                   "capacity": {"cpu": "4", "memory": "8Gi"}, "nodeInfo": {"kubeletVersion": v}}}
+                       for i, (n, v) in enumerate(zip(names, vs))]}
     metrics = {"items": [{"metadata": {"name": n}, "usage": {"cpu": f"{i + 1}000000000n", "memory": f"{i + 1}Gi"}}
                          for i, n in enumerate(names)]}
     return nodes, metrics
 
 
-def statvfs(used_ratio):
-    return mock.Mock(f_blocks=1000, f_bfree=int(1000 * (1 - used_ratio)), f_bavail=int(1000 * (1 - used_ratio)),
-                     f_frsize=1)
+def stats(used_ratio):
+    return {"node": {"fs": {"usedBytes": int(1000 * used_ratio), "capacityBytes": 1000}}}
 
 
 class ResourcesTest(unittest.TestCase):
     def run_fetch(self, ratio):
-        k8s = FakeK8s({"/api/v1/nodes": NODES, "/apis/metrics.k8s.io/v1beta1/nodes": METRICS})
-        with mock.patch("os.statvfs", return_value=statvfs(ratio)):
-            return {i.key: i for i in nr.SOURCES[0].fetch(make_ctx(k8s=k8s)).items}
+        k8s = FakeK8s({"/api/v1/nodes": NODES, "/apis/metrics.k8s.io/v1beta1/nodes": METRICS},
+                      kubelet={"10.0.1.1": stats(ratio)})
+        return {i.key: i for i in nr.SOURCES[0].fetch(make_ctx(k8s=k8s)).items}
 
     def test_quantity(self):
         self.assertEqual(nr.quantity("250m"), 0.25)
@@ -48,32 +50,42 @@ class ResourcesTest(unittest.TestCase):
         by = self.run_fetch(0.5)
         self.assertEqual(by["cpu:prod-node-1"].values["ratio"], 25.0)
         self.assertEqual(by["memory:prod-node-1"].values["ratio"], 50.0)
-        self.assertEqual(by["disk"].status, Status.OK)
+        self.assertEqual(by["disk:prod-node-1"].status, Status.OK)
 
     def test_disk_over_85_is_flagged(self):
         by = self.run_fetch(0.9)
-        self.assertEqual(by["disk"].status, Status.WARN)
-        self.assertIn("85%", by["disk"].note)
-        self.assertEqual(self.run_fetch(0.96)["disk"].status, Status.CRIT)
+        self.assertEqual(by["disk:prod-node-1"].status, Status.WARN)
+        self.assertIn("85%", by["disk:prod-node-1"].note)
+        self.assertEqual(self.run_fetch(0.96)["disk:prod-node-1"].status, Status.CRIT)
 
     def test_three_nodes_each_get_cpu_and_memory(self):
         nodes, metrics = node3()
-        k8s = FakeK8s({"/api/v1/nodes": nodes, "/apis/metrics.k8s.io/v1beta1/nodes": metrics})
-        with mock.patch("os.statvfs", return_value=statvfs(0.5)):
-            items = nr.SOURCES[0].fetch(make_ctx(k8s=k8s)).items
+        k8s = FakeK8s({"/api/v1/nodes": nodes, "/apis/metrics.k8s.io/v1beta1/nodes": metrics},
+                      kubelet={f"10.0.1.{n}": stats(0.1 * n) for n in (1, 2, 3)})
+        items = nr.SOURCES[0].fetch(make_ctx(k8s=k8s)).items
         by = {i.key: i for i in items}
-        self.assertEqual(len(items), 7)
+        self.assertEqual(len(items), 9)
+        self.assertEqual(by["disk:prod-node-3"].values["ratio"], 30.0)
+        self.assertEqual(by["disk:prod-node-2"].label, "prod-node-2")
         self.assertEqual(by["cpu:prod-node-3"].values["ratio"], 75.0)
         self.assertEqual(by["memory:prod-node-2"].values["ratio"], 25.0)
         self.assertEqual(by["memory:prod-node-3"].label, "prod-node-3")
-        self.assertEqual(by["disk"].label, "prod-node-1")
+
+    def test_unreachable_kubelet_is_stale_and_others_survive(self):
+        nodes, metrics = node3()
+        k8s = FakeK8s({"/api/v1/nodes": nodes, "/apis/metrics.k8s.io/v1beta1/nodes": metrics},
+                      kubelet={"10.0.1.1": stats(0.5), "10.0.1.2": HttpError("x"), "10.0.1.3": {"node": {}}})
+        by = {i.key: i for i in nr.SOURCES[0].fetch(make_ctx(k8s=k8s)).items}
+        self.assertEqual(by["disk:prod-node-1"].status, Status.OK)
+        for k in ("disk:prod-node-2", "disk:prod-node-3"):
+            self.assertEqual(by[k].status, Status.STALE)
 
     def test_node_missing_from_metrics_is_stale_and_others_survive(self):
         nodes, metrics = node3()
         metrics["items"] = [m for m in metrics["items"] if m["metadata"]["name"] != "prod-node-3"]
-        k8s = FakeK8s({"/api/v1/nodes": nodes, "/apis/metrics.k8s.io/v1beta1/nodes": metrics})
-        with mock.patch("os.statvfs", return_value=statvfs(0.5)):
-            by = {i.key: i for i in nr.SOURCES[0].fetch(make_ctx(k8s=k8s)).items}
+        k8s = FakeK8s({"/api/v1/nodes": nodes, "/apis/metrics.k8s.io/v1beta1/nodes": metrics},
+                      kubelet={f"10.0.1.{n}": stats(0.5) for n in (1, 2, 3)})
+        by = {i.key: i for i in nr.SOURCES[0].fetch(make_ctx(k8s=k8s)).items}
         self.assertEqual(by["cpu:prod-node-2"].values["ratio"], 50.0)
         for k in ("cpu:prod-node-3", "memory:prod-node-3"):
             self.assertEqual(by[k].status, Status.STALE)
