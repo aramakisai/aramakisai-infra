@@ -39,3 +39,8 @@ class K8sClient:
         """items を返す。metadata.namespace または metadata.name が exclude に含まれるものは除く。"""
         return [i for i in self.get(path).get("items", [])
                 if i["metadata"].get("namespace") not in exclude and i["metadata"].get("name") not in exclude]
+
+    def kubelet_stats(self, node_ip: str):
+        # k3s の kubelet 提供証明書は API サーバーと同じ server CA の署名で SAN に InternalIP を含むため、
+        # ServiceAccount の ca.crt で検証できる
+        return self.http.get_json(f"https://{node_ip}:10250/stats/summary", bearer=self._token())
