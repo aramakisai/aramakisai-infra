@@ -88,7 +88,21 @@ docker run --rm -i \
   grafana/k6 run - < real-mix.js
 ```
 
-`MIX_FILE` 以外の変数は `breakpoint.js` と同じ。追加で `SUMMARY_TOP` (既定 `30`) が path ごとの集計表に出す行数。
+当日想定レートを一定時間保つ (Cloudflare 経由):
+
+```bash
+docker run --rm -i \
+  -v "$PWD/mix.json:/mix.json:ro" \
+  -e MIX_FILE=/mix.json \
+  -e BASE_URL=https://cms.aramakisai.com \
+  -e START_RATE=1 \
+  -e MAX_RATE=<target-rps> \
+  -e RAMP_DURATION=<duration> \
+  -e HOLD_DURATION=<duration> \
+  grafana/k6 run --out json=/out/result.json - < real-mix.js
+```
+
+`MIX_FILE` 以外の変数は `breakpoint.js` と同じ。追加で `HOLD_DURATION` (既定 `0s`) は、`MAX_RATE` に達した後そのレートを保つ時間。0 以外のとき `RAMP_DURATION` の後に同レートの保持段階が付く。保持中も閾値と `abortOnFail` は有効。保持段階の推移は `--out json=<file>` で時系列として取れる (コンテナで実行する場合は出力先を `-v` でマウントする)。追加で `SUMMARY_TOP` (既定 `30`) が path ごとの集計表に出す行数。
 
 ### 出力
 

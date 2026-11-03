@@ -6,6 +6,7 @@ const BASE_URL = __ENV.BASE_URL || 'http://localhost:8080';
 const START_RATE = Number(__ENV.START_RATE || 1);
 const MAX_RATE = Number(__ENV.MAX_RATE || 50);
 const RAMP_DURATION = __ENV.RAMP_DURATION || '10m';
+const HOLD_DURATION = __ENV.HOLD_DURATION || '0s';
 const PRE_ALLOCATED_VUS = Number(__ENV.PRE_ALLOCATED_VUS || 50);
 const MAX_VUS = Number(__ENV.MAX_VUS || 500);
 // abortOnFail はエラー率がこの値を超えた時点でテストを即時停止する。本番へ印加するため、壊れた後も負荷を掛け続けないための安全弁。
@@ -32,8 +33,11 @@ export const options = {
       timeUnit: '1s',
       preAllocatedVUs: PRE_ALLOCATED_VUS,
       maxVUs: MAX_VUS,
-      // plateau・ramp-down を設けない: 単一ステージで MAX_RATE まで上げ続け、エラー率超過による abortOnFail で止める
-      stages: [{ target: MAX_RATE, duration: RAMP_DURATION }],
+      // 保持段階は時間差で効く劣化 (待ち行列の蓄積や CPU throttling の継続) を見るため。既定 0 では限界探索として ramp のみ、エラー率超過による abortOnFail で止める。ramp-down は設けない
+      stages: [
+        { target: MAX_RATE, duration: RAMP_DURATION },
+        ...(/^0+(\.0+)?(ms|s|m|h)?$/.test(HOLD_DURATION) ? [] : [{ target: MAX_RATE, duration: HOLD_DURATION }]),
+      ],
     },
   },
   thresholds: {
