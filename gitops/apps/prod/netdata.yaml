@@ -30,17 +30,18 @@ spec:
               memory: 64Mi
             limits:
               cpu: 200m
-              # 150Miはlimit付近に張り付いて慢性的にOOM Killされていた (76回/22h)。256Miへ拡張。
-              memory: 256Mi
+              memory: 512Mi
           configs:
             netdata:
               enabled: true
               path: /etc/netdata/netdata.conf
               data: |
                 [db]
-                  mode = ram
-                  # ram モードは dimension ごとに retention 分の点を確保するため、保持を縮めてメモリを抑える。
-                  retention = 1024
+                  db = dbengine
+                [directories]
+                  # 既定の /var/cache/netdata はコンテナ内の書き込み層でコンテナ再作成時に消える。
+                  # chart が hostPath で永続化しているのは /var/lib/netdata 配下だけ。
+                  cache = /var/lib/netdata/cache
                 [plugins]
                   # 閲覧専用の child では不要で、メモリを消費するか毎分エラーを出すため無効化する。
                   netflow = no
