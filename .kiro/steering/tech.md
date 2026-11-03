@@ -214,7 +214,7 @@ Grafana Cloud は解約済みで使用しない。単一ノード (CX33) のメ�
 
 Netdata・Falco はいずれもリソース予算 (requests/limits) を明示的に絞ってデプロイしている。値を変更する際は `make kubectl ARGS="top pod -n monitoring"` で実メモリを確認すること。
 
-Netdata child は chart を `3.7.175` に固定し、`[db] mode = ram` / `retention = 1024` (閲覧できる履歴は約 17 分。parent は無効で streaming もしないため、これより古いデータは残らない) とし、`[plugins]` で `netflow`・`scripts.d`・`network-viewer` を無効化している。ram モードは dimension ごとに retention 分の点を確保するため、メモリは retention に比例する。chart のバージョンを上げる際は同梱プラグインの増減とメモリ増加を確認すること。
+Netdata child は chart を `3.7.175` に固定し、`[db] db = dbengine` とし、保存先を hostPath で永続化されている `/var/lib/netdata/cache` へ移して (`[directories] cache`) ノードのディスクに履歴を残し (storage tier・保持期間は既定)、`[plugins]` で `netflow`・`scripts.d`・`network-viewer` を無効化している。dbengine はキャッシュ分のメモリを使うため、child の memory limit は 512Mi としている。chart のバージョンを上げる際は同梱プラグインの増減とメモリ増加を確認すること。
 
 ### 監視の誤検知除外設定 (Falco カスタムルール)
 eBPF ランタイム侵入検知（Falco）において、コントロールプレーン連携やコンテナ固有の正常な動作によるアラート誤検知を回避するため、以下の除外ルール（`gitops/helm-values/prod/falco.yaml`）を適用している：
