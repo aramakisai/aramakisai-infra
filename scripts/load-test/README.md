@@ -52,3 +52,44 @@ docker run --rm -i \
 - 同時刻の Netdata / `kubectl top` によるノード・Pod のリソース使用状況（本シナリオの出力範囲外。別途記録する）
 
 Cloudflare 経由の実行結果とオリジン直の実行結果は、別々の実行として記録し混在させない。
+
+## real-mix.js (実リクエスト比率の再現)
+
+`breakpoint.js` が単一エンドポイントを叩くのに対し、`real-mix.js` は重み付き URL 一覧 (`MIX_FILE`) に従って各イテレーションで URL を 1 つ選んで GET する。実際にオリジンへ届いたリクエストの比率で負荷を掛けるためのシナリオ。実行器・閾値・`abortOnFail`・`BASE_URL` 等の環境変数は `breakpoint.js` と同じ (`TARGET_PATH` は使わない)。
+
+比率データは実測値から逆算できるためリポジトリに置かない。実行時に JSON ファイルを渡す。
+
+### MIX_FILE の形式
+
+`{ "url": <BASE_URL に続くパス+クエリ>, "weight": <正の数> }` の配列。`weight` は相対値で、合計が 1 である必要はない。
+
+```json
+[
+  { "url": "/api/globals/navigation?depth=1", "weight": 10 },
+  { "url": "/api/topics?where%5Bpublished_at%5D%5Bless_than_equal%5D=__NOW__&limit=0", "weight": 2.5 }
+]
+```
+
+- `url` 中の `__NOW__` は実行時に現在時刻 (分単位, `YYYY-MM-DDTHH:mm:00.000Z` を URL エンコードしたもの) へ置換される。公開日時で絞る where が分ごとに別 URL になるため
+- クエリ文字列は URL エンコード済みで書く
+
+### 実行例
+
+Cloudflare 経由:
+
+```bash
+docker run --rm -i \
+  -v "$PWD/mix.json:/mix.json:ro" \
+  -e MIX_FILE=/mix.json \
+  -e BASE_URL=https://cms.aramakisai.com \
+  -e START_RATE=1 \
+  -e MAX_RATE=50 \
+  -e RAMP_DURATION=10m \
+  grafana/k6 run - < real-mix.js
+```
+
+`MIX_FILE` 以外の変数は `breakpoint.js` と同じ。追加で `SUMMARY_TOP` (既定 `30`) が path ごとの集計表に出す行数。
+
+### 出力
+
+end-of-test の標準出力に、リクエスト数の多い path から順に、件数・エラー率・平均/p95 応答時間 (path は `name` タグ。クエリを除いたもの) と全体の p95/p99 を出す。`http_req_duration{name:<path>}` / `error_rate{name:<path>}` のサブメトリクスは `--out` の出力にも含まれる。
