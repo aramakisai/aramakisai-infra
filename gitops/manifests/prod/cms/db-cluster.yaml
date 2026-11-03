@@ -32,6 +32,7 @@ spec:
       effective_cache_size: "128MB"
       work_mem: "4MB"
       wal_compression: "on"
+      jit: "off"
 
   bootstrap:
     recovery:

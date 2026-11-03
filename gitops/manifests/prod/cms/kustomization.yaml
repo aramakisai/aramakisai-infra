@@ -7,6 +7,7 @@ resources:
   - db-cluster.yaml
   - scheduled-backup.yaml
   - db-init-job.yaml
+  - analyze-job.yaml
   - migrate-job.yaml
   - deployment.yaml
   - worker-deployment.yaml
