@@ -4,6 +4,7 @@ from datetime import timedelta
 
 import config
 from helpers import FIXED_NOW, FakeK8s, make_ctx
+from http_client import HttpError
 from model import Status, iso
 from sources import festival_workloads as fw
 from test_festival_config import raw_festival
@@ -57,6 +58,13 @@ class RecordingK8s(FakeK8s):
     def __init__(self, *a, **kw):
         super().__init__(*a, **kw)
         self.params = {}
+        self.texts = {}
+
+    def kubelet_text(self, ip, path):
+        r = self.texts.get((ip, path), HttpError("no route"))
+        if isinstance(r, Exception):
+            raise r
+        return r
 
     def get(self, path, params=None, **kw):
         sel = (params or {}).get("labelSelector")
@@ -64,13 +72,35 @@ class RecordingK8s(FakeK8s):
         return self.paths[(path, sel)] if (path, sel) in self.paths else super().get(path)
 
 
-def run(p, kubelet=None):
-    k8s = RecordingK8s(p, kubelet=kubelet)
+def run(p, kubelet=None, texts=None, k8s=None):
+    k8s = k8s or RecordingK8s(p, kubelet=kubelet)
+    k8s.texts.update(texts or {})
     r = fw.SOURCES[0].fetch(make_ctx(k8s=k8s))
     return {i.key: i for i in r.items}, k8s
 
 
+def cadv(*rows):
+    """rows は (namespace, pod, container, throttled, periods)。"""
+    out = []
+    for ns, pd, c, t, per in rows:
+        lab = f'container="{c}",namespace="{ns}",pod="{pd}"'
+        out += [f"container_cpu_cfs_throttled_periods_total{{{lab}}} {t}", f"container_cpu_cfs_periods_total{{{lab}}} {per}"]
+    return "\n".join(out) + "\n"
+
+
+def summary(ns, name, **rss):
+    return {"pods": [{"podRef": {"namespace": ns, "name": name},
+                      "containers": [{"name": c, "memory": {"rssBytes": v, "workingSetBytes": 10**12}}
+                                     for c, v in rss.items()]}]}
+
+
+CADV = ("10.0.1.1", "/metrics/cadvisor")
+
+
 class WorkloadsTest(unittest.TestCase):
+    def setUp(self):
+        fw._prev_cfs = {}
+
     def test_cms_item(self):
         p = paths([pod("cms-a", cpu_limit="1", restarts=(RECENT,)),
                    pod("cms-b", ready=False, cpu_limit="500m", restarts=(OLD,), term=("OOMKilled", RECENT), waiting="CrashLoopBackOff"),
@@ -114,6 +144,47 @@ class WorkloadsTest(unittest.TestCase):
                                               pm("cf-b", ns="cloudflared", app="300m")])
         v = run(p)[0]["cloudflared"].values
         self.assertEqual((v["pods"], v["cpu_ratio_max"]), (2, 0.6))
+
+    def test_db_memory_rss_ratio(self):
+        db = [pod("db-1", mem_limit="1000"), pod("db-2", host="10.0.1.2", mem_limit="2000"), pod("db-3", host="10.0.1.9", mem_limit="1000")]
+        kubelet = {"10.0.1.1": summary("prod", "db-1", app=250),
+                   "10.0.1.2": summary("prod", "db-2", app=1500), "10.0.1.9": HttpError("down")}
+        items, _ = run(paths([], db_pods=db), kubelet=kubelet)
+        self.assertEqual(items["db.db-1"].values["memory_rss_ratio"], 0.25)
+        self.assertEqual(items["db.db-2"].values["memory_rss_ratio"], 0.75)
+        self.assertIsNone(items["db.db-3"].values["memory_rss_ratio"])  # そのノードの Pod だけ欠かす
+        self.assertIsNotNone(items["db.db-3"].note)
+        self.assertEqual(items["db.db-3"].values["role"], "replica")
+
+    def test_throttle_ratio_needs_previous_sample(self):
+        p = paths([pod("cms-a", containers=("app", "side"))], cf_pods=[pod("cf-a", ns="cloudflared")])
+        k8s = RecordingK8s(p)
+        first = cadv(("prod", "cms-a", "app", 10, 100), ("prod", "cms-a", "side", 0, 100), ("cloudflared", "cf-a", "app", 5, 50))
+        items, _ = run(p, texts={CADV: first}, k8s=k8s)
+        self.assertIsNone(items["cms"].values["throttle_ratio_max"])  # 初回は計算から除かれる
+        self.assertIsNotNone(items["cms"].note)
+        second = cadv(("prod", "cms-a", "app", 40, 200), ("prod", "cms-a", "side", 0, 200),
+                      ("cloudflared", "cf-a", "app", 5, 50), ("prod", "cms-a", "", 999, 1000))
+        items, _ = run(p, texts={CADV: second}, k8s=k8s)
+        self.assertEqual(items["cms"].values["throttle_ratio_max"], 0.3)
+        self.assertEqual(items["cloudflared"].values["throttle_ratio_max"], 0.0)  # 期間の増分 0
+        self.assertIsNone(items["cms"].note)
+        third = cadv(("prod", "cms-a", "app", 10, 300), ("prod", "cms-a", "side", 50, 300))  # app はカウンタの減少
+        items, _ = run(p, texts={CADV: third}, k8s=k8s)
+        self.assertEqual(items["cms"].values["throttle_ratio_max"], 0.5)
+        self.assertIsNone(items["cloudflared"].values["throttle_ratio_max"])  # 行が無い
+
+    def test_throttle_new_pod_is_skipped_and_kubelet_down_only_loses_that_node(self):
+        p = paths([pod("cms-a"), pod("cms-b", host="10.0.1.2")])
+        k8s = RecordingK8s(p)
+        run(p, texts={CADV: cadv(("prod", "cms-a", "app", 0, 100))}, k8s=k8s)
+        second = cadv(("prod", "cms-a", "app", 10, 200), ("prod", "cms-b", "app", 90, 100))
+        items, _ = run(p, texts={CADV: second}, k8s=k8s)  # 10.0.1.2 は届かない
+        self.assertEqual(items["cms"].values["throttle_ratio_max"], 0.1)
+        p2 = paths([pod("cms-a")])
+        k8s2 = RecordingK8s(p2)
+        run(p2, texts={CADV: cadv(("prod", "cms-a", "app", 0, 100))}, k8s=k8s2)
+        run(p2, texts={CADV: cadv(("prod", "cms-a", "app", 10, 200), ("prod", "cms-new", "app", 90, 100))}, k8s=k8s2)
 
     def test_undeclared_or_disabled_is_empty_without_requests(self):
         cfg = make_ctx().config
