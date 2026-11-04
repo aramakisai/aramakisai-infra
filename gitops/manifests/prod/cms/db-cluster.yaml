@@ -33,6 +33,11 @@ spec:
       work_mem: "4MB"
       wal_compression: "on"
 
+  monitoring:
+    customQueriesConfigMap:
+      - name: directus-db-monitoring
+        key: queries
+
   bootstrap:
     recovery:
       source: directus-db
