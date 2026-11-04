@@ -94,6 +94,11 @@ class Collector:
                 snap[s.source_id] = self._execute(s, s.render, None, query)
         return snap
 
+    def latest(self) -> dict[str, SourceResult]:
+        """保持している最新結果の写し。描画時に評価する情報源は実行しない。"""
+        with self._lock:
+            return dict(self.results)
+
     def _loop(self, s: Source):
         while not self._stop.is_set():
             self.collect(s)
@@ -134,6 +139,9 @@ class _Quiet(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
+FESTIVAL_PREFIX = "festival."
+
+
 def make_web_server(collector: Collector, addr, render=render_page.render) -> ThreadingHTTPServer:
     class Handler(_Quiet):
         def do_GET(self):
@@ -142,7 +150,10 @@ def make_web_server(collector: Collector, addr, render=render_page.render) -> Th
                 return self.reply(200, b"ok")
             if u.path in ("/admin/", "/admin"):
                 try:
-                    page = self.render(collector.snapshot(parse_qs(u.query)), parse_qs(u.query))
+                    # 当日監視の結果は /admin/ の要確認に混ぜない (別画面で扱う)
+                    snap = {k: v for k, v in collector.snapshot(parse_qs(u.query)).items()
+                            if not k.startswith(FESTIVAL_PREFIX)}
+                    page = self.render(snap, parse_qs(u.query))
                 except Exception as e:
                     log("render_failed", error=model.safe_error(e))
                     return self.reply(500, b"render failed")
