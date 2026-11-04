@@ -109,6 +109,24 @@ resource "cloudflare_zero_trust_access_application" "aramakisai_signage" {
   allowed_idps              = [cloudflare_zero_trust_access_identity_provider.zitadel.id]
 }
 
+# 当日監視の collector がサイネージハブの接続数 (/api/signage/stats) を読むための専用アプリ。
+# collector のトークンを aramakisai_signage に許可すると notify・ws まで通るため分ける。
+# 宛先がより長い /api/signage/stats を持つ本アプリが優先されることは実測で確かめる
+resource "cloudflare_zero_trust_access_application" "aramakisai_signage_stats" {
+  account_id       = var.cloudflare_account_id
+  name             = "aramakisai-web (signage stats)"
+  domain           = "aramakisai.com/api/signage/stats"
+  type             = "self_hosted"
+  session_duration = "24h"
+
+  destinations {
+    type = "public"
+    uri  = "aramakisai.com/api/signage/stats"
+  }
+
+  allowed_idps = [cloudflare_zero_trust_access_identity_provider.zitadel.id]
+}
+
 # 旧 2025 年版 WordPress (Worker が /2025 へリバースプロキシ) の管理画面とログイン画面を許可ユーザーに限る。
 # WAF は同パスの .php 遮断を除外している (cloudflare_waf_scanners.tf)。
 # destinations を使うと domain が自動では含まれない (API エラー 12130) ため、両方を明示列挙する
@@ -237,5 +255,35 @@ resource "cloudflare_zero_trust_access_policy" "allow_signage_notify_service_tok
 
   include {
     service_token = [cloudflare_zero_trust_access_service_token.signage_notify.id]
+  }
+}
+
+# ============================================================
+# Cloudflare Access: 当日監視 collector 専用 Service Token
+#
+# /api/signage/stats だけを読む。signage_notify と同じ有効期間・更新・作り直しの順序。
+# ============================================================
+
+resource "cloudflare_zero_trust_access_service_token" "collector_signage_stats" {
+  account_id           = var.cloudflare_account_id
+  name                 = "aramakisai-web collector signage stats"
+  duration             = "8760h"
+  min_days_for_renewal = 30
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+# このアプリには allow_zitadel を付けない (人間のログインを通さずトークンだけを許可する)
+resource "cloudflare_zero_trust_access_policy" "allow_collector_signage_stats_service_token" {
+  account_id     = var.cloudflare_account_id
+  application_id = cloudflare_zero_trust_access_application.aramakisai_signage_stats.id
+  name           = "Allow Collector Signage Stats Service Token"
+  precedence     = 1
+  decision       = "non_identity"
+
+  include {
+    service_token = [cloudflare_zero_trust_access_service_token.collector_signage_stats.id]
   }
 }
