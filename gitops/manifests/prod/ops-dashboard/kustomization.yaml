@@ -67,6 +67,11 @@ configMapGenerator:
       - collector/app/sources/cluster_workloads.py
       - collector/app/sources/connect_tailscale.py
       - collector/app/sources/connect_tunnel.py
+      - collector/app/sources/festival_cloudflare.py
+      - collector/app/sources/festival_stamp.py
+      - collector/app/sources/festival_signage.py
+      - collector/app/sources/festival_quake.py
+      - collector/app/sources/festival_bus.py
       - collector/app/sources/festival_parking.py
       - collector/app/sources/festival_schedule.py
       - collector/app/sources/mail.py
