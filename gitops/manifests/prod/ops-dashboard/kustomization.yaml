@@ -88,6 +88,8 @@ configMapGenerator:
     files:
       - collector/app/festival/__init__.py
       - collector/app/festival/catalog.py
+      - collector/app/festival/labels.py
+      - collector/app/festival/page.py
   - name: collector-render
     files:
       - collector/app/render/__init__.py
