@@ -1,0 +1,40 @@
+---
+# 小さく更新の少ない表は autoanalyze の閾値に届かず、統計カウンタもフェイルオーバー等で
+# リセットされる。マイグレーション直後に ANALYZE して、統計が無い状態での過大な見積りを防ぐ
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cms-db-analyze
+  namespace: prod
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
+spec:
+  ttlSecondsAfterFinished: 3600
+  backoffLimit: 6
+  activeDeadlineSeconds: 900
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: db-analyze
+          image: ghcr.io/cloudnative-pg/postgresql:16.15
+          command: [sh, -c]
+          args:
+            - |
+              set -eu
+              export PGPASSWORD="$PAYLOAD_DB_PASSWORD"
+              psql -h directus-db-rw.prod.svc.cluster.local -U payload -d payload -c ANALYZE
+          env:
+            - name: PAYLOAD_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: cms-secrets
+                  key: PAYLOAD_DB_PASSWORD
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "128Mi"
+              cpu: "100m"
