@@ -10,6 +10,8 @@ from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 import falco_ingest
+from festival import page as festival_page
+from unittest import mock
 import main
 import model
 import store as store_mod
@@ -212,6 +214,18 @@ class ServerTest(unittest.TestCase):
     def test_admin_snapshot_excludes_festival_sources(self):
         self.col.results["festival.x"] = ok_result("festival.x", T0)
         self.assertEqual(req(self.w + "/admin/")[1], b"PAGE good")
+
+    def test_festival_page_and_fragment(self):
+        code, body = req(self.w + "/admin/festival")
+        self.assertEqual(code, 200)
+        self.assertIn(b'id="festival-fragment"', body)
+        code, body = req(self.w + "/admin/festival/fragment")
+        self.assertEqual(code, 200)
+        self.assertTrue(body.startswith(b'<div id="festival-fragment"'))
+
+    def test_festival_render_failure_is_500(self):
+        with mock.patch.object(festival_page, "render_fragment", side_effect=ZeroDivisionError):
+            self.assertEqual(req(self.w + "/admin/festival/fragment")[0], 500)
 
     def falco_post(self, body, token="s3cret"):
         h = {"Content-Type": "application/json"}

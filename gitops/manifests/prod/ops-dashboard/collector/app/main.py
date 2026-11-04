@@ -12,6 +12,10 @@ from urllib.parse import parse_qs, urlsplit
 
 import config as config_mod
 import falco_ingest
+from festival import page as festival_page
+from festival.evaluate import FestivalEvaluator
+from festival.heartbeat import FestivalHeartbeat
+from festival.notify import FestivalNotifier
 import model
 import store as store_mod
 from render import page as render_page
@@ -158,6 +162,14 @@ def make_web_server(collector: Collector, addr, render=render_page.render) -> Th
                     log("render_failed", error=model.safe_error(e))
                     return self.reply(500, b"render failed")
                 return self.reply(200, page.encode(), "text/html; charset=utf-8")
+            if u.path in (festival_page.PAGE_PATH, festival_page.FRAGMENT_PATH):
+                fn = festival_page.render_page if u.path == festival_page.PAGE_PATH else festival_page.render_fragment
+                try:
+                    body = fn(collector.store, collector.ctx.config.festival, utcnow())
+                except Exception as e:
+                    log("festival_render_failed", error=model.safe_error(e))
+                    return self.reply(500, b"render failed")
+                return self.reply(200, body.encode(), "text/html; charset=utf-8")
             self.reply(404, b"not found")
 
     Handler.render = staticmethod(render)
@@ -190,11 +202,19 @@ def run(argv=None, env=None) -> int:
     falco = falco_ingest.make_falco_server(store, ("", args.falco_port), env.get("OPS_FALCO_WEBHOOK_TOKEN", ""), log=log)
     threading.Thread(target=falco.serve_forever, name="falco-http", daemon=True).start()
     collector.start()
+    stop_festival = threading.Event()
+    if cfg.festival is not None:
+        evaluator = FestivalEvaluator(
+            cfg.festival, collector.latest, store,
+            FestivalNotifier(cfg.festival, store, ctx.http, env.get("DISCORD_FESTIVAL_WEBHOOK_URL")),
+            utcnow, FestivalHeartbeat(ctx.http, env.get("HEALTHCHECKS_FESTIVAL_MONITOR_PING_URL"), store))
+        threading.Thread(target=evaluator.run, args=(stop_festival,), name="festival-eval", daemon=True).start()
     signal.signal(signal.SIGTERM, lambda *a: threading.Thread(target=web.shutdown).start())
     log("started", web=args.web_port, falco=args.falco_port)
     try:
         web.serve_forever()
     finally:
+        stop_festival.set()
         collector.stop()
         falco.shutdown()
         store.close()

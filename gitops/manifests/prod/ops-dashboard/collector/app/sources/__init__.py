@@ -22,6 +22,16 @@ MODULES: tuple[str, ...] = (
     "auth_zitadel",
     "security_falco",
     "mail",
+    "festival_cloudflare",
+    "festival_stamp",
+    "festival_quake",
+    "festival_signage",
+    "festival_parking",
+    "festival_schedule",
+    "festival_bus",
+    "festival_nodes",
+    "festival_workloads",
+    "festival_cnpg",
 )
 
 
