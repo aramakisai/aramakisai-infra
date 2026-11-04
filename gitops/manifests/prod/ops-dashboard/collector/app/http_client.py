@@ -3,15 +3,33 @@ import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
+from dataclasses import dataclass
 from typing import Any, Mapping
 
 
 class HttpError(Exception):
     """メッセージに URL のクエリ・応答本文を含めない (API キーが載り得るため)。"""
 
-    def __init__(self, message: str, status: int | None = None):
+    def __init__(self, message: str, status: int | None = None, retry_after: float | None = None):
         super().__init__(message)
         self.status = status
+        self.retry_after = retry_after
+
+
+@dataclass(frozen=True)
+class HttpResponse:
+    status: int
+    headers: Mapping[str, str]  # キーは小文字
+    body: bytes
+
+
+def _retry_after(headers) -> float | None:
+    # HTTP-date 形式は扱わない (Discord は秒数で返す)
+    try:
+        v = float(headers.get("Retry-After"))
+    except (TypeError, ValueError):
+        return None
+    return v if v >= 0 else None
 
 
 class Http:
@@ -20,9 +38,11 @@ class Http:
         self._ctx = ssl_context
         self._open = opener or urllib.request.urlopen
 
-    def request(self, method: str, url: str, *, params: Mapping[str, str] | None = None,
-                headers: Mapping[str, str] | None = None, bearer: str | None = None,
-                data: bytes | None = None, content_type: str | None = None, timeout: float | None = None) -> bytes:
+    def request_meta(self, method: str, url: str, *, params: Mapping[str, str] | None = None,
+                     headers: Mapping[str, str] | None = None, bearer: str | None = None,
+                     data: bytes | None = None, content_type: str | None = None, timeout: float | None = None,
+                     redact_url: bool = False) -> HttpResponse:
+        """redact_url は URL 自体がシークレット (webhook・ping URL) のとき、エラー文から URL を全て伏せる。"""
         if params:
             url = f"{url}?{urllib.parse.urlencode(params)}"
         # Netdata Cloud 前段の Cloudflare は urllib 既定の UA を 403 (error 1010) で拒否する
@@ -32,15 +52,19 @@ class Http:
         if content_type:
             hdrs["Content-Type"] = content_type
         req = urllib.request.Request(url, data=data, method=method, headers=hdrs)
-        where = f"{method} {urllib.parse.urlsplit(url)._replace(query='', fragment='').geturl()}"
+        where = method if redact_url else f"{method} {urllib.parse.urlsplit(url)._replace(query='', fragment='').geturl()}"
         try:
             kw = {"context": self._ctx} if self._ctx else {}
             with self._open(req, timeout=timeout or self.timeout, **kw) as resp:
-                return resp.read()
+                return HttpResponse(resp.status, {k.lower(): v for k, v in resp.headers.items()}, resp.read())
         except urllib.error.HTTPError as e:
-            raise HttpError(f"{where} -> {e.code}", status=e.code) from None
+            raise HttpError(f"{where} -> {e.code}", status=e.code,
+                            retry_after=_retry_after(e.headers or {}) if e.code == 429 else None) from None
         except (urllib.error.URLError, OSError) as e:
             raise HttpError(f"{where} failed: {type(e).__name__}") from None
+
+    def request(self, method: str, url: str, **kw) -> bytes:
+        return self.request_meta(method, url, **kw).body
 
     def get_bytes(self, url: str, **kw) -> bytes:
         return self.request("GET", url, **kw)
@@ -50,7 +74,8 @@ class Http:
         try:
             return json.loads(raw)
         except ValueError:
-            raise HttpError(f"{method} {urllib.parse.urlsplit(url).path} returned invalid JSON") from None
+            where = method if kw.get("redact_url") else f"{method} {urllib.parse.urlsplit(url).path}"
+            raise HttpError(f"{where} returned invalid JSON") from None
 
     def get_json(self, url: str, **kw) -> Any:
         return self._json("GET", url, **kw)

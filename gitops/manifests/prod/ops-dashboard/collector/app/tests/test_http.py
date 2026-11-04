@@ -76,6 +76,64 @@ class HttpTest(unittest.TestCase):
         with self.assertRaises(HttpError):
             h.get_bytes("https://x/y")
 
+    def test_request_meta_returns_status_headers_body(self):
+        resp = FakeResp(b"ok")
+        resp.status = 204
+        resp.headers = {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset-After": "2"}
+        h, calls = self.make(resp)
+        r = h.request_meta("POST", "https://x/y", data=b"{}")
+        self.assertEqual((r.status, r.body), (204, b"ok"))
+        self.assertEqual(r.headers["x-ratelimit-remaining"], "0")
+        self.assertEqual(r.headers["x-ratelimit-reset-after"], "2")
+        self.assertEqual(calls[0][0].get_method(), "POST")
+
+    def test_429_carries_retry_after(self):
+        err = urllib.error.HTTPError("https://x/y", 429, "Too Many", {"Retry-After": "7"}, io.BytesIO(b""))
+        h, _ = self.make(exc=err)
+        with self.assertRaises(HttpError) as cm:
+            h.request_meta("POST", "https://x/y")
+        self.assertEqual((cm.exception.status, cm.exception.retry_after), (429, 7.0))
+
+    def test_retry_after_absent_or_invalid_is_none(self):
+        for hdrs in ({}, {"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"}):
+            err = urllib.error.HTTPError("https://x/y", 429, "Too Many", hdrs, io.BytesIO(b""))
+            h, _ = self.make(exc=err)
+            with self.assertRaises(HttpError) as cm:
+                h.get_bytes("https://x/y")
+            self.assertIsNone(cm.exception.retry_after)
+
+    def test_non_429_has_no_retry_after(self):
+        err = urllib.error.HTTPError("https://x/y", 503, "Unavailable", {"Retry-After": "7"}, io.BytesIO(b""))
+        h, _ = self.make(exc=err)
+        with self.assertRaises(HttpError) as cm:
+            h.get_bytes("https://x/y")
+        self.assertIsNone(cm.exception.retry_after)
+
+    def test_redact_url_keeps_url_out_of_every_error(self):
+        url = "https://discord.com/api/webhooks/123/TOKEN"
+        cases = [
+            urllib.error.HTTPError(url, 401, "Unauthorized", {}, io.BytesIO(b"")),
+            urllib.error.URLError("boom"),
+            TimeoutError(),
+        ]
+        for exc in cases:
+            h, _ = self.make(exc=exc)
+            with self.assertRaises(HttpError) as cm:
+                h.request_meta("POST", url, redact_url=True)
+            for part in ("TOKEN", "webhooks", "discord"):
+                self.assertNotIn(part, str(cm.exception))
+        h, _ = self.make(FakeResp(b"not json"))
+        with self.assertRaises(HttpError) as cm:
+            h.post_json(url, {}, redact_url=True)
+        self.assertNotIn("TOKEN", str(cm.exception))
+
+    def test_default_error_still_names_url(self):
+        err = urllib.error.HTTPError("https://x/y", 500, "Err", {}, io.BytesIO(b""))
+        h, _ = self.make(exc=err)
+        with self.assertRaises(HttpError) as cm:
+            h.get_bytes("https://x/y")
+        self.assertIn("https://x/y", str(cm.exception))
+
     def test_invalid_json(self):
         h, _ = self.make(FakeResp(b"not json"))
         with self.assertRaises(HttpError):
