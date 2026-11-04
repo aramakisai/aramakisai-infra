@@ -90,6 +90,7 @@ configMapGenerator:
       - collector/app/festival/catalog.py
       - collector/app/festival/evaluate.py
       - collector/app/festival/labels.py
+      - collector/app/festival/notify.py
       - collector/app/festival/page.py
   - name: collector-render
     files:
