@@ -28,6 +28,45 @@ CPU・メモリ使用率と K3s バージョン (ノード間で異なれば両�
 - 凍結中のワークロード: `[exclude]` に Namespace または名前を列挙する。
 - 閾値・情報源の宣言: `[thresholds]`、`[sources."<source_id>"]`。
 
+## 当日監視画面
+
+admin は `/admin/festival` で、開催日当日の各機能・容量・基盤・セキュリティの項目を正常・注意・異常で見られる。collector が取得・評価し、異常への遷移・再通知・回復を当日専用の Discord webhook (Infisical キー `DISCORD_FESTIVAL_WEBHOOK_URL`) に通知する。`dashboard.toml` に `[festival]` が無ければ何もせず、画面は「未設定」を表示する。
+
+### 宣言の変更
+
+`collector/dashboard.toml` の `[festival]` 配下を編集して PR を出す。ConfigMap のハッシュが変わり collector Pod が再作成されて反映される。誤りがあると起動に失敗する。
+
+- 閾値: `[festival.thresholds]` (注意 `warn`・異常 `crit`)。比率の判定に要る最低要求数は `[festival.min_requests]`。`cms_cache_hit_ratio` は省略でき、省略中は判定せず表示だけを行う。
+- 再通知の間隔 `renotify`、情報源の失敗を通知するまでの猶予 `source_failure_grace`、情報源ごとの鮮度の上限 `[festival.max_age]` (超えると「取得遅延」)。
+- サイネージ設置台数 `[festival.signage] installed`: リハーサルで全端末を接続して確認した台数を設定する。0 の間は判定しない。
+- 開催日と駐車場の監視時間は宣言せず、CMS の `site_settings` が正本。
+
+### 情報源の無効化
+
+`[festival] disabled_sources` に source_id (例 `festival.signage`) を書くと、その情報源を取得も評価もしない (画面は「無効」)。依存する項目がすべて無効なら項目自体を作らない。到達できない情報源の通知を止めたいときに使う。
+
+### 駐車場の有効化
+
+既定は `[festival.parking] enabled = false` (問い合わせず、項目を作らない)。web 側の `/api/ops/parking-health` が本番に入り、Infisical の `OPS_PARKING_HEALTH_TOKEN` が `collector-secrets` と `cms-secrets` の両方に渡っていることを確認してから `true` にして PR を出す。
+
+### 生存確認 (Healthchecks.io)
+
+collector は評価が例外なく終わるたびに、60 秒以上空けて Healthchecks.io のチェック `festival-monitor` (timeout 60 秒・grace 180 秒) へ ping する。評価の停止・例外の継続・Pod の停止で ping が途絶え、約 4 分で通知される。ping URL は Infisical の `HEALTHCHECKS_FESTIVAL_MONITOR_PING_URL` (未設定だと画面に「生存確認が未設定」の注意が出る)。
+
+通知先は Terraform で管理しないため、チェック作成後に Healthchecks.io のコンソールで `festival-monitor` の Integrations (通知先) を手動で設定する。
+
+### 戻し方
+
+- 通知・取得を止める: 該当の `disabled_sources` を足す、または `[festival]` 一式を外す PR をマージする。
+- 閾値の誤りによる誤通知: `[festival.thresholds]` を直す PR をマージする。
+- collector 全体を元に戻す: 当日監視を入れた PR を revert する。
+
+### collector のメモリ
+
+collector の limit は 160Mi。当日監視の追加分の見積り (仮) は +15〜25Mi (スレッド 11 本、項目 100 未満、GraphQL の応答は数 KB)。測定は `make kubectl ARGS="top pod -n ops-dashboard"`。実測が limit の 75% (120Mi) を超えたら、増加の要因を調べて limit の見直しを検討する。
+
+実測値: 本番反映後に記録する。
+
 ## executive・admin の付与・剥奪
 
 ロールは Zitadel で管理する (手順は Zitadel の既存運用)。反映の仕組みは次のとおり。
