@@ -69,6 +69,8 @@ configMapGenerator:
       - collector/app/sources/connect_tunnel.py
       - collector/app/sources/festival_cloudflare.py
       - collector/app/sources/festival_stamp.py
+      - collector/app/sources/festival_cloudflare.py
+      - collector/app/sources/festival_stamp.py
       - collector/app/sources/festival_signage.py
       - collector/app/sources/festival_quake.py
       - collector/app/sources/festival_bus.py
