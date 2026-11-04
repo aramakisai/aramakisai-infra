@@ -9,7 +9,9 @@ from enum import StrEnum
 from typing import Callable, Iterable, Mapping
 
 from config import OPTIONAL_THRESHOLDS, THRESHOLD_DIRECTIONS, FestivalConfig, Threshold
-from model import Item, SourceResult, Status, parse_iso, worst
+from model import FestivalStateRow, Item, SourceResult, Status, parse_iso, worst
+from render.sections.monitoring import NETDATA_URL
+from sources.security_falco import PRIORITIES
 
 
 class Category(StrEnum):
@@ -384,7 +386,6 @@ FUNCTION_GROUPS: tuple[ItemGroup, ...] = (
     _group("function.bus.", "バス フィード", ("festival.bus",), _bus, None, Category.FUNCTION),
 )
 
-CATALOG: tuple[ItemGroup, ...] = VISITOR_GROUPS + FUNCTION_GROUPS
 
 
 # --- 容量・基盤・セキュリティ ---
@@ -683,4 +684,4 @@ INFRA_GROUPS: tuple[ItemGroup, ...] = (
     _infra("infra.heartbeat", "生存確認", (), _heartbeat, HEALTHCHECKS_CONSOLE, False),
 )
 
-CATALOG: tuple[ItemGroup, ...] = VISITOR_GROUPS + CAPACITY_GROUPS + INFRA_GROUPS
+CATALOG: tuple[ItemGroup, ...] = VISITOR_GROUPS + FUNCTION_GROUPS + CAPACITY_GROUPS + INFRA_GROUPS

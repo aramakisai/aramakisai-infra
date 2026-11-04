@@ -33,6 +33,11 @@ def judge(results, cfg=CFG):
     return {j.key: j for g in CATALOG for j in g.judge(inp)}
 
 
+def visitor_judge(results):
+    inp = EvalInput(NOW, CFG, results, {}, ())
+    return {j.key: j for g in catalog.VISITOR_GROUPS for j in g.judge(inp)}
+
+
 def with_thresholds(**kw):
     return dataclasses.replace(CFG, thresholds={**CFG.thresholds, **kw})
 
@@ -73,7 +78,7 @@ class GradeTest(unittest.TestCase):
 
 class VisitorTest(unittest.TestCase):
     def test_healthy(self):
-        js = judge({"festival.cloudflare": cf_result()})
+        js = visitor_judge({"festival.cloudflare": cf_result()})
         self.assertEqual({j.status for j in js.values()}, {Status.OK})
         self.assertEqual(set(js), {
             "visitor.worker.error_rate", "visitor.worker.exceeded", "visitor.worker.cpu_p99",
@@ -110,7 +115,7 @@ class VisitorTest(unittest.TestCase):
              "visitor.cms.origin_p95": Status.WARN, "visitor.media.4xx": Status.CRIT, "visitor.media.5xx": Status.WARN})
 
     def test_no_result_makes_no_items(self):
-        self.assertEqual(judge({}), {})
+        self.assertEqual(visitor_judge({}), {})
 
     def test_uptime_excludes_idp_and_cms_db_monitors(self):
         r = result("monitor.uptimerobot", [
@@ -120,7 +125,7 @@ class VisitorTest(unittest.TestCase):
             Item("monitor.3", "old", Status.WARN, {"state": "paused"}),
             Item("monitor.4", CFG.uptime_monitors["idp"], Status.CRIT, {"state": "down"}),
             Item("monitor.5", CFG.uptime_monitors["cms_db"], Status.CRIT, {"state": "down"})])
-        js = judge({"monitor.uptimerobot": r})
+        js = visitor_judge({"monitor.uptimerobot": r})
         self.assertEqual({k: j.status for k, j in js.items()},
                          {"visitor.uptime.1": Status.OK, "visitor.uptime.2": Status.CRIT, "visitor.uptime.3": Status.WARN})
         self.assertEqual(js["visitor.uptime.2"].label, "api")
@@ -328,6 +333,247 @@ class UniqueKeysTest(unittest.TestCase):
         self.assertEqual(len(prefixes), len(set(prefixes)))
         for g in catalog.FUNCTION_GROUPS:
             self.assertEqual(g.category, catalog.Category.FUNCTION)
+
+
+def wl_cms(**over):
+    v = {"replicas": 2, "ready": 2, "restarts_recent": 0, "oom_recent": False, "crashloop": False,
+         "cpu_ratio_max": 0.1, "throttle_ratio_max": 0.0, **over}
+    return Item("cms", "CMS", Status.OK, v)
+
+
+def wl_db(pod, role="primary", **over):
+    v = {"role": role, "cpu_ratio": 0.1, "memory_rss_ratio": 0.2, "restarts_recent": 0, "oom_recent": False,
+         "crashloop": False, **over}
+    return Item(f"db.{pod}", pod, Status.OK, v)
+
+
+def cnpg_db(pod, role="primary", **over):
+    v = {"role": role, "backends": 10, "max_connections": 100.0,
+         "replication_lag_s": None if role == "primary" else 1.0,
+         "unanalyzed_tables": 0 if role == "primary" else None, **over}
+    return Item(f"db.{pod}", pod, Status.OK, v)
+
+
+def node(name, **over):
+    v = {"ready": True, "cpu_ratio": 0.1, "memory_ratio": 0.2, "disk_ratio": 0.3, "addresses_count": 2, **over}
+    return Item(f"node.{name}", name, Status.OK, v)
+
+
+class CapacityTest(unittest.TestCase):
+    def j(self, results, cfg=CFG, **kw):
+        inp = EvalInput(NOW, cfg, results, {}, (), **kw)
+        return {j.key: j for g in catalog.CAPACITY_GROUPS for j in g.judge(inp)}
+
+    def test_healthy_keys(self):
+        js = self.j({
+            "festival.workloads": result("festival.workloads", [
+                wl_cms(), wl_db("db-1"), wl_db("db-2", "replica"),
+                Item("cloudflared", "cloudflared", Status.OK, {"pods": 1, "cpu_ratio_max": 0.1,
+                                                              "throttle_ratio_max": 0.0})]),
+            "festival.cnpg": result("festival.cnpg", [cnpg_db("db-1"), cnpg_db("db-2", "replica")]),
+            "festival.cloudflare": result("festival.cloudflare", [
+                Item("cms", "cms", Status.OK, {"requests": 3000, "window_end": "2026-06-01T11:57:00Z"}),
+                Item("media", "media", Status.OK, {"requests": 600}),
+                Item("cms_cache", "c", Status.OK, {"lookups": 0, "hits": 0, "window_end": "2026-06-01T11:57:00Z"})]),
+            "festival.nodes": result("festival.nodes", [node("n1")]),
+            "connect.tunnel": result("connect.tunnel", [Item("tunnel", "tunnel", Status.OK,
+                                                            {"state": "healthy", "connections": 4})])})
+        self.assertEqual(set(js), {
+            "capacity.cms.ready", "capacity.cms.restarts", "capacity.cms.cpu", "capacity.db.primary_cpu",
+            "capacity.db.connections", "capacity.db.backends.db-1", "capacity.db.backends.db-2",
+            "capacity.db.memory.db-1", "capacity.db.memory.db-2", "capacity.db.restarts", "capacity.db.unanalyzed",
+            "capacity.db.lag.db-2", "capacity.cms.throttle", "capacity.cms.rps", "capacity.cms.cache_hit",
+            "capacity.cloudflared.cpu", "capacity.cloudflared.throttle", "capacity.node.n1.ready",
+            "capacity.node.n1.cpu", "capacity.node.n1.memory", "capacity.node.n1.disk", "capacity.tunnel"})
+        self.assertEqual({j.status for j in js.values()}, {Status.OK})
+        self.assertEqual(js["capacity.cms.rps"].value, "8.00 req/s")  # (3000-600)/300、メディアを除く
+        self.assertEqual(js["capacity.db.connections"].value, "10.0% (10/100)")
+
+    def test_no_result_makes_no_items(self):
+        self.assertEqual(self.j({}), {})
+
+    def test_cms_ready_below_is_exclusive(self):
+        w = lambda **o: self.j({"festival.workloads": result("festival.workloads", [wl_cms(**o)])})["capacity.cms.ready"]
+        self.assertEqual(w(ready=2).status, Status.OK)
+        self.assertEqual(w(ready=1).status, Status.WARN)  # 0.5 は異常の境界 (未満) に達しない
+        self.assertEqual(w(ready=0).status, Status.CRIT)
+
+    def test_restart_rules_cms_and_db(self):
+        w = lambda **o: self.j({"festival.workloads": result("festival.workloads", [wl_cms(**o), wl_db("db-1", **o)])})
+        self.assertEqual(w(restarts_recent=1)["capacity.cms.restarts"].status, Status.WARN)
+        self.assertEqual(w(oom_recent=True)["capacity.cms.restarts"].status, Status.CRIT)
+        self.assertEqual(w(crashloop=True)["capacity.db.restarts"].status, Status.CRIT)
+        self.assertEqual(w(restarts_recent=2)["capacity.db.restarts"].value, "db-1 (再起動 2 回)")
+        self.assertEqual(w()["capacity.db.restarts"].value, "なし")
+
+    def test_throttle_and_cpu_none_carry_note(self):
+        cms = Item("cms", "CMS", Status.OK, {"replicas": 1, "ready": 1, "restarts_recent": 0, "oom_recent": False,
+                                             "crashloop": False, "cpu_ratio_max": None, "throttle_ratio_max": None},
+                   "メトリクス欠落")
+        js = self.j({"festival.workloads": result("festival.workloads", [cms])})
+        self.assertEqual((js["capacity.cms.cpu"].status, js["capacity.cms.cpu"].value, js["capacity.cms.cpu"].note),
+                         (Status.OK, "—", "メトリクス欠落"))
+        self.assertEqual(js["capacity.cms.throttle"].note, "メトリクス欠落")
+
+    def test_db_primary_and_replica_selection(self):
+        js = self.j({"festival.workloads": result("festival.workloads", [
+                        wl_db("p", cpu_ratio=0.95), wl_db("r", "replica", cpu_ratio=0.99)]),
+                     "festival.cnpg": result("festival.cnpg", [
+                         cnpg_db("p", backends=70, unanalyzed_tables=10), cnpg_db("r", "replica", replication_lag_s=10)])})
+        self.assertEqual(js["capacity.db.primary_cpu"].status, Status.CRIT)  # replica の 0.99 は混ざらない
+        self.assertEqual(js["capacity.db.connections"].status, Status.WARN)  # 0.7
+        self.assertEqual(js["capacity.db.unanalyzed"].status, Status.CRIT)
+        self.assertEqual(js["capacity.db.lag.r"].status, Status.WARN)
+        self.assertNotIn("capacity.db.lag.p", js)
+
+    def test_rps_excludes_media(self):
+        cf = lambda cms, media: self.j({"festival.cloudflare": result("festival.cloudflare", [
+            Item("cms", "cms", Status.OK, {"requests": cms, "window_end": "2026-06-01T11:57:00Z"}),
+            Item("media", "media", Status.OK, {"requests": media})])})["capacity.cms.rps"]
+        self.assertEqual(cf(30000, 6000).status, Status.WARN)  # 80 req/s ちょうど
+        self.assertEqual(cf(30000, 30000).status, Status.OK)  # 全部メディアなら 0
+
+    def test_cache_hit_display_only_until_declared(self):
+        cache = {"festival.cloudflare": result("festival.cloudflare", [
+            Item("cms_cache", "c", Status.OK, {"lookups": 100, "hits": 30, "window_end": "2026-06-01T11:57:00Z"})])}
+        j = self.j(cache)["capacity.cms.cache_hit"]
+        self.assertEqual((j.judged, j.status, j.value), (False, Status.OK, "30.0% (30/100)"))
+        cfg = with_thresholds(cms_cache_hit_ratio=config.Threshold(0.5, 0.2))
+        self.assertEqual(self.j(cache, cfg)["capacity.cms.cache_hit"].status, Status.WARN)
+
+    def test_cache_hit_zero_lookups_is_ok(self):
+        cfg = with_thresholds(cms_cache_hit_ratio=config.Threshold(0.5, 0.2))
+        j = self.j({"festival.cloudflare": result("festival.cloudflare", [
+            Item("cms_cache", "c", Status.OK, {"lookups": 0, "hits": 0, "window_end": "2026-06-01T11:57:00Z"})])},
+            cfg)["capacity.cms.cache_hit"]
+        self.assertEqual((j.status, j.value, j.judged), (Status.OK, "照会 0 件", True))
+
+    def test_node_rules(self):
+        js = self.j({"festival.nodes": result("festival.nodes", [
+            node("a", ready=False, cpu_ratio=0.85, memory_ratio=0.95, disk_ratio=None)])})
+        self.assertEqual(js["capacity.node.a.ready"].status, Status.CRIT)
+        self.assertEqual(js["capacity.node.a.cpu"].status, Status.WARN)
+        self.assertEqual(js["capacity.node.a.memory"].status, Status.CRIT)
+        self.assertEqual((js["capacity.node.a.disk"].status, js["capacity.node.a.disk"].value), (Status.OK, "—"))
+
+    def test_tunnel_takes_worse_of_state_and_connections(self):
+        t = lambda status, conns: self.j({"connect.tunnel": result("connect.tunnel", [
+            Item("tunnel", "tunnel", status, {"state": "x", "connections": conns})])})["capacity.tunnel"].status
+        self.assertEqual(t(Status.OK, 4), Status.OK)
+        self.assertEqual(t(Status.OK, 3), Status.WARN)
+        self.assertEqual(t(Status.OK, 0), Status.CRIT)
+        self.assertEqual(t(Status.CRIT, 4), Status.CRIT)
+
+
+class InfraTest(unittest.TestCase):
+    def j(self, results=None, falco=None, nets=(), state=None, **kw):
+        inp = EvalInput(NOW, CFG, results or {}, falco or {}, nets, state, **kw)
+        return {j.key: j for g in catalog.INFRA_GROUPS for j in g.judge(inp)}
+
+    def test_incidents(self):
+        gh = lambda *items: self.j({"ci.github": result("ci.github", items)})["infra.incidents"]
+        inc = lambda n, label, st: Item(f"incident.{label}.{n}", f"題{n}", st, {"label": label})
+        self.assertEqual((gh().status, gh().value), (Status.OK, "異常 0 件 / 注意 0 件"))
+        self.assertEqual(gh(inc(1, "infra-alert", Status.WARN)).status, Status.WARN)
+        j = gh(inc(1, "infra-alert", Status.WARN), inc(2, "dr-incident", Status.CRIT))
+        self.assertEqual((j.status, j.value), (Status.CRIT, "異常 1 件 / 注意 1 件: 題2 / 題1"))
+
+    def test_falco_priorities(self):
+        f = lambda c: self.j(falco=c)["infra.falco"]
+        self.assertEqual((f({}).status, f({}).value), (Status.OK, "0 件"))
+        self.assertEqual(f({"notice": 9, "warning": 0}).status, Status.OK)
+        self.assertEqual(f({"warning": 2}).status, Status.WARN)
+        self.assertEqual(f({"error": 1}).status, Status.WARN)  # warning より重い
+        self.assertEqual(f({"critical": 1, "warning": 2}).status, Status.CRIT)
+        self.assertEqual(f({"emergency": 1}).status, Status.CRIT)
+        self.assertEqual(f({"critical": 1, "warning": 2}).value, "critical 1 件 / warning 2 件")
+
+    def test_idp_and_cms_db_by_label(self):
+        r = result("monitor.uptimerobot", [
+            Item("monitor.1", CFG.uptime_monitors["idp"], Status.CRIT, {"state": "down"}),
+            Item("monitor.2", CFG.uptime_monitors["cms_db"], Status.STALE, {"state": "pending"})])
+        js = self.j({"monitor.uptimerobot": r})
+        self.assertEqual((js["infra.idp"].status, js["infra.idp"].value), (Status.CRIT, "down"))
+        self.assertEqual(js["infra.cms_db"].status, Status.OK)
+        js = self.j({"monitor.uptimerobot": result("monitor.uptimerobot", [])})
+        self.assertEqual(js["infra.idp"].status, Status.WARN)
+
+    def test_healthchecks_skip_quota(self):
+        r = result("monitor.healthchecks", [
+            Item("quota", "healthchecks", Status.OK, {}),
+            Item("check.abc", "backup", Status.CRIT, {"state": "down"}),
+            Item("check.def", "new", Status.STALE, {"state": "new"})])
+        js = self.j({"monitor.healthchecks": r})
+        self.assertEqual({k: j.status for k, j in js.items() if k.startswith("infra.healthchecks.")},
+                         {"infra.healthchecks.abc": Status.CRIT, "infra.healthchecks.def": Status.OK})
+
+    def test_fail2ban_counts_internal_only_and_hides_ip(self):
+        import ipaddress
+        nets = (ipaddress.ip_network("10.0.0.5/32"), ipaddress.ip_network("10.42.0.0/24"))
+        bans = result("mail.fail2ban", [
+            Item("ban.sshd.10.42.0.7", "sshd", Status.OK, {"ip": "10.42.0.7"}),
+            Item("ban.sshd.10.0.0.5", "sshd", Status.OK, {"ip": "10.0.0.5"}),
+            Item("ban.sshd.203.0.113.9", "sshd", Status.OK, {"ip": "203.0.113.9"}),
+            Item("ban.sshd.2001:db8::1", "sshd", Status.OK, {"ip": "2001:db8::1"})])
+        nodes = result("festival.nodes", [])
+        j = self.j({"mail.fail2ban": bans, "festival.nodes": nodes}, nets=nets)["infra.fail2ban.internal"]
+        self.assertEqual((j.status, j.value), (Status.CRIT, "2 件"))
+        j = self.j({"mail.fail2ban": bans, "festival.nodes": nodes})["infra.fail2ban.internal"]
+        self.assertEqual(j.status, Status.OK)
+        self.assertNotIn("infra.fail2ban.internal", self.j({"mail.fail2ban": bans}))
+
+    def test_notifier_and_heartbeat_state(self):
+        from model import FestivalStateRow, NotifierState
+        t0, t1 = NOW, NOW.replace(minute=5)
+        st = lambda **o: FestivalStateRow(NOW, None, NotifierState(**{
+            "last_success_at": None, "last_failure_at": None, "last_failure": None, "not_before": None,
+            "halted": False, **o.pop("n", {})}), **{"heartbeat_ok_at": None, "heartbeat_failed_at": None,
+                                                    "heartbeat_failure": None, **o})
+        self.assertNotIn("infra.notifier", self.j())  # state なしは項目を作らない
+        js = self.j(state=st())
+        self.assertEqual((js["infra.notifier"].status, js["infra.heartbeat"].status), (Status.OK, Status.OK))
+        js = self.j(state=st(), notifier_configured=False, heartbeat_configured=False)
+        self.assertEqual((js["infra.notifier"].value, js["infra.heartbeat"].value), ("未設定", "未設定"))
+        js = self.j(state=st(n={"last_success_at": t0, "last_failure_at": t1, "last_failure": "500"},
+                             heartbeat_ok_at=t0, heartbeat_failed_at=t1, heartbeat_failure="timeout"))
+        self.assertEqual((js["infra.notifier"].status, js["infra.heartbeat"].status), (Status.WARN, Status.WARN))
+        js = self.j(state=st(n={"last_success_at": t1, "last_failure_at": t0, "last_failure": "500"},
+                             heartbeat_ok_at=t1, heartbeat_failed_at=t0))
+        self.assertEqual((js["infra.notifier"].status, js["infra.heartbeat"].status), (Status.OK, Status.OK))
+        js = self.j(state=st(n={"halted": True, "last_failure": "401"}))
+        self.assertEqual((js["infra.notifier"].status, js["infra.notifier"].value), (Status.WARN, "停止中 (401)"))
+
+    def test_notifier_heartbeat_are_not_notified(self):
+        by = {g.key_prefix: g for g in catalog.INFRA_GROUPS}
+        self.assertFalse(by["infra.notifier"].notify)
+        self.assertFalse(by["infra.heartbeat"].notify)
+        self.assertTrue(by["infra.falco"].notify)
+
+
+class AllKeysTest(unittest.TestCase):
+    def test_every_key_unique_and_prefixed(self):
+        import ipaddress
+        from model import FestivalStateRow, NotifierState
+        res = {
+            "festival.workloads": result("festival.workloads", [wl_cms(), wl_db("p"), wl_db("r", "replica")]),
+            "festival.cnpg": result("festival.cnpg", [cnpg_db("p"), cnpg_db("r", "replica")]),
+            "festival.nodes": result("festival.nodes", [node("a"), node("b")]),
+            "monitor.uptimerobot": result("monitor.uptimerobot", [
+                Item("monitor.1", CFG.uptime_monitors["idp"], Status.OK, {"state": "up"}),
+                Item("monitor.2", CFG.uptime_monitors["cms_db"], Status.OK, {"state": "up"}),
+                Item("monitor.3", "web", Status.OK, {"state": "up"})]),
+            "monitor.healthchecks": result("monitor.healthchecks", [Item("check.x", "x", Status.OK, {"state": "up"})]),
+            "mail.fail2ban": result("mail.fail2ban", []),
+            "ci.github": result("ci.github", [])}
+        st = FestivalStateRow(NOW, None, NotifierState(None, None, None, None, False), None, None, None)
+        inp = EvalInput(NOW, CFG, res, {}, (ipaddress.ip_network("10.0.0.0/8"),), st)
+        for g in CATALOG:
+            for j in g.judge(inp):
+                self.assertTrue(j.key.startswith(g.key_prefix), j.key)
+                if g.category in (catalog.Category.CAPACITY, catalog.Category.INFRA):
+                    self.assertTrue(j.key.startswith(g.category.value + "."), j.key)
+        keys = [j.key for g in CATALOG for j in g.judge(inp)]
+        self.assertEqual(len(keys), len(set(keys)))
 
 
 if __name__ == "__main__":
