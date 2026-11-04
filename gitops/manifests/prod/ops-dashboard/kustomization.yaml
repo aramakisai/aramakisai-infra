@@ -67,6 +67,8 @@ configMapGenerator:
       - collector/app/sources/cluster_workloads.py
       - collector/app/sources/connect_tailscale.py
       - collector/app/sources/connect_tunnel.py
+      - collector/app/sources/festival_parking.py
+      - collector/app/sources/festival_schedule.py
       - collector/app/sources/mail.py
       - collector/app/sources/monitor_healthchecks.py
       - collector/app/sources/monitor_uptimerobot.py
