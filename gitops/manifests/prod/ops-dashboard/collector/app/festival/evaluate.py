@@ -9,9 +9,12 @@ import model
 from config import FestivalConfig
 from festival.catalog import CATALOG, EvalInput, ItemGroup
 from model import FestivalItem, SourceResult, Status
+from render.labels import label
 from sources import festival_nodes
 
 PARKING = "festival.parking"
+# 情報源が取得遅延を示すために Item.note へ入れる文言。catalog はエラー文の表示にも note を使うので、これ以外の note では STALE にしない
+STALE_NOTES = frozenset({"取得遅延", label("note.metrics_missing")})
 
 
 @dataclass(frozen=True)
@@ -88,7 +91,7 @@ class FestivalEvaluator:
             reasons = [p[1] for _, p in problems]
             if any(p[0] is Status.ERROR for _, p in problems):
                 status, note = Status.ERROR, "; ".join(reasons)
-            elif problems or (j.note and status is not Status.ERROR):
+            elif problems or j.note in STALE_NOTES:
                 status = Status.STALE
                 note = "; ".join(reasons) if reasons else j.note
             out.append(FestivalItem(key=j.key, label=j.label, status=status, value=j.value, threshold=j.threshold,

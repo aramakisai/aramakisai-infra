@@ -10,6 +10,7 @@ import model
 import store as store_mod
 from festival.evaluate import FestivalEvaluator
 from model import AlertState, Item, SourceResult, Status
+from render.labels import label
 
 PROD_TOML = Path(__file__).resolve().parents[2] / "dashboard.toml"
 NOW = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
@@ -99,6 +100,40 @@ class EvaluateTest(unittest.TestCase):
         items = self.items(self.ev())
         notes = [i for i in items.values() if i.note == "取得遅延"]
         self.assertTrue(all(i.status is Status.STALE for i in notes))
+
+    def _iso(self, **kw):
+        return model.iso(NOW - timedelta(**kw))
+
+    def test_display_note_keeps_crit_for_quake_discord(self):
+        q = SourceResult("festival.quake", Status.OK, NOW, NOW, (
+            Item("cron", "cron", Status.OK, {"last_run_at": self._iso(minutes=1), "in_period": True}),
+            Item("unreachable", "u", Status.OK, {"value": False}),
+            Item("discord", "d", Status.OK, {"configured": True, "disabled": True, "last_success_at": self._iso(hours=1),
+                                             "last_failure_at": self._iso(minutes=1), "last_failure": "http_404"})), None)
+        self.results["festival.quake"] = q
+        i = self.items(self.ev())["function.quake.discord"]
+        self.assertEqual((i.status, i.note), (Status.CRIT, "http_404"))
+
+    def test_display_note_keeps_crit_for_parking_judge_failures(self):
+        cam = Item("camera.1", "北", Status.OK, {
+            "name": "北", "lot": "A", "last_captured_at": self._iso(minutes=1), "device_received_at": None,
+            "judge_last_succeeded_at": self._iso(hours=3), "judge_last_failed_at": self._iso(minutes=1),
+            "judge_last_error": "boom", "judge_consecutive_failures": 50, "lot_status_updated_at": None})
+        sched = Item("monitor", "m", Status.OK, {"start": "00:00", "end": "23:59"})
+        day = Item("event_day.0", "d0", Status.OK, {"start_at": "2026-05-31T15:00:00Z", "end_at": "2026-06-01T15:00:00Z"})
+        self.results["festival.parking"] = SourceResult("festival.parking", Status.OK, NOW, NOW, (cam,), None)
+        self.results["festival.schedule"] = SourceResult("festival.schedule", Status.OK, NOW, NOW, (sched, day), None)
+        cfg = dataclasses.replace(CFG, parking=dataclasses.replace(CFG.parking, enabled=True))
+        i = self.items(self.ev(cfg))["function.parking.judge.1"]
+        self.assertEqual((i.status, i.note), (Status.CRIT, "boom"))
+
+    def test_source_stale_notes_mean_stale(self):
+        for note in ("取得遅延", label("note.metrics_missing")):
+            self.results["festival.workloads"] = SourceResult("festival.workloads", Status.OK, NOW, NOW, (
+                Item("cms", "cms", Status.OK, {"replicas": 2, "ready": 2, "restarts_recent": 0, "oom_recent": False,
+                                           "crashloop": False, "cpu_ratio_max": 0.1, "throttle_ratio_max": None}, note=note),), None)
+            i = self.items(self.ev())["capacity.cms.throttle"]
+            self.assertEqual((i.status, i.note), (Status.STALE, note))
 
     def test_disabled_sources_produce_no_items(self):
         self.results["festival.cloudflare"] = cf()
