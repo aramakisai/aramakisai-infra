@@ -26,6 +26,12 @@ output "healthchecksio_mailserver_backup_ping_url" {
   sensitive   = true
 }
 
+output "healthchecksio_festival_monitor_ping_url" {
+  description = "Healthchecks.io festival-monitor check の ping URL (Infisical の HEALTHCHECKS_FESTIVAL_MONITOR_PING_URL へ反映 / 機密情報)"
+  value       = healthchecksio_check.festival_monitor.ping_url
+  sensitive   = true
+}
+
 output "netdata_room_id" {
   description = "Netdata Cloud aramakisai-prod Room ID (Infisical の NETDATA_CLAIM_ROOMS へ反映)"
   value       = netdata_room.prod.id
@@ -58,6 +64,18 @@ output "signage_notify_service_token_client_id" {
 output "signage_notify_service_token_client_secret" {
   description = "サイネージ通知用 Service Token の client_secret (apply後にInfisicalのSIGNAGE_NOTIFY_ACCESS_CLIENT_SECRETへ反映 / 機密情報)"
   value       = cloudflare_zero_trust_access_service_token.signage_notify.client_secret
+  sensitive   = true
+}
+
+output "collector_signage_stats_service_token_client_id" {
+  description = "当日監視 collector 用 Service Token の client_id (apply後にInfisicalのOPS_SIGNAGE_ACCESS_CLIENT_IDへ反映 / 機密情報)"
+  value       = cloudflare_zero_trust_access_service_token.collector_signage_stats.client_id
+  sensitive   = true
+}
+
+output "collector_signage_stats_service_token_client_secret" {
+  description = "当日監視 collector 用 Service Token の client_secret (apply後にInfisicalのOPS_SIGNAGE_ACCESS_CLIENT_SECRETへ反映 / 機密情報)"
+  value       = cloudflare_zero_trust_access_service_token.collector_signage_stats.client_secret
   sensitive   = true
 }
 
