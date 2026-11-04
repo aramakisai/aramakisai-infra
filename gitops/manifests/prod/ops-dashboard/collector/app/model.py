@@ -53,6 +53,55 @@ class Source:
     timeout: float | None = None
 
 
+@dataclass(frozen=True)
+class FestivalItem:
+    """当日監視の項目 1 件の評価結果。SQLite の festival_items の 1 行に対応する。"""
+    key: str
+    category: str
+    label: str
+    status: Status
+    value: str
+    threshold: str | None
+    observed_at: datetime | None
+    fetched_at: datetime | None
+    source_ids: tuple[str, ...]
+    link: str | None
+    note: str | None
+    notify: bool
+    judged: bool  # False は表示のみ (閾値が未宣言)
+
+
+@dataclass(frozen=True)
+class AlertState:
+    """項目または情報源ごとの、異常の 1 回の期間。回復の通知が成功したら消える。"""
+    key: str
+    kind: str  # "item" | "source"
+    label: str
+    notified_open: bool
+    opened_at: datetime
+    last_notified_at: datetime | None
+
+
+@dataclass(frozen=True)
+class NotifierState:
+    last_success_at: datetime | None
+    last_failure_at: datetime | None
+    last_failure: str | None
+    not_before: datetime | None
+    halted: bool
+
+
+@dataclass(frozen=True)
+class FestivalStateRow:
+    """festival_state の 1 行。評価器・通知器・生存確認の状態をまとめて持つ。"""
+    evaluated_at: datetime | None
+    last_eval_error: str | None
+    notifier: NotifierState
+    heartbeat_ok_at: datetime | None
+    heartbeat_failed_at: datetime | None
+    heartbeat_failure: str | None
+
+
 class MissingSecret(Exception):
     pass
 

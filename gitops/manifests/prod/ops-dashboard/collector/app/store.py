@@ -2,7 +2,7 @@ import queue
 import sqlite3
 import threading
 from datetime import datetime, timedelta
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Sequence
 
 import model
 
@@ -36,6 +36,18 @@ CREATE TABLE IF NOT EXISTS tlsrpt_reports (
 CREATE TABLE IF NOT EXISTS ingest_failures (
     source TEXT NOT NULL, key TEXT NOT NULL, time TEXT NOT NULL, reason TEXT);
 CREATE INDEX IF NOT EXISTS ingest_failures_time ON ingest_failures(time);
+CREATE TABLE IF NOT EXISTS festival_items (
+    key TEXT PRIMARY KEY, category TEXT NOT NULL, label TEXT NOT NULL, status TEXT NOT NULL,
+    value TEXT NOT NULL, threshold TEXT, observed_at TEXT, fetched_at TEXT,
+    source_ids TEXT NOT NULL, link TEXT, note TEXT, notify INTEGER NOT NULL,
+    judged INTEGER NOT NULL DEFAULT 1);
+CREATE TABLE IF NOT EXISTS festival_alerts (
+    key TEXT PRIMARY KEY, kind TEXT NOT NULL, label TEXT NOT NULL, notified_open INTEGER NOT NULL,
+    opened_at TEXT NOT NULL, last_notified_at TEXT);
+CREATE TABLE IF NOT EXISTS festival_state (
+    id INTEGER PRIMARY KEY CHECK (id = 1), evaluated_at TEXT, last_eval_error TEXT,
+    last_success_at TEXT, last_failure_at TEXT, last_failure TEXT, not_before TEXT, halted INTEGER NOT NULL DEFAULT 0,
+    heartbeat_ok_at TEXT, heartbeat_failed_at TEXT, heartbeat_failure TEXT);
 """
 
 # (テーブル, 日時列, 保持日数)。SQLite の datetime() は Z・オフセット・小数秒付きの ISO 8601 を解釈するため、
@@ -49,6 +61,16 @@ RETENTION = (
     ("tlsrpt_reports", "end", 400),
     ("report_messages", "ingested_at", 400),
 )
+
+
+
+def _iso_or_none(dt: datetime | None) -> str | None:
+    return model.iso(dt) if dt else None
+
+
+def _parse_or_none(s: str | None) -> datetime | None:
+    return model.parse_iso(s) if s else None
+
 
 _CURSORS = {"auth_cursor": "cursor", "mail_cursor": "cursor"}
 
@@ -147,6 +169,79 @@ class Store:
             "VALUES (?,?,?,?,?,?,?,?)",
             (payload.get("time"), payload.get("priority"), payload["rule"], f.get("k8s.ns.name"),
              f.get("k8s.pod.name"), f.get("container.name"), payload.get("output"), model.iso(received_at))))
+
+    # --- 当日監視 (festival_*)。最新値だけを持ち、RETENTION の対象にしない ---
+
+    @staticmethod
+    def _set_festival_state(c: sqlite3.Connection, **cols) -> None:
+        # 列名は呼び出し側のコード内の固定値で、外部入力を通さない
+        c.execute("INSERT OR IGNORE INTO festival_state(id) VALUES (1)")
+        c.execute(f"UPDATE festival_state SET {', '.join(f'{k}=?' for k in cols)} WHERE id = 1", tuple(cols.values()))
+
+    def replace_festival_items(self, items: Sequence[model.FestivalItem], evaluated_at: datetime) -> None:
+        def run(c):
+            c.execute("DELETE FROM festival_items")
+            c.executemany(
+                "INSERT INTO festival_items(key,category,label,status,value,threshold,observed_at,fetched_at,"
+                "source_ids,link,note,notify,judged) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                [(i.key, i.category, i.label, str(i.status), i.value, i.threshold, _iso_or_none(i.observed_at),
+                  _iso_or_none(i.fetched_at), ",".join(i.source_ids), i.link, i.note, int(i.notify), int(i.judged))
+                 for i in items])
+            self._set_festival_state(c, evaluated_at=model.iso(evaluated_at), last_eval_error=None)
+        self.write(run)
+
+    def load_festival_items(self) -> list[model.FestivalItem]:
+        return [model.FestivalItem(
+            r["key"], r["category"], r["label"], model.Status(r["status"]), r["value"], r["threshold"],
+            _parse_or_none(r["observed_at"]), _parse_or_none(r["fetched_at"]),
+            tuple(r["source_ids"].split(",")) if r["source_ids"] else (), r["link"], r["note"],
+            bool(r["notify"]), bool(r["judged"]))
+            for r in self.query("SELECT * FROM festival_items ORDER BY key")]
+
+    def load_festival_state(self) -> model.FestivalStateRow:
+        rows = self.query("SELECT * FROM festival_state WHERE id = 1")
+        r = rows[0] if rows else {k: None for k in (
+            "evaluated_at", "last_eval_error", "last_success_at", "last_failure_at", "last_failure", "not_before",
+            "heartbeat_ok_at", "heartbeat_failed_at", "heartbeat_failure")} | {"halted": 0}
+        return model.FestivalStateRow(
+            _parse_or_none(r["evaluated_at"]), r["last_eval_error"],
+            model.NotifierState(_parse_or_none(r["last_success_at"]), _parse_or_none(r["last_failure_at"]),
+                                r["last_failure"], _parse_or_none(r["not_before"]), bool(r["halted"])),
+            _parse_or_none(r["heartbeat_ok_at"]), _parse_or_none(r["heartbeat_failed_at"]), r["heartbeat_failure"])
+
+    def save_festival_eval_error(self, error: str) -> None:
+        """evaluated_at は動かさない (評価が止まっていることを画面が時刻の古さで示すため)。"""
+        self.write(lambda c: self._set_festival_state(c, last_eval_error=error))
+
+    def save_festival_heartbeat(self, at: datetime, ok: bool, failure: str | None) -> None:
+        """成功と失敗の時刻は別々に残す (最終失敗が最終成功より新しいかで判定するため)。失敗理由は失敗時だけ更新する。"""
+        if ok:
+            self.write(lambda c: self._set_festival_state(c, heartbeat_ok_at=model.iso(at)))
+        else:
+            self.write(lambda c: self._set_festival_state(c, heartbeat_failed_at=model.iso(at), heartbeat_failure=failure))
+
+    def load_alert_states(self) -> dict[str, model.AlertState]:
+        return {r["key"]: model.AlertState(r["key"], r["kind"], r["label"], bool(r["notified_open"]),
+                                           model.parse_iso(r["opened_at"]), _parse_or_none(r["last_notified_at"]))
+                for r in self.query("SELECT * FROM festival_alerts")}
+
+    def apply_notifications(self, upserts: Sequence[model.AlertState], deletes: Sequence[str],
+                            notifier: model.NotifierState) -> None:
+        """通知の状態の更新・削除と通知器の状態の更新を 1 回の書き込み (1 トランザクション) で行う。"""
+        def run(c):
+            c.executemany(
+                "INSERT INTO festival_alerts(key,kind,label,notified_open,opened_at,last_notified_at) "
+                "VALUES (?,?,?,?,?,?) ON CONFLICT(key) DO UPDATE SET kind=excluded.kind, label=excluded.label, "
+                "notified_open=excluded.notified_open, opened_at=excluded.opened_at, "
+                "last_notified_at=excluded.last_notified_at",
+                [(a.key, a.kind, a.label, int(a.notified_open), model.iso(a.opened_at),
+                  _iso_or_none(a.last_notified_at)) for a in upserts])
+            c.executemany("DELETE FROM festival_alerts WHERE key = ?", [(k,) for k in deletes])
+            self._set_festival_state(
+                c, last_success_at=_iso_or_none(notifier.last_success_at),
+                last_failure_at=_iso_or_none(notifier.last_failure_at), last_failure=notifier.last_failure,
+                not_before=_iso_or_none(notifier.not_before), halted=int(notifier.halted))
+        self.write(run)
 
     def purge(self, now: datetime) -> None:
         def run(c):
