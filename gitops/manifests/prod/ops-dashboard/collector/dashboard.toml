@@ -129,6 +129,11 @@ expires_on = "2027-10-31"
 name = "サイネージ通知 Service Token"
 expires_on = "2027-10-12"
 
+# 有効期間はサイネージ通知 Service Token と同じ 8760h。日付は発行日 + 8760h で、apply 後に実際の期限へ書き換える (仮)
+[[credentials]]
+name = "collector サイネージ Service Token"
+expires_on = "2027-11-04"
+
 # 凍結中のワークロード (Namespace または名前) は取得結果から除外する。
 # prod Namespace に置かれた付随リソース (バックアップ・DB の Application・ExternalSecret) は名前で列挙する。
 [exclude]
@@ -157,3 +162,104 @@ buckets = ["aramakisai-backups"]
 # tunnel は terraform の cloudflare_zero_trust_tunnel_cloudflared.main の name から ID を引く。
 [sources."connect.tunnel"]
 tunnel_name = "aramakisai-k3s"
+
+# 当日監視。値は初期値 (仮) で、リハーサルで見直す。
+# 宣言を消すと当日監視の取得・評価・通知は何もしない状態になる。
+[festival]
+page_url = "https://dash.aramakisai.com/admin/festival"
+renotify = "30m"
+source_failure_grace = "3m"
+# cms Deployment の env SIGNAGE_QUAKE_URL と同じ値
+quake_url = "https://aramakisai-signage-quake.aramakisai.workers.dev"
+# aramakisai-web の frontend/src/lib/use-bus-realtime.ts と同じ ODPT の公開フィード。末尾にフィード名を付けて取る
+bus_feed_base = "https://api-public.odpt.org/api/v4/gtfs/realtime/odpt_Kan_etsuTransportation_AllLines_"
+disabled_sources = []
+
+[festival.max_age]
+"festival.cloudflare" = "3m"
+"festival.stamp" = "3m"
+"festival.quake" = "3m"
+"festival.signage" = "3m"
+"festival.parking" = "3m"
+"festival.schedule" = "15m"
+"festival.bus" = "2m"
+"festival.nodes" = "3m"
+"festival.workloads" = "2m"
+"festival.cnpg" = "2m"
+"monitor.uptimerobot" = "12m"
+"monitor.healthchecks" = "12m"
+"connect.tunnel" = "5m"
+"ci.github" = "25m"
+"mail.fail2ban" = "12m"
+
+[festival.cloudflare]
+worker_script = "aramakisai-web"
+cms_host = "cms.aramakisai.com"
+media_path_like = "/api/media/%"
+hub_object_name = "signage-hub"
+
+# web 側の反映前は false
+[festival.parking]
+enabled = false
+
+# installed はリハーサルで全端末を接続して確認した台数を設定する。0 の間は判定しない
+[festival.signage]
+url = "https://aramakisai.com/api/signage/stats"
+installed = 0
+
+[festival.cms]
+namespace = "prod"
+deployment = "cms"
+pod_selector = "app=cms"
+db_cluster = "directus-db"
+service_base = "http://cms.prod.svc.cluster.local:80"
+restart_window = "30m"
+
+[festival.cloudflared]
+namespace = "cloudflared"
+pod_selector = "app=cloudflared"
+
+[festival.uptime_monitors]
+idp = "Zitadel IdP"
+cms_db = "Payload CMS API (DB 経由)"
+
+[festival.falco]
+window = "15m"
+warn_priority = "warning"
+crit_priority = "critical"
+
+[festival.min_requests]
+worker_error_rate = 50
+cms_5xx_rate = 50
+
+# cms_cache_hit_ratio は平常値を取るまで宣言しない (表示のみ)
+[festival.thresholds]
+worker_error_rate = { warn = 0.01, crit = 0.05 }
+worker_exceeded = { warn = 1, crit = 10 }
+worker_cpu_p99_ms = { warn = 200, crit = 1000 }
+cms_5xx_rate = { warn = 0.01, crit = 0.05 }
+cms_origin_p95_ms = { warn = 1500, crit = 3000 }
+media_4xx = { warn = 20, crit = 100 }
+media_5xx = { warn = 1, crit = 10 }
+parking_capture_age = { warn = "10m", crit = "15m" }
+parking_judge_failures = { warn = 1, crit = 5 }
+parking_judge_success_age = { warn = "10m", crit = "20m" }
+signage_missing = { warn = 1, crit = 3 }
+quake_cron_age = { warn = "7m", crit = "12m" }
+stamp_failed = { warn = 1, crit = 10 }
+stamp_d1_failed = { warn = 1, crit = 10 }
+stamp_rate_limited = { warn = 10, crit = 100 }
+bus_feed_age = { warn = "2m", crit = "5m" }
+cms_ready_ratio = { warn = 1.0, crit = 0.5 }
+pod_cpu_ratio = { warn = 0.8, crit = 0.95 }
+db_connections_ratio = { warn = 0.7, crit = 0.9 }
+db_replica_lag_s = { warn = 10, crit = 60 }
+db_backends = { warn = 25, crit = 40 }
+db_memory_rss_ratio = { warn = 0.7, crit = 0.85 }
+db_unanalyzed_tables = { warn = 1, crit = 10 }
+cpu_throttle_ratio = { warn = 0.25, crit = 0.5 }
+cms_rps = { warn = 80, crit = 115 }
+node_cpu_ratio = { warn = 0.85, crit = 0.95 }
+node_memory_ratio = { warn = 0.85, crit = 0.95 }
+node_disk_ratio = { warn = 0.85, crit = 0.95 }
+tunnel_connections = { warn = 4, crit = 1 }
