@@ -84,6 +84,10 @@ configMapGenerator:
       - collector/app/sources/node_maintenance.py
       - collector/app/sources/node_resources.py
       - collector/app/sources/security_falco.py
+  - name: collector-festival
+    files:
+      - collector/app/festival/__init__.py
+      - collector/app/festival/catalog.py
   - name: collector-render
     files:
       - collector/app/render/__init__.py
