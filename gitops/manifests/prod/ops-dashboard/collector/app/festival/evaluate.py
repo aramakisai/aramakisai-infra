@@ -64,6 +64,7 @@ class FestivalEvaluator:
         self.clock = clock
         self.internal_networks = internal_networks
         self._failing: dict[str, datetime] = {}
+        self._last_minute: datetime | None = None
 
     def _falco_counts(self, now: datetime) -> dict[str, int]:
         since = model.iso(now - self.cfg.falco.window)
@@ -76,7 +77,7 @@ class FestivalEvaluator:
         problems = [(s, _source_problem(cfg, s, inp.results.get(s), now)) for s in active]
         problems = [(s, p) for s, p in problems if p]
         fetched = [inp.results[s].fetched_at for s in active if s in inp.results]
-        base = dict(category=g.category.value, source_ids=tuple(g.sources), link=g.link, notify=g.notify,
+        base = dict(category=g.category.value, source_ids=tuple(g.sources), link=g.link, link_label=g.link_label, notify=g.notify,
                     fetched_at=min(fetched) if fetched else None)
         judgements = list(g.judge(inp))
         errors = [p[1] for _, p in problems if p[0] is Status.ERROR]
@@ -95,7 +96,8 @@ class FestivalEvaluator:
                 status = Status.STALE
                 note = "; ".join(reasons) if reasons else j.note
             out.append(FestivalItem(key=j.key, label=j.label, status=status, value=j.value, threshold=j.threshold,
-                                    observed_at=j.observed_at, note=note, judged=j.judged, **base))
+                                    observed_at=j.observed_at, note=note, judged=j.judged, metric=j.metric, unit=j.unit, warn=j.warn, crit=j.crit,
+                                    breakdown=j.breakdown, **base))
         return out
 
     def _health(self, now: datetime, results: Mapping[str, SourceResult], used: set[str],
@@ -131,7 +133,14 @@ class FestivalEvaluator:
             used.update(active)
             items.extend(self._items_for(g, inp, active))
         health = self._health(now, results, used, self.store.load_alert_states())
-        self.store.replace_festival_items(items, now)
+        minute = now.replace(second=0, microsecond=0)
+        record = minute != self._last_minute
+        history = [(i.key, i.metric) for i in items
+                   if i.metric is not None and i.unit is not None
+                   and i.status not in (Status.ERROR, Status.STALE, Status.EMPTY)] if record else []
+        self.store.replace_festival_items(items, now, history, minute if record else None)
+        # 書き込みが失敗した評価では分を消費せず、次の評価で記録し直す
+        self._last_minute = minute
         return Evaluation(now, items, health)
 
     def tick(self) -> None:
