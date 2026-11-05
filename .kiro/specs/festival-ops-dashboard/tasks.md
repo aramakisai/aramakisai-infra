@@ -396,7 +396,7 @@
   - _Depends: 8.8_
   - _Boundary: FestivalPage_
 
-- [ ] 8.10 配布の設定と結合テストを推移・内訳に合わせる
+- [x] 8.10 配布の設定と結合テストを推移・内訳に合わせる
   - kustomization の configMap `collector-festival` に `festival/chart.py` を足す
   - 偽の結果を入れた Collector と一時 SQLite で、時計を進めて複数の分を評価し、断片のスパークラインと、`key` を付けた断片の当日の折れ線・内訳に反映されることを結合テストに足す
   - テストファイル: `test_festival_integration.py`

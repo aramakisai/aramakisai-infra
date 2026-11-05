@@ -1,6 +1,7 @@
 """取得結果の写し -> 評価 -> SQLite -> 断片、評価 -> 通知・ping を、実 SQLite とローカルの偽サーバーで通す。"""
 import json
 import os
+import re
 import tempfile
 import threading
 import unittest
@@ -104,6 +105,40 @@ class FestivalFlowTest(unittest.TestCase):
             web.server_close()
         self.assertNotIn("festival.", body)
         self.assertNotIn(crit[0].label, body)
+
+    def _cms_cpu_over_minutes(self, ratios):
+        ev = self.evaluator()
+        for r in ratios:
+            self.col.results["festival.workloads"] = SourceResult("festival.workloads", Status.OK, self.now, self.now, (
+                Item("cms", "CMS", Status.OK, {"replicas": 1, "ready": 1, "restarts_recent": 0, "oom_recent": False,
+                                               "crashloop": False, "cpu_ratio_max": r, "throttle_ratio_max": 0.0,
+                                               "by_pod": [{"pod": "cms-0", "ready": True, "cpu_ratio": r,
+                                                           "throttle_ratio": 0.0, "restarts_recent": 0,
+                                                           "oom_recent": False, "crashloop": False}]}),), None)
+            ev.tick()
+            self.now += timedelta(minutes=1)
+        self.now -= timedelta(minutes=1)
+
+    @staticmethod
+    def _points(svg):
+        d = re.search(r'<path d="([^"]*)"', svg).group(1)
+        return d.count("L") + 1
+
+    def test_sparkline_reflects_several_minutes(self):
+        self._cms_cpu_over_minutes([0.1, 0.5, 0.9])
+        frag = page.render_fragment(self.store, CFG, self.now)
+        tile = re.search(r'<[^>]*capacity\.cms\.cpu[^>]*>.*?<svg[^>]*class="spark".*?</svg>', frag, re.S)
+        self.assertTrue(tile)
+        self.assertEqual(self._points(tile.group(0)[tile.group(0).index("<svg"):]), 3)
+
+    def test_keyed_fragment_has_day_chart_and_breakdown(self):
+        self._cms_cpu_over_minutes([0.1, 0.5, 0.9])
+        frag = page.render_fragment(self.store, CFG, self.now, key="capacity.cms.cpu")
+        aside = frag[frag.index('<aside id="detail"'):]
+        chart = re.search(r'<svg[^>]*class="daychart".*?</svg>', aside, re.S)
+        self.assertTrue(chart)
+        self.assertEqual(self._points(chart.group(0)), 3)
+        self.assertIn("cms-0", aside)
 
     def test_429_waits_then_resends_once(self):
         d = self.server((429, {"Retry-After": "30"}))
