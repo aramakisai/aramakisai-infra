@@ -13,6 +13,7 @@ resources:
   - worker-deployment.yaml
   - service.yaml
   - pdb.yaml
+  - networkpolicy.yaml
 
 # newTag は aramakisai-web の cms-ci.yml が commit SHA へ書き換える。
 # 実行用とマイグレーション用は同一コミットから作るため常に同じ値を持つ

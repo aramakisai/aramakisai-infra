@@ -17,8 +17,19 @@ spec:
   ttlSecondsAfterFinished: 3600
   backoffLimit: 1
   template:
+    metadata:
+      labels:
+        app: cms-job
     spec:
       restartPolicy: OnFailure
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 65533
+        fsGroup: 65533
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: migrate
           image: ghcr.io/aramakisai/aramakisai-cms-migrate:main
@@ -34,15 +45,29 @@ spec:
                 echo "payload migrate が完了ログを出さずに終了した (試行 $attempt)"
               done
               exit 1
-          envFrom:
-            - secretRef:
-                name: cms-secrets
           env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cms-secrets
+                  key: DATABASE_URL
+            - name: PAYLOAD_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: cms-secrets
+                  key: PAYLOAD_SECRET
             - name: NODE_OPTIONS
               value: --no-deprecation
-            # envFrom の cms-secrets より env が優先される。migrate は primary だけを使う
+            # migrate は primary だけを使う
             - name: DATABASE_REPLICA_URL
               value: ""
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
           resources:
             requests:
               memory: "256Mi"
@@ -50,3 +75,5 @@ spec:
             limits:
               memory: "512Mi"
               cpu: "250m"
+      volumes:
+        - {name: tmp, emptyDir: {}}
