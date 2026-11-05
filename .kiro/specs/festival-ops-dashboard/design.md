@@ -196,6 +196,7 @@ gitops/manifests/prod/ops-dashboard/collector/app/
   - 評価スレッドを起動する。
 - `collector/app/config.py`: `[festival]` を `FestivalConfig` に読み込み、検証する (D-4)。
 - `collector/app/store.py`: 当日監視の 3 表と、その読み書きを足す。
+- `collector/app/k8s.py`: `K8sClient.kubelet_text(node_ip, path)` を足す (kubelet の Prometheus テキスト。`/metrics/cadvisor`)。
 - `collector/app/http_client.py`:
   - 応答の状態・ヘッダ・本文を返す `request_meta()` を足す。
   - `HttpError` に `retry_after` を持たせる。
@@ -419,6 +420,8 @@ sequenceDiagram
 **Responsibilities & Constraints**
 - 既存の `Config` に `festival: FestivalConfig | None` を足す。`[festival]` が無ければ `None` で、当日監視の情報源・評価・通知は何もしない。その場合、`/admin/festival` は「未設定」を表示する。
 - 未知のキー、閾値名の欠け、注意と異常の大小の逆転、未知の source_id は、起動の失敗にする (既存の流儀)。
+- `[festival.max_age]` は、次の 15 個の source_id すべての宣言を必須にする (欠ければ起動の失敗)。`festival.*` の 10 個 (`cloudflare`・`stamp`・`quake`・`signage`・`parking`・`schedule`・`bus`・`nodes`・`workloads`・`cnpg`) と、`monitor.uptimerobot`・`monitor.healthchecks`・`connect.tunnel`・`ci.github`・`mail.fail2ban`。
+- 閾値の向き (`THRESHOLD_DIRECTIONS`)、省略できる閾値名 (`OPTIONAL_THRESHOLDS`)、必須の source_id (`FESTIVAL_SOURCE_IDS`・`FESTIVAL_MAX_AGE_SOURCES`) は `config.py` の定数に置く。
   - 例外として、FestivalCatalog が「省略できる」とした閾値名 (`cms_cache_hit_ratio`) は欠けてよい。欠けている間、その項目は判定せず表示だけを行う (6.13)。
 - 期間は既存の `parse_duration` (`30m`・`36h`・`8d`) を使う。
 - 開催日と駐車場の監視時間は宣言しない。CMS の `site_settings` が正本 (D-7)。
@@ -732,7 +735,7 @@ class Judgement:
     note: str | None = None
     judged: bool = True             # False は表示のみ (閾値が未宣言。6.13)
 
-OPTIONAL_THRESHOLDS: frozenset[str]   # 宣言を省略できる閾値名。{"cms_cache_hit_ratio"}
+# 宣言を省略できる閾値名 {"cms_cache_hit_ratio"} は config.py の OPTIONAL_THRESHOLDS に置く
 
 @dataclass(frozen=True)
 class EvalInput:
@@ -741,6 +744,9 @@ class EvalInput:
     results: Mapping[str, SourceResult]
     falco_counts: Mapping[str, int]                  # 優先度 -> 窓内の件数
     internal_networks: tuple[object, ...]            # festival_nodes.internal_networks()
+    state: "FestivalStateRow | None" = None          # infra.notifier・infra.heartbeat の入力 (festival_state)
+    notifier_configured: bool = True                 # 通知の webhook が設定されているか
+    heartbeat_configured: bool = True                # ping URL が設定されているか
 
 @dataclass(frozen=True)
 class ItemGroup:
@@ -755,6 +761,7 @@ class ItemGroup:
 CATALOG: tuple[ItemGroup, ...]
 ```
 - Preconditions: `judge` は依存する情報源の結果が無いとき、項目を作らずに空を返す (評価器が「取得失敗」の項目を作る)。
+- 閾値の向き (`THRESHOLD_DIRECTIONS`)・`OPTIONAL_THRESHOLDS`・検証用の定数は `config.py` に置き、FestivalCatalog が参照する。
 - Postconditions: 返す `Judgement.key` は `key_prefix` で始まり、CATALOG 全体で一意。
 
 **項目の一覧** (閾値名は `[festival.thresholds]` のキー):
@@ -769,17 +776,17 @@ CATALOG: tuple[ItemGroup, ...]
 | 来場者影響 | `visitor.media.4xx` | festival.cloudflare | 4xx の件数 | `media_4xx` | Cloudflare ダッシュボード |
 | 来場者影響 | `visitor.media.5xx` | festival.cloudflare | 5xx の件数 | `media_5xx` | Cloudflare ダッシュボード |
 | 来場者影響 | `visitor.uptime.<id>` | monitor.uptimerobot | 既存の判定 (down は異常、paused は注意) | — | `/admin/#sec-monitoring` |
-| 機能別 | `function.parking.capture.<id>` | festival.parking, festival.schedule | 最終受信からの経過 (時間外は時間外) | `parking_capture_age` | CMS 管理画面 |
-| 機能別 | `function.parking.judge.<id>` | festival.parking, festival.schedule | 連続失敗回数と最終成功からの経過の悪い方 (時間外は時間外) | `parking_judge_failures`、`parking_judge_success_age` | CMS 管理画面 |
-| 機能別 | `function.signage.prod` | festival.signage | 本番の接続数 (設置台数を下回ると注意。`signage_missing` 台以上欠けると異常) | `signage_missing` | Cloudflare ダッシュボード |
-| 機能別 | `function.quake.cron` | festival.quake | 最終実行からの経過 (期間外は時間外) | `quake_cron_age` | — |
-| 機能別 | `function.quake.channel.<name>` | festival.quake | receiving が偽なら注意。`unreachable` が真なら全系統を異常 (期間外は時間外) | — | — |
+| 機能別 | `function.parking.capture.<id>` | festival.parking, festival.schedule | 最終受信からの経過。最終受信の時刻が無いときは異常 (時間外は時間外) | `parking_capture_age` | CMS 管理画面 |
+| 機能別 | `function.parking.judge.<id>` | festival.parking, festival.schedule | 連続失敗回数と最終成功からの経過の悪い方。最終成功の時刻が無いときは経過を異常とする (時間外は時間外) | `parking_judge_failures`、`parking_judge_success_age` | CMS 管理画面 |
+| 機能別 | `function.signage.prod` | festival.signage | 本番の接続数 (設置台数を下回ると注意。`signage_missing` 台以上欠けると異常)。設置台数が 0 の間は判定せず表示のみ | `signage_missing` | Cloudflare ダッシュボード |
+| 機能別 | `function.quake.cron` | festival.quake | 最終実行からの経過。期間内で最終実行の時刻が無いときは異常 (期間外は時間外) | `quake_cron_age` | — |
+| 機能別 | `function.quake.channel.<name>` | festival.quake | receiving が偽なら注意。`unreachable` が真なら全系統を異常 (期間外は時間外)。定期起動の情報が無い応答では期間内として扱う | — | — |
 | 機能別 | `function.quake.discord` | festival.quake | disabled は異常。configured が偽、または最終失敗が最終成功より新しい場合は注意 | — | — |
 | 機能別 | `function.stamp.failed` | festival.stamp | 記録失敗の件数 | `stamp_failed` | Cloudflare ダッシュボード |
 | 機能別 | `function.stamp.d1_failed` | festival.stamp | D1 失敗の件数 | `stamp_d1_failed` | Cloudflare ダッシュボード |
 | 機能別 | `function.stamp.rate_limited` | festival.stamp | レート制限の件数 | `stamp_rate_limited` | Cloudflare ダッシュボード |
 | 機能別 | `function.bus.<feed>` | festival.bus | 生成時刻からの経過。開催日で絞らず、常に判定する (U-5) | `bus_feed_age` | — |
-| 容量 | `capacity.cms.ready` | festival.workloads | Ready ÷ 宣言数 (下回るほど悪い) | `cms_ready_ratio` | `/admin/#sec-cluster` |
+| 容量 | `capacity.cms.ready` | festival.workloads | Ready ÷ 宣言数 (下回るほど悪い)。宣言数が 0 のときは Ready 率 0 として扱い、異常 | `cms_ready_ratio` | `/admin/#sec-cluster` |
 | 容量 | `capacity.cms.restarts` | festival.workloads | 直近の再起動は注意。OOM と CrashLoop は異常 | — | `/admin/#sec-cluster` |
 | 容量 | `capacity.cms.cpu` | festival.workloads | CPU 対 limit の最大 | `pod_cpu_ratio` | Netdata |
 | 容量 | `capacity.db.primary_cpu` | festival.workloads | primary の CPU 対 limit | `pod_cpu_ratio` | Netdata |
@@ -801,8 +808,8 @@ CATALOG: tuple[ItemGroup, ...]
 | 容量 | `capacity.tunnel` | connect.tunnel | 既存の状態の判定と、接続数 | `tunnel_connections` | `/admin/#sec-connect` |
 | 基盤・セキュリティ | `infra.incidents` | ci.github | dr-incident があれば異常、infra-alert があれば注意。件数と表題の一覧 | — | `/admin/#sec-cluster` |
 | 基盤・セキュリティ | `infra.falco` | (SQLite の falco_events) | 窓内の優先度別の件数。`crit_priority` 以上は異常、`warn_priority` 以上は注意 | — | `/admin/#sec-falco` |
-| 基盤・セキュリティ | `infra.idp` | monitor.uptimerobot | `uptime_monitors.idp` のモニターの状態 | — | `/admin/#sec-monitoring` |
-| 基盤・セキュリティ | `infra.cms_db` | monitor.uptimerobot | `uptime_monitors.cms_db` のモニターの状態 | — | `/admin/#sec-monitoring` |
+| 基盤・セキュリティ | `infra.idp` | monitor.uptimerobot | `uptime_monitors.idp` のモニターの状態。UptimeRobot の結果があるのに宣言したモニターが見つからなければ注意 (「モニターが見つかりません」) | — | `/admin/#sec-monitoring` |
+| 基盤・セキュリティ | `infra.cms_db` | monitor.uptimerobot | `uptime_monitors.cms_db` のモニターの状態。UptimeRobot の結果があるのに宣言したモニターが見つからなければ注意 (「モニターが見つかりません」) | — | `/admin/#sec-monitoring` |
 | 基盤・セキュリティ | `infra.healthchecks.<id>` | monitor.healthchecks | 既存の判定 | — | `/admin/#sec-monitoring` |
 | 基盤・セキュリティ | `infra.fail2ban.internal` | mail.fail2ban, festival.nodes | 内部アドレスの BAN が 1 件以上なら異常。件数だけを表示 | — | `/admin/#sec-fail2ban` |
 | 基盤・セキュリティ | `infra.notifier` | (festival_state) | 未設定・最終失敗が最終成功より新しい場合は注意。通知しない | — | — |
@@ -813,6 +820,7 @@ CATALOG: tuple[ItemGroup, ...]
   - 駐車場の項目は、今日が `event_days` のいずれかの日 (`start_at` を JST に直した日付) で、かつ `parking_monitor` の時間内 (`end` ちょうどを含む) のときだけ判定する。それ以外は `EMPTY` (時間外)。
   - 地震リレーの項目は、`/status` の `inPeriod` が偽なら `EMPTY`。
   - 規則は RN-13 の公開ページの判定に揃える。
+  - `festival.parking` が無効 (`parking.enabled = false`) の間は、`festival.schedule` が有効でも駐車場の項目を作らない。
 - 参照先の Cloudflare ダッシュボードは、アカウント ID を含まないトップの URL にする。アカウント ID はこのリポジトリでは秘匿扱いのため。
 
 #### FestivalEvaluator
@@ -826,12 +834,13 @@ CATALOG: tuple[ItemGroup, ...]
 - `Collector.latest()` (結果の写し) を読む。`Collector.snapshot()` は使わない (render を実行しないため)。
 - 依存する情報源ごとに次を判定し、項目の判定を上書きする:
   - `Status.ERROR` → 「取得失敗」(`Status.ERROR`)。直前の値を薄く表示するため、値は残す。
-  - `now - fetched_at > max_age[source]`、または項目の `note` に取得遅延がある → 「取得遅延」(`Status.STALE`)。
+  - `now - fetched_at > max_age[source]` → 「取得遅延」(`Status.STALE`)。
+  - 項目の `note` が、情報源の付ける取得遅延の注記 (`STALE_NOTES`: 「取得遅延」と「メトリクスを取得できません」) のときも「取得遅延」にする。それ以外の `note` (エラー文の表示など) では上書きしない。
   - 一度も成功していない (結果が無い) → 「取得失敗」(理由: 未取得)。
-- 依存する情報源のすべてが無効 (`disabled_sources`、`parking.enabled = false`) の項目は作らない。
-- 評価のたびに `festival_items` を 1 トランザクションで置き換え、`festival_state.evaluated_at` を更新する。
-- 1 回の評価の例外は `log("festival_eval_failed", ...)` に記録して握りつぶし、次の評価に進む。`festival_state.last_eval_error` に理由を残す。
-- 評価のあとに FestivalNotifier を呼ぶ。送信の失敗は評価と表示を止めない (8.5)。
+- 依存する情報源のすべてが無効 (`disabled_sources`、`parking.enabled = false`) の項目は作らない。駐車場の項目は `festival.schedule` にも依存するが、`festival.parking` が無効なら `festival.schedule` が有効でも作らない。
+- 評価のたびに `festival_items` を 1 トランザクションで置き換え、`festival_state.evaluated_at` を更新し、`last_eval_error` を NULL に戻す。
+- 1 回の評価の例外は `log("festival_eval_failed", ...)` に記録して握りつぶし、次の評価に進む。`Store.save_festival_eval_error(error)` で `festival_state.last_eval_error` に理由だけを残し、`evaluated_at` は進めない (例外が続く間は画面に「判定が止まっている」が出る)。
+- 評価のあとに FestivalNotifier を呼ぶ。送信の失敗は評価と表示を止めない (8.5)。評価の入力 (`EvalInput`) には、`load_festival_state()` の結果と、通知器・生存確認の設定の有無 (`notifier_configured`・`heartbeat_configured`) を渡す。
 - 評価が例外なく終わったら FestivalHeartbeat を呼ぶ (8.7)。
 
 **Dependencies**
@@ -849,6 +858,7 @@ from typing import Callable, Mapping, Sequence
 
 from model import SourceResult, Status
 
+# FestivalItem・AlertState・NotifierState・FestivalStateRow は model.py に置く
 @dataclass(frozen=True)
 class FestivalItem:
     key: str
@@ -882,7 +892,8 @@ class FestivalEvaluator:
 
     def __init__(self, config: "FestivalConfig", latest: Callable[[], Mapping[str, SourceResult]],
                  store: "Store", notifier: "FestivalNotifier",
-                 clock: Callable[[], datetime]) -> None: ...
+                 clock: Callable[[], datetime], heartbeat: "FestivalHeartbeat | None" = None,
+                 internal_networks: Callable[[], tuple] = festival_nodes.internal_networks) -> None: ...
 
     def evaluate_once(self) -> Evaluation: ...
     def run(self, stop: threading.Event) -> None: ...
@@ -891,7 +902,7 @@ class FestivalEvaluator:
 - Invariants: 評価器は外部に問い合わせない (SQLite と結果の写しだけを読む)。
 
 ##### State Management
-- State model: `SourceHealth.failing_since` は、評価のたびに前回の値から計算する。プロセスの再起動では、SQLite の `festival_alerts` (kind = source) の `opened_at` から復元する。
+- State model: `SourceHealth.failing_since` は、評価のたびに前回の値から計算する。プロセスの再起動では、SQLite の `festival_alerts` (kind = source) の `opened_at` から復元する。`opened_at` には、通知器が情報源の失敗の通知(`Notice.since` = `failing_since`)を送れたときに、失敗の開始時刻を残す。
 - Persistence & consistency: `festival_items` と `festival_state` は、既存の `Store.write` (単一ライター) で書く。
 - Concurrency strategy: 評価は 1 スレッドだけで行う。画面は読み取りの接続で読む (WAL)。
 
@@ -918,6 +929,7 @@ class FestivalEvaluator:
   - 2xx で `X-RateLimit-Remaining: 0` → `X-RateLimit-Reset-After` まで送らない。
   - 通信断と 5xx → 60 秒送らない。
   - 401・403・404 → 送信を止め、`infra.notifier` を注意にし、理由を表示する。設定を直して再起動するまで再送しない。401・403・429 の累計による一時遮断 (RN-11) を避けるため。
+- 停止 (`halted`) は「設定を直して再起動するまで」の状態のため、通知器は起動時に `halted` を解除する。
 - 通知は本番に入れた時点から常に有効で、開催日に限る切り替えは設けない (U-4)。webhook が未設定なら送らず、状態を「未設定」として `infra.notifier` に出す。
 - webhook の URL (path にトークンを含む) を、ログ・画面・例外のメッセージに出さない。失敗の理由は HTTP の状態コードか `network`・`timeout` だけにする (9.4)。
 - 送るのは POST だけで、応答本文は読まない (`?wait` を付けない)。
@@ -940,6 +952,7 @@ class Notice:
     value: str | None
     threshold: str | None
     reason: str | None        # 情報源の失敗の理由 (safe_error 済み)
+    since: datetime | None    # 異常 (または情報源の失敗) が始まった時刻。送信の成功後に festival_alerts.opened_at へ残す
 
 @dataclass(frozen=True)
 class AlertState:
@@ -956,7 +969,7 @@ class NotifierState:
     last_failure_at: datetime | None
     last_failure: str | None          # "http_429"・"http_500"・"network"・"timeout"・"disabled_http_404" 等
     not_before: datetime | None       # これより前は送らない
-    halted: bool                      # 401・403・404 で停止中
+    halted: bool                      # 401・403・404 で停止中。起動時に解除する
 
 @dataclass(frozen=True)
 class SendOutcome:
@@ -1002,6 +1015,7 @@ https://dash.aramakisai.com/admin/festival
 **Responsibilities & Constraints**
 - `evaluate_once` が例外なく終わったときだけ、前回の ping から 60 秒以上経っていれば ping URL に GET を送る。評価が止まる、例外が続く、Pod が止まると ping が途絶え、Healthchecks.io が通知する。当日監視画面と当日監視の通知には依存しない。
 - ping URL は `HEALTHCHECKS_FESTIVAL_MONITOR_PING_URL`。未設定なら ping しない。その場合、`infra.notifier` と同じ扱いで画面に「生存確認が未設定」を注意として出す (項目 `infra.heartbeat`、通知しない)。
+- 結果は `store.save_festival_heartbeat` で `festival_state` (`heartbeat_ok_at`・`heartbeat_failed_at`・`heartbeat_failure`) に残す。`infra.heartbeat` は最終失敗が最終成功より新しいときに注意とする。
 - タイムアウトは 10 秒。失敗しても同じ評価の中では再送しない。評価と通知は止めない。失敗は `log("festival_heartbeat_failed", reason=<状態コード|network|timeout>)` に記録し、URL は出さない (ping URL 自体がシークレット)。
 - Healthchecks.io のチェック `festival-monitor` は Terraform で作る (既存の `healthchecksio_check.mailserver_backup` と同じ形)。初期値 (仮): `timeout = 60` (1 分)、`grace = 180` (3 分)。評価が止まってから最大で約 4 分で通知される。
 - ping URL の扱いは、mailserver-backup の前例に合わせる。
@@ -1020,7 +1034,7 @@ from datetime import datetime
 class FestivalHeartbeat:
     MIN_INTERVAL_SECONDS: int = 60
 
-    def __init__(self, http: "Http", ping_url: str | None) -> None: ...
+    def __init__(self, http: "Http", ping_url: str | None, store: "Store | None" = None) -> None: ...
 
     def beat(self, now: datetime) -> str | None:
         """必要なら ping を送り、失敗の理由 (状態コード・network・timeout) を返す。送らなかった・成功したら None。"""
@@ -1092,8 +1106,8 @@ interface FestivalClient {
 - タブとタイルはキーボードで操作できるようにする (tablist・tab・tabpanel の role)。
 
 **画面の構成と寸法の予算 (3.8)**:
-- 上部の帯 (固定、高さ 120px 以内): 異常と注意の件数、異常の項目名 (横並び。溢れたら「ほか n 件」)、最終更新時刻、更新の警告 (3.5)。
-- タブ見出し (高さ 56px): 各タブの最悪の判定の記号と文字、異常の件数 (3.9)。
+- 上部の帯 (固定、高さ 120px 以内): 異常と注意の件数、異常の項目名 (横並び。最大 5 件で、溢れた分は「ほか n 件」(`fest.band.more`))、最終更新時刻、更新の警告 (3.5)。件数と項目名は判定対象 (`judged = True`) の項目だけから求める。
+- タブ見出し (高さ 56px): 各タブの最悪の判定の記号と文字、異常の件数 (3.9)。最悪の判定は判定対象の項目だけから求め、重さは 取得失敗 が 注意 より重く、取得遅延 は 注意 より軽い。項目が無いタブ、または全項目が表示のみのタブは「–」とする。
 - 本文:
   - 左はタイルの格子。`grid-template-columns: repeat(auto-fill, minmax(220px, 1fr))`、タイルの高さは 84px。
   - 右は詳細パネル (幅 420px)。
@@ -1128,6 +1142,7 @@ interface FestivalClient {
 | `fest.band.stale` | 表示が古い (最終更新 {time}) |
 | `fest.band.reauth` | 表示が古い・再ログインが必要 |
 | `fest.band.eval_stopped` | 判定が止まっている (最終判定 {time}) |
+| `fest.band.more` | ほか {n} 件 |
 | `fest.detail.threshold` | 閾値 |
 | `fest.detail.fetched_at` | 取得時刻 |
 | `fest.detail.observed_at` | データの時刻 |
@@ -1336,6 +1351,8 @@ CREATE TABLE IF NOT EXISTS festival_state (
     last_success_at TEXT, last_failure_at TEXT, last_failure TEXT, not_before TEXT, halted INTEGER NOT NULL DEFAULT 0,
     heartbeat_ok_at TEXT, heartbeat_failed_at TEXT, heartbeat_failure TEXT);
 ```
+- `replace_festival_items` は、成功時に `evaluated_at` を更新し `last_eval_error` を NULL に戻す。
+- `FestivalItem`・`AlertState`・`NotifierState`・`FestivalStateRow` は `model.py` に置く。
 - `source_ids` はカンマ区切り。日時は既存と同じ ISO 8601 (UTC、`Z`)。
 - 行数は項目数 (100 未満) に比例し、増え続けない。既存の `RETENTION` には加えない。
 - 3 表は復元の対象外 (既存の collector の SQLite と同じ。dr.md の記述どおり)。失っても、次の評価で作り直される。
@@ -1345,7 +1362,7 @@ class Store:  # 追加するメソッド
     def replace_festival_items(self, items: Sequence["FestivalItem"], evaluated_at: datetime) -> None: ...
     def load_festival_items(self) -> list["FestivalItem"]: ...
     def load_festival_state(self) -> "FestivalStateRow": ...
-    def save_festival_eval_error(self, evaluated_at: datetime, error: str | None) -> None: ...
+    def save_festival_eval_error(self, error: str) -> None: ...  # evaluated_at は進めない
     def save_festival_heartbeat(self, at: datetime, ok: bool, failure: str | None) -> None: ...
     def load_alert_states(self) -> dict[str, "AlertState"]: ...
     def apply_notifications(self, upserts: Sequence["AlertState"], deletes: Sequence[str],
