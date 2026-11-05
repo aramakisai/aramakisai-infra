@@ -6,7 +6,7 @@ from pathlib import Path
 import config
 from festival import catalog
 from festival.catalog import CATALOG, EvalInput, Judgement
-from model import Item, SourceResult, Status
+from model import Breakdown, Item, SourceResult, Status
 
 PROD_TOML = Path(__file__).resolve().parents[2] / "dashboard.toml"
 NOW = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
@@ -19,9 +19,12 @@ def result(sid, items):
 
 def cf_result(**over):
     vals = {
-        "worker": {"requests": 1000, "errors": 0, "exceeded": 0, "cpu_p99_ms": 10, "window_end": "2026-06-01T11:57:00Z"},
-        "cms": {"requests": 1000, "status_5xx": 0, "origin_p95_ms": 100, "window_end": "2026-06-01T11:57:00Z"},
-        "media": {"requests": 10, "status_4xx": 0, "status_5xx": 0, "window_end": "2026-06-01T11:57:00Z"},
+        "worker": {"requests": 1000, "errors": 0, "exceeded": 0, "cpu_p99_ms": 10, "window_end": "2026-06-01T11:57:00Z",
+                   "by_status": []},
+        "cms": {"requests": 1000, "status_5xx": 0, "origin_p95_ms": 100, "window_end": "2026-06-01T11:57:00Z",
+                "by_status": []},
+        "media": {"requests": 10, "status_4xx": 0, "status_5xx": 0, "window_end": "2026-06-01T11:57:00Z",
+                  "by_status": []},
     }
     for k, patch in over.items():
         vals[k] = {**vals[k], **patch}
@@ -81,7 +84,7 @@ class VisitorTest(unittest.TestCase):
         js = visitor_judge({"festival.cloudflare": cf_result()})
         self.assertEqual({j.status for j in js.values()}, {Status.OK})
         self.assertEqual(set(js), {
-            "visitor.worker.error_rate", "visitor.worker.exceeded", "visitor.worker.cpu_p99",
+            "visitor.worker.requests", "visitor.worker.error_rate", "visitor.worker.exceeded", "visitor.worker.cpu_p99",
             "visitor.cms.5xx_rate", "visitor.cms.origin_p95", "visitor.media.4xx", "visitor.media.5xx"})
         self.assertEqual(js["visitor.worker.error_rate"].observed_at, datetime(2026, 6, 1, 11, 57, tzinfo=timezone.utc))
 
@@ -337,7 +340,7 @@ class UniqueKeysTest(unittest.TestCase):
 
 def wl_cms(**over):
     v = {"replicas": 2, "ready": 2, "restarts_recent": 0, "oom_recent": False, "crashloop": False,
-         "cpu_ratio_max": 0.1, "throttle_ratio_max": 0.0, **over}
+         "cpu_ratio_max": 0.1, "throttle_ratio_max": 0.0, "by_pod": [], **over}
     return Item("cms", "CMS", Status.OK, v)
 
 
@@ -574,6 +577,303 @@ class AllKeysTest(unittest.TestCase):
                     self.assertTrue(j.key.startswith(g.category.value + "."), j.key)
         keys = [j.key for g in CATALOG for j in g.judge(inp)]
         self.assertEqual(len(keys), len(set(keys)))
+
+
+def _sec(v):
+    return v.total_seconds() if isinstance(v, timedelta) else v
+
+
+def full_results(cache=None):
+    """グラフの対象の全項目 (カメラ・DB instance・ノードを各 1 つ以上) を作れる入力。"""
+    return {
+        "festival.cloudflare": result("festival.cloudflare", [
+            *cf_result(cms={"requests": 3000}, media={"requests": 600}).items,
+            Item("cms_cache", "c", Status.OK, {"lookups": 100, "hits": 30, "window_end": "2026-06-01T11:57:00Z"} if cache is None else cache)]),
+        "festival.parking": parking(), "festival.schedule": schedule(),
+        "festival.signage": signage(9),
+        "festival.stamp": result("festival.stamp", [Item("stamp", "s", Status.OK, {
+            "failed": 0, "rate_limited": 0, "d1_failed": 0, "window_end": "2026-06-01T11:57:00Z"})]),
+        "festival.bus": result("festival.bus", [Item("feed.vehicle", "b", Status.OK, {"header_timestamp": ago(minutes=1)})]),
+        "festival.quake": quake(cron=cron()),
+        "festival.workloads": result("festival.workloads", [
+            wl_cms(), wl_db("p"), wl_db("r", "replica"),
+            Item("cloudflared", "cloudflared", Status.OK, {"pods": 1, "cpu_ratio_max": 0.1, "throttle_ratio_max": 0.0})]),
+        "festival.cnpg": result("festival.cnpg", [cnpg_db("p"), cnpg_db("r", "replica")]),
+        "festival.nodes": result("festival.nodes", [node("a")]),
+        "connect.tunnel": result("connect.tunnel", [Item("tunnel", "tunnel", Status.OK,
+                                                        {"state": "healthy", "connections": 4})])}
+
+
+# 設計「グラフの対象」の表。キー -> (単位, 閾値名)
+GRAPH = {
+    "visitor.worker.requests": ("count", None),
+    "visitor.worker.error_rate": ("ratio", "worker_error_rate"),
+    "visitor.worker.exceeded": ("count", "worker_exceeded"),
+    "visitor.worker.cpu_p99": ("ms", "worker_cpu_p99_ms"),
+    "visitor.cms.5xx_rate": ("ratio", "cms_5xx_rate"),
+    "visitor.cms.origin_p95": ("ms", "cms_origin_p95_ms"),
+    "visitor.media.4xx": ("count", "media_4xx"),
+    "visitor.media.5xx": ("count", "media_5xx"),
+    "function.parking.capture.1": ("seconds", "parking_capture_age"),
+    "function.parking.judge.1": ("count", "parking_judge_failures"),
+    "function.signage.prod": ("count", None),  # 線は設置台数から求める (別のテスト)
+    "function.stamp.failed": ("count", "stamp_failed"),
+    "function.stamp.d1_failed": ("count", "stamp_d1_failed"),
+    "function.stamp.rate_limited": ("count", "stamp_rate_limited"),
+    "function.bus.vehicle": ("seconds", "bus_feed_age"),
+    "capacity.cms.cpu": ("ratio", "pod_cpu_ratio"),
+    "capacity.cms.throttle": ("ratio", "cpu_throttle_ratio"),
+    "capacity.cms.rps": ("rps", "cms_rps"),
+    "capacity.cms.cache_hit": ("ratio", "cms_cache_hit_ratio"),
+    "capacity.db.primary_cpu": ("ratio", "pod_cpu_ratio"),
+    "capacity.db.connections": ("ratio", "db_connections_ratio"),
+    "capacity.db.backends.p": ("count", "db_backends"),
+    "capacity.db.backends.r": ("count", "db_backends"),
+    "capacity.db.memory.p": ("ratio", "db_memory_rss_ratio"),
+    "capacity.db.memory.r": ("ratio", "db_memory_rss_ratio"),
+    "capacity.db.unanalyzed": ("count", "db_unanalyzed_tables"),
+    "capacity.db.lag.r": ("seconds", "db_replica_lag_s"),
+    "capacity.cloudflared.cpu": ("ratio", "pod_cpu_ratio"),
+    "capacity.cloudflared.throttle": ("ratio", "cpu_throttle_ratio"),
+    "capacity.node.a.cpu": ("ratio", "node_cpu_ratio"),
+    "capacity.node.a.memory": ("ratio", "node_memory_ratio"),
+    "capacity.node.a.disk": ("ratio", "node_disk_ratio"),
+    "capacity.tunnel": ("count", "tunnel_connections"),
+}
+
+
+class ChartMetaTest(unittest.TestCase):
+    def test_graph_items_match_the_design_table(self):
+        js = judge(full_results())
+        self.assertEqual({k for k, j in js.items() if j.unit is not None}, set(GRAPH))
+        for key, (unit, name) in GRAPH.items():
+            j = js[key]
+            self.assertEqual(j.unit, unit, key)
+            self.assertIsNotNone(j.metric, key)
+            th = CFG.thresholds.get(name) if name else None
+            want = (None, None) if th is None else (_sec(th.warn), _sec(th.crit))
+            if key != "function.signage.prod":
+                self.assertEqual((j.warn, j.crit), want, key)
+
+    def test_non_graph_items_have_no_chart_fields(self):
+        for key, j in judge(full_results()).items():
+            if key not in GRAPH:
+                self.assertEqual((j.metric, j.unit, j.warn, j.crit), (None, None, None, None), key)
+
+    def test_duration_thresholds_are_seconds(self):
+        j = judge(full_results())["function.parking.capture.1"]
+        self.assertEqual((j.metric, j.warn, j.crit), (60.0, 600.0, 900.0))
+        b = judge(full_results())["function.bus.vehicle"]
+        self.assertEqual((b.metric, b.warn, b.crit), (60.0, 120.0, 300.0))
+
+    def test_metric_values(self):
+        js = judge(full_results())
+        self.assertEqual(js["visitor.worker.requests"].metric, 1000)
+        self.assertEqual(js["visitor.worker.error_rate"].metric, 0.0)
+        self.assertEqual(js["capacity.cms.cache_hit"].metric, 0.3)
+        self.assertEqual(js["capacity.cms.rps"].metric, 8.0)
+        self.assertEqual(js["capacity.db.connections"].metric, 0.1)
+        self.assertEqual(js["capacity.db.lag.r"].metric, 1.0)
+        self.assertEqual(js["function.parking.judge.1"].metric, 0)
+
+    def test_error_rate_metric_is_set_below_min_requests(self):
+        j = judge({"festival.cloudflare": cf_result(worker={"requests": 10, "errors": 5})})["visitor.worker.error_rate"]
+        self.assertEqual((j.status, j.metric), (Status.OK, 0.5))
+
+    def test_unavailable_values_have_no_metric(self):
+        zero = judge(full_results({"lookups": 0, "hits": 0, "window_end": "2026-06-01T11:57:00Z"}))
+        self.assertEqual((zero["capacity.cms.cache_hit"].metric, zero["capacity.cms.cache_hit"].unit), (None, "ratio"))
+        never = judge(full_results() | {"festival.parking": parking(camera(last_captured_at=None))})
+        self.assertEqual((never["function.parking.capture.1"].metric, never["function.parking.capture.1"].unit),
+                         (None, "seconds"))
+
+    def test_parking_out_of_hours_has_no_metric(self):
+        js = judge(full_results() | {"festival.schedule": schedule(days=())})
+        for k in ("function.parking.capture.1", "function.parking.judge.1"):
+            self.assertEqual((js[k].status, js[k].metric), (Status.EMPTY, None))
+
+    def test_cache_hit_line_only_when_declared(self):
+        self.assertEqual(judge(full_results())["capacity.cms.cache_hit"].warn, None)
+        cfg = with_thresholds(cms_cache_hit_ratio=config.Threshold(0.5, 0.2))
+        j = judge(full_results(), cfg)["capacity.cms.cache_hit"]
+        self.assertEqual((j.warn, j.crit), (0.5, 0.2))
+
+    def test_signage_line_is_installed_minus_missing(self):
+        cfg = dataclasses.replace(CFG, signage=dataclasses.replace(CFG.signage, installed=10))
+        j = judge(full_results(), cfg)["function.signage.prod"]
+        m = CFG.thresholds["signage_missing"]
+        self.assertEqual((j.metric, j.unit, j.warn, j.crit), (9, "count", 10 - m.warn, 10 - m.crit))
+
+    def test_signage_without_installed_has_no_line(self):
+        cfg = dataclasses.replace(CFG, signage=dataclasses.replace(CFG.signage, installed=0))
+        j = judge(full_results(), cfg)["function.signage.prod"]
+        self.assertEqual((j.metric, j.unit, j.warn, j.crit, j.judged), (9, "count", None, None, False))
+
+    def test_worker_requests_is_display_only(self):
+        j = judge({"festival.cloudflare": cf_result()})["visitor.worker.requests"]
+        self.assertEqual((j.label, j.value, j.status, j.judged, j.threshold, j.warn, j.crit),
+                         ("Worker 要求数", "1000 件", Status.OK, False, None, None, None))
+        self.assertEqual(j.observed_at, datetime(2026, 6, 1, 11, 57, tzinfo=timezone.utc))
+
+    def test_link_labels(self):
+        got = {g.key_prefix: g.link_label for g in CATALOG}
+        self.assertEqual(got["visitor.worker.requests"], "fest.link.cloudflare")
+        self.assertEqual(got["visitor.uptime."], "fest.link.admin")
+        self.assertEqual(got["function.parking.capture."], "fest.link.cms")
+        self.assertEqual(got["capacity.cms.cpu"], "fest.link.netdata")
+        self.assertEqual(got["capacity.node."], "fest.link.admin")
+        self.assertEqual(got["infra.heartbeat"], "fest.link.healthchecks")
+        self.assertIsNone(got["function.quake.cron"])
+        self.assertIsNone(got["infra.notifier"])
+        for g in CATALOG:
+            self.assertEqual(g.link is None, g.link_label is None, g.key_prefix)
+
+
+class BreakdownTest(unittest.TestCase):
+    """内訳の表 (design「内訳」) の全項目。ts は NOW=12:00Z = 21:00 JST から数えた JST の HH:MM:SS。"""
+
+    def bd(self, results, key):
+        inp = EvalInput(NOW, CFG, results, {}, ())
+        (g,) = (g for g in CATALOG if key.startswith(g.key_prefix))
+        return {j.key: j.breakdown for j in g.judge(inp)}[key]
+
+    def test_cloudflare_tables(self):
+        cf = cf_result(
+            worker={"by_status": [{"status": "success", "requests": 90, "errors": 0},
+                                  {"status": "exceededResources", "requests": 3, "errors": 3},
+                                  {"status": "scriptThrewException", "requests": 7, "errors": 7}]},
+            cms={"by_status": [{"status": 200, "count": 5}, {"status": 502, "count": 40}, {"status": 404, "count": 5}]},
+            media={"by_status": [{"status": 200, "count": 1}, {"status": 404, "count": 9}]})
+        cache = Item("cms_cache", "c", Status.OK, {"lookups": 10, "hits": 4, "window_end": "2026-06-01T11:57:00Z",
+                                                   "by_cache_status": [{"cache_status": "miss", "count": 2},
+                                                                       {"cache_status": "hit", "count": 8}]})
+        r = {"festival.cloudflare": result("festival.cloudflare", [*cf.items, cache])}
+        for k in ("visitor.worker.error_rate", "visitor.worker.exceeded"):
+            self.assertEqual(self.bd(r, k), Breakdown("fest.bd.worker_status",
+                             ("fest.col.status", "fest.col.requests", "fest.col.errors"),
+                             (("success", "90", "0"), ("scriptThrewException", "7", "7"),
+                              ("exceededResources", "3", "3"))))
+        self.assertEqual(self.bd(r, "visitor.cms.5xx_rate"), Breakdown(
+            "fest.bd.http_status", ("fest.col.http_status", "fest.col.count"),
+            (("502", "40"), ("200", "5"), ("404", "5"))))
+        for k in ("visitor.media.4xx", "visitor.media.5xx"):
+            self.assertEqual(self.bd(r, k).rows, (("404", "9"), ("200", "1")))
+        self.assertEqual(self.bd(r, "capacity.cms.cache_hit"), Breakdown(
+            "fest.bd.cache_status", ("fest.col.cache_status", "fest.col.count"), (("hit", "8"), ("miss", "2"))))
+
+    def test_signage_origin_order(self):
+        r = {"festival.signage": signage(7)}
+        self.assertEqual(self.bd(r, "function.signage.prod"), Breakdown(
+            "fest.bd.signage_origin", ("fest.col.origin", "fest.col.connections"),
+            (("prod", "7"), ("dev", "0"), ("preview", "0"), ("unknown", "0"))))
+
+    def test_quake_channels_by_name(self):
+        r = {"festival.quake": quake(cron(), {"wolfx": {"test": True, "last_received_at": None},
+                                              "p2p": {"receiving": False}})}
+        want = Breakdown("fest.bd.quake_channel",
+                         ("fest.col.channel", "fest.col.connected", "fest.col.receiving", "fest.col.last_received",
+                          "fest.col.test"),
+                         (("p2p", "fest.bool.true", "fest.bool.false", "20:59:55", "fest.bool.false"),
+                          ("wolfx", "fest.bool.true", "fest.bool.true", "—", "fest.bool.true")))
+        self.assertEqual(self.bd(r, "function.quake.channel.p2p"), want)
+        self.assertEqual(self.bd(r, "function.quake.channel.wolfx"), want)
+
+    def test_parking_cameras_by_name(self):
+        r = {"festival.parking": parking(camera("2", name="南", judge_consecutive_failures=3,
+                                                judge_last_succeeded_at=None),
+                                         camera("1", name="北", lot="B")),
+             "festival.schedule": schedule()}
+        want = Breakdown("fest.bd.parking_camera",
+                         ("fest.col.camera", "fest.col.lot", "fest.col.captured", "fest.col.judge_succeeded",
+                          "fest.col.judge_failures"),
+                         (("北", "B", "20:59:00", "20:59:00", "0"), ("南", "A", "20:59:00", "—", "3")))
+        for k in ("function.parking.capture.1", "function.parking.judge.2"):
+            self.assertEqual(self.bd(r, k), want)
+
+    def test_cms_and_cloudflared_pods(self):
+        cms = wl_cms()
+        cms = dataclasses.replace(cms, values={**cms.values, "by_pod": [
+            {"pod": "cms-b", "ready": False, "cpu_ratio": None, "throttle_ratio": 0.25, "restarts_recent": 2,
+             "oom_recent": True, "crashloop": False},
+            {"pod": "cms-a", "ready": True, "cpu_ratio": 0.123, "throttle_ratio": 0.0, "restarts_recent": 0,
+             "oom_recent": False, "crashloop": False}]})
+        cfd = Item("cloudflared", "c", Status.OK, {"pods": 2, "cpu_ratio_max": 0.1, "throttle_ratio_max": 0.0,
+                                                   "by_pod": [{"pod": "cf-2", "cpu_ratio": 0.5, "throttle_ratio": None},
+                                                              {"pod": "cf-1", "cpu_ratio": 0.0, "throttle_ratio": 0.1}]})
+        r = {"festival.workloads": result("festival.workloads", [cms, cfd])}
+        want = Breakdown("fest.bd.pod",
+                         ("fest.col.pod", "fest.col.ready", "fest.col.cpu", "fest.col.throttle", "fest.col.restarts"),
+                         (("cms-a", "fest.bool.true", "12.3%", "0.0%", "なし"),
+                          ("cms-b", "fest.bool.false", "—", "25.0%", "OOM / 再起動 2 回")))
+        for k in ("capacity.cms.ready", "capacity.cms.restarts", "capacity.cms.cpu", "capacity.cms.throttle"):
+            self.assertEqual(self.bd(r, k), want)
+        want = Breakdown("fest.bd.pod", ("fest.col.pod", "fest.col.cpu", "fest.col.throttle"),
+                         (("cf-1", "0.0%", "10.0%"), ("cf-2", "50.0%", "—")))
+        for k in ("capacity.cloudflared.cpu", "capacity.cloudflared.throttle"):
+            self.assertEqual(self.bd(r, k), want)
+
+    DB_COLS = ("fest.col.pod", "fest.col.role", "fest.col.cpu", "fest.col.memory", "fest.col.backends",
+               "fest.col.lag", "fest.col.restarts")
+
+    def test_db_joined_by_pod_primary_first(self):
+        r = {"festival.workloads": result("festival.workloads", [wl_db("db-1", "replica"), wl_db("db-2"),
+                                                                 wl_db("db-3", "replica", restarts_recent=1)]),
+             "festival.cnpg": result("festival.cnpg", [cnpg_db("db-1", "replica", backends=4, replication_lag_s=2.5),
+                                                       cnpg_db("db-2", backends=12), cnpg_db("db-3", "replica")])}
+        want = Breakdown("fest.bd.db_instance", self.DB_COLS, (
+            ("db-2", "primary", "10.0%", "20.0%", "12", "—", "なし"),
+            ("db-1", "replica", "10.0%", "20.0%", "4", "2.5 秒", "なし"),
+            ("db-3", "replica", "10.0%", "20.0%", "10", "1 秒", "再起動 1 回")))
+        for k in ("capacity.db.primary_cpu", "capacity.db.connections", "capacity.db.backends.db-1",
+                  "capacity.db.memory.db-1", "capacity.db.restarts", "capacity.db.unanalyzed",
+                  "capacity.db.lag.db-1"):
+            self.assertEqual(self.bd(r, k), want, k)
+
+    def test_db_missing_side_is_dash(self):
+        stale = Item("db.db-1", "db-1", Status.STALE, {"role": "replica"}, "x")
+        r = {"festival.workloads": result("festival.workloads", [wl_db("db-2"), wl_db("db-1", "replica")]),
+             "festival.cnpg": result("festival.cnpg", [cnpg_db("db-2"), stale, cnpg_db("db-9", "replica")])}
+        rows = self.bd(r, "capacity.db.primary_cpu").rows
+        self.assertEqual(rows, (("db-2", "primary", "10.0%", "20.0%", "10", "—", "なし"),
+                                ("db-1", "replica", "10.0%", "20.0%", "—", "—", "なし"),
+                                ("db-9", "replica", "—", "—", "10", "1 秒", "—")))
+
+    def test_db_without_workloads_source(self):
+        r = {"festival.cnpg": result("festival.cnpg", [cnpg_db("db-2")])}
+        self.assertEqual(self.bd(r, "capacity.db.connections").rows,
+                         (("db-2", "primary", "—", "—", "10", "—", "—"),))
+
+    def test_nodes_by_name(self):
+        r = {"festival.nodes": result("festival.nodes", [node("n2", ready=False, disk_ratio=None), node("n1")])}
+        want = Breakdown("fest.bd.node", ("fest.col.node", "fest.col.ready", "fest.col.cpu", "fest.col.memory",
+                                          "fest.col.disk"),
+                         (("n1", "fest.bool.true", "10.0%", "20.0%", "30.0%"),
+                          ("n2", "fest.bool.false", "10.0%", "20.0%", "—")))
+        for k in ("capacity.node.n1.ready", "capacity.node.n1.cpu", "capacity.node.n2.memory", "capacity.node.n2.disk"):
+            self.assertEqual(self.bd(r, k), want, k)
+
+    def test_other_items_have_no_breakdown(self):
+        cf = cf_result()
+        r = {"festival.cloudflare": cf, "festival.signage": signage(1), "festival.quake": quake(cron()),
+             "festival.workloads": result("festival.workloads", [wl_cms(), wl_db("db-1"),
+                                                                 Item("cloudflared", "c", Status.OK, {
+                                                                     "pods": 1, "cpu_ratio_max": 0, "throttle_ratio_max": 0,
+                                                                     "by_pod": []})]),
+             "festival.cnpg": result("festival.cnpg", [cnpg_db("db-1")]),
+             "festival.nodes": result("festival.nodes", [node("n1")]),
+             "connect.tunnel": result("connect.tunnel", [Item("tunnel", "t", Status.OK,
+                                                              {"connections": 4, "state": "healthy"})]),
+             "festival.stamp": result("festival.stamp", [Item("stamp", "s", Status.OK,
+                                                              {"failed": 0, "d1_failed": 0, "rate_limited": 0})])}
+        inp = EvalInput(NOW, CFG, r, {}, ())
+        shown = {j.key for g in CATALOG for j in g.judge(inp) if j.breakdown is not None}
+        for j in (j for g in CATALOG for j in g.judge(inp)):
+            if j.key.startswith(("visitor.worker.requests", "visitor.worker.cpu_p99", "visitor.cms.origin_p95",
+                                 "capacity.tunnel", "capacity.cms.rps", "function.quake.cron",
+                                 "function.quake.discord", "function.stamp.", "infra.")):
+                self.assertNotIn(j.key, shown)
+        self.assertNotIn("capacity.tunnel", shown)
+        self.assertIn("function.signage.prod", shown)
 
 
 if __name__ == "__main__":
