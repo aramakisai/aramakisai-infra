@@ -99,7 +99,7 @@
   - _Depends: 3.3_
   - _Requirements: 5.1, 5.2, 9.3, 9.4, 9.5_
 
-- [ ] 4. collector の情報源 (取得層)
+- [x] 4. collector の情報源 (取得層)
   - 各情報源は値を取り出すだけで判定しない。宣言が無い・無効の情報源は外部に問い合わせない。失敗は例外として送り出し、同じ周期でリトライしない
   - 情報源のテストは情報源ごとのファイル (`test_festival_source_<情報源名>.py`) に置く。情報源の登録 (一覧への追加) は 7.1 で行う
 - [x] 4.1 (P) Cloudflare GraphQL から来場者影響の数値とハブの接続数を取る
@@ -136,7 +136,7 @@
   - _Requirements: 5.3_
   - _Boundary: festival.signage_
 
-- [ ] 4.5 (P) CMS から駐車場カメラの状態と開催日程を取る
+- [x] 4.5 (P) CMS から駐車場カメラの状態と開催日程を取る
   - テストファイル: `test_festival_source_parking.py`、`test_festival_source_schedule.py`
   - 駐車場の取得が無効の宣言の間は問い合わせない。有効なら、クラスタ内の CMS Service 経由で `/api/ops/parking-health` に Bearer トークンを付けて取り、カメラごとの Item にする
   - 開催日程は、CMS の公開設定から駐車場の監視時間と開催日だけを認証なしで取り、Item にする
@@ -153,7 +153,7 @@
   - _Requirements: 5.7, 9.2_
   - _Boundary: festival.bus_
 
-- [ ] 4.7 (P) 全ノードの Ready と資源の使用率を取る
+- [x] 4.7 (P) 全ノードの Ready と資源の使用率を取る
   - テストファイル: `test_festival_source_nodes.py`
   - Kubernetes のノード一覧を期待集合とし、ノードごとに Ready、CPU・メモリの使用率、kubelet から読むルートディスクの使用率を Item にする。1 ノードの kubelet に届かなければ、そのノードのディスクだけ取得遅延にする
   - fail2ban の照合用に、ノードのアドレスと Pod の CIDR をモジュール内の最新値として保持し、評価器に渡す手段を用意する。これらは Item に入れない
@@ -171,7 +171,7 @@
   - _Requirements: 6.1, 6.2, 6.7, 6.9_
   - _Boundary: festival.workloads_
 
-- [ ] 4.9 CNPG の exporter から DB の接続数と replica の遅延を取る
+- [x] 4.9 CNPG の exporter から DB の接続数と replica の遅延を取る
   - テストファイル: `test_festival_source_cnpg.py`
   - Prometheus テキスト形式から指定した名前のサンプルを読む最小の読み取りを用意する
   - 4.8 が保持する DB の Pod の宛先から各 Pod の 9187 番を取り、Pod ごとの接続数の和・接続の上限・replica の遅延・primary の統計情報の無い表の数 (1.4 のカスタムクエリ) を Item にする。1 Pod に届かなければその Pod を取得遅延、全 Pod に届かなければ例外にする
