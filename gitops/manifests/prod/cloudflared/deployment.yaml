@@ -66,9 +66,11 @@ spec:
             requests:
               memory: "64Mi"
               cpu: "100m"
+            # CPU が不足すると処理待ちのリクエストが溜まりメモリが増えて OOM する。
+            # CPU は Cloudflare 公式の目安 (使用率 70% 未満) を保てる値にする
             limits:
               memory: "128Mi"
-              cpu: "200m"
+              cpu: "400m"
           livenessProbe:
             httpGet:
               path: /ready
