@@ -152,6 +152,13 @@ class DayChartTest(unittest.TestCase):
         s = self.mk(self.minutes(0, 5, 1), unit="count", end=end)
         return re.findall(r">(\d\d):00<", s)
 
+    def test_time_tick_anchors_and_baseline(self):
+        s = self.mk(self.minutes(0, 5, 1), unit="count", end=at(8))
+        tick = lambda t: re.search(r'<text x="([^"]*)" y="([^"]*)" text-anchor="(\w+)"[^>]*>' + t + "<", s).groups()
+        self.assertEqual(tick("00:00"), ("56.0", "214", "start"))
+        self.assertEqual(tick("08:00")[2], "end")
+        self.assertEqual(tick("04:00")[2], "middle")
+
     def test_tick_interval_boundaries(self):
         self.assertEqual(self.hours(at(8)), [f"{h:02d}" for h in range(0, 9)])
         self.assertEqual(self.hours(at(9)), ["00", "02", "04", "06", "08"])

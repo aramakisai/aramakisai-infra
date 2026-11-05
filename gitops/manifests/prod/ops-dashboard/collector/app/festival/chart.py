@@ -79,7 +79,9 @@ def day_chart(points: Sequence[Point], start: datetime, end: datetime, unit: Met
     t = start
     while t <= end:
         tx = PL + PW * (t - start).total_seconds() / span
-        parts.append(f'<text x="{tx:.1f}" y="{PT + PH + 14}" text-anchor="middle" font-size="12">'
+        # 左端の文字は縦軸の「0」の文字と重なるため、端の目盛は内側へ寄せる
+        anchor = "start" if tx <= PL else "end" if tx >= PL + PW else "middle"
+        parts.append(f'<text x="{tx:.1f}" y="{PT + PH + 18}" text-anchor="{anchor}" font-size="12">'
                      f'{t.hour:02d}:00</text>')
         t += timedelta(hours=step)
     cells = {i: (PL + PW * i * 60 / span, y(v)) for i, v in vals.items()}
