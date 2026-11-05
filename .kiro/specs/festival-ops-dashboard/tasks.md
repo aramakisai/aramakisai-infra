@@ -316,7 +316,7 @@
   - _Requirements: 3.14, 9.2, 9.5_
   - _Boundary: festival.cloudflare, festival.workloads_
 
-- [ ] 8.3 項目にグラフの値・閾値の線・参照先の名前を持たせる
+- [x] 8.3 項目にグラフの値・閾値の線・参照先の名前を持たせる
   - `Judgement` に `metric`・`unit`・`warn`・`crit`・`breakdown` を、`ItemGroup` に `link_label` を足す
   - design の「グラフの対象」の表の全項目で、`metric`・`unit`・閾値の線を入れる。期間の閾値は秒に換算し、算出できない値 (最終受信の時刻が無い、lookups が 0 など) は `metric = None` にする。表示のみの項目と、閾値が未宣言の Cache API のヒット率は線を `None` にする。サイネージの線は設置台数 − `signage_missing` の注意・異常とし、設置台数 0 の間は線なし
   - 駐車場の受信の経過 (秒) と判定の連続失敗回数をグラフの対象にする
@@ -328,7 +328,7 @@
   - _Depends: 8.1_
   - _Boundary: FestivalCatalog_
 
-- [ ] 8.4 項目に内訳の表を持たせる
+- [x] 8.4 項目に内訳の表を持たせる
   - design の「内訳」の表の全項目で、見出し・列・並び順のとおりに `Breakdown` を作る。値は情報源が既に取得した結果だけから作り、問い合わせを足さない
   - DB の instance ごとの内訳は `festival.workloads` と `festival.cnpg` の `db.*` を Pod 名で突き合わせ、片方が無い・取得失敗のときはその列を「—」にする。primary を先頭、残りは Pod 名順にする
   - 値の書式は、比率は小数 1 桁の百分率、時刻は JST の `HH:MM:SS`、真偽は「はい」「いいえ」、値が無いときは「—」、再起動は `capacity.cms.restarts` の現在値と同じ書式にする
@@ -339,7 +339,7 @@
   - _Depends: 8.2, 8.3_
   - _Boundary: FestivalCatalog_
 
-- [ ] 8.5 (P) 評価器で 1 分値を記録し、内訳を保存する
+- [x] 8.5 (P) 評価器で 1 分値を記録し、内訳を保存する
   - `Judgement` の `metric`・`unit`・`warn`・`crit`・`breakdown` と `ItemGroup.link_label` を `FestivalItem` に移す。取得失敗・取得遅延の項目も、直前の結果から作った内訳を残す
   - 評価時刻を分単位で切り捨てた分が、最後に記録した分 (評価器のメモリにだけ持つ) から変わった最初の評価でだけ 1 分値を記録する
   - 記録するのは `unit` と `metric` が `None` でなく、取得失敗・取得遅延・時間外でない項目とする。表示のみの項目も記録し、判定の結果は記録しない。記録しない分は補わない
@@ -350,7 +350,7 @@
   - _Depends: 8.1, 8.3_
   - _Boundary: FestivalEvaluator_
 
-- [ ] 8.6 (P) スパークラインと当日の折れ線を SVG にする
+- [x] 8.6 (P) スパークラインと当日の折れ線を SVG にする
   - `festival/chart.py` に `sparkline`・`day_chart`・`format_axis` を作る。入力の値だけから描き、SQLite と時計を読まない。import は `model`・`festival.labels`・`render.components` の `esc`・`render.svg` の `_nice_max` に限る
   - スパークライン: design の「スパークライン」のとおり、直近 60 個の分、`viewBox="0 0 600 100"`、縦軸 0〜`_nice_max(最大値)` (すべて 0・記録なしは 0〜1)、軸・目盛・文字なし、`aria-hidden="true"`。記録が 1 つも無ければ空文字
   - 当日の折れ線: design の「当日の折れ線」のとおり、JST の 00:00 から評価時刻まで、`viewBox="0 0 528 220"`、縦軸の上限に閾値を含め、3 本の目盛と単位ごとの文字、正時の横軸の目盛 (8 時間以下は 1 時間、16 時間以下は 2 時間、それ以上は 3 時間)、注意・異常の破線と右の文字 (縦の間隔が 14px 未満なら上側を 14px 上へ)、`role="img"` と `aria-label`。記録が 1 つも無ければ「当日の記録がありません」
@@ -362,7 +362,7 @@
   - _Depends: 8.1_
   - _Boundary: FestivalChart_
 
-- [ ] 8.7 タイルの格子とタイルの中身を描く
+- [x] 8.7 タイルの格子とタイルの中身を描く
   - `tile_grid(n)` を design の「タイルの大きさの決め方」の手順と定数どおりに作り、タブパネルに `data-size` と `--cols`・`--tile-w`・`--tile-h` を出す
   - タイルに、名前・判定・現在値・閾値・注記・時刻 (「データ HH:MM:SS・取得 HH:MM:SS」、データの時刻が無い項目は取得だけ) と、グラフの対象の項目は直近 60 分のスパークラインを常に載せる。スパークラインは `festival_history` の直近 60 分を全項目まとめて 1 回で読む
   - 標準表示と小型表示の各行の高さ・文字の大きさ・余白を design の「タイルの中身」の表どおりにし、溢れた文字は末尾を省略する

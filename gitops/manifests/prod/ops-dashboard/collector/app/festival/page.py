@@ -1,8 +1,11 @@
 """当日監視画面 (/admin/festival) の HTML と断片。保存済みの評価結果だけを読み、取得も評価もしない。"""
 import json
+import math
 from datetime import datetime, timedelta
+from typing import NamedTuple
 
 import model
+from festival.chart import sparkline
 from festival.labels import label
 from model import FestivalItem, Status
 from render.components import JST, Raw, _MARK, esc
@@ -10,8 +13,12 @@ from render.components import JST, Raw, _MARK, esc
 PAGE_PATH = "/admin/festival"
 FRAGMENT_PATH = "/admin/festival/fragment"
 TABS = ("visitor", "function", "capacity", "infra")
-# 通常の表示 (タイル高 84px) が 1920x1080 の本文に収まる最大数 (6 列 x 9 行)。超えたら 64px の小型表示にする
-DENSE_THRESHOLD = 54
+# 格子の領域 (1360x904 から内側の余白 12px を引いた寸法) とタイルの寸法の制約。ブラウザの幅には依存させない
+GRID_W, GRID_H, GAP = 1336, 880, 8
+TILE_MIN_W, TILE_MIN_H, TILE_MAX_W, TILE_MAX_H = 200, 108, 640, 360
+STANDARD_MIN_W, STANDARD_MIN_H = 240, 198
+MAX_COLS = 6
+SPARK_MINUTES = 60
 EVAL_STALE_AFTER = timedelta(seconds=60)
 BAND_NAMES_MAX = 5
 
@@ -37,12 +44,52 @@ def _href(link: str | None) -> str | None:
     return None
 
 
-def _tile(i: FestivalItem) -> str:
+class Grid(NamedTuple):
+    cols: int
+    rows: int
+    w: int
+    h: int
+    size: str
+
+
+def tile_grid(n: int) -> Grid | None:
+    """タブの項目数からタイルの列数・行数・寸法を決める。0 個は None。"""
+    if n <= 0:
+        return None
+    best = None
+    for c in range(1, MAX_COLS + 1):
+        r = math.ceil(n / c)
+        w = min((GRID_W - (c - 1) * GAP) // c, TILE_MAX_W)
+        h = min((GRID_H - (r - 1) * GAP) // r, TILE_MAX_H)
+        if w < TILE_MIN_W or h < TILE_MIN_H:
+            continue
+        if best is None or w * h > best[2] * best[3]:
+            best = (c, r, w, h)
+    if best is None:
+        # 42 個を超えた場合。設計に定めが無いため、最小寸法の 6 列で置いて格子の領域のスクロールに任せる
+        c = MAX_COLS
+        best = (c, math.ceil(n / c), (GRID_W - (c - 1) * GAP) // c, TILE_MIN_H)
+    c, r, w, h = best
+    return Grid(c, r, w, h, "standard" if w >= STANDARD_MIN_W and h >= STANDARD_MIN_H else "compact")
+
+
+def _times(i: FestivalItem) -> str:
+    fetched = label("fest.tile.fetched_at", time=_hms(i.fetched_at))
+    if not i.observed_at:
+        return fetched
+    return f'{label("fest.tile.observed_at", time=_hms(i.observed_at))}・{fetched}'
+
+
+def _tile(i: FestivalItem, spark: str) -> str:
     s = _view_status(i)
-    return (f'<button type="button" class="tile s-{s}" data-key="{esc(i.key)}" data-tab="{esc(i.category)}" '
-            f'aria-controls="detail" aria-pressed="false"><span class="n">{esc(i.label)}</span>'
-            f'<span class="st">{_badge(s)}</span><span class="v">{esc(i.value)}</span>'
-            f'<span class="t">{_hms(i.fetched_at)}</span></button>')
+    chart = i.unit is not None
+    sp = f'<span class="sp">{spark}</span>' if chart else ""
+    return (f'<button type="button" class="tile s-{s}{"" if chart else " nc"}" data-key="{esc(i.key)}" '
+            f'data-tab="{esc(i.category)}" aria-controls="detail" aria-pressed="false">'
+            f'<span class="h"><span class="n">{esc(i.label)}</span>{_badge(s)}</span>'
+            f'<span class="v">{esc(i.value)}</span>{sp}'
+            f'<span class="th">{esc(i.threshold or "")}</span><span class="no">{esc(i.note or "")}</span>'
+            f'<span class="t">{esc(_times(i))}</span></button>')
 
 
 def _detail(i: FestivalItem) -> str:
@@ -99,11 +146,21 @@ def _tab_head(cat: str, items, selected: bool) -> str:
             f'{head}<span class="cnt">{esc(label("fest.status.crit"))} {n_crit} 件</span></button>')
 
 
-def _panel(cat: str, items, selected: bool) -> str:
-    dense = ' data-dense="true"' if len(items) > DENSE_THRESHOLD else ""
-    body = "".join(_tile(i) + _detail(i) for i in items)
+def _panel(cat: str, items, selected: bool, sparks: dict[str, str]) -> str:
+    g = tile_grid(len(items))
+    grid = (f' data-size="{g.size}" style="--cols:{g.cols};--tile-w:{g.w}px;--tile-h:{g.h}px"') if g else ""
+    body = "".join(_tile(i, sparks.get(i.key, "")) + _detail(i) for i in items)
     return (f'<div role="tabpanel" class="panel" id="panel-{cat}" data-tab-id="{cat}" aria-labelledby="tab-{cat}"'
-            f'{"" if selected else " hidden"}{dense}>{body}</div>')
+            f'{"" if selected else " hidden"}{grid}>{body}</div>')
+
+
+def _sparks(store, items, state) -> dict[str, str]:
+    """グラフの対象の項目の直近 60 分を、全項目まとめて 1 回で読んで描く。"""
+    if state.evaluated_at is None or not any(i.unit for i in items):
+        return {}
+    end = state.evaluated_at.replace(second=0, microsecond=0)
+    hist = store.load_festival_history(end - timedelta(minutes=SPARK_MINUTES - 1), end)
+    return {i.key: sparkline(hist[i.key], end) for i in items if i.unit and i.key in hist}
 
 
 def render_fragment(store, festival, now: datetime) -> str:
@@ -117,7 +174,8 @@ def render_fragment(store, festival, now: datetime) -> str:
     items = store.load_festival_items()
     by = {c: [i for i in items if i.category == c] for c in TABS}
     tabs = "".join(_tab_head(c, by[c], c == TABS[0]) for c in TABS)
-    panels = "".join(_panel(c, by[c], c == TABS[0]) for c in TABS)
+    sparks = _sparks(store, items, state)
+    panels = "".join(_panel(c, by[c], c == TABS[0], sparks) for c in TABS)
     return (f'{root}{_band(items, state, now)}<nav class="tabs" role="tablist">{tabs}</nav>'
             f'<div class="panels">{panels}</div></div>')
 
@@ -129,9 +187,9 @@ CSS = """
 --ok:#6fcf8a;--warn:#f0b04a;--crit:#ff8a80;--error:#d7a5f5;--stale:#a9b4c6;--empty:#a9b4c6;--info:#a9b4c6}}
 *{box-sizing:border-box}html,body{height:100%;margin:0}
 body{background:var(--bg);color:var(--fg);font:15px/1.4 system-ui,"Hiragino Sans","Noto Sans JP",sans-serif;
-display:grid;grid-template-columns:minmax(0,1fr) 420px;grid-template-rows:auto 56px minmax(0,1fr);overflow:hidden}
+display:grid;grid-template-columns:1360px 560px;grid-template-rows:120px 56px 904px;overflow:hidden}
 #festival-fragment{display:contents}
-.band{grid-column:1/-1;grid-row:1;max-height:120px;overflow:hidden;display:grid;grid-template-columns:1fr auto;
+.band{grid-column:1/-1;grid-row:1;height:120px;overflow:hidden;display:grid;grid-template-columns:1fr auto;
 gap:2px 24px;align-items:center;padding:8px 16px;background:var(--card);border-bottom:4px solid var(--ok)}
 .band.s-warn{border-bottom-color:var(--warn)}.band.s-crit{border-bottom-color:var(--crit)}
 .counts{font-size:26px;font-weight:700}.upd{color:var(--mute);font-size:18px}
@@ -149,22 +207,42 @@ background:var(--bg);color:var(--fg);font:inherit;font-size:17px;cursor:pointer;
 .badge.s-error{color:var(--error);background:color-mix(in srgb,var(--error) 12%,transparent)}
 .badge.s-stale,.badge.s-info{color:var(--stale)}.badge.s-empty{color:var(--empty)}
 .panels{grid-column:1;grid-row:3;min-height:0}
-.panel{height:100%;overflow:auto;padding:12px;display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));
-grid-auto-rows:84px;gap:8px;align-content:start}
-.panel[hidden]{display:none}.panel[data-dense=true]{grid-auto-rows:64px}
-.tile{display:grid;grid-template-columns:auto 1fr;grid-template-areas:"n n" "st v" "t t";align-content:center;
-gap:2px 8px;padding:6px 10px;min-width:0;text-align:left;font:inherit;color:var(--fg);background:var(--card);
-border:1px solid var(--line);border-left:6px solid var(--ok);border-radius:6px;cursor:pointer}
-.panel[data-dense=true] .tile{grid-template-areas:"n t" "st v";padding:4px 10px}
+.panel{height:100%;overflow:auto;padding:12px;display:grid;grid-template-columns:repeat(var(--cols),var(--tile-w));
+grid-auto-rows:var(--tile-h);gap:8px;align-content:start;justify-content:start}
+.panel[hidden]{display:none}
+.tile{display:grid;grid-template-columns:minmax(0,1fr);min-width:0;min-height:0;overflow:hidden;text-align:left;
+font:inherit;color:var(--fg);background:var(--card);border:1px solid var(--line);border-left:6px solid var(--ok);
+border-radius:6px;cursor:pointer;padding:10px 12px;gap:4px;
+grid-template-areas:"h" "v" "sp" "th" "no" "t";
+grid-template-rows:24px 38px max(40px,calc(var(--tile-h) - 158px)) 18px 18px 18px}
 .tile.s-warn{border-left-color:var(--warn)}.tile.s-crit{border-left-color:var(--crit);background:color-mix(in srgb,var(--crit) 10%,var(--card))}
 .tile.s-error{border-left-color:var(--error)}.tile.s-stale,.tile.s-empty{border-left-color:var(--stale)}
 .tile.s-info{border-left-color:var(--info);border-left-style:dashed}
 .tile.sel{outline:3px solid var(--fg);outline-offset:-3px}
-.tile .n{grid-area:n;font-weight:700;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.tile .st{grid-area:st}.tile .v{grid-area:v;font-size:18px;font-weight:600;text-align:right;white-space:nowrap;
-overflow:hidden;text-overflow:ellipsis}.tile .t{grid-area:t;color:var(--mute);font-size:13px}
-.panel[data-dense=true] .tile .t{text-align:right}
-#detail{grid-column:2;grid-row:3;overflow:auto;padding:16px;background:var(--card);border-left:1px solid var(--line)}
+.tile.s-ok{color:var(--fg)}
+.tile .h{grid-area:h;display:flex;align-items:center;gap:8px;min-width:0}
+.tile .n{flex:1;min-width:0;font-weight:700;font-size:17px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tile .v{grid-area:v;font-size:30px;font-weight:700;line-height:38px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tile .sp{grid-area:sp;min-height:0;overflow:hidden;color:var(--ok)}
+.tile.s-warn .sp{color:var(--warn)}.tile.s-crit .sp{color:var(--crit)}.tile.s-error .sp{color:var(--error)}
+.tile.s-stale .sp,.tile.s-empty .sp,.tile.s-info .sp{color:var(--stale)}
+.tile .spark{display:block;width:100%;height:100%}
+.panel[data-size=standard] .tile.nc{grid-template-areas:"h" "v" "th" "no" "t";
+grid-template-rows:24px calc(42px + max(40px,calc(var(--tile-h) - 158px))) 18px 18px 18px}
+/* 30px に収まらない現在値の続きを、同じ要素の 2 行目以降に 15px で折り返して出す */
+.panel[data-size=standard] .tile.nc .v{font-size:15px;font-weight:400;line-height:normal;white-space:normal;
+overflow:hidden;overflow-wrap:anywhere;text-overflow:clip}
+.panel[data-size=standard] .tile.nc .v::first-line{font-size:30px;font-weight:700;line-height:38px}
+.tile .th,.tile .no,.tile .t{font-size:13px;line-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tile .th{grid-area:th}.tile .no{grid-area:no}.tile .t{grid-area:t;color:var(--mute)}
+.panel[data-size=compact] .tile{padding:4px 8px;gap:2px;grid-template-columns:55fr 45fr;
+grid-template-areas:"h h" "v sp" "th th" "no no" "t t";grid-template-rows:20px max(28px,calc(var(--tile-h) - 80px)) 14px 14px 14px}
+.panel[data-size=compact] .tile.nc{grid-template-areas:"h h" "v v" "th th" "no no" "t t"}
+.panel[data-size=compact] .tile.nc .sp{display:none}
+.panel[data-size=compact] .tile .n{font-size:14px}.panel[data-size=compact] .tile .badge{font-size:12px}
+.panel[data-size=compact] .tile .v{font-size:20px;line-height:28px;align-self:center}
+.panel[data-size=compact] .tile .th,.panel[data-size=compact] .tile .no,.panel[data-size=compact] .tile .t{font-size:12px;line-height:14px}
+#detail{grid-column:2;grid-row:3;height:904px;overflow:auto;padding:16px;background:var(--card);border-left:1px solid var(--line)}
 #detail h2{font-size:20px;margin:0 0 8px}#detail .val{font-size:26px;font-weight:700;margin:8px 0}
 #detail dl{display:grid;grid-template-columns:auto 1fr;gap:4px 12px}#detail dt{color:var(--mute)}#detail dd{margin:0}
 .btn{display:inline-block;padding:6px 12px;border:1px solid var(--line);border-radius:6px;color:var(--fg);text-decoration:none}

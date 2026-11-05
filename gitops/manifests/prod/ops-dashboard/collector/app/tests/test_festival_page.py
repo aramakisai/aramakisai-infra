@@ -110,12 +110,63 @@ class FestivalPageTest(unittest.TestCase):
         self.assertIn("当日監視の宣言がありません", html)
         self.assertNotIn('role="tab"', html)
 
-    def test_dense_when_over_threshold(self):
-        n = page.DENSE_THRESHOLD
-        normal = self.frag([item(f"capacity.{i:03}", category="capacity") for i in range(n)])
-        self.assertNotIn('data-dense="true"', normal)
-        dense = self.frag([item(f"capacity.{i:03}", category="capacity") for i in range(n + 1)])
-        self.assertEqual(dense.count('data-dense="true"'), 1)
+    def test_tile_grid_matches_design_table(self):
+        table = {1: (1, 1, 640, 360, "standard"), 2: (1, 2, 640, 360, "standard"), 4: (2, 2, 640, 360, "standard"),
+                 6: (2, 3, 640, 288, "standard"), 8: (2, 4, 640, 214, "standard"), 12: (4, 3, 328, 288, "standard"),
+                 16: (4, 4, 328, 214, "standard"), 20: (5, 4, 260, 214, "standard"), 24: (6, 4, 216, 214, "compact"),
+                 30: (6, 5, 216, 169, "compact"), 37: (6, 7, 216, 118, "compact"), 42: (6, 7, 216, 118, "compact")}
+        for n, want in table.items():
+            g = page.tile_grid(n)
+            self.assertEqual((g.cols, g.rows, g.w, g.h, g.size), want, n)
+        self.assertIsNone(page.tile_grid(0))
+
+    def test_panel_carries_size_and_grid_variables(self):
+        def panel(n):
+            html = self.frag([item(f"capacity.{i:03}", category="capacity") for i in range(n)])
+            return re.search(r'<div role="tabpanel"[^>]*data-tab-id="capacity"[^>]*>', html).group(0)
+        std, small = panel(20), panel(21)
+        self.assertIn('data-size="standard"', std)
+        self.assertIn("--cols:5;--tile-w:260px;--tile-h:214px", std)
+        self.assertIn('data-size="compact"', small)
+        self.assertIn("--cols:3;--tile-w:440px;--tile-h:118px", small)
+        self.assertNotIn("data-size", panel(0))
+
+    def test_tile_shows_threshold_note_and_times(self):
+        html = self.frag([item("visitor.a", Status.WARN)])
+        tile = re.search(r'<button type="button" class="tile.*?</button>', html, re.S).group(0)
+        self.assertIn("注意 ≥ 1.0% / 異常 ≥ 5.0%", tile)
+        self.assertIn("メモ &lt;b&gt;", tile)
+        self.assertIn("データ 11:57:00・取得 11:59:55", tile)
+        no_obs = self.frag([item("visitor.a", observed_at=None, threshold=None, note=None)])
+        tile = re.search(r'<button type="button" class="tile.*?</button>', no_obs, re.S).group(0)
+        self.assertIn("取得 11:59:55", tile)
+        self.assertNotIn("データ", tile)
+
+    def test_sparkline_only_for_chart_items(self):
+        for m in range(3):
+            at = NOW - timedelta(minutes=2 - m)
+            self.store.replace_festival_items(
+                [item("visitor.a", metric=0.1 * m, unit="ratio"), item("visitor.b")], at,
+                history=[("visitor.a", 0.1 * m)], history_minute=at)
+        html = page.render_fragment(self.store, object(), NOW)
+        a = re.search(r'data-key="visitor.a".*?</button>', html, re.S).group(0)
+        b = re.search(r'data-key="visitor.b".*?</button>', html, re.S).group(0)
+        self.assertIn('class="spark"', a)
+        self.assertNotIn("<svg", b)
+
+    def test_non_chart_tile_shows_value_once(self):
+        html = self.frag([item("visitor.b", value="合計 12,345 件 (固有の値)")])
+        tile = re.search(r'<button type="button" class="tile.*?</button>', html, re.S).group(0)
+        self.assertEqual(tile.count("合計 12,345 件 (固有の値)"), 1)
+
+    def test_sparkline_reads_history_once(self):
+        calls = []
+        orig = self.store.load_festival_history
+        self.store.load_festival_history = lambda *a, **k: calls.append((a, k)) or orig(*a, **k)
+        self.frag([item(f"visitor.{i}", metric=1.0, unit="count") for i in range(5)])
+        self.assertEqual(len(calls), 1)
+        self.assertNotIn("key", calls[0][1])
+        self.assertEqual(len(calls[0][0]), 2)
 
     def test_page_includes_fragment_detail_frame_and_labels(self):
         self.store.replace_festival_items([item("visitor.a")], NOW)
