@@ -38,6 +38,7 @@ LABELS: dict[str, str] = {
     "fest.unit.rps": "{value}/s",
     "fest.detail.more_rows": "ほか {n} 行",
     "fest.detail.link": "{name} を開く",
+    "fest.detail.loading": "読み込み中",
     "fest.detail.empty": "項目を選ぶと推移と内訳を表示します",
     "fest.detail.gone": "この項目は現在ありません",
     "fest.link.cloudflare": "Cloudflare ダッシュボード",

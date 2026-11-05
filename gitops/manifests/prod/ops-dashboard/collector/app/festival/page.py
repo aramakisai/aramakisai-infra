@@ -85,8 +85,10 @@ def _times(i: FestivalItem) -> str:
 def _tile(i: FestivalItem, spark: str) -> str:
     s = _view_status(i)
     chart = i.unit is not None
+    # 自動選択がブラウザ側で model.worst と同じ順序を使えるよう、判定対象の項目の重さを渡す
+    rank = f' data-rank="{model._SEVERITY[i.status]}"' if i.judged else ""
     sp = f'<span class="sp">{spark}</span>' if chart else ""
-    return (f'<button type="button" class="tile s-{s}{"" if chart else " nc"}" data-key="{esc(i.key)}" '
+    return (f'<button type="button" class="tile s-{s}{"" if chart else " nc"}" data-key="{esc(i.key)}"{rank} '
             f'data-tab="{esc(i.category)}" aria-controls="detail" aria-pressed="false">'
             f'<span class="h"><span class="n">{esc(i.label)}</span>{_badge(s)}</span>'
             f'<span class="v">{esc(i.value)}</span>{sp}'
@@ -315,7 +317,9 @@ const L=JSON.parse(document.getElementById('festival-labels').textContent);
 const TABS=['visitor','function','capacity','infra'];
 const $=(s,r=document)=>r.querySelector(s);
 const hashTab=()=>{const h=location.hash.slice(1);return TABS.includes(h)?h:'visitor'};
-const st={tab:hashTab(),key:null,last:Date.now(),reason:null};
+// key: 利用者が選んだ項目、auto: 自動選択の項目、gone: key の項目が消えたことを 1 回表示済み、seq: 最後に出した断片の要求の連番
+const st={tab:hashTab(),key:null,auto:null,gone:false,seq:0,last:Date.now(),reason:null};
+const curKey=()=>st.key??st.auto;
 const hms=ms=>new Date(ms).toLocaleTimeString('ja-JP',{timeZone:'Asia/Tokyo',hour12:false});
 function warn(){
   const w=$('#festival-warn');if(!w)return;
@@ -330,55 +334,85 @@ function paint(){
   const root=$('#festival-fragment');
   root.querySelectorAll('[role=tab]').forEach(b=>{const on=b.dataset.tabId===st.tab;b.setAttribute('aria-selected',on);b.tabIndex=on?0:-1});
   root.querySelectorAll('[role=tabpanel]').forEach(p=>{p.hidden=p.dataset.tabId!==st.tab});
-  root.querySelectorAll('.tile').forEach(t=>{const on=t.dataset.key===st.key;t.classList.toggle('sel',on);t.setAttribute('aria-pressed',on)});
+  root.querySelectorAll('.tile').forEach(t=>{const on=t.dataset.key===curKey();t.classList.toggle('sel',on);t.setAttribute('aria-pressed',on)});
   warn();
 }
-async function refresh(){
+async function refresh(key){
   const ac=new AbortController(),to=setTimeout(()=>ac.abort(),10000);
   try{
-    const r=await fetch(L.fragment,{credentials:'same-origin',cache:'no-store',redirect:'manual',signal:ac.signal});
+    const r=await fetch(key?L.fragment+'?key='+encodeURIComponent(key):L.fragment,{credentials:'same-origin',cache:'no-store',redirect:'manual',signal:ac.signal});
     if(r.type==='opaqueredirect'||r.status===401)return{kind:'auth'};
     if(r.status===403)return{kind:'forbidden'};
     if(!r.ok)return{kind:'server',status:r.status};
     return{kind:'ok',html:await r.text()};
   }catch(e){return{kind:'network'}}finally{clearTimeout(to)}
 }
-function apply(res){
+function load(loading){
+  const seq=++st.seq;
+  if(loading){const d=$('#detail'),p=document.createElement('p');p.className='gone';p.textContent=L.loading;d.replaceChildren(p)}
+  refresh(curKey()).then(r=>apply(r,seq));
+}
+function pick(){
+  const ts=[...document.querySelectorAll('#panel-'+st.tab+' .tile')];
+  let b=null;
+  for(const t of ts)if(t.dataset.rank&&(!b||+t.dataset.rank>+b.dataset.rank))b=t;
+  return (b||ts[0])?.dataset.key??null;
+}
+function autoSelect(){
+  if(st.key)return;
+  st.auto=pick();paint();
+  if(st.auto!==($('#festival-fragment').dataset.key||null))load(true);
+}
+function selectItem(key){
+  st.key=key;st.gone=false;
+  if(key===null)st.auto=pick();
+  paint();load(true);
+}
+function apply(res,seq){
+  if(seq!==st.seq)return;
   if(res.kind==='ok'){
     const n=new DOMParser().parseFromString(res.html,'text/html').getElementById('festival-fragment');
-    if(!n)return apply({kind:'server',status:200});
+    if(!n)return apply({kind:'server',status:200},seq);
     const f=document.activeElement;
     const sel=f&&f.dataset&&(f.dataset.key?'.tile[data-key="'+CSS.escape(f.dataset.key)+'"]':f.id&&f.getAttribute('role')==='tab'?'#'+f.id:null);
     $('#festival-fragment').replaceWith(document.importNode(n,true));
-    st.last=Date.now();st.reason=null;paint();
+    st.last=Date.now();st.reason=null;
+    if(st.key){
+      if(!$('.tile[data-key="'+CSS.escape(st.key)+'"]')){if(st.gone){st.key=null;st.gone=false}else st.gone=true}
+      else st.gone=false;
+    }
+    paint();
     if(sel){const e=$(sel);if(e)e.focus()}
+    autoSelect();
     return;
   }
   st.reason=res.kind;paint();
 }
-function selectTab(t){st.tab=t;history.replaceState(null,'','#'+t);paint()}
+function selectTab(t){st.tab=t;history.replaceState(null,'','#'+t);paint();autoSelect()}
 document.addEventListener('click',e=>{
   const b=e.target.closest('[role=tab]');if(b){selectTab(b.dataset.tabId);return}
-  const t=e.target.closest('.tile');if(t){st.key=t.dataset.key;paint()}
+  const t=e.target.closest('.tile');if(t)selectItem(t.dataset.key===st.key?null:t.dataset.key)
 });
 document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'&&st.key){selectItem(null);return}
   const b=e.target.closest&&e.target.closest('[role=tab]');if(!b)return;
   const i=TABS.indexOf(b.dataset.tabId);
   const j={ArrowRight:(i+1)%4,ArrowLeft:(i+3)%4,Home:0,End:3}[e.key];
   if(j===undefined)return;
   e.preventDefault();selectTab(TABS[j]);$('#tab-'+TABS[j]).focus();
 });
-window.addEventListener('hashchange',()=>{st.tab=hashTab();paint()});
-setInterval(()=>refresh().then(apply),15000);
+window.addEventListener('hashchange',()=>{st.tab=hashTab();paint();autoSelect()});
+setInterval(()=>load(false),15000);
 setInterval(warn,5000);
-paint();
+paint();autoSelect();
 })();
 """
 
 
 def render_page(store, festival, now: datetime) -> str:
     labels = {"stale": label("fest.band.stale", time="{time}"),
-              "reauth": label("fest.band.reauth"), "page": PAGE_PATH, "fragment": FRAGMENT_PATH}
+              "reauth": label("fest.band.reauth"), "page": PAGE_PATH, "fragment": FRAGMENT_PATH,
+              "loading": label("fest.detail.loading")}
     # </script> 等で JSON ブロックが閉じないよう < をエスケープする
     data = json.dumps(labels, ensure_ascii=False).replace("<", "\\u003c")
     return ('<!doctype html><html lang="ja"><head><meta charset="utf-8">'

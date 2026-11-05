@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import tempfile
@@ -280,6 +281,20 @@ class FestivalPageTest(unittest.TestCase):
         self.assertIn('id="detail"', html)
         self.assertIn("表示が古い・再ログインが必要", html)
         self.assertNotIn("<script src", html)
+
+    def test_page_passes_loading_label_to_script(self):
+        self.store.replace_festival_items([item("visitor.a")], NOW)
+        html = page.render_page(self.store, object(), NOW)
+        data = json.loads(re.search(r'id="festival-labels">(.*?)</script>', html, re.S).group(1))
+        self.assertEqual(data["loading"], "読み込み中")
+
+    def test_tile_rank_follows_model_severity_and_is_absent_for_display_only(self):
+        html = self.frag([item("visitor.a", Status.CRIT), item("visitor.b", Status.OK),
+                          item("visitor.c", Status.WARN, judged=False)])
+        rank = {k: re.search(rf'data-key="{k}"[^>]*', html).group(0) for k in ("visitor.a", "visitor.b", "visitor.c")}
+        self.assertIn('data-rank="5"', rank["visitor.a"])
+        self.assertIn('data-rank="1"', rank["visitor.b"])
+        self.assertNotIn("data-rank", rank["visitor.c"])
 
     def test_labels_cover_design_table(self):
         self.assertEqual(label("fest.status.info"), "表示のみ")
