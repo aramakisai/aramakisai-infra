@@ -54,31 +54,45 @@ resource "cloudflare_ruleset" "directus_assets_cache" {
 
   # CMS の公開 JSON 応答 (GET /api/*) をエッジで 60 秒キャッシュする。
   # サイネージ・駐車場は保存から数秒以内の反映が要件、announcements/topics は公開日時で
-  # 保存なしに公開へ切り替わるため除外する。Cookie/Authorization 付きは認証状態で応答が変わるため対象外。
+  # 保存なしに公開へ切り替わるため除外する。ただしサイトの取得には即時反映の要件が無いため、
+  # 目印のクエリ __edge=1 付きに限り performance_slots / stages / sponsors / globals/site_settings
+  # をキャッシュ対象に戻す。目印があっても他の除外は解除しない。
+  # Cookie/Authorization 付きは認証状態で応答が変わるため対象外。
   rules {
     description = "CMS 公開 JSON 応答を 60 秒エッジキャッシュ (即時反映が要る系統と認証付きは除外)"
     expression = replace(trimspace(<<-EOT
       (http.host eq "cms.aramakisai.com")
       and (http.request.method eq "GET")
       and starts_with(http.request.uri.path, "/api/")
-      and not (
-        starts_with(http.request.uri.path, "/api/media")
-        or starts_with(http.request.uri.path, "/api/health")
-        or starts_with(http.request.uri.path, "/api/users")
-        or starts_with(http.request.uri.path, "/api/lost_items")
-        or starts_with(http.request.uri.path, "/api/parking_statuses")
-        or starts_with(http.request.uri.path, "/api/parking_lots")
-        or starts_with(http.request.uri.path, "/api/parking_snapshots")
-        or starts_with(http.request.uri.path, "/api/performance_slots")
-        or starts_with(http.request.uri.path, "/api/stages")
-        or starts_with(http.request.uri.path, "/api/telops")
-        or starts_with(http.request.uri.path, "/api/sponsors")
-        or starts_with(http.request.uri.path, "/api/signage_slides")
-        or starts_with(http.request.uri.path, "/api/signage_groups")
-        or starts_with(http.request.uri.path, "/api/announcements")
-        or starts_with(http.request.uri.path, "/api/topics")
-        or starts_with(http.request.uri.path, "/api/globals/signage_settings")
-        or starts_with(http.request.uri.path, "/api/globals/site_settings")
+      and (
+        not (
+          starts_with(http.request.uri.path, "/api/media")
+          or starts_with(http.request.uri.path, "/api/health")
+          or starts_with(http.request.uri.path, "/api/users")
+          or starts_with(http.request.uri.path, "/api/lost_items")
+          or starts_with(http.request.uri.path, "/api/parking_statuses")
+          or starts_with(http.request.uri.path, "/api/parking_lots")
+          or starts_with(http.request.uri.path, "/api/parking_snapshots")
+          or starts_with(http.request.uri.path, "/api/performance_slots")
+          or starts_with(http.request.uri.path, "/api/stages")
+          or starts_with(http.request.uri.path, "/api/telops")
+          or starts_with(http.request.uri.path, "/api/sponsors")
+          or starts_with(http.request.uri.path, "/api/signage_slides")
+          or starts_with(http.request.uri.path, "/api/signage_groups")
+          or starts_with(http.request.uri.path, "/api/announcements")
+          or starts_with(http.request.uri.path, "/api/topics")
+          or starts_with(http.request.uri.path, "/api/globals/signage_settings")
+          or starts_with(http.request.uri.path, "/api/globals/site_settings")
+        )
+        or (
+          http.request.uri.query contains "__edge=1"
+          and (
+            starts_with(http.request.uri.path, "/api/performance_slots")
+            or starts_with(http.request.uri.path, "/api/stages")
+            or starts_with(http.request.uri.path, "/api/sponsors")
+            or starts_with(http.request.uri.path, "/api/globals/site_settings")
+          )
+        )
       )
       and (http.cookie eq "")
       and not has_key(http.request.headers, "authorization")
