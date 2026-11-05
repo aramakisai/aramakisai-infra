@@ -33,6 +33,8 @@ spec:
       work_mem: "4MB"
       wal_compression: "on"
       jit: "off"
+      log_min_duration_sample: "0"
+      log_statement_sample_rate: "0.05"
 
   bootstrap:
     recovery:
