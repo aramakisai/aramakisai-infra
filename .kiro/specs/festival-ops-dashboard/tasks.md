@@ -293,3 +293,136 @@
   - 本番反映後に collector のメモリを実測し、追加分の見積りとあわせて runbook に記録する。limit の 75% を超えた場合は、増加の要因を調べて limit の見直しを諮る
   - 完了時: runbook と steering に当日監視の記述があり、collector のメモリの実測値が記録されている
   - _Requirements: 9.1, 9.6_
+
+- [ ] 8. 当日監視画面の推移・内訳・タイルの格子
+  - 各小タスクは、完了時の条件を確かめるテストを先に書き、失敗することを確かめてから実装する
+  - 6.1 の詳細の雛形 (`<template data-detail-for>`)、6.2 の雛形の複製による詳細の表示、6.3 の寸法の予算と小型表示の切り替え、7.3 の E2E は、本タスクの 8.7〜8.9・8.11 が置き換える。既存のテストのうち置き換わる挙動を確かめているものは、新しい挙動のテストに書き換える
+- [ ] 8.1 (P) 1 分値の表と、項目のグラフ・内訳の列を Store に足す
+  - `model.py` に `MetricUnit` (`ratio`・`count`・`ms`・`seconds`・`rps`) と `Breakdown` (見出し・列・整形済みの行) を足し、`FestivalItem` に `metric`・`unit`・`warn`・`crit`・`breakdown`・`link_label` を足す
+  - `festival_items` に `metric`・`unit`・`warn`・`crit`・`breakdown` (`Breakdown` の JSON)・`link_label` の列を足し、`festival_history` (主キー `(key, minute)`、`WITHOUT ROWID`) と索引 `festival_history_minute` を、既存の表と同じく起動時に作る
+  - `replace_festival_items` に 1 分値 (`history`・`history_minute`) を渡せるようにし、同じトランザクションで `INSERT OR REPLACE` と、`minute` が `history_minute − 24 時間` より前の行の削除を行う。既存の `RETENTION` には加えない
+  - `load_festival_history(since, until, key=None)` で、範囲内の 1 分値を項目キーごとに時刻順で返す (key を渡すとその項目だけ)
+  - テストファイル: `test_festival_store.py`
+  - 完了時: 一時 SQLite に対し、主キーが同じ行の上書き、期間の読み取り (全項目と 1 項目)、24 時間より前の行の削除、`festival_items` の内訳とグラフの列の往復を確かめる単体テストが通る
+  - _Requirements: 3.11, 3.13, 3.14, 9.1_
+  - _Boundary: Store_
+
+- [ ] 8.2 (P) Cloudflare と Pod の取得結果に内訳を残す
+  - `festival.cloudflare`: 合計に畳む前の行から、`worker.by_status` (`{status, requests, errors}`)、`cms.by_status`・`media.by_status` (`edgeResponseStatus` ごとの `{status, count}`。同じステータスは足し合わせる)、`cms_cache.by_cache_status` (`{cache_status, count}`) を `Item.values` に足す。問い合わせの回数と選ぶ次元は変えない
+  - `festival.workloads`: 最大値を求める前の Pod ごとの値から、`cms.by_pod` (`{pod, ready, cpu_ratio, throttle_ratio, restarts_recent, oom_recent, crashloop}`) と `cloudflared.by_pod` (`{pod, cpu_ratio, throttle_ratio}`) を足す。DB には足さない
+  - 配列の各要素は数値と文字列だけの辞書にし、IP などの個人を識別できる値を入れない
+  - テストファイル: `test_festival_source_cloudflare.py`、`test_festival_source_workloads.py`
+  - 完了時: fixture の行と `by_status`・`by_cache_status`・`by_pod` の内訳が一致することを単体テストで確かめている
+  - _Requirements: 3.14, 9.2, 9.5_
+  - _Boundary: festival.cloudflare, festival.workloads_
+
+- [ ] 8.3 項目にグラフの値・閾値の線・参照先の名前を持たせる
+  - `Judgement` に `metric`・`unit`・`warn`・`crit`・`breakdown` を、`ItemGroup` に `link_label` を足す
+  - design の「グラフの対象」の表の全項目で、`metric`・`unit`・閾値の線を入れる。期間の閾値は秒に換算し、算出できない値 (最終受信の時刻が無い、lookups が 0 など) は `metric = None` にする。表示のみの項目と、閾値が未宣言の Cache API のヒット率は線を `None` にする。サイネージの線は設置台数 − `signage_missing` の注意・異常とし、設置台数 0 の間は線なし
+  - 駐車場の受信の経過 (秒) と判定の連続失敗回数をグラフの対象にする
+  - 表示のみの項目 `visitor.worker.requests` (「Worker 要求数」、「{requests} 件」) を足す。閾値名を持たず、常に `judged = False` を返す
+  - 参照先の名前は、Cloudflare ダッシュボード・Netdata・`/admin/#…`・CMS 管理画面・Healthchecks.io のコンソールに、それぞれ `fest.link.cloudflare`・`fest.link.netdata`・`fest.link.admin`・`fest.link.cms`・`fest.link.healthchecks` を割り当てる
+  - テストファイル: `test_festival_catalog.py`
+  - 完了時: グラフの対象の全項目で値・単位・線が入り、表に無い項目で `unit` が `None` であること、期間の閾値の秒への換算、サイネージの線、表示のみの項目で線が無いこと、`visitor.worker.requests` が通知を計画せず帯とタブの件数に数えられないこと、受信なしの駐車場で `metric = None` になることを単体テストで確かめている
+  - _Requirements: 3.5, 3.7, 3.11, 3.12, 4.1, 6.13_
+  - _Depends: 8.1_
+  - _Boundary: FestivalCatalog_
+
+- [ ] 8.4 項目に内訳の表を持たせる
+  - design の「内訳」の表の全項目で、見出し・列・並び順のとおりに `Breakdown` を作る。値は情報源が既に取得した結果だけから作り、問い合わせを足さない
+  - DB の instance ごとの内訳は `festival.workloads` と `festival.cnpg` の `db.*` を Pod 名で突き合わせ、片方が無い・取得失敗のときはその列を「—」にする。primary を先頭、残りは Pod 名順にする
+  - 値の書式は、比率は小数 1 桁の百分率、時刻は JST の `HH:MM:SS`、真偽は「はい」「いいえ」、値が無いときは「—」、再起動は `capacity.cms.restarts` の現在値と同じ書式にする
+  - 表に無い項目 (`capacity.tunnel` を含む) は内訳を持たない。列に IP などの個人を識別できる値を入れない
+  - テストファイル: `test_festival_catalog.py`
+  - 完了時: 内訳の表の全項目で見出し・列・並び順が表のとおりであること、DB の突き合わせと片方が無いときの「—」、内訳の無い項目で `breakdown` が `None` であることを単体テストで確かめている
+  - _Requirements: 3.14, 9.5_
+  - _Depends: 8.2, 8.3_
+  - _Boundary: FestivalCatalog_
+
+- [ ] 8.5 (P) 評価器で 1 分値を記録し、内訳を保存する
+  - `Judgement` の `metric`・`unit`・`warn`・`crit`・`breakdown` と `ItemGroup.link_label` を `FestivalItem` に移す。取得失敗・取得遅延の項目も、直前の結果から作った内訳を残す
+  - 評価時刻を分単位で切り捨てた分が、最後に記録した分 (評価器のメモリにだけ持つ) から変わった最初の評価でだけ 1 分値を記録する
+  - 記録するのは `unit` と `metric` が `None` でなく、取得失敗・取得遅延・時間外でない項目とする。表示のみの項目も記録し、判定の結果は記録しない。記録しない分は補わない
+  - 記録と 24 時間より前の行の削除は、`festival_items` の置き換えと同じトランザクションで行い、記録の失敗は既存の評価の例外の扱いに従う
+  - テストファイル: `test_festival_evaluate.py`
+  - 完了時: 分が変わって最初の評価だけが記録すること、取得失敗・取得遅延・時間外・`metric = None`・グラフの対象外の項目を記録しないこと、表示のみの項目を記録すること、24 時間より前の行が消えること、同じ分の再記録で上書きされることを単体テストで確かめている
+  - _Requirements: 3.11, 3.13, 3.14, 9.1_
+  - _Depends: 8.1, 8.3_
+  - _Boundary: FestivalEvaluator_
+
+- [ ] 8.6 (P) スパークラインと当日の折れ線を SVG にする
+  - `festival/chart.py` に `sparkline`・`day_chart`・`format_axis` を作る。入力の値だけから描き、SQLite と時計を読まない。import は `model`・`festival.labels`・`render.components` の `esc`・`render.svg` の `_nice_max` に限る
+  - スパークライン: design の「スパークライン」のとおり、直近 60 個の分、`viewBox="0 0 600 100"`、縦軸 0〜`_nice_max(最大値)` (すべて 0・記録なしは 0〜1)、軸・目盛・文字なし、`aria-hidden="true"`。記録が 1 つも無ければ空文字
+  - 当日の折れ線: design の「当日の折れ線」のとおり、JST の 00:00 から評価時刻まで、`viewBox="0 0 528 220"`、縦軸の上限に閾値を含め、3 本の目盛と単位ごとの文字、正時の横軸の目盛 (8 時間以下は 1 時間、16 時間以下は 2 時間、それ以上は 3 時間)、注意・異常の破線と右の文字 (縦の間隔が 14px 未満なら上側を 14px 上へ)、`role="img"` と `aria-label`。記録が 1 つも無ければ「当日の記録がありません」
+  - 両方とも欠測の分で線を切って前後を結ばず、1 点だけの分は長さ 0 の線分を丸い端で描く
+  - 当日の推移と単位の表記 (`fest.detail.chart*`) を `festival/labels.py` に足す
+  - テストファイル: `test_festival_chart.py`
+  - 完了時: スパークラインの横軸 (60 個の分)・縦軸の上限 (0 だけ・記録なしで 0〜1)・欠測での切断・1 点だけの分、当日の折れ線の範囲・閾値を含む上限・閾値の線と文字・文字のずらし・目盛の間隔 (8・16 時間の境界)・記録なしの表示・単位ごとの書式を単体テストで確かめている
+  - _Requirements: 3.11, 3.12, 3.13_
+  - _Depends: 8.1_
+  - _Boundary: FestivalChart_
+
+- [ ] 8.7 タイルの格子とタイルの中身を描く
+  - `tile_grid(n)` を design の「タイルの大きさの決め方」の手順と定数どおりに作り、タブパネルに `data-size` と `--cols`・`--tile-w`・`--tile-h` を出す
+  - タイルに、名前・判定・現在値・閾値・注記・時刻 (「データ HH:MM:SS・取得 HH:MM:SS」、データの時刻が無い項目は取得だけ) と、グラフの対象の項目は直近 60 分のスパークラインを常に載せる。スパークラインは `festival_history` の直近 60 分を全項目まとめて 1 回で読む
+  - 標準表示と小型表示の各行の高さ・文字の大きさ・余白を design の「タイルの中身」の表どおりにし、溢れた文字は末尾を省略する
+  - 帯 120px・タブ見出し 56px・格子の領域 1360 × 904・詳細パネル 560 × 904 の寸法の予算で配置する (6.3 の寸法と小型表示の切り替えを置き換える)
+  - 時刻の表記 (`fest.tile.*`) を `festival/labels.py` に足す
+  - テストファイル: `test_festival_page.py`
+  - 完了時: `tile_grid()` が design の例の表 (1・4・6・8・12・16・20・24・30・37・42 個) と一致し 0 個で `None` になること、標準と小型の境界、一時 SQLite から描いたタイルに閾値・注記・時刻・スパークラインが入り、グラフの対象でない項目にスパークラインが無いことを単体テストで確かめている
+  - _Requirements: 3.6, 3.8, 3.11, 3.15_
+  - _Depends: 8.1, 8.6_
+  - _Boundary: FestivalPage_
+
+- [ ] 8.8 選んだ項目の詳細を断片に含めて返す
+  - `/admin/festival/fragment` の任意のクエリ `key` を受け、ルート要素に `data-key` を出し、断片の中に詳細パネル `<aside id="detail" aria-live="polite">` を置く。`key` の項目の分だけ詳細を描き、`key` が無ければ未選択の表示にする。`key` は SQL のパラメータと HTML のエスケープを通してだけ使い、200 文字を超える値と該当する項目の無い値は「この項目は現在ありません」にする
+  - 詳細パネルに、見出し・現在値・項目の情報 (閾値・データの時刻・取得時刻・注記。注記は 2 行まで)・当日の推移 (グラフの対象の項目だけ。`festival_history` の当該項目の JST の 00:00 から評価時刻までを間引かずに読む)・内訳 (11 行を超えるときは先頭 10 行と「ほか n 行」)・補助のリンク (「{name} を開く」の文字のリンク、外部は新しいタブ) を、design の「詳細パネル」の高さの予算と間隔で出す
+  - 6.1 の詳細の雛形 (`<template data-detail-for>`) を除く
+  - 詳細・参照先・内訳の見出しと列・真偽の表記 (`fest.detail.*`・`fest.link.*`・`fest.bd.*`・`fest.col.*`・`fest.bool.*`) を design の「画面表記」どおりに `festival/labels.py` に足し、`fest.detail.link` を「{name} を開く」に改める
+  - テストファイル: `test_festival_page.py`
+  - 完了時: `key` 付きの断片に当該項目の当日の折れ線・内訳・リンクが入り、`key` 無しで未選択、200 文字超・該当無しで「この項目は現在ありません」、内訳 11 行超で「ほか n 行」、`key` の値がエスケープされることを単体テストで確かめている
+  - _Requirements: 3.7, 3.12, 3.13, 3.14, 3.16_
+  - _Depends: 8.7_
+  - _Boundary: FestivalPage_
+
+- [ ] 8.9 ブラウザ側で項目の選択・自動選択・取り直しを行う
+  - `selectItem` で、タイルに選択の印を付け、詳細パネルを「読み込み中」にして、選択中の項目のキーを付けてすぐに断片を取り直す。15 秒ごとの更新も選択中のキーを付ける
+  - 断片の要求に連番 (`requestSeq`) を付け、最後に出した要求でない応答は適用しない
+  - 利用者の選択が無い間は、表示中のタブで最も悪い判定の項目 (`model.worst` と同じ順序、同じ判定はタイルの並びで先、表示のみの項目はタブに判定対象が無いときだけ候補) を自動で選び、その `key` で詳細を取り直す。更新のたびとタブの切り替えのたびに選び直す
+  - 利用者の選択は自動では変えず、タブを切り替えても保つ。選択中のタイルの再選択または Esc で自動選択に戻る。選んだ項目が消えたら「この項目は現在ありません」を出し、次の更新で自動選択に戻る。タブに項目が無いときだけ「項目を選ぶと推移と内訳を表示します」を出す
+  - 失敗時は詳細パネルを含めて表示を保つ (6.2 の雛形の複製による詳細の表示を置き換える)
+  - 完了時: 8.11 の E2E のうち、選択の保持と更新、選択の切り替えの競合、自動選択の項目を先に書き、それらが通る
+  - _Requirements: 3.7, 3.10, 3.16_
+  - _Depends: 8.8_
+  - _Boundary: FestivalPage_
+
+- [ ] 8.10 配布の設定と結合テストを推移・内訳に合わせる
+  - kustomization の configMap `collector-festival` に `festival/chart.py` を足す
+  - 偽の結果を入れた Collector と一時 SQLite で、時計を進めて複数の分を評価し、断片のスパークラインと、`key` を付けた断片の当日の折れ線・内訳に反映されることを結合テストに足す
+  - テストファイル: `test_festival_integration.py`
+  - 完了時: 上記の結合テストが通り、`kustomize build` が通り、ローカルの collector で `key` を付けた断片が 200 を返す
+  - _Requirements: 3.11, 3.12, 3.14, 9.1_
+  - _Depends: 8.4, 8.5, 8.8_
+
+- [ ] 8.11 当日監視画面を実ブラウザで確かめる (7.3 を置き換える)
+  - Playwright (headless) で、ローカルの collector と fixture の SQLite を使い、1920×1080 で確かめる。検証後と失敗時にブラウザを閉じる
+  - テストは `collector/app/tests/e2e_festival.py` に置き、`python3 -I` で手動で実行する (ファイル名を `test_` で始めず、CI の `unittest discover` の対象にしない)
+  - 4 つのタブのそれぞれで、格子と詳細パネルに縦スクロールが無いこと (`scrollHeight <= clientHeight`)。項目数は 1・12・20 (標準表示)・24・42 (小型表示)
+  - 各項目数で、タイルの寸法が `tile_grid()` の値と一致し、タイルの各行 (名前・現在値・スパークライン・閾値・注記・時刻) が予算の高さに収まること (`getBoundingClientRect()` で実測する)
+  - 内訳 11 行以上とグラフと注記 2 行を持つ項目を選び、詳細パネルの各部分が予算の高さに収まり、パネルに縦スクロールが無いこと
+  - 項目を選ぶとページを遷移せずに当日の折れ線 (閾値の線と文字つき) と内訳が出ること、欠測のある fixture で線が途切れること
+  - タブを切り替え、項目を選んだ状態で 2 回の自動更新を待ち、タブと詳細パネルが保たれ、詳細の値が更新後の値になること
+  - 項目 A を選んだ直後に項目 B を選び、A の応答を遅らせても、詳細パネルに A が出ないこと
+  - 開いた直後とタブの切り替え直後に、選ばなくてもそのタブで最も悪い判定の項目の詳細が出ること。最も悪い項目が変わる fixture に差し替えると次の更新で詳細が切り替わること。利用者が選んだ項目は、より悪い項目が現れても変わらず、選択を外すと自動選択に戻ること
+  - 断片の応答を 401・500・通信断に差し替えたときの帯の警告と表示の保持、タブ見出しの最悪の判定・異常件数と帯の件数・異常の項目名の一致
+  - 完了時: 上記の E2E テストがすべて通る
+  - _Requirements: 2.1, 2.5, 3.5, 3.6, 3.7, 3.8, 3.9, 3.10, 3.11, 3.12, 3.13, 3.14, 3.15, 3.16_
+  - _Depends: 8.9, 8.10_
+
+- [ ] 8.12 (P) 運用の記録を推移の保持に合わせる
+  - 運用ダッシュボードの runbook の当日監視画面の節に、タイルの推移と画面内の詳細、推移の値を collector の SQLite に 1 分ごとに 24 時間分だけ持つこと、`festival_history` は復元の対象外で失うとその時点より前の推移が消えることを足す
+  - runbook の collector のメモリの節に、推移と内訳の追加分の見積り (試算 +6〜10Mi) と合計の見込み (試算 約 79Mi、limit の約 49%) を、試算であることを明記して足す。本番反映後の実測は 7.4 で行い、この合計の見込みと比べる
+  - steering の監視スタック節の運用ダッシュボードの行に、推移の表示のために既存の SQLite に 1 分値を 24 時間分持つ (時系列の保存基盤は置かない) ことを足す
+  - steering の dr.md の「運用ダッシュボードのデータ (collector の SQLite)」に、当日監視の 4 表 (評価結果・通知の状態・状態・1 分値) も復元の対象外で、失うと通知の状態と推移が初期化されることを足す
+  - 完了時: runbook と steering に推移の保持とメモリの見積りの記述がある
+  - _Requirements: 9.1, 9.6_

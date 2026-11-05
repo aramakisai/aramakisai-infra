@@ -1709,9 +1709,9 @@ MetricUnit = Literal["ratio", "count", "ms", "seconds", "rps"]
 
 @dataclass(frozen=True)
 class Breakdown:
-    title: str                          # 表の見出し (fest.bd.* の表記)
-    columns: tuple[str, ...]            # 列の見出し (fest.col.* の表記)
-    rows: tuple[tuple[str, ...], ...]   # 表示用に整形済みの値。並び順は FestivalCatalog の「内訳」の表のとおり
+    title: str                          # 表の見出しの表記キー (fest.bd.*)。文字への解決は FestivalPage が labels で行う
+    columns: tuple[str, ...]            # 列の見出しの表記キー (fest.col.*)
+    rows: tuple[tuple[str, ...], ...]   # 表示用に整形済みの値。真偽は表記キー (fest.bool.*) のまま入れ、FestivalPage が解決する。並び順は FestivalCatalog の「内訳」の表のとおり
 ```
 
 **1 分値の量の試算 (試算。実測ではない)**:
