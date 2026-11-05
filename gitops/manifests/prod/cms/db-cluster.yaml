@@ -16,7 +16,7 @@ spec:
   instances: 3
   # restart (既定) だと Pod spec 変更時に primary が switchover なしで再作成され書き込みが止まる
   primaryUpdateMethod: switchover
-  imageName: ghcr.io/cloudnative-pg/postgresql:16.8
+  imageName: ghcr.io/cloudnative-pg/postgresql:16.8@sha256:ed9bd4a26b152cf35f2c64e15f48126e3477ad222cfb04794562bdc999b8f0be
 
   # required にしないと prod-node-1 に複数インスタンスが集まり得るため、
   # ノード追加による冗長化の効果が失われる
@@ -84,19 +84,26 @@ spec:
 
   # Payload CMS 用のロール。CNPG 1.23.3 には Database CRD が無いため、
   # データベース自体の作成は cms の PreSync Job (cms-db-init) が psql で行う。
-  # そのために必要な CREATEDB をここで宣言的に与える。
+  # payload は payload DB の owner でマイグレーションを実行するロール、
+  # payload_app は web / worker が実行時に使う DML だけのロール (権限は cms-db-grant Job が付与する)。
   # directus ロールと directus データベースには触れない。
   managed:
     roles:
       - name: payload
         ensure: present
         login: true
-        createdb: true
         # CNPG が defaulting で補う値。書いておかないと ArgoCD が常に OutOfSync になる
         inherit: true
         connectionLimit: -1
         passwordSecret:
           name: cms-db-credentials
+      - name: payload_app
+        ensure: present
+        login: true
+        inherit: true
+        connectionLimit: -1
+        passwordSecret:
+          name: cms-app-db-credentials
 
   storage:
     size: 10Gi   # Directus はアセットを DB に保存するため authentik より大きめ

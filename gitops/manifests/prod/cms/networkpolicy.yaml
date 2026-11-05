@@ -1,0 +1,148 @@
+# 公開経路は cloudflared の Tunnel。運用ダッシュボードの collector だけが Service 経由で状態を読む
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cms-ingress
+spec:
+  podSelector:
+    matchLabels:
+      app: cms
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cloudflared
+          podSelector:
+            matchLabels:
+              app: cloudflared
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ops-dashboard
+          podSelector:
+            matchLabels:
+              app: collector
+      ports:
+        - {protocol: TCP, port: 3000}
+---
+# worker は Service を持たず、受け付けるのは kubelet の probe だけ (policy の対象外)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cms-worker-ingress
+spec:
+  podSelector:
+    matchLabels:
+      app: cms-worker
+  policyTypes: [Ingress]
+  ingress: []
+---
+# 8000 は CNPG オペレーターがインスタンスの状態を読むポート
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: directus-db-ingress
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: directus-db
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - {key: app, operator: In, values: [cms, cms-worker, cms-job]}
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: directus-db
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cnpg-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: cloudnative-pg
+      ports:
+        - {protocol: TCP, port: 5432}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cnpg-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: cloudnative-pg
+      ports:
+        - {protocol: TCP, port: 8000}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ops-dashboard
+          podSelector:
+            matchLabels:
+              app: collector
+      ports:
+        - {protocol: TCP, port: 9187}
+---
+# DNS と DB だけを許可する。Job は外部へ出ない
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cms-egress-internal
+spec:
+  podSelector:
+    matchExpressions:
+      - {key: app, operator: In, values: [cms, cms-worker, cms-job]}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    - to:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: directus-db
+      ports:
+        - {protocol: TCP, port: 5432}
+---
+# S3・Zitadel・Gemini・Cloudflare API・Discord・サイネージ通知など外部宛。
+# クラスタ内 (Pod / Service / ノード / メタデータ) への横移動は except で塞ぐ
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cms-egress-internet
+spec:
+  podSelector:
+    matchExpressions:
+      - {key: app, operator: In, values: [cms, cms-worker]}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.0.0/16
+---
+# mailserver は hostNetwork のため、Pod を選ぶ NetworkPolicy も ipBlock も宛先にならない
+# (Cilium は CIDR でノードの IP を選ばない)。ノードを entity で指定して 587 だけ許可する
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: cms-egress-smtp
+spec:
+  endpointSelector:
+    matchExpressions:
+      - {key: app, operator: In, values: [cms, cms-worker]}
+  egress:
+    - toEntities: [host, remote-node]
+      toPorts:
+        - ports:
+            - {port: "587", protocol: TCP}

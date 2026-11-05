@@ -25,6 +25,14 @@ spec:
       labels:
         app: cms
     spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 65533
+        fsGroup: 65533
+        seccompProfile:
+          type: RuntimeDefault
       # DB 接続・セッション (JWT)・アップロード (S3) をすべて Pod 外に持つため、どのノードでも動く。
       # ScheduleAnyway なのでノード障害時は残りのノードへ寄って起動を妨げない
       topologySpreadConstraints:
@@ -42,10 +50,77 @@ spec:
           image: ghcr.io/aramakisai/aramakisai-cms:main
           ports:
             - containerPort: 3000
-          envFrom:
-            - secretRef:
-                name: cms-secrets   # ESO が生成。DATABASE_URL もここから入る
           env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cms-secrets
+                  key: DATABASE_URL
+            - name: DATABASE_REPLICA_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cms-secrets
+                  key: DATABASE_REPLICA_URL
+            - name: PAYLOAD_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: cms-secrets
+                  key: PAYLOAD_SECRET
+            - name: S3_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: cms-secrets
+                  key: S3_ACCESS_KEY_ID
+            - name: S3_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: cms-secrets
+                  key: S3_SECRET_ACCESS_KEY
+            - name: SMTP_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: cms-secrets
+                  key: SMTP_HOST
+            - name: NOREPLY_SMTP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: cms-secrets
+                  key: NOREPLY_SMTP_PASSWORD
+            - name: CLOUDFLARE_ZONE_ID
+              valueFrom:
+                secretKeyRef:
+                  name: cms-secrets
+                  key: CLOUDFLARE_ZONE_ID
+            - name: CLOUDFLARE_PURGE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: cms-secrets
+                  key: CLOUDFLARE_PURGE_TOKEN
+            - name: SIGNAGE_NOTIFY_ACCESS_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: cms-secrets
+                  key: SIGNAGE_NOTIFY_ACCESS_CLIENT_ID
+            - name: SIGNAGE_NOTIFY_ACCESS_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: cms-secrets
+                  key: SIGNAGE_NOTIFY_ACCESS_CLIENT_SECRET
+            - name: AUTHENTIK_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: cms-secrets
+                  key: AUTHENTIK_CLIENT_ID
+            - name: AUTHENTIK_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: cms-secrets
+                  key: AUTHENTIK_CLIENT_SECRET
+            - name: SIGNAGE_QUAKE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: cms-secrets
+                  key: SIGNAGE_QUAKE_TOKEN
             - name: NODE_ENV
               value: production
             # ジョブの autoRun は cms-worker だけが担う。Payload のジョブ取得は排他がなく、
@@ -57,7 +132,7 @@ spec:
             - name: CMS_CORS_ORIGINS
               value: https://aramakisai.com
             - name: S3_BUCKET
-              value: aramakisai-backups
+              value: aramakisai-cms-media
             - name: S3_ENDPOINT
               value: https://fsn1.your-objectstorage.com
             - name: S3_REGION
@@ -68,15 +143,20 @@ spec:
             # AUTHENTIK_*という変数名だがCMSアプリ側のenv名(historical、値はZitadel)。
             # issuerはZitadelではアプリ単位パスを持たずインスタンスドメイン直下
             # (実機の/.well-known/openid-configuration確認済み)。
-            # AUTHENTIK_CLIENT_IDはZitadelが発行する値でauthentikのような
-            # カスタムclient_id指定ができないため、cms-secrets(envFrom)側から注入する
-            # (このenv:には置かない、envFromの後にenv:が来ると後勝ちで上書きされるため)。
             - name: AUTHENTIK_ISSUER_URL
               value: https://idp.aramakisai.com
             - name: SIGNAGE_NOTIFY_URL
               value: https://aramakisai.com/api/signage/notify
             - name: SIGNAGE_QUAKE_URL
               value: https://aramakisai-signage-quake.aramakisai.workers.dev
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+            - {name: next-cache, mountPath: /app/.next/cache}
           resources:
             requests:
               memory: "256Mi"
@@ -117,3 +197,6 @@ spec:
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 12
+      volumes:
+        - {name: tmp, emptyDir: {}}
+        - {name: next-cache, emptyDir: {}}

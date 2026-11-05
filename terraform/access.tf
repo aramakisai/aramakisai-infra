@@ -225,14 +225,29 @@ resource "cloudflare_zero_trust_access_service_token" "signage_notify" {
   }
 }
 
-# allow_zitadel (decision = "allow") と共存できないため独立リソースにする。
+# CMS の保存時通知 (/api/signage/notify) だけを Service Token に開く。
+# aramakisai_signage (/api/signage 配下) のポリシーにトークンを入れると /api/signage 全体を
+# 通してしまうため、より具体的なパスのアプリで分離する (Access は最長一致のアプリを選ぶ)
+resource "cloudflare_zero_trust_access_application" "aramakisai_signage_notify" {
+  account_id       = var.cloudflare_account_id
+  name             = "aramakisai-web (signage notify)"
+  domain           = "aramakisai.com/api/signage/notify"
+  type             = "self_hosted"
+  session_duration = "24h"
+
+  destinations {
+    type = "public"
+    uri  = "aramakisai.com/api/signage/notify"
+  }
+}
+
 # local.access_applications の for_each には相乗りさせない
 # (他アプリへ意図せずバイパスが広がるのを避けるため)
 resource "cloudflare_zero_trust_access_policy" "allow_signage_notify_service_token" {
   account_id     = var.cloudflare_account_id
-  application_id = cloudflare_zero_trust_access_application.aramakisai_signage.id
+  application_id = cloudflare_zero_trust_access_application.aramakisai_signage_notify.id
   name           = "Allow Signage Notify Service Token"
-  precedence     = 2
+  precedence     = 1
   decision       = "non_identity"
 
   include {
