@@ -32,6 +32,12 @@ CPU・メモリ使用率と K3s バージョン (ノード間で異なれば両�
 
 admin は `/admin/festival` で、開催日当日の各機能・容量・基盤・セキュリティの項目を正常・注意・異常で見られる。collector が取得・評価し、異常への遷移・再通知・回復を当日専用の Discord webhook (Infisical キー `DISCORD_FESTIVAL_WEBHOOK_URL`) に通知する。`dashboard.toml` に `[festival]` が無ければ何もせず、画面は「未設定」を表示する。
 
+### 推移と画面内の詳細
+
+各タイルは直近 60 分の推移 (スパークライン) を表示し、タイルを開くと同じ画面内に、当日 (JST 0:00 から現在) の折れ線と閾値の線、内訳の詳細を表示する。推移の値は collector の SQLite の `festival_history` に 1 分ごとに 1 点、24 時間分だけ持つ (24 時間を過ぎた行は評価のたびに消える。時系列の保存基盤は置かない)。判定と内訳の推移は持たない。
+
+`festival_history` は復元の対象外。失うとその時点より前の推移が消え、次の評価から記録し直される。
+
 ### 宣言の変更
 
 `collector/dashboard.toml` の `[festival]` 配下を編集して PR を出す。ConfigMap のハッシュが変わり collector Pod が再作成されて反映される。誤りがあると起動に失敗する。
@@ -63,9 +69,11 @@ collector は評価が例外なく終わるたびに、60 秒以上空けて Hea
 
 ### collector のメモリ
 
-collector の limit は 160Mi。当日監視の追加分の見積り (仮) は +15〜25Mi (スレッド 11 本、項目 100 未満、GraphQL の応答は数 KB)。測定は `make kubectl ARGS="top pod -n ops-dashboard"`。実測が limit の 75% (120Mi) を超えたら、増加の要因を調べて limit の見直しを検討する。
+collector の limit は 160Mi。当日監視の追加分の見積り (仮) は +15〜25Mi (スレッド 11 本、項目 100 未満、GraphQL の応答は数 KB)。測定は `make kubectl ARGS="top pod -n ops-dashboard"`。推移と内訳の追加分の見積り (試算) は +6〜10Mi (書き込みの接続のページキャッシュ最大 2MiB、断片 1 回の描画で一時的に約 4MiB、同時に 2 画面で最大約 8MiB、内訳は 100 行未満)。合計の見込み (試算) は 44 + 25 + 10 = 約 79Mi で、limit の約 49%。いずれも実測ではない。
 
-実測値: 本番反映後に記録する。
+実測が limit の 75% (120Mi) を超えたら、増加の要因を調べて limit の見直しを検討する。
+
+実測値: 本番反映後に記録し、上記の合計の見込み (試算) と比べる。
 
 ## executive・admin の付与・剥奪
 

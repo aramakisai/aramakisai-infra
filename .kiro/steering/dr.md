@@ -162,6 +162,8 @@ VolSync の対象は `mailserver-data` PVC のみ。次の PVC は `ReplicationS
 
 collector の `collector-data` PVC (SQLite) に保存する Falco 検知・認証イベント・DMARC・TLS-RPT・配送失敗は、再構築時の復元対象外 (バックアップなし)。DMARC・TLS-RPT は、`mailserver-ops-reports` に残っているレポートメールから mail-agent 経由で再取り込みされる (PVC ごと失った場合は上記のとおり再送待ち)。Falco 検知・認証イベント・配送失敗は再取得できない。
 
+当日監視の 4 表 (`festival_items` 評価結果・`festival_alerts` 通知の状態・`festival_state` 状態・`festival_history` 1 分値) も復元の対象外。失うと通知の状態と推移が初期化され、次の評価から作り直される。
+
 ### DKIM / TLS の注意事項
 
 - DKIM 鍵は `dkim-external-secret.yaml` から Infisical 経由で注入。Infisical に鍵が登録済みであること
