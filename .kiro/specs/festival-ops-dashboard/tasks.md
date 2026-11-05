@@ -1,7 +1,7 @@
 # Implementation Plan
 
 - [ ] 1. 外部の前提: Access のサービストークン・生存確認のチェック・シークレット・権限・DB のカスタムクエリ
-- [ ] 1.1 サイネージの接続数の読み取りに限った Cloudflare Access の経路を用意し、優先の挙動を実測する
+- [x] 1.1 サイネージの接続数の読み取りに限った Cloudflare Access の経路を用意し、優先の挙動を実測する
   - サイトの `/api/signage/stats` だけを宛先にした専用の Access アプリと、collector 用のサービストークン、そのトークンだけを許可するポリシーを Terraform に足す
   - サービストークンの有効期間・更新の余裕・作り直しの順序は、既存のサイネージ通知用トークンと同じにし、ID と secret を既存と同じ手順で取り出せる出力にする
   - 対象のリソースに限って適用したあと、実装の最初の検証として、collector のトークンで `/api/signage/stats` の Access を通過でき、同じトークンで `/api/signage/notify` と `/api/signage/ws` は通過できないことを実測する
@@ -16,7 +16,7 @@
   - 完了時: チェックが Healthchecks.io に存在し、通知先が設定済みで、ping URL が Infisical に登録されている
   - _Requirements: 8.7, 9.4_
 
-- [ ] 1.3 collector と CMS に渡すシークレットと、collector の読み取り権限を足す
+- [x] 1.3 collector と CMS に渡すシークレットと、collector の読み取り権限を足す
   - 当日専用の Discord webhook、生存確認の ping URL、地震リレーの読み取り専用トークン、駐車場の状態の読み取りトークン、Access のサービストークンの ID と secret を、collector-secrets の ExternalSecret に足す
   - 駐車場の状態の読み取りトークンを、cms-secrets の ExternalSecret にも足す (正本は Infisical の同じキー)
   - 地震リレーと駐車場のトークンはランダム値で生成し、web 側の本番デプロイより前に Infisical prod に登録されていることを確かめる
