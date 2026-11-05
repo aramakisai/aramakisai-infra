@@ -320,7 +320,7 @@ const hashTab=()=>{const h=location.hash.slice(1);return TABS.includes(h)?h:'vis
 // key: 利用者が選んだ項目、auto: 自動選択の項目、gone: key の項目が消えたことを 1 回表示済み、seq: 最後に出した断片の要求の連番
 const st={tab:hashTab(),key:null,auto:null,gone:false,seq:0,last:Date.now(),reason:null};
 const curKey=()=>st.key??st.auto;
-const hms=ms=>new Date(ms).toLocaleTimeString('ja-JP',{timeZone:'Asia/Tokyo',hour12:false});
+const hms=ms=>new Date(ms).toLocaleTimeString('ja-JP',{timeZone:'Asia/Tokyo',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'});
 function warn(){
   const w=$('#festival-warn');if(!w)return;
   if(!st.reason){w.hidden=true;return}

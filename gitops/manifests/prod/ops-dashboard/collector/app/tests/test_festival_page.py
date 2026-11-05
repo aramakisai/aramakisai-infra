@@ -305,6 +305,10 @@ class FestivalPageTest(unittest.TestCase):
         with self.assertRaises(KeyError):
             label("fest.nope")
 
+    def test_band_time_is_zero_padded_24h(self):
+        # 「最終更新 HH:MM:SS」は 1 桁の時と 0 時で崩れないよう、2 桁・h23 を明示する
+        self.assertRegex(page.JS, r"hour:'2-digit'[^}]*hourCycle:'h23'|hourCycle:'h23'[^}]*hour:'2-digit'")
+
 
 if __name__ == "__main__":
     unittest.main()
