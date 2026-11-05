@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 import store as store_mod
 from festival import page
 from festival.labels import label
-from model import FestivalItem, Status
+from model import Breakdown, FestivalItem, Status
 
 NOW = datetime(2026, 11, 14, 3, 0, 0, tzinfo=timezone.utc)  # JST 12:00:00
 
@@ -78,16 +78,119 @@ class FestivalPageTest(unittest.TestCase):
         self.assertIn('data-tab="visitor"', tile)
         self.assertIn('aria-controls="detail"', tile)
 
-    def test_detail_template_has_threshold_link_times_and_escaped_note(self):
-        html = self.frag([item("visitor.a", Status.CRIT)])
-        tpl = re.search(r'<template data-detail-for="visitor.a">(.*?)</template>', html, re.S).group(1)
-        self.assertIn("注意 ≥ 1.0% / 異常 ≥ 5.0%", tpl)
-        self.assertIn('href="/admin/#sec-cluster"', tpl)
-        self.assertIn("詳細を見る", tpl)
-        self.assertIn("11:57:00", tpl)
-        self.assertIn("11:59:55", tpl)
-        self.assertIn("メモ &lt;b&gt;", tpl)
-        self.assertNotIn("<b>", tpl)
+    def detail(self, key, items=None, **kw):
+        if items is not None:
+            self.store.replace_festival_items(items, NOW)
+        html = page.render_fragment(self.store, object(), NOW, key=key, **kw)
+        m = re.search(r'<aside id="detail" aria-live="polite"[^>]*>(.*)</aside>', html, re.S)
+        return html, m.group(1)
+
+    def test_detail_has_threshold_times_escaped_note_and_no_template(self):
+        html, d = self.detail("visitor.a", [item("visitor.a", Status.CRIT)])
+        self.assertNotIn("<template", html)
+        self.assertIn('data-key="visitor.a"', html.split(">", 1)[0])
+        self.assertIn("注意 ≥ 1.0% / 異常 ≥ 5.0%", d)
+        self.assertIn("11:57:00", d)
+        self.assertIn("11:59:55", d)
+        self.assertIn("メモ &lt;b&gt;", d)
+        self.assertNotIn("<b>", d)
+        self.assertIn("名前 visitor.a", d)
+        self.assertIn("1.5%", d)
+        self.assertNotIn("<svg", d)
+        self.assertNotIn("<table", d)
+
+    def test_detail_unselected_when_no_key(self):
+        html, d = self.detail(None, [item("visitor.a")])
+        self.assertIn(label("fest.detail.empty"), d)
+        self.assertNotIn("名前 visitor.a", d)
+        self.assertIn('data-key=""', html.split(">", 1)[0])
+
+    def test_detail_gone_for_unknown_or_long_key(self):
+        for key in ("visitor.zzz", "k" * 201):
+            _, d = self.detail(key, [item("visitor.a")])
+            self.assertIn("この項目は現在ありません", d)
+
+    def test_detail_escapes_key_and_passes_it_as_sql_parameter(self):
+        evil = '"><script>alert(1)</script>\' OR 1=1 --'
+        html, d = self.detail(evil, [item("visitor.a")])
+        self.assertNotIn("<script>alert", html)
+        self.assertIn("この項目は現在ありません", d)
+        self.assertEqual(self.store.query("SELECT COUNT(*) FROM festival_items")[0][0], 1)
+
+    def test_detail_key_value_is_escaped_in_root_attribute(self):
+        html = page.render_fragment(self.store, object(), NOW, key='a"b<c')
+        root = html.split(">", 1)[0]
+        self.assertIn('data-key="a&quot;b&lt;c"', root)
+
+    def test_detail_only_renders_selected_item(self):
+        _, d = self.detail("visitor.a", [item("visitor.a"), item("visitor.b", note="別の注記")])
+        self.assertNotIn("別の注記", d)
+
+    def test_detail_day_chart_reads_today_jst_for_key_without_thinning(self):
+        calls = []
+        orig = self.store.load_festival_history
+        self.store.load_festival_history = lambda *a, **k: calls.append((a, k)) or orig(*a, **k)
+        it = item("visitor.a", metric=0.5, unit="ratio", warn=0.8, crit=0.9)
+        self.store.replace_festival_items([it], NOW)
+        for m in (0, 1, 5):  # JST 11:55 / 11:56 / 12:00 のうち 2 分目の欠測を含む
+            at = NOW - timedelta(minutes=5 - m)
+            self.store.replace_festival_items([it], at, history=[("visitor.a", 0.1 * (m + 1))], history_minute=at)
+        self.store.replace_festival_items([it], NOW)
+        _, d = self.detail("visitor.a")
+        self.assertIn('class="daychart"', d)
+        self.assertIn("名前 visitor.a の当日の推移", d)
+        self.assertIn("当日の推移 (00:00〜12:00)", d)
+        self.assertIn(label("fest.detail.chart_gap"), d)
+        self.assertIn("注意 80%", d)
+        self.assertIn("異常 90%", d)
+        self.assertEqual(d.count("M"), 2)  # 欠測で 2 本の線に分かれる
+        since, until = calls[-1][0]
+        self.assertEqual(calls[-1][1], {"key": "visitor.a"})
+        self.assertEqual(since, datetime(2026, 11, 13, 15, 0, tzinfo=timezone.utc))
+        self.assertEqual(until, NOW)
+
+    def test_detail_chart_empty_and_absent_for_non_chart_item(self):
+        _, d = self.detail("visitor.a", [item("visitor.a", metric=0.5, unit="ratio")])
+        self.assertIn(label("fest.detail.chart_empty"), d)
+        _, d = self.detail("visitor.b", [item("visitor.b")])
+        self.assertNotIn("当日の推移", d)
+
+    def test_detail_breakdown_resolves_labels_and_bool_keys(self):
+        bd = Breakdown("fest.bd.pod", ("fest.col.pod", "fest.col.ready"),
+                       (("cms-0", "fest.bool.true"), ("cms-1", "fest.bool.false"), ("cms-2", "—")))
+        _, d = self.detail("visitor.a", [item("visitor.a", breakdown=bd)])
+        for s in ("Pod ごと", "<th", "Pod", "Ready", "cms-0", "はい", "いいえ", "—"):
+            self.assertIn(s, d)
+        self.assertNotIn("fest.", d)
+        self.assertNotIn("ほか", d)
+
+    def test_detail_breakdown_over_11_rows_shows_first_10_and_remainder(self):
+        rows = tuple((f"pod-{n:02}",) for n in range(14))
+        _, d = self.detail("visitor.a", [item("visitor.a", breakdown=Breakdown("fest.bd.pod", ("fest.col.pod",), rows))])
+        self.assertEqual(len(re.findall(r"<tr><td", d)), 10)
+        self.assertIn("pod-09", d)
+        self.assertNotIn("pod-10", d)
+        self.assertIn("ほか 4 行", d)
+        exact = tuple((f"pod-{n:02}",) for n in range(11))
+        _, d = self.detail("visitor.a", [item("visitor.a", breakdown=Breakdown("fest.bd.pod", ("fest.col.pod",), exact))])
+        self.assertIn("pod-10", d)
+        self.assertNotIn("ほか", d)
+
+    def test_detail_breakdown_cells_are_escaped(self):
+        bd = Breakdown("fest.bd.pod", ("fest.col.pod",), (("<i>x</i>",),))
+        _, d = self.detail("visitor.a", [item("visitor.a", breakdown=bd)])
+        self.assertIn("&lt;i&gt;x&lt;/i&gt;", d)
+
+    def test_detail_link_is_text_link_with_name_and_new_tab_for_external(self):
+        _, d = self.detail("visitor.a", [item("visitor.a", link="https://app.netdata.cloud/", link_label="netdata")])
+        self.assertIn('<a class="dlink" href="https://app.netdata.cloud/" target="_blank" rel="noopener">Netdata を開く</a>', d)
+        _, d = self.detail("visitor.a", [item("visitor.a", link="/admin/#sec-cluster", link_label="admin")])
+        self.assertIn('href="/admin/#sec-cluster"', d)
+        self.assertIn("運用ダッシュボード を開く", d)
+        self.assertNotIn("_blank", d)
+        self.assertNotIn("btn", d)
+        _, d = self.detail("visitor.a", [item("visitor.a", link=None, link_label=None)])
+        self.assertNotIn("<a ", d)
 
     def test_javascript_link_is_not_rendered(self):
         html = self.frag([item("visitor.a", link="javascript:alert(1)")])
@@ -172,6 +275,7 @@ class FestivalPageTest(unittest.TestCase):
         self.store.replace_festival_items([item("visitor.a")], NOW)
         html = page.render_page(self.store, object(), NOW)
         self.assertIn("<title>当日監視</title>", html)
+        self.assertEqual(html.count('id="detail"'), 1)
         self.assertIn('id="festival-fragment"', html)
         self.assertIn('id="detail"', html)
         self.assertIn("表示が古い・再ログインが必要", html)
@@ -179,6 +283,10 @@ class FestivalPageTest(unittest.TestCase):
 
     def test_labels_cover_design_table(self):
         self.assertEqual(label("fest.status.info"), "表示のみ")
+        self.assertEqual(label("fest.detail.link", name=label("fest.link.netdata")), "Netdata を開く")
+        for k in ("fest.detail.note", "fest.detail.more_rows", "fest.detail.empty", "fest.link.cloudflare",
+                  "fest.link.admin", "fest.link.cms", "fest.link.healthchecks"):
+            self.assertTrue(label(k, n=1, name="x"))
         with self.assertRaises(KeyError):
             label("fest.nope")
 

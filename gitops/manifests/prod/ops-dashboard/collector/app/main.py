@@ -165,7 +165,10 @@ def make_web_server(collector: Collector, addr, render=render_page.render) -> Th
             if u.path in (festival_page.PAGE_PATH, festival_page.FRAGMENT_PATH):
                 fn = festival_page.render_page if u.path == festival_page.PAGE_PATH else festival_page.render_fragment
                 try:
-                    body = fn(collector.store, collector.ctx.config.festival, utcnow())
+                    args = (collector.store, collector.ctx.config.festival, utcnow())
+                    if fn is festival_page.render_fragment:
+                        args += (parse_qs(u.query).get("key", [None])[0],)
+                    body = fn(*args)
                 except Exception as e:
                     log("festival_render_failed", error=model.safe_error(e))
                     return self.reply(500, b"render failed")

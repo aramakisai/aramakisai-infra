@@ -223,6 +223,11 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(code, 200)
         self.assertTrue(body.startswith(b'<div id="festival-fragment"'))
 
+    def test_festival_fragment_passes_key_query(self):
+        code, body = req(self.w + "/admin/festival/fragment?key=visitor.a")
+        self.assertEqual(code, 200)
+        self.assertIn(b'data-key="visitor.a"', body.split(b">", 1)[0])
+
     def test_festival_render_failure_is_500(self):
         with mock.patch.object(festival_page, "render_fragment", side_effect=ZeroDivisionError):
             self.assertEqual(req(self.w + "/admin/festival/fragment")[0], 500)

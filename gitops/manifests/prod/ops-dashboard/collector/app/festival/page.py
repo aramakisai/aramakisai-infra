@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from typing import NamedTuple
 
 import model
-from festival.chart import sparkline
+from festival.chart import day_chart, sparkline
 from festival.labels import label
 from model import FestivalItem, Status
 from render.components import JST, Raw, _MARK, esc
@@ -21,6 +21,8 @@ MAX_COLS = 6
 SPARK_MINUTES = 60
 EVAL_STALE_AFTER = timedelta(seconds=60)
 BAND_NAMES_MAX = 5
+KEY_MAX = 200
+BREAKDOWN_MAX_ROWS = 11
 
 _MARKS = {**{s.value: m for s, m in _MARK.items()}, "info": "◇"}
 
@@ -92,24 +94,62 @@ def _tile(i: FestivalItem, spark: str) -> str:
             f'<span class="t">{esc(_times(i))}</span></button>')
 
 
-def _detail(i: FestivalItem) -> str:
+def _cell(v: str) -> str:
+    return esc(label(v) if v.startswith("fest.bool.") else v)
+
+
+def _breakdown(bd) -> str:
+    rows = bd.rows
+    more = ""
+    if len(rows) > BREAKDOWN_MAX_ROWS:
+        more = (f'<tr class="more"><td colspan="{len(bd.columns)}">'
+                f'{esc(label("fest.detail.more_rows", n=len(rows) - (BREAKDOWN_MAX_ROWS - 1)))}</td></tr>')
+        rows = rows[:BREAKDOWN_MAX_ROWS - 1]
+    head = "".join(f"<th>{esc(label(c))}</th>" for c in bd.columns)
+    body = "".join("<tr>" + "".join(f"<td>{_cell(v)}</td>" for v in r) + "</tr>" for r in rows)
+    return (f'<section class="db"><h3>{esc(label(bd.title))}</h3>'
+            f'<table><thead><tr>{head}</tr></thead><tbody>{body}{more}</tbody></table></section>')
+
+
+def _chart(store, i: FestivalItem, state, now: datetime) -> str:
+    end = (state.evaluated_at or now).astimezone(JST)
+    start = end.replace(hour=0, minute=0, second=0, microsecond=0)
+    points = store.load_festival_history(start, end, key=i.key).get(i.key, [])
+    return (f'<section class="dc"><h3>{esc(label("fest.detail.chart", start=start.strftime("%H:%M"), end=end.strftime("%H:%M")))}</h3>'
+            f'{day_chart(points, start, end, i.unit, i.warn, i.crit, i.label)}'
+            f'<p class="gap">{esc(label("fest.detail.chart_gap"))}</p></section>')
+
+
+def _detail(store, i: FestivalItem, state, now: datetime) -> str:
     s = _view_status(i)
     rows = []
     if i.threshold:
-        rows.append((label("fest.detail.threshold"), esc(i.threshold)))
+        rows.append((label("fest.detail.threshold"), i.threshold))
     if i.observed_at:
         rows.append((label("fest.detail.observed_at"), _hms(i.observed_at)))
     if i.fetched_at:
         rows.append((label("fest.detail.fetched_at"), _hms(i.fetched_at)))
-    dl = "".join(f"<dt>{esc(k)}</dt><dd>{v}</dd>" for k, v in rows)
-    note = f'<p class="note">{esc(i.note)}</p>' if i.note else ""
+    if i.note:
+        rows.append((label("fest.detail.note"), i.note))
+    dl = "".join(f"<dt>{esc(k)}</dt><dd>{esc(v)}</dd>" for k, v in rows)
     href = _href(i.link)
     link = ""
-    if href:
+    if href and i.link_label:
         ext = ' target="_blank" rel="noopener"' if href.startswith("https://") else ""
-        link = f'<p><a class="btn" href="{esc(href)}"{ext}>{esc(label("fest.detail.link"))}</a></p>'
-    return (f'<template data-detail-for="{esc(i.key)}"><h2>{esc(i.label)}</h2><p>{_badge(s)}</p>'
-            f'<p class="val">{esc(i.value)}</p><dl>{dl}</dl>{note}{link}</template>')
+        link = (f'<p class="dl"><a class="dlink" href="{esc(href)}"{ext}>'
+                f'{esc(label("fest.detail.link", name=label("fest.link." + i.link_label)))}</a></p>')
+    return (f'<div class="dh"><h2>{esc(i.label)}</h2>{_badge(s)}</div><p class="dv">{esc(i.value)}</p>'
+            f'<dl class="di">{dl}</dl>{_chart(store, i, state, now) if i.unit else ""}'
+            f'{_breakdown(i.breakdown) if i.breakdown else ""}{link}')
+
+
+def _detail_aside(store, items, state, key: str | None, now: datetime) -> str:
+    if not key:
+        body = f'<p class="gone">{esc(label("fest.detail.empty"))}</p>'
+    else:
+        i = next((x for x in items if x.key == key), None) if len(key) <= KEY_MAX else None
+        body = _detail(store, i, state, now) if i else f'<p class="gone">{esc(label("fest.detail.gone"))}</p>'
+    return f'<aside id="detail" aria-live="polite">{body}</aside>'
 
 
 def _band(items, state, now: datetime) -> str:
@@ -149,7 +189,7 @@ def _tab_head(cat: str, items, selected: bool) -> str:
 def _panel(cat: str, items, selected: bool, sparks: dict[str, str]) -> str:
     g = tile_grid(len(items))
     grid = (f' data-size="{g.size}" style="--cols:{g.cols};--tile-w:{g.w}px;--tile-h:{g.h}px"') if g else ""
-    body = "".join(_tile(i, sparks.get(i.key, "")) + _detail(i) for i in items)
+    body = "".join(_tile(i, sparks.get(i.key, "")) for i in items)
     return (f'<div role="tabpanel" class="panel" id="panel-{cat}" data-tab-id="{cat}" aria-labelledby="tab-{cat}"'
             f'{"" if selected else " hidden"}{grid}>{body}</div>')
 
@@ -163,12 +203,12 @@ def _sparks(store, items, state) -> dict[str, str]:
     return {i.key: sparkline(hist[i.key], end) for i in items if i.unit and i.key in hist}
 
 
-def render_fragment(store, festival, now: datetime) -> str:
-    """festival は config.festival。None (宣言なし) のときは宣言が無い旨だけを出す。"""
+def render_fragment(store, festival, now: datetime, key: str | None = None) -> str:
+    """festival は config.festival。None (宣言なし) のときは宣言が無い旨だけを出す。key は選択中の項目。"""
     state = store.load_festival_state()
     stale = "true" if _eval_stale(state, now) else "false"
     at = model.iso(state.evaluated_at) if state.evaluated_at else ""
-    root = f'<div id="festival-fragment" data-evaluated-at="{at}" data-eval-stale="{stale}">'
+    root = f'<div id="festival-fragment" data-evaluated-at="{at}" data-eval-stale="{stale}" data-key="{esc(key if key and len(key) <= KEY_MAX else "")}">'
     if festival is None:
         return f'{root}<p class="unconf">{esc(label("fest.unconfigured"))}</p></div>'
     items = store.load_festival_items()
@@ -177,7 +217,7 @@ def render_fragment(store, festival, now: datetime) -> str:
     sparks = _sparks(store, items, state)
     panels = "".join(_panel(c, by[c], c == TABS[0], sparks) for c in TABS)
     return (f'{root}{_band(items, state, now)}<nav class="tabs" role="tablist">{tabs}</nav>'
-            f'<div class="panels">{panels}</div></div>')
+            f'<div class="panels">{panels}</div>{_detail_aside(store, items, state, key, now)}</div>')
 
 
 CSS = """
@@ -243,9 +283,28 @@ grid-template-areas:"h h" "v sp" "th th" "no no" "t t";grid-template-rows:20px m
 .panel[data-size=compact] .tile .v{font-size:20px;line-height:28px;align-self:center}
 .panel[data-size=compact] .tile .th,.panel[data-size=compact] .tile .no,.panel[data-size=compact] .tile .t{font-size:12px;line-height:14px}
 #detail{grid-column:2;grid-row:3;height:904px;overflow:auto;padding:16px;background:var(--card);border-left:1px solid var(--line)}
-#detail h2{font-size:20px;margin:0 0 8px}#detail .val{font-size:26px;font-weight:700;margin:8px 0}
-#detail dl{display:grid;grid-template-columns:auto 1fr;gap:4px 12px}#detail dt{color:var(--mute)}#detail dd{margin:0}
-.btn{display:inline-block;padding:6px 12px;border:1px solid var(--line);border-radius:6px;color:var(--fg);text-decoration:none}
+#detail>*{margin:0}#detail>*+*{margin-top:16px}#detail>.dv,#detail>.di{margin-top:8px}
+#detail .dh{height:28px;display:flex;align-items:center;gap:8px}
+#detail h2{font-size:20px;line-height:28px;margin:0;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+#detail .dv{font-size:26px;font-weight:700;line-height:36px;height:36px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#detail dl{display:grid;grid-template-columns:auto 1fr;gap:0 12px;max-height:110px;overflow:hidden;font-size:15px;line-height:22px}
+#detail dt{color:var(--mute)}
+#detail dd{margin:0;min-width:0;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;overflow:hidden}
+#detail h3{margin:0;font-size:13px;line-height:20px;font-weight:400;color:var(--mute)}
+#detail .dc{height:258px;overflow:hidden}
+#detail .daychart{display:block;width:528px;height:220px;color:var(--mute);fill:currentColor}
+#detail .daychart text{fill:currentColor}
+#detail .chart-empty{height:220px;display:flex;align-items:center;justify-content:center;color:var(--mute)}
+#detail .gap{margin:0;font-size:13px;line-height:18px;color:var(--mute)}
+#detail .db{max-height:334px;overflow:hidden}
+#detail .db h3{font-size:15px;line-height:20px;font-weight:700;color:var(--fg)}
+#detail table{width:100%;table-layout:fixed;border-collapse:separate;border-spacing:0;font-size:13px}
+#detail th,#detail td{box-sizing:border-box;padding:0 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left}
+#detail th{height:28px;line-height:27px;color:var(--mute);font-weight:600;border-bottom:1px solid var(--line)}
+#detail td{height:26px;line-height:25px;border-bottom:1px solid var(--line)}
+#detail tr.more td{color:var(--mute)}
+#detail .dl{height:24px;font-size:13px;line-height:24px}
+#detail .dlink{color:var(--fg);text-decoration:underline}
 .gone{color:var(--mute)}.unconf{grid-column:1/-1;grid-row:1/-1;margin:auto;font-size:24px}
 button:focus-visible,a:focus-visible{outline:3px solid var(--fg);outline-offset:2px}
 """
@@ -272,13 +331,6 @@ function paint(){
   root.querySelectorAll('[role=tab]').forEach(b=>{const on=b.dataset.tabId===st.tab;b.setAttribute('aria-selected',on);b.tabIndex=on?0:-1});
   root.querySelectorAll('[role=tabpanel]').forEach(p=>{p.hidden=p.dataset.tabId!==st.tab});
   root.querySelectorAll('.tile').forEach(t=>{const on=t.dataset.key===st.key;t.classList.toggle('sel',on);t.setAttribute('aria-pressed',on)});
-  const d=$('#detail');
-  if(st.key===null)d.replaceChildren();
-  else{
-    const tpl=[...root.querySelectorAll('template')].find(x=>x.dataset.detailFor===st.key);
-    if(tpl)d.replaceChildren(tpl.content.cloneNode(true));
-    else{const p=document.createElement('p');p.className='gone';p.textContent=L.gone;d.replaceChildren(p)}
-  }
   warn();
 }
 async function refresh(){
@@ -325,12 +377,12 @@ paint();
 
 
 def render_page(store, festival, now: datetime) -> str:
-    labels = {"gone": label("fest.detail.gone"), "stale": label("fest.band.stale", time="{time}"),
+    labels = {"stale": label("fest.band.stale", time="{time}"),
               "reauth": label("fest.band.reauth"), "page": PAGE_PATH, "fragment": FRAGMENT_PATH}
     # </script> 等で JSON ブロックが閉じないよう < をエスケープする
     data = json.dumps(labels, ensure_ascii=False).replace("<", "\\u003c")
     return ('<!doctype html><html lang="ja"><head><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width,initial-scale=1">'
             f'<title>{esc(label("fest.title"))}</title><style>{CSS}</style></head><body>'
-            f'{render_fragment(store, festival, now)}<aside id="detail" aria-live="polite"></aside>'
+            f'{render_fragment(store, festival, now)}'
             f'<script type="application/json" id="festival-labels">{data}</script><script>{JS}</script></body></html>')
