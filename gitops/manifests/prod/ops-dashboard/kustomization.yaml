@@ -88,6 +88,7 @@ configMapGenerator:
     files:
       - collector/app/festival/__init__.py
       - collector/app/festival/catalog.py
+      - collector/app/festival/chart.py
       - collector/app/festival/evaluate.py
       - collector/app/festival/heartbeat.py
       - collector/app/festival/labels.py
