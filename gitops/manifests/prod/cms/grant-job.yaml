@@ -1,0 +1,74 @@
+# payload_app (web / worker の実行時ロール) に DML だけを付与する PreSync Job。
+# マイグレーションの後に実行し、既存表への GRANT と、以後 payload ロールが作る表・シーケンスへの
+# DEFAULT PRIVILEGES を冪等に設定する。payload_app は DDL できず、マイグレーションだけが payload で動く
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cms-db-grant
+  namespace: prod
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  ttlSecondsAfterFinished: 3600
+  backoffLimit: 6
+  activeDeadlineSeconds: 900
+  template:
+    metadata:
+      labels:
+        app: cms-job
+    spec:
+      restartPolicy: OnFailure
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 26
+        runAsGroup: 102
+        fsGroup: 102
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: db-grant
+          image: ghcr.io/cloudnative-pg/postgresql:16.15@sha256:34cd4159d07b3410a1b29da35072e2e927a0905e717a61afa3814624a2e8859a
+          command: [sh, -c]
+          args:
+            - |
+              set -eu
+              export PGPASSWORD="$PAYLOAD_DB_PASSWORD"
+              # managed.roles の反映は Cluster の同期後に CNPG が行うため、ロールが現れるまで待つ
+              for i in $(seq 1 30); do
+                if [ "$(psql -h directus-db-rw.prod.svc.cluster.local -U payload -d payload -tAc \
+                    "SELECT 1 FROM pg_roles WHERE rolname='payload_app'")" = "1" ]; then
+                  break
+                fi
+                echo "waiting for role payload_app ($i/30)"
+                sleep 10
+              done
+              psql -h directus-db-rw.prod.svc.cluster.local -U payload -d payload -v ON_ERROR_STOP=1 <<'SQL'
+              GRANT USAGE ON SCHEMA public TO payload_app;
+              GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO payload_app;
+              GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO payload_app;
+              ALTER DEFAULT PRIVILEGES FOR ROLE payload IN SCHEMA public
+                GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO payload_app;
+              ALTER DEFAULT PRIVILEGES FOR ROLE payload IN SCHEMA public
+                GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO payload_app;
+              SQL
+          env:
+            - name: PAYLOAD_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: cms-secrets
+                  key: PAYLOAD_DB_PASSWORD
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "128Mi"
+              cpu: "100m"
