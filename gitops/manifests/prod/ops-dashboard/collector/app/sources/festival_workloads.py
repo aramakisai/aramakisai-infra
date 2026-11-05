@@ -126,11 +126,14 @@ def _cms(ctx, fc, pods, ratios):
     usage = _cpu_usage(ctx, c.namespace, c.pod_selector)
     ev = [_events(ctx, p) for p in pods]
     throttle, note = _throttle_max(pods, ratios)
+    by_pod = [{"pod": p["metadata"]["name"], "ready": _ready(p), "cpu_ratio": _cpu_ratio(p, usage),
+               "throttle_ratio": ratios.get(p["metadata"]["name"]), "restarts_recent": e[0],
+               "oom_recent": e[1], "crashloop": e[2]} for p, e in zip(pods, ev)]
     return Item("cms", "CMS", Status.OK, {
         "replicas": replicas, "ready": sum(_ready(p) for p in pods),
         "restarts_recent": sum(e[0] for e in ev), "oom_recent": any(e[1] for e in ev),
         "crashloop": any(e[2] for e in ev), "cpu_ratio_max": _max(_cpu_ratio(p, usage) for p in pods),
-        "throttle_ratio_max": throttle}, note)
+        "throttle_ratio_max": throttle, "by_pod": by_pod}, note)
 
 
 def _rss_ratio(pod, stats):
@@ -176,9 +179,11 @@ def _db(ctx, fc, cache):
 def _cloudflared(ctx, fc, pods, ratios):
     usage = _cpu_usage(ctx, fc.cloudflared.namespace, fc.cloudflared.pod_selector)
     throttle, note = _throttle_max(pods, ratios)
+    by_pod = [{"pod": p["metadata"]["name"], "cpu_ratio": _cpu_ratio(p, usage),
+               "throttle_ratio": ratios.get(p["metadata"]["name"])} for p in pods]
     return Item("cloudflared", "cloudflared", Status.OK,
                 {"pods": len(pods), "cpu_ratio_max": _max(_cpu_ratio(p, usage) for p in pods),
-                 "throttle_ratio_max": throttle}, note)
+                 "throttle_ratio_max": throttle, "by_pod": by_pod}, note)
 
 
 def fetch(ctx):

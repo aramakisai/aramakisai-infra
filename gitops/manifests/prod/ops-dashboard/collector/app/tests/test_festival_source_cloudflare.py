@@ -36,19 +36,47 @@ def run(resp, cfg=None):
     return r, http, {i.key: i for i in r.items}
 
 
+def _scalars(item):
+    return {k: v for k, v in item.values.items() if not k.startswith("by_")}
+
+
 class CloudflareTest(unittest.TestCase):
     def test_values(self):
         r, http, it = run(gql())
         self.assertEqual(r.status, Status.OK)
         self.assertEqual(len(http.calls), 1)
-        self.assertEqual(it["worker"].values, {
+        self.assertEqual(_scalars(it["worker"]), {
             "requests": 1000, "errors": 13, "exceeded": 100, "cpu_p99_ms": 12.5, "window_end": "2026-06-01T11:57:00Z"})
-        self.assertEqual(it["cms"].values, {
+        self.assertEqual(_scalars(it["cms"]), {
             "requests": 725, "status_5xx": 5, "origin_p95_ms": 420, "window_end": "2026-06-01T11:57:00Z"})
-        self.assertEqual(it["media"].values, {
+        self.assertEqual(_scalars(it["media"]), {
             "requests": 308, "status_4xx": 7, "status_5xx": 1, "window_end": "2026-06-01T11:57:00Z"})
-        self.assertEqual(it["cms_cache"].values, {"lookups": 100, "hits": 80, "window_end": "2026-06-01T11:57:00Z"})
+        self.assertEqual(_scalars(it["cms_cache"]), {"lookups": 100, "hits": 80, "window_end": "2026-06-01T11:57:00Z"})
         self.assertTrue(all(i.status == Status.OK for i in r.items))
+
+    def test_breakdowns_match_rows(self):
+        resp = gql()
+        a = resp["data"]["viewer"]["accounts"][0]
+        a["cms"].append({"count": 5, "dimensions": {"edgeResponseStatus": 200}})
+        _, _, it = run(resp)
+        self.assertEqual(it["worker"].values["by_status"], [
+            {"status": "success", "requests": 900, "errors": 5},
+            {"status": "exceededResources", "requests": 100, "errors": 8}])
+        self.assertEqual(it["cms"].values["by_status"], [
+            {"status": 200, "count": 705}, {"status": 404, "count": 20},
+            {"status": 500, "count": 3}, {"status": 503, "count": 2}])
+        self.assertEqual(it["media"].values["by_status"], [
+            {"status": 200, "count": 300}, {"status": 404, "count": 7}, {"status": 502, "count": 1}])
+        self.assertEqual(it["cms_cache"].values["by_cache_status"], [
+            {"cache_status": "hit", "count": 80}, {"cache_status": "miss", "count": 20}])
+
+    def test_breakdown_rows_are_flat_scalars(self):
+        _, _, it = run(gql())
+        for i in it.values():
+            for k, rows in i.values.items():
+                if k.startswith("by_"):
+                    for row in rows:
+                        self.assertTrue(all(isinstance(v, (int, str)) for v in row.values()))
 
     def test_window_and_filters(self):
         _, http, _ = run(gql())

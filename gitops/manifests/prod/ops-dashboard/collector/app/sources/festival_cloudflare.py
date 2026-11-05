@@ -50,6 +50,14 @@ def _count(rows, pred=lambda s: True):
     return sum(r["count"] for r in rows if pred(r["dimensions"]["edgeResponseStatus"]))
 
 
+def _by_status(rows):
+    out = {}
+    for r in rows:
+        st = r["dimensions"]["edgeResponseStatus"]
+        out[st] = out.get(st, 0) + r["count"]
+    return [{"status": st, "count": n} for st, n in out.items()]
+
+
 def _first(rows, group, key):
     return rows[0][group][key] if rows else 0
 
@@ -81,17 +89,21 @@ def fetch(ctx):
             "errors": sum(r["sum"]["errors"] for r in workers),
             "exceeded": sum(r["sum"]["requests"] for r in workers if r["dimensions"]["status"] == "exceededResources"),
             "cpu_p99_ms": _first(a["workersCpu"], "quantiles", "cpuTimeP99") / 1000,
-            "window_end": we}),
+            "window_end": we,
+            "by_status": [{"status": r["dimensions"]["status"], "requests": r["sum"]["requests"],
+                           "errors": r["sum"]["errors"]} for r in workers]}),
         Item("cms", "CMS", Status.OK, {
             "requests": _count(cms), "status_5xx": _count(cms, is5),
-            "origin_p95_ms": _first(a["cmsLatency"], "quantiles", "originResponseDurationMsP95"), "window_end": we}),
+            "origin_p95_ms": _first(a["cmsLatency"], "quantiles", "originResponseDurationMsP95"), "window_end": we,
+            "by_status": _by_status(cms)}),
         Item("media", "メディア", Status.OK, {
             "requests": _count(media), "status_4xx": _count(media, lambda s: 400 <= s < 500),
-            "status_5xx": _count(media, is5), "window_end": we}),
+            "status_5xx": _count(media, is5), "window_end": we, "by_status": _by_status(media)}),
         Item("cms_cache", "CMS キャッシュ", Status.OK, {
             "lookups": sum(r["count"] for r in cache),
             "hits": sum(r["count"] for r in cache if r["dimensions"]["cacheStatus"] == "hit"),
-            "window_end": we}),
+            "window_end": we,
+            "by_cache_status": [{"cache_status": r["dimensions"]["cacheStatus"], "count": r["count"]} for r in cache]}),
     ]
 
     by_minute = {}

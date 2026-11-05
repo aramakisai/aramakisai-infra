@@ -123,6 +123,33 @@ class WorkloadsTest(unittest.TestCase):
         self.assertEqual((v["restarts_recent"], v["oom_recent"], v["crashloop"]), (0, False, False))
         self.assertIsNone(v["cpu_ratio_max"])
 
+    def test_cms_by_pod_keeps_per_pod_values(self):
+        p = paths([pod("cms-a", cpu_limit="1", restarts=(RECENT,)),
+                   pod("cms-b", ready=False, cpu_limit="500m", term=("OOMKilled", RECENT), waiting="CrashLoopBackOff"),
+                   pod("cms-c", cpu_limit=None)],
+                  metrics=[pm("cms-a", app="250m"), pm("cms-b", app="400m"), pm("cms-c", app="2")], replicas=3)
+        k8s = RecordingK8s(p)
+        run(p, texts={CADV: cadv(("prod", "cms-a", "app", 0, 100), ("prod", "cms-b", "app", 0, 100))}, k8s=k8s)
+        items, _ = run(p, texts={CADV: cadv(("prod", "cms-a", "app", 10, 200), ("prod", "cms-b", "app", 50, 200))}, k8s=k8s)
+        self.assertEqual(items["cms"].values["by_pod"], [
+            {"pod": "cms-a", "ready": True, "cpu_ratio": 0.25, "throttle_ratio": 0.1,
+             "restarts_recent": 1, "oom_recent": False, "crashloop": False},
+            {"pod": "cms-b", "ready": False, "cpu_ratio": 0.8, "throttle_ratio": 0.5,
+             "restarts_recent": 1, "oom_recent": True, "crashloop": True},
+            {"pod": "cms-c", "ready": True, "cpu_ratio": None, "throttle_ratio": None,
+             "restarts_recent": 0, "oom_recent": False, "crashloop": False}])
+
+    def test_cloudflared_by_pod_and_db_has_none(self):
+        cf = [pod("cf-a", ns="cloudflared", cpu_limit="1"), pod("cf-b", ns="cloudflared", cpu_limit="500m")]
+        p = paths([], db_pods=[pod("db-1")], cf_pods=cf, cf_metrics=[pm("cf-a", ns="cloudflared", app="100m"),
+                                                                  pm("cf-b", ns="cloudflared", app="300m")])
+        items, _ = run(p)
+        self.assertEqual(items["cloudflared"].values["by_pod"], [
+            {"pod": "cf-a", "cpu_ratio": 0.1, "throttle_ratio": None},
+            {"pod": "cf-b", "cpu_ratio": 0.6, "throttle_ratio": None}])
+        self.assertNotIn("by_pod", items["db.db-1"].values)
+        self.assertNotIn("10.", repr(items["cloudflared"].values["by_pod"]))
+
     def test_db_items_and_endpoints(self):
         db = [pod("db-1", ip="10.1.0.1", cpu_limit="2", mem_limit="1Gi"),
               pod("db-2", ip="10.1.0.2", cpu_limit="2", term=("OOMKilled", RECENT), restarts=(RECENT,))]

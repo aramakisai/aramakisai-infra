@@ -297,7 +297,7 @@
 - [ ] 8. 当日監視画面の推移・内訳・タイルの格子
   - 各小タスクは、完了時の条件を確かめるテストを先に書き、失敗することを確かめてから実装する
   - 6.1 の詳細の雛形 (`<template data-detail-for>`)、6.2 の雛形の複製による詳細の表示、6.3 の寸法の予算と小型表示の切り替え、7.3 の E2E は、本タスクの 8.7〜8.9・8.11 が置き換える。既存のテストのうち置き換わる挙動を確かめているものは、新しい挙動のテストに書き換える
-- [ ] 8.1 (P) 1 分値の表と、項目のグラフ・内訳の列を Store に足す
+- [x] 8.1 (P) 1 分値の表と、項目のグラフ・内訳の列を Store に足す
   - `model.py` に `MetricUnit` (`ratio`・`count`・`ms`・`seconds`・`rps`) と `Breakdown` (見出し・列・整形済みの行) を足し、`FestivalItem` に `metric`・`unit`・`warn`・`crit`・`breakdown`・`link_label` を足す
   - `festival_items` に `metric`・`unit`・`warn`・`crit`・`breakdown` (`Breakdown` の JSON)・`link_label` の列を足し、`festival_history` (主キー `(key, minute)`、`WITHOUT ROWID`) と索引 `festival_history_minute` を、既存の表と同じく起動時に作る
   - `replace_festival_items` に 1 分値 (`history`・`history_minute`) を渡せるようにし、同じトランザクションで `INSERT OR REPLACE` と、`minute` が `history_minute − 24 時間` より前の行の削除を行う。既存の `RETENTION` には加えない
@@ -307,7 +307,7 @@
   - _Requirements: 3.11, 3.13, 3.14, 9.1_
   - _Boundary: Store_
 
-- [ ] 8.2 (P) Cloudflare と Pod の取得結果に内訳を残す
+- [x] 8.2 (P) Cloudflare と Pod の取得結果に内訳を残す
   - `festival.cloudflare`: 合計に畳む前の行から、`worker.by_status` (`{status, requests, errors}`)、`cms.by_status`・`media.by_status` (`edgeResponseStatus` ごとの `{status, count}`。同じステータスは足し合わせる)、`cms_cache.by_cache_status` (`{cache_status, count}`) を `Item.values` に足す。問い合わせの回数と選ぶ次元は変えない
   - `festival.workloads`: 最大値を求める前の Pod ごとの値から、`cms.by_pod` (`{pod, ready, cpu_ratio, throttle_ratio, restarts_recent, oom_recent, crashloop}`) と `cloudflared.by_pod` (`{pod, cpu_ratio, throttle_ratio}`) を足す。DB には足さない
   - 配列の各要素は数値と文字列だけの辞書にし、IP などの個人を識別できる値を入れない
