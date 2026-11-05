@@ -132,7 +132,7 @@ spec:
             - name: CMS_CORS_ORIGINS
               value: https://aramakisai.com
             - name: S3_BUCKET
-              value: aramakisai-backups
+              value: aramakisai-cms-media
             - name: S3_ENDPOINT
               value: https://fsn1.your-objectstorage.com
             - name: S3_REGION
