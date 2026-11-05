@@ -8,6 +8,7 @@
 
 **Impact**:
 - collector に当日監視用の情報源 (`festival.*`)、評価・通知の処理、画面を足す。
+- 画面の推移の表示のため、collector の既存の SQLite に、数値を持つ項目の 1 分ごとの値を 24 時間分だけ持つ。
 - collector は閲覧専用から「通知もする」に変わる。外部に GET 以外 (当日専用の Discord webhook への POST) を発行する。
 - 当日監視の評価が止まったことを、Healthchecks.io への定期的な ping の途絶で検知する。
 - `/admin/` の表示と判定は変えない。
@@ -15,6 +16,7 @@
 
 ### Goals
 - 画面を操作しなくても 15 秒ごとに表示が更新される。セッション切れや通信断で更新できないときは、そのことを画面に明示する。
+- 各項目の判定・現在値・閾値・注記・時刻と直近 60 分の推移を、タイルに常に表示する。選んだ項目の当日の推移 (閾値の線つき) と内訳を、画面を遷移せずに表示する。
 - 各項目を、コードで宣言した閾値で「正常・注意・異常」に判定する。値が古い・取れないときは「取得遅延」「取得失敗」として区別する。
 - 画面を開いていなくても、異常に入った項目と回復した項目が当日専用の Discord チャンネルに届く。
 - 当日監視そのものが止まったことを、当日監視に依存しない外部の監視 (Healthchecks.io) が通知する。
@@ -24,7 +26,7 @@
 ### Non-Goals
 - 既存の `/admin/` の表示・判定の変更 (要確認の集計から当日監視の項目を除くことを除く)。
 - 既存の監視・通知 (UptimeRobot・Healthchecks.io・Falco・Falcosidekick・DR Trigger・Infra Health Check・駐車場カメラ停止通知・地震リレーの Discord 通知) の置き換えや停止。
-- メトリクスを時系列で保存する基盤の導入。
+- メトリクスを時系列で保存する基盤 (Prometheus・VictoriaMetrics 等) の導入。推移の表示に使う値は、既存の SQLite に 24 時間分だけ持つ。
 - 異常の自動是正 (スケール・再起動・切り替え)。
 - ポータル (Homer) から当日監視画面への導線の追加。要件に無い。足す場合は、姉妹 spec `committee-timeline` も `ops-dashboard/portal/links.yaml` を変更する予定のため、衝突に注意する。
 - 来場者向けサイト・サイネージ・CMS の機能そのものの変更。
@@ -35,8 +37,8 @@
 - collector の当日監視の情報源 (source_id `festival.*`) と、その取得の契約。
 - 当日監視の評価・通知・描画 (collector の `festival/` パッケージ)。
 - `dashboard.toml` の `[festival]` の宣言と、その検証 (`config.py`)。
-- collector の SQLite に置く当日監視の表 (`festival_items`・`festival_alerts`・`festival_state`)。
-- 当日監視画面 `/admin/festival` と断片 `/admin/festival/fragment`、その画面表記。
+- collector の SQLite に置く当日監視の表 (`festival_items`・`festival_alerts`・`festival_state`・`festival_history`)。
+- 当日監視画面 `/admin/festival` と断片 `/admin/festival/fragment`、その画面表記と推移のグラフ。
 - Discord への通知の内容・頻度・まとめ方 (collector が送るものに限る)。
 - aramakisai-web に追加する次の口と記録 (実装は aramakisai-web の PR):
   - CMS: `parking_cameras` の判定状態の 4 項目と、その書き込み規則。読み取り専用の endpoint `GET /api/ops/parking-health`。
@@ -115,32 +117,34 @@ graph TB
   - 取得層 (`sources/festival_*.py`) は外部の値を `Item` に変換するだけで、判定しない。
   - 評価層 (`festival/evaluate.py`・`festival/catalog.py`) は、取得結果と宣言から当日監視の項目を作り、判定する。
   - 通知層 (`festival/notify.py`) は、評価結果と通知済みの状態から送る内容を決めて送る。
-  - 描画層 (`festival/page.py`) は、SQLite の評価結果を読むだけ。
+  - 描画層 (`festival/page.py`・`festival/chart.py`) は、SQLite の評価結果と推移の記録を読むだけ。
 - **Existing patterns preserved**: Source の登録、情報源ごとのスレッド、`Status`、宣言ファイルの厳格な検証、SQLite の単一ライター、ConfigMap による配布、nginx の認可。
 - **New components rationale**:
   - 評価器: 判定と通知を描画から切り離す (D-3)。
   - 通知器: Discord への送信と、レート制限への追従。
-  - 当日監視画面: タブ・自動更新・選択状態の保持 (R3)。
+  - 当日監視画面: タブ・タイルの大きさの決定・自動更新・選択状態の保持・画面内の詳細 (R3)。
+  - 推移のグラフ (`festival/chart.py`): タイルのスパークラインと詳細の当日の折れ線を、サーバー側でインライン SVG にする。既存の `/admin/` のグラフ (`render/svg.py`) と同じく、外部の JS とライブラリを使わない。
 - **Steering compliance**:
-  - 時系列の保存基盤を置かない。
+  - 時系列の保存基盤を置かない。推移は既存の SQLite に 24 時間分の 1 分値だけを持つ。
   - シークレットは Infisical と ExternalSecret で渡す。
   - IP アドレスを宣言に書かない。Pod とノードのアドレスは Kubernetes API から得る。
   - サブドメインと ArgoCD Application を増やさない。
 
 **依存の向き** (左のものだけを import する。逆向きは誤り):
 
-`config` → `model` → `http_client`・`k8s` → `sources/*` → `store` → `festival.catalog` → `festival.evaluate` → `festival.notify` → `festival.labels`・`festival.page` → `main`
+`config` → `model` → `http_client`・`k8s` → `sources/*` → `store` → `festival.catalog` → `festival.evaluate` → `festival.notify` → `festival.labels`・`festival.chart` → `festival.page` → `main`
 
-- `festival.page` は `store` と `festival.labels` だけを読む。`festival.evaluate` と `festival.notify` を import しない。
-- `render/*` (既存) は `festival` を import しない。`festival.page` は `render.components` の `esc` だけを使ってよい。
+- `festival.page` は `store`・`festival.labels`・`festival.chart` だけを読む。`festival.evaluate` と `festival.notify` を import しない。
+- `festival.chart` は `model`・`festival.labels`・`render.components` の `esc`・`render.svg` の `_nice_max` だけを使う。
+- `render/*` (既存) は `festival` を import しない。`festival.page` は `render.components` の `esc`・`JST`・`Raw`・`_MARK` を使ってよい。
 
 ### Technology Stack
 
 | Layer | Choice / Version | Role in Feature | Notes |
 |-------|------------------|-----------------|-------|
-| Frontend | サーバー側描画の HTML と、ページ内の素の JavaScript (ビルドなし) | タブ、15 秒ごとの断片の差し替え、選択状態の保持、更新失敗の表示 | 新しい依存なし |
+| Frontend | サーバー側描画の HTML とインライン SVG、ページ内の素の JavaScript (ビルドなし) | タブ、15 秒ごとの断片の差し替え、選択状態の保持、更新失敗の表示、スパークラインと当日の折れ線 | 新しい依存なし。グラフは既存の `render/svg.py` と同じくサーバー側の SVG |
 | Backend | Python 3.13 slim、標準ライブラリだけ | 情報源・評価・通知・Web | protobuf・Prometheus テキストも自前の数十行で読む (D-13) |
-| Data | 既存の SQLite (WAL、PVC `collector-data`) | 評価結果と通知状態 | 新しい保存基盤を置かない (R9.1) |
+| Data | 既存の SQLite (WAL、PVC `collector-data`) | 評価結果、通知状態、数値を持つ項目の 1 分値 (24 時間) | 新しい保存基盤を置かない (R9.1) |
 | Messaging | Discord webhook、Healthchecks.io | 異常と回復の通知、当日監視の生存確認 | 当日専用の `DISCORD_FESTIVAL_WEBHOOK_URL` (D-14 改定)。Healthchecks.io は既存の Terraform provider |
 | Infrastructure | ConfigMap 配布、ExternalSecret、Cloudflare Access サービストークン (Terraform) | 配布・シークレット・ハブへの認証 | 新しい ConfigMap `collector-festival` |
 | Web (aramakisai-web) | Payload CMS、Cloudflare Workers・Durable Objects | 読み取り専用の口と判定状態の記録 | 既存の方式に従う |
@@ -151,7 +155,7 @@ graph TB
 ```
 gitops/manifests/prod/ops-dashboard/collector/app/
 ├── sources/
-│   ├── festival_cloudflare.py   # GraphQL 1 回 (alias) で Worker・CMS・メディア・Cache API・ハブ接続数
+│   ├── festival_cloudflare.py   # GraphQL 1 回 (alias) で Worker・CMS・メディア・Cache API・ハブ接続数と、状態・ステータスごとの内訳
 │   ├── festival_stamp.py        # AE SQL でスタンプの処理結果
 │   ├── festival_quake.py        # 地震リレー /status
 │   ├── festival_signage.py      # サイトの Worker /api/signage/stats (Access のサービストークン)
@@ -159,16 +163,17 @@ gitops/manifests/prod/ops-dashboard/collector/app/
 │   ├── festival_schedule.py     # CMS site_settings (開催日・駐車場の監視時間)
 │   ├── festival_bus.py          # ODPT の 2 フィードの header.timestamp
 │   ├── festival_nodes.py        # ノードの Ready・CPU・メモリ・ディスク (k8s のノード一覧が正)
-│   ├── festival_workloads.py    # CMS・DB・cloudflared の Pod (Ready・再起動・OOM・CPU 対 limit・メモリ・スロットリング・primary)
+│   ├── festival_workloads.py    # CMS・DB・cloudflared の Pod (Ready・再起動・OOM・CPU 対 limit・メモリ・スロットリング・primary) と Pod ごとの内訳
 │   ├── festival_cnpg.py         # CNPG の instance の :9187 (接続数・上限・replica 遅延・統計情報の無い表)
 │   └── _promtext.py             # Prometheus テキスト形式の最小の読み取り
 ├── festival/                    # 新しい ConfigMap collector-festival で配る
 │   ├── __init__.py
-│   ├── catalog.py               # 項目の定義 (キー・区分・依存する情報源・閾値名・リンク) と判定関数
-│   ├── evaluate.py              # 15 秒ごとの評価スレッド。鮮度・取得失敗の扱いと SQLite への保存
+│   ├── catalog.py               # 項目の定義 (キー・区分・依存する情報源・閾値名・リンク・グラフの単位・内訳) と判定関数
+│   ├── evaluate.py              # 15 秒ごとの評価スレッド。鮮度・取得失敗の扱いと SQLite への保存 (1 分値の記録を含む)
 │   ├── notify.py                # 通知の差分計算と Discord への送信
 │   ├── heartbeat.py             # Healthchecks.io への生存の ping
-│   ├── page.py                  # /admin/festival の HTML と断片、CSS、JavaScript
+│   ├── page.py                  # /admin/festival の HTML と断片、タイルの格子の算出、詳細、CSS、JavaScript
+│   ├── chart.py                 # スパークラインと当日の折れ線の SVG
 │   └── labels.py                # 当日監視の画面表記 (本書「画面表記」が正本)
 └── tests/
     ├── test_festival_config.py
@@ -185,6 +190,8 @@ gitops/manifests/prod/ops-dashboard/collector/app/
     ├── test_festival_catalog.py
     ├── test_festival_evaluate.py
     ├── test_festival_notify.py
+    ├── test_festival_store.py
+    ├── test_festival_chart.py
     └── test_festival_page.py
 ```
 
@@ -195,7 +202,8 @@ gitops/manifests/prod/ops-dashboard/collector/app/
   - `Collector.latest()` (結果の写し。render を実行しない) を足す。
   - 評価スレッドを起動する。
 - `collector/app/config.py`: `[festival]` を `FestivalConfig` に読み込み、検証する (D-4)。
-- `collector/app/store.py`: 当日監視の 3 表と、その読み書きを足す。
+- `collector/app/store.py`: 当日監視の 4 表 (`festival_history` を含む) と、その読み書き・24 時間を過ぎた 1 分値の削除を足す。
+- `collector/app/model.py`: `FestivalItem`・`AlertState`・`NotifierState`・`FestivalStateRow`・`Breakdown`・`MetricUnit` を足す。
 - `collector/app/k8s.py`: `K8sClient.kubelet_text(node_ip, path)` を足す (kubelet の Prometheus テキスト。`/metrics/cadvisor`)。
 - `collector/app/http_client.py`:
   - 応答の状態・ヘッダ・本文を返す `request_meta()` を足す。
@@ -213,7 +221,7 @@ gitops/manifests/prod/ops-dashboard/collector/app/
 - `collector/deployment.yaml`: initContainer に `festival/` のコピーを足し、volume `src-festival` を足す。
 - `kustomization.yaml`:
   - `collector-sources` に新しいファイルを列挙する。
-  - configMap `collector-festival` を足す。
+  - configMap `collector-festival` を足す (`festival/` の `__init__.py`・`catalog.py`・`chart.py`・`evaluate.py`・`heartbeat.py`・`labels.py`・`notify.py`・`page.py`)。
 - `gitops/manifests/prod/cms/db-cluster.yaml`: Cluster `directus-db` に `spec.monitoring.customQueriesConfigMap` を足し、ConfigMap `directus-db-monitoring` のキー `queries` を参照する (festival.cnpg)。同じファイルを変更する別の PR (#437、未マージ) がある。
 - `gitops/manifests/prod/cms/db-monitoring.yaml` (新規): ConfigMap `directus-db-monitoring` (namespace `prod`、ラベル `cnpg.io/reload`)。統計情報の無い表を数えるカスタムクエリを持つ。
 - `gitops/manifests/prod/cms/kustomization.yaml`: `resources` に `db-monitoring.yaml` を足す。同じファイルを変更する別の PR (#437、未マージ) がある。
@@ -293,10 +301,10 @@ sequenceDiagram
     Br->>Ng: GET admin festival
     Ng->>Wb: 認可済みで転送
     Wb-->>Br: 全体の HTML と初回の断片
-    loop 15 秒ごと
-        Br->>Ng: fetch fragment
+    loop 15 秒ごと と 項目の選択の直後
+        Br->>Ng: fetch fragment 選択中の項目のキー付き
         alt 200
-            Ng-->>Br: 断片と更新された Cookie
+            Ng-->>Br: 断片 詳細を含む と更新された Cookie
             Br->>Br: 差し替えてタブと選択を戻す
         else 401
             Ng-->>Br: 401
@@ -308,6 +316,7 @@ sequenceDiagram
 ```
 
 - fetch は `credentials: 'same-origin'`、`cache: 'no-store'`、`redirect: 'manual'` で、10 秒で打ち切る。
+- 詳細 (当日の折れ線・内訳) は、選択中の項目のキーを付けた同じ断片に含めて返す。項目を選んだ直後にも断片を取り直す。詳細のための別の経路は設けない。
 - oauth2-proxy は、認証付きの要求のたびに、前回から 1 時間を超えていれば refresh し、Cookie を 12 時間に延ばす (RN-12)。15 秒ごとの fetch が refresh を兼ねるため、稼働時間内は再ログインなしで続く。
 
 ## Requirements Traceability
@@ -329,11 +338,17 @@ sequenceDiagram
 | 3.3 | 宣言から閾値・期待値 | FestivalConfig | `[festival]` | — |
 | 3.4 | 宣言の変更だけで反映 | FestivalConfig | ConfigMap のハッシュによる再起動 | — |
 | 3.5 | 共通の帯 (件数・異常の項目名・最終更新) | FestivalPage | 帯の DOM | 画面の更新 |
-| 3.6 | 判定と現在値、選択で閾値 | FestivalPage | 詳細パネル | — |
-| 3.7 | 選択で参照先リンク | FestivalCatalog、FestivalPage | `ItemDef.link` | — |
+| 3.6 | タイルに判定・現在値・閾値・注記・データの時刻を常に表示 | FestivalPage | タイルの DOM | — |
+| 3.7 | 選択で画面内に推移と内訳、リンクは補助 | FestivalPage、FestivalCatalog | 断片の `key`、詳細パネル、`ItemGroup.link`・`link_label` | 画面の更新 |
 | 3.8 | 1920×1080 でスクロールなし | FestivalPage | レイアウトの予算 | — |
 | 3.9 | タブ見出しに最悪の判定と異常件数 | FestivalPage | タブの DOM | — |
 | 3.10 | 更新中も選択中のタブを維持 | FestivalPage (JS) | `ViewState` | 画面の更新 |
+| 3.11 | タイルのスパークライン (直近 60 分) | FestivalCatalog、FestivalEvaluator、Store、FestivalChart | `FestivalItem.metric`・`unit`、`festival_history` | 取得・評価・通知 |
+| 3.12 | 詳細の当日の折れ線と閾値の線 | FestivalChart、FestivalPage | `FestivalItem.warn`・`crit`、`festival_history` | 画面の更新 |
+| 3.13 | 記録の無い期間は線を途切れさせる | FestivalEvaluator、FestivalChart | 1 分値の記録の規則、欠測の描き方 | — |
+| 3.14 | 内訳の表 | 各 festival 情報源、FestivalCatalog、FestivalPage | `Breakdown`、`festival_items.breakdown` | — |
+| 3.15 | 項目数に応じたタイルの大きさ | FestivalPage | `tile_grid()` | — |
+| 3.16 | 更新中も選択中の項目の詳細を維持し更新 | FestivalPage (JS) | `ViewState.selectedItemKey`、断片の `key` | 画面の更新 |
 | 4.1 | Worker の要求数・エラー率・リソース超過・CPU | festival.cloudflare、FestivalCatalog | GraphQL `workers` | 取得・評価・通知 |
 | 4.2 | CMS の要求数・5xx 比率・origin 応答時間 | festival.cloudflare | GraphQL `cms` | 取得・評価・通知 |
 | 4.3 | Worker のキャッシュ照会を除外 | festival.cloudflare | `requestSource_in` の許可リスト | — |
@@ -374,7 +389,7 @@ sequenceDiagram
 | 8.5 | 送信失敗の表示 | FestivalNotifier、FestivalPage | `festival_state`、項目 `infra.notifier` | — |
 | 8.6 | 既存の通知を変えない | FestivalNotifier | 当日専用の webhook。既存の送信先を使わない | — |
 | 8.7 | 当日監視の停止の検知 | FestivalHeartbeat | Healthchecks.io の ping | 取得・評価・通知 |
-| 9.1 | 時系列の保存基盤なし | Store | SQLite の 3 表 (最新値だけ) | — |
+| 9.1 | 時系列の保存基盤なし、SQLite に 24 時間分の 1 分値 | Store、FestivalEvaluator | `festival_history` (1 分に 1 点、24 時間で削除) | 取得・評価・通知 |
 | 9.2 | 外部 API のレート制限 | 各 festival 情報源、FestivalNotifier | 「Performance & Scalability」の表 | — |
 | 9.3 | 読み取りに限る | 各 festival 情報源 | GET・参照クエリだけ。読み取り専用トークン | — |
 | 9.4 | シークレットを出さない | http_client、FestivalNotifier | `redact_url`、`safe_error` | — |
@@ -387,7 +402,7 @@ sequenceDiagram
 | Component | Domain/Layer | Intent | Req Coverage | Key Dependencies (P0/P1) | Contracts |
 |-----------|--------------|--------|--------------|--------------------------|-----------|
 | FestivalConfig | config | `[festival]` の宣言の読み込みと検証 | 3.3, 3.4, 6.13 | tomllib (P0) | Service |
-| festival.cloudflare | sources | Worker・CMS・メディア・Cache API・ハブ接続数 | 4.1–4.4, 4.6, 5.3, 6.11, 6.12 | Cloudflare GraphQL (P0) | Batch |
+| festival.cloudflare | sources | Worker・CMS・メディア・Cache API・ハブ接続数と、状態・ステータスごとの内訳 | 3.14, 4.1–4.4, 4.6, 5.3, 6.11, 6.12 | Cloudflare GraphQL (P0) | Batch |
 | festival.stamp | sources | スタンプの処理結果 | 5.6, 4.6 | AE SQL (P0) | Batch |
 | festival.quake | sources | 地震リレーの状態 | 5.4, 5.5 | QuakeRelay `/status` (P0) | Batch |
 | festival.signage | sources | 本番からのハブ接続数 | 5.3 | SiteEntry `/api/signage/stats` (P0)、CF Access (P0) | Batch |
@@ -395,13 +410,14 @@ sequenceDiagram
 | festival.schedule | sources | 開催日と駐車場の監視時間 | 5.8 | CMS `site_settings` (P1) | Batch |
 | festival.bus | sources | バスのフィードの生成時刻 | 5.7 | ODPT (P0) | Batch |
 | festival.nodes | sources | ノードの Ready・資源 | 6.4, 7.5 | k8s API (P0)、kubelet (P1) | Batch |
-| festival.workloads | sources | CMS・DB・cloudflared の Pod | 6.1, 6.2, 6.6, 6.7, 6.9, 6.10 | k8s API (P0)、metrics.k8s.io (P1)、kubelet (P1) | Batch |
+| festival.workloads | sources | CMS・DB・cloudflared の Pod と Pod ごとの内訳 | 3.14, 6.1, 6.2, 6.6, 6.7, 6.9, 6.10 | k8s API (P0)、metrics.k8s.io (P1)、kubelet (P1) | Batch |
 | festival.cnpg | sources | DB の接続数・遅延・統計情報の無い表 | 6.2, 6.3, 6.8, 6.14 | CNPG `:9187` (P1) | Batch |
-| FestivalCatalog | festival | 項目の定義と判定 | 1.4, 3.3, 3.7, 4.x, 5.x, 6.x, 7.x | FestivalConfig (P0) | Service |
-| FestivalEvaluator | festival | 15 秒ごとの評価と保存 | 2.2–2.4, 6.13, 9.7 | Collector (P0)、Store (P0) | Service, State |
+| FestivalCatalog | festival | 項目の定義と判定、グラフの値と閾値、内訳 | 1.4, 3.3, 3.7, 3.11, 3.12, 3.14, 4.x, 5.x, 6.x, 7.x | FestivalConfig (P0) | Service |
+| FestivalEvaluator | festival | 15 秒ごとの評価と保存、1 分値の記録 | 2.2–2.4, 3.11, 3.13, 6.13, 9.1, 9.7 | Collector (P0)、Store (P0) | Service, State |
 | FestivalHeartbeat | festival | Healthchecks.io への生存の ping | 8.7 | Healthchecks.io (P1) | Service |
 | FestivalNotifier | festival | Discord への通知 | 6.13, 8.1–8.6, 9.2, 9.4 | Discord (P0)、Store (P0) | Service, State |
-| FestivalPage | festival | 画面と断片 | 1.1, 2.1, 2.5, 3.1, 3.2, 3.5–3.10, 6.13 | Store (P0) | API, State |
+| FestivalPage | festival | 画面と断片、タイルの格子、画面内の詳細 | 1.1, 2.1, 2.5, 3.1, 3.2, 3.5–3.16, 6.13 | Store (P0)、FestivalChart (P0) | API, State |
+| FestivalChart | festival | スパークラインと当日の折れ線の SVG | 3.11, 3.12, 3.13 | Store の 1 分値 (P0) | Service |
 | AdminSnapshotFilter | main | `/admin/` から `festival.*` を除く | 1.5 | Collector (P0) | Service |
 | ParkingJudgeHealth (web) | CMS | 判定の状態をカメラに記録 | 5.2 | Payload DB (P0) | State |
 | OpsParkingHealthEndpoint (web) | CMS | 判定の状態の読み取り | 5.1, 5.2 | Payload (P0) | API |
@@ -514,10 +530,11 @@ def parse_festival(raw: Mapping[str, object]) -> FestivalConfig: ...  # 誤り�
 - 失敗 (HTTP エラー、429、GraphQL の `errors`、解釈できない応答) は例外として送り出す。既存の `Collector._execute` が `Status.ERROR` に変換し、直前の items を保つ。同じ周期内でのリトライはしない (D-11)。
 - `Item.values` には、データの時刻 `observed_at` (ISO 8601、UTC) を必要に応じて入れる。取得時刻は `SourceResult.fetched_at`。
 - 個人を識別できる値 (IP、端末識別子) を `Item` に入れない (9.5)。fail2ban の IP は既存の `mail.fail2ban` の items にあるが、当日監視は照合に使うだけで、表示・保存しない。
+- 内訳 (3.14) は、その周期の問い合わせで既に受け取っている値だけを、`Item.values` の配列 (`by_status`・`by_cache_status`・`by_pod`) に残す。内訳のために問い合わせを足さない。配列の各要素は数値と文字列だけの辞書にする (`result_to_json` でそのまま保存できる形)。
 
 | source_id | 間隔 | 取得先 | 主な Item (キー: values) |
 |---|---|---|---|
-| `festival.cloudflare` | 60 秒 | GraphQL 1 回 (alias で 5 つ) | `worker`: requests, errors, exceeded, cpu_p99_ms, window_end<br>`cms`: requests, status_5xx, origin_p95_ms, window_end<br>`media`: requests, status_4xx, status_5xx, window_end<br>`cms_cache`: lookups, hits, window_end<br>`hub_total`: connections, minute |
+| `festival.cloudflare` | 60 秒 | GraphQL 1 回 (alias で 5 つ) | `worker`: requests, errors, exceeded, cpu_p99_ms, window_end, by_status<br>`cms`: requests, status_5xx, origin_p95_ms, window_end, by_status<br>`media`: requests, status_4xx, status_5xx, window_end, by_status<br>`cms_cache`: lookups, hits, window_end, by_cache_status<br>`hub_total`: connections, minute |
 | `festival.stamp` | 60 秒 | AE SQL 1 回 | `stamp`: failed, rate_limited, d1_failed, window_end |
 | `festival.quake` | 60 秒 | 地震リレー `/status` | `cron`: last_run_at, in_period<br>`channel.<name>`: connected, receiving, last_received_at, test<br>`unreachable`: value<br>`discord`: configured, disabled, last_success_at, last_failure_at, last_failure |
 | `festival.signage` | 60 秒 | `/api/signage/stats` | `connections`: prod, dev, preview, unknown, at |
@@ -525,7 +542,7 @@ def parse_festival(raw: Mapping[str, object]) -> FestivalConfig: ...  # 誤り�
 | `festival.schedule` | 5 分 | `site_settings` (認証なし) | `monitor`: start, end<br>`event_day.<n>`: start_at, end_at |
 | `festival.bus` | 30 秒 | ODPT の `trip_update`・`vehicle` | `feed.trip_update`・`feed.vehicle`: header_timestamp |
 | `festival.nodes` | 60 秒 | k8s nodes、`metrics.k8s.io` nodes、kubelet | `node.<name>`: ready, cpu_ratio, memory_ratio, disk_ratio, addresses_count<br>(アドレスと podCIDRs は fail2ban の照合用に、メモリ内の値として評価器に渡す。後述) |
-| `festival.workloads` | 30 秒 | k8s pods・deployments・CNPG Cluster・`metrics.k8s.io` pods、対象の Pod があるノードの kubelet (`/stats/summary`・`/metrics/cadvisor`) | `cms`: replicas, ready, restarts_recent, oom_recent, crashloop, cpu_ratio_max, throttle_ratio_max<br>`db.<pod>`: role, cpu_ratio, memory_rss_ratio, restarts_recent, oom_recent, crashloop, ip<br>`cloudflared`: pods, cpu_ratio_max, throttle_ratio_max |
+| `festival.workloads` | 30 秒 | k8s pods・deployments・CNPG Cluster・`metrics.k8s.io` pods、対象の Pod があるノードの kubelet (`/stats/summary`・`/metrics/cadvisor`) | `cms`: replicas, ready, restarts_recent, oom_recent, crashloop, cpu_ratio_max, throttle_ratio_max, by_pod<br>`db.<pod>`: role, cpu_ratio, memory_rss_ratio, restarts_recent, oom_recent, crashloop, ip<br>`cloudflared`: pods, cpu_ratio_max, throttle_ratio_max, by_pod |
 | `festival.cnpg` | 30 秒 | 各 DB の Pod の `:9187/metrics` | `db.<pod>`: role, backends, max_connections, replication_lag_s, unanalyzed_tables (primary だけ) |
 
 #### festival.cloudflare
@@ -546,6 +563,10 @@ def parse_festival(raw: Mapping[str, object]) -> FestivalConfig: ...  # 誤り�
 - 要求の無い分は行が返らない (RN-4)。そのため、行が無い窓は件数 0 として扱う。
 - 接続数 (`hub_total`) は最新の分の値を使う。その分が `floor(now)-4分` より古ければ、Item の `note` に取得遅延を記し、評価器が「取得遅延」にする。
 - 次元に `clientIP`・`clientRequestPath` の全体・User-Agent などは選ばない (9.5)。
+- 内訳 (3.14): 合計に畳んでいた行を、畳む前の形でも残す。
+  - `worker.by_status`: `workers` の行ごとに `{status, requests, errors}`。
+  - `cms.by_status`・`media.by_status`: `edgeResponseStatus` ごとに `{status, count}`。同じステータスの行は足し合わせる。
+  - `cms_cache.by_cache_status`: `cacheStatus` ごとに `{cache_status, count}`。
 
 **Dependencies**
 - External: Cloudflare GraphQL Analytics API — 5 分で 300 クエリ (P0)。
@@ -633,6 +654,7 @@ def internal_networks() -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, 
   - 対象の Pod が載っているノードの kubelet `:10250/metrics/cadvisor` を GET し、`_promtext.py` で `container_cpu_cfs_throttled_periods_total` と `container_cpu_cfs_periods_total` を読む。`namespace`・`pod` のラベルが対象の Pod に一致し、`container` のラベルが空でない行だけを使う。
   - 前回の取得との差分で、`Δthrottled_periods ÷ Δperiods` をコンテナごとに求め、Pod ごと・対象 (CMS・cloudflared) ごとの最大値を `throttle_ratio_max` にする。前回の値はモジュール内に保持する。
   - `Δperiods` が 0 の行は 0 とする (CPU を使う期間が無かった)。前回の値が無い行 (初回・新しい Pod・カウンタの減少) は、その周期の計算から除く。対象のすべての行が除かれた場合は、Item の `note` に取得遅延を記す。
+- 内訳 (3.14): `cms.by_pod` は Pod ごとに `{pod, ready, cpu_ratio, throttle_ratio, restarts_recent, oom_recent, crashloop}`、`cloudflared.by_pod` は Pod ごとに `{pod, cpu_ratio, throttle_ratio}`。最大値を求める前の Pod ごとの値をそのまま残す。DB は instance ごとに Item (`db.<pod>`) があるため足さない。
 - kubelet への経路: `festival.nodes` と同じ k8s モジュールの kubelet 呼び出し (Pod の `spec.nodeName` から得たノードの InternalIP の 10250 番、ServiceAccount トークン) を使う。`/stats/summary` は既存の `nodes/stats` の権限で読める。1 ノードの kubelet に届かなければ、そのノードの Pod のメモリとスロットリングだけを欠かし、他は続ける。
 - RBAC: `metrics.k8s.io` の pods の get・list (D-12)、`apps` の deployments の get (U-7)、`nodes/metrics` の get (kubelet の `/metrics/*` は resource `nodes`・subresource `metrics` で認可される) を足す。
 
@@ -694,7 +716,7 @@ def parse_samples(text: str, names: Iterable[str]) -> Mapping[str, list[tuple[Ma
 | Field | Detail |
 |-------|--------|
 | Intent | 当日監視の項目を定義し、取得結果と宣言から判定する |
-| Requirements | 1.4, 3.3, 3.7, 4.1–4.6, 5.1–5.8, 6.1–6.14, 7.1–7.5 |
+| Requirements | 1.4, 3.3, 3.7, 3.11, 3.12, 3.14, 4.1–4.6, 5.1–5.8, 6.1–6.14, 7.1–7.5 |
 
 **Responsibilities & Constraints**
 - 項目の一覧と判定の規則は、コードとして宣言する。閾値・期待値は `FestivalConfig` から読む (3.3)。
@@ -706,6 +728,9 @@ def parse_samples(text: str, names: Iterable[str]) -> Mapping[str, list[tuple[Ma
   - FestivalNotifier は `judged = False` の項目を計画しない (通知しない)。
   - FestivalPage は判定の文字を「表示のみ」(`fest.status.info`) にし、正常の色を使わない。帯とタブ見出しの件数・最悪の判定には数えない。
   - 閾値を宣言すれば、宣言の変更だけで通常の判定に変わる (3.4)。
+  - `visitor.worker.requests` (項目名「Worker 要求数」、現在値「{requests} 件」) は閾値名を持たない表示のみの項目で、`judge` が `judged = False` の `Judgement` を直接返す。表示・通知・件数の扱いは上と同じ。
+- グラフの値 (3.11・3.12): グラフの対象の項目 (後述の表) は、表示用の文字 (`value`) とは別に、数値 (`metric`)・単位 (`unit`)・閾値の線の値 (`warn`・`crit`) を `Judgement` に入れる。`metric` の単位は `unit` に従い、期間の閾値 (`timedelta`) は秒に換算する。表示のみの項目は `warn`・`crit` を `None` にする。
+- 内訳 (3.14): 内訳を持つ項目 (後述の表) は、情報源の結果から表示用に整形した `Breakdown` を `Judgement` に入れる。内訳のために情報源へ問い合わせを足さない。
 
 **Contracts**: Service [x]
 
@@ -716,7 +741,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Callable, Iterable, Mapping
 
-from model import SourceResult, Status
+from model import Breakdown, MetricUnit, SourceResult, Status
 
 class Category(StrEnum):
     VISITOR = "visitor"      # 来場者影響
@@ -734,6 +759,11 @@ class Judgement:
     observed_at: datetime | None    # データの時刻 (取得時刻と異なるとき)
     note: str | None = None
     judged: bool = True             # False は表示のみ (閾値が未宣言。6.13)
+    metric: float | None = None     # グラフの値。グラフの対象でない項目と、値を算出できないときは None
+    unit: MetricUnit | None = None  # None はグラフの対象外
+    warn: float | None = None       # 閾値の線 (metric と同じ単位)。閾値が無い・表示のみのときは None
+    crit: float | None = None
+    breakdown: Breakdown | None = None
 
 # 宣言を省略できる閾値名 {"cms_cache_hit_ratio"} は config.py の OPTIONAL_THRESHOLDS に置く
 
@@ -755,6 +785,7 @@ class ItemGroup:
     category: Category
     sources: tuple[str, ...]        # 依存する source_id。取得失敗・鮮度の判定に使う
     link: str | None                # 参照先 (3.7)
+    link_label: str | None          # 参照先の名前の表記キー (fest.link.*)。link が None なら None
     notify: bool                    # False は通知しない (infra.notifier 自身など)
     judge: Callable[[EvalInput], Iterable[Judgement]]
 
@@ -768,6 +799,7 @@ CATALOG: tuple[ItemGroup, ...]
 
 | 区分 | 項目キー | 依存する情報源 | 判定 | 閾値名 | 参照先 |
 |---|---|---|---|---|---|
+| 来場者影響 | `visitor.worker.requests` | festival.cloudflare | 要求数 (5 分の窓)。閾値を持たず、常に表示のみ (`judged = False`) | — | Cloudflare ダッシュボード |
 | 来場者影響 | `visitor.worker.error_rate` | festival.cloudflare | errors ÷ requests (最低要求数未満は正常) | `worker_error_rate` | Cloudflare ダッシュボード |
 | 来場者影響 | `visitor.worker.exceeded` | festival.cloudflare | exceededResources の件数 | `worker_exceeded` | Cloudflare ダッシュボード |
 | 来場者影響 | `visitor.worker.cpu_p99` | festival.cloudflare | CPU 時間の p99 (ms) | `worker_cpu_p99_ms` | Cloudflare ダッシュボード |
@@ -822,13 +854,71 @@ CATALOG: tuple[ItemGroup, ...]
   - 規則は RN-13 の公開ページの判定に揃える。
   - `festival.parking` が無効 (`parking.enabled = false`) の間は、`festival.schedule` が有効でも駐車場の項目を作らない。
 - 参照先の Cloudflare ダッシュボードは、アカウント ID を含まないトップの URL にする。アカウント ID はこのリポジトリでは秘匿扱いのため。
+- 参照先の名前 (`link_label`): Cloudflare ダッシュボードは `fest.link.cloudflare`、Netdata は `fest.link.netdata`、`/admin/#…` は `fest.link.admin`、CMS 管理画面は `fest.link.cms`、Healthchecks.io のコンソールは `fest.link.healthchecks`。
+
+**グラフの対象 (3.11・3.12)**: 次の表の項目だけがグラフ (タイルのスパークラインと詳細の当日の折れ線) を持つ。表に無い項目 (Ready・再起動・定期起動・上流・Discord 通知・UptimeRobot・Healthchecks.io・Falco など、状態を表す項目) は持たない。駐車場の 2 項目は、時間外 (`EMPTY`) の間は記録されない (1 分値の記録の規則)。
+
+| 項目キー | 値 (`metric`) | 単位 | 閾値の線 |
+|---|---|---|---|
+| `visitor.worker.requests` | 要求数 (5 分の窓) | `count` | なし (表示のみ) |
+| `visitor.worker.error_rate` | errors ÷ requests (requests が 0 なら 0)。最低要求数未満でも値は入れる | `ratio` | `worker_error_rate` |
+| `visitor.worker.exceeded` | exceededResources の件数 (5 分の窓) | `count` | `worker_exceeded` |
+| `visitor.worker.cpu_p99` | CPU 時間の p99 | `ms` | `worker_cpu_p99_ms` |
+| `visitor.cms.5xx_rate` | 5xx ÷ 要求数 (要求数が 0 なら 0) | `ratio` | `cms_5xx_rate` |
+| `visitor.cms.origin_p95` | origin 応答時間の p95 | `ms` | `cms_origin_p95_ms` |
+| `visitor.media.4xx` | 4xx の件数 (5 分の窓) | `count` | `media_4xx` |
+| `visitor.media.5xx` | 5xx の件数 (5 分の窓) | `count` | `media_5xx` |
+| `function.parking.capture.<id>` | 最終受信からの経過 (最終受信の時刻が無いときは None) | `seconds` | `parking_capture_age` |
+| `function.parking.judge.<id>` | 判定の連続失敗回数 | `count` | `parking_judge_failures` |
+| `function.signage.prod` | 本番の接続数 | `count` | 設置台数 − `signage_missing` の注意・異常 (接続数がこの値以下で注意・異常)。設置台数が 0 の間は線なし |
+| `function.stamp.failed` | 記録失敗の件数 (5 分の窓) | `count` | `stamp_failed` |
+| `function.stamp.d1_failed` | D1 失敗の件数 (5 分の窓) | `count` | `stamp_d1_failed` |
+| `function.stamp.rate_limited` | レート制限の件数 (5 分の窓) | `count` | `stamp_rate_limited` |
+| `function.bus.<feed>` | 生成時刻からの経過 | `seconds` | `bus_feed_age` |
+| `capacity.cms.cpu` | CPU 対 limit の最大 | `ratio` | `pod_cpu_ratio` |
+| `capacity.cms.throttle` | CPU スロットリング率の最大 | `ratio` | `cpu_throttle_ratio` |
+| `capacity.cms.rps` | メディアを除く毎秒の要求数 | `rps` | `cms_rps` |
+| `capacity.cms.cache_hit` | hits ÷ lookups (lookups が 0 なら None) | `ratio` | `cms_cache_hit_ratio` (未宣言の間は線なし) |
+| `capacity.db.primary_cpu` | primary の CPU 対 limit | `ratio` | `pod_cpu_ratio` |
+| `capacity.db.connections` | primary の接続数 ÷ 上限 | `ratio` | `db_connections_ratio` |
+| `capacity.db.backends.<pod>` | instance の接続数 | `count` | `db_backends` |
+| `capacity.db.memory.<pod>` | instance のメモリ (rss) 対 limit | `ratio` | `db_memory_rss_ratio` |
+| `capacity.db.unanalyzed` | 統計情報の無い表の数 | `count` | `db_unanalyzed_tables` |
+| `capacity.db.lag.<pod>` | replica の遅延 | `seconds` | `db_replica_lag_s` |
+| `capacity.cloudflared.cpu` | CPU 対 limit の最大 | `ratio` | `pod_cpu_ratio` |
+| `capacity.cloudflared.throttle` | CPU スロットリング率の最大 | `ratio` | `cpu_throttle_ratio` |
+| `capacity.node.<name>.cpu`・`.memory`・`.disk` | 使用率 | `ratio` | `node_cpu_ratio`・`node_memory_ratio`・`node_disk_ratio` |
+| `capacity.tunnel` | 接続数 | `count` | `tunnel_connections` |
+
+- 値を算出できないとき (メトリクスが無い、lookups が 0 など) は `metric = None` にする (記録しない)。
+
+**内訳 (3.14)**: 次の表の項目だけが内訳を持つ。値はその項目の情報源が既に取得している結果から作り、最新値だけを持つ (推移は持たない)。
+
+| 項目キー | 見出し | 列 | 元の値 | 並び |
+|---|---|---|---|---|
+| `visitor.worker.error_rate`・`visitor.worker.exceeded` | 状態ごと | 状態・要求数・エラー数 | festival.cloudflare `worker.by_status` | 要求数の多い順 |
+| `visitor.cms.5xx_rate` | ステータスごと | ステータス・件数 | festival.cloudflare `cms.by_status` | 件数の多い順 |
+| `visitor.media.4xx`・`visitor.media.5xx` | ステータスごと | ステータス・件数 | festival.cloudflare `media.by_status` | 件数の多い順 |
+| `capacity.cms.cache_hit` | キャッシュの状態ごと | キャッシュの状態・件数 | festival.cloudflare `cms_cache.by_cache_status` | 件数の多い順 |
+| `function.signage.prod` | 接続元ごと | 接続元・接続数 | festival.signage `connections` の prod・dev・preview・unknown | prod・dev・preview・unknown の順 |
+| `function.quake.channel.<name>` | 上流ごと | 上流・接続・受信・最終受信・テスト | festival.quake の `channel.*` | 上流の名前順 |
+| `function.parking.capture.<id>`・`function.parking.judge.<id>` | カメラごと | カメラ・駐車場・最終受信・判定の最終成功・連続失敗 | festival.parking の `camera.*` | カメラ名順 |
+| `capacity.cms.ready`・`.restarts`・`.cpu`・`.throttle` | Pod ごと | Pod・Ready・CPU・スロットリング・再起動 | festival.workloads `cms.by_pod` | Pod 名順 |
+| `capacity.cloudflared.cpu`・`.throttle` | Pod ごと | Pod・CPU・スロットリング | festival.workloads `cloudflared.by_pod` | Pod 名順 |
+| `capacity.db.*` (`primary_cpu`・`connections`・`backends.<pod>`・`memory.<pod>`・`restarts`・`unanalyzed`・`lag.<pod>`) | instance ごと | Pod・役割・CPU・メモリ・接続・遅延・再起動 | festival.workloads の `db.*` と festival.cnpg の `db.*` を Pod 名で突き合わせる | primary を先頭、残りは Pod 名順 |
+| `capacity.node.<name>.*` (`ready`・`cpu`・`memory`・`disk`) | ノードごと | ノード・Ready・CPU・メモリ・ディスク | festival.nodes の `node.*` | ノード名順 |
+
+- 表に無い項目は内訳を持たない。`capacity.tunnel` は、既存の情報源 `connect.tunnel` の取得内容を変えない (Out of Boundary) ため持たない。
+- CPU・メモリ・ディスク・スロットリングの列は、それぞれ CPU 対 limit・メモリ (rss) 対 limit・使用率・スロットリング率 (ノードは使用率)。
+- 突き合わせの片方の情報源が無い・取得失敗のときは、その列を「—」にする。
+- 個人を識別できる値 (IP 等) を列に入れない (9.5)。
 
 #### FestivalEvaluator
 
 | Field | Detail |
 |-------|--------|
-| Intent | 15 秒ごとに全項目を評価し、取得失敗と取得遅延を反映して SQLite に保存する |
-| Requirements | 2.2, 2.3, 2.4, 6.13, 9.7 |
+| Intent | 15 秒ごとに全項目を評価し、取得失敗と取得遅延を反映して SQLite に保存する。グラフの対象の項目の値を 1 分ごとに記録する |
+| Requirements | 2.2, 2.3, 2.4, 3.11, 3.13, 6.13, 9.1, 9.7 |
 
 **Responsibilities & Constraints**
 - `Collector.latest()` (結果の写し) を読む。`Collector.snapshot()` は使わない (render を実行しないため)。
@@ -839,6 +929,14 @@ CATALOG: tuple[ItemGroup, ...]
   - 一度も成功していない (結果が無い) → 「取得失敗」(理由: 未取得)。
 - 依存する情報源のすべてが無効 (`disabled_sources`、`parking.enabled = false`) の項目は作らない。駐車場の項目は `festival.schedule` にも依存するが、`festival.parking` が無効なら `festival.schedule` が有効でも作らない。
 - 評価のたびに `festival_items` を 1 トランザクションで置き換え、`festival_state.evaluated_at` を更新し、`last_eval_error` を NULL に戻す。
+- 1 分値の記録 (`festival_history`。3.11・3.13・9.1):
+  - 記録する分は、評価時刻を分単位で切り捨てた時刻 (`minute`)。評価器は最後に記録した分を覚え、分が変わって最初の評価でだけ記録する。1 分に 1 点で、値はその分の最初の評価の値。
+  - 記録する項目は、`unit` が `None` でなく、`metric` が `None` でなく、`status` が `ERROR` (取得失敗)・`STALE` (取得遅延)・`EMPTY` (時間外) でないもの。表示のみの項目 (`judged = False`) も記録する。判定の結果 (`OK`・`WARN`・`CRIT`) は記録しない。
+  - 記録しない分は欠測になり、グラフで線が途切れる。値を補ったり、前の値を繰り返したりしない。
+  - 記録は `festival_items` の置き換えと同じトランザクションで行う。同じトランザクションで、`minute` が 24 時間より前の行を消す。
+  - プロセスの再起動で同じ分にもう一度記録することがある。その場合は上書きする (主キーが同じ行を置き換える)。
+  - 記録の失敗は、評価の例外として既存の扱い (`festival_eval_failed`、`last_eval_error`) に従う。
+- 内訳 (`Judgement.breakdown`) は `FestivalItem.breakdown` にそのまま移し、`festival_items` に最新値だけを保存する。取得失敗・取得遅延の項目も、判定と同じく直前の結果から作った内訳を残す。
 - 1 回の評価の例外は `log("festival_eval_failed", ...)` に記録して握りつぶし、次の評価に進む。`Store.save_festival_eval_error(error)` で `festival_state.last_eval_error` に理由だけを残し、`evaluated_at` は進めない (例外が続く間は画面に「判定が止まっている」が出る)。
 - 評価のあとに FestivalNotifier を呼ぶ。送信の失敗は評価と表示を止めない (8.5)。評価の入力 (`EvalInput`) には、`load_festival_state()` の結果と、通知器・生存確認の設定の有無 (`notifier_configured`・`heartbeat_configured`) を渡す。
 - 評価が例外なく終わったら FestivalHeartbeat を呼ぶ (8.7)。
@@ -874,6 +972,12 @@ class FestivalItem:
     note: str | None
     notify: bool
     judged: bool                     # False は表示のみ (6.13)
+    metric: float | None             # グラフの値 (Judgement から移す)
+    unit: "MetricUnit | None"        # None はグラフの対象外
+    warn: float | None               # 閾値の線
+    crit: float | None
+    breakdown: "Breakdown | None"    # 内訳 (最新値だけ)
+    link_label: str | None           # 参照先の名前の表記キー
 
 @dataclass(frozen=True)
 class SourceHealth:
@@ -898,12 +1002,13 @@ class FestivalEvaluator:
     def evaluate_once(self) -> Evaluation: ...
     def run(self, stop: threading.Event) -> None: ...
 ```
-- Postconditions: `evaluate_once` のあと、`festival_items` は今回の評価の項目だけになる。
+- Postconditions: `evaluate_once` のあと、`festival_items` は今回の評価の項目だけになる。`festival_history` には、24 時間より前の行が無い。
 - Invariants: 評価器は外部に問い合わせない (SQLite と結果の写しだけを読む)。
 
 ##### State Management
 - State model: `SourceHealth.failing_since` は、評価のたびに前回の値から計算する。プロセスの再起動では、SQLite の `festival_alerts` (kind = source) の `opened_at` から復元する。`opened_at` には、通知器が情報源の失敗の通知(`Notice.since` = `failing_since`)を送れたときに、失敗の開始時刻を残す。
-- Persistence & consistency: `festival_items` と `festival_state` は、既存の `Store.write` (単一ライター) で書く。
+- Persistence & consistency: `festival_items`・`festival_state`・`festival_history` は、既存の `Store.write` (単一ライター) で、1 回の評価につき 1 トランザクションで書く。
+- 最後に記録した分は評価器のメモリにだけ持つ (再起動で失っても、上書きで済む)。
 - Concurrency strategy: 評価は 1 スレッドだけで行う。画面は読み取りの接続で読む (WAL)。
 
 #### FestivalNotifier
@@ -1045,14 +1150,17 @@ class FestivalHeartbeat:
 | Field | Detail |
 |-------|--------|
 | Intent | 当日監視画面の HTML と断片を描画し、ブラウザ側で自動更新と選択状態の保持を行う |
-| Requirements | 1.1, 2.1, 2.2, 2.5, 3.1, 3.2, 3.5, 3.6, 3.7, 3.8, 3.9, 3.10, 6.13 |
+| Requirements | 1.1, 2.1, 2.2, 2.5, 3.1, 3.2, 3.5–3.16, 6.13 |
 
 **Responsibilities & Constraints**
-- `festival_items` と `festival_state` を読むだけ。評価・取得はしない (D-3)。
+- `festival_items`・`festival_state`・`festival_history` を読むだけ。評価・取得はしない (D-3)。
 - `GET /admin/festival`: ページ全体 (head、CSS、JS、初回の断片を含む)。
-- `GET /admin/festival/fragment`: 断片だけ。断片は「上部の帯・タブ見出し・4 つのタブパネル・各項目の詳細」を含む。詳細パネルの枠は含まない。
-- 断片の差し替えは、ブラウザ側の状態 (選択中のタブと項目) を DOM の外に持つことで、更新をまたいで保つ (3.10、D-2)。
+- `GET /admin/festival/fragment?key=<項目キー>`: 断片だけ。断片は「上部の帯・タブ見出し・4 つのタブパネル (タイル)・詳細パネル」を含む。詳細パネルの中身は `key` の項目のもので、`key` が無ければ未選択の表示にする。
+  - 詳細 (当日の折れ線と内訳) は、選択中の 1 項目の分だけを描く。全項目の詳細を断片に入れない (当日の折れ線は 1 項目で最大 1,440 点あり、全項目分を 15 秒ごとに送らないため)。
+  - `key` は SQL のパラメータと HTML のエスケープを通してだけ使う。200 文字を超える値と、該当する項目の無い値は「この項目は現在ありません」(`fest.detail.gone`) にする。
+- 断片の差し替えは、ブラウザ側の状態 (選択中のタブと項目) を DOM の外に持つことで、更新をまたいで保つ (3.10・3.16、D-2)。
 - 色だけに頼らず、記号と文字を併記する (3.1)。記号は既存の `badge` と同じものを使い、文言は `festival/labels.py` から引く。
+- グラフはサーバー側でインライン SVG に描く (`festival/chart.py`)。既存の `/admin/` のグラフ (`render/svg.py`) と同じ流儀で、外部の JS・画像・ライブラリを使わない。軸の上限の丸めは `render.svg._nice_max` を使う。
 
 **Contracts**: API [x] / State [x]
 
@@ -1060,14 +1168,32 @@ class FestivalHeartbeat:
 | Method | Endpoint | Request | Response | Errors |
 |--------|----------|---------|----------|--------|
 | GET | `/admin/festival` | なし | `text/html` ページ全体 | 401・302・403 (nginx)、500 (描画失敗) |
-| GET | `/admin/festival/fragment` | なし | `text/html` 断片 | 401・403 (nginx)、500 |
+| GET | `/admin/festival/fragment` | クエリ `key` (任意。選択中の項目キー) | `text/html` 断片 | 401・403 (nginx)、500 |
 
-- 断片のルート要素は `<div id="festival-fragment" data-evaluated-at="<ISO>" data-eval-stale="true|false">`。
+- 断片のルート要素は `<div id="festival-fragment" data-evaluated-at="<ISO>" data-eval-stale="true|false" data-key="<key>">`。
   - `data-eval-stale` は、`festival_state.evaluated_at` が 60 秒より古いときに真。帯に「判定が止まっている」を出すために使う。
+- タブパネル: `<div role="tabpanel" class="panel" data-size="standard|compact" style="--cols:<列数>;--tile-w:<幅>px;--tile-h:<高さ>px">`。列数・幅・高さは `tile_grid()` (後述) で求める。
 - 項目のタイル: `<button class="tile s-<status>" data-key="<key>" data-tab="<category>" aria-controls="detail">`。
-  - タイルには、名前・判定・現在値・取得時刻 (`HH:MM:SS`) を載せる。
+  - タイルには、名前・判定・現在値・閾値・注記・時刻と、グラフの対象の項目はスパークラインを載せる (3.6・3.11)。
   - 表示のみの項目 (`judged = False`) で取得失敗・取得遅延でないものは、`s-info` と「表示のみ」を使う (6.13)。
-  - 閾値・参照先・データの時刻・注記は、`<template data-detail-for="<key>">` に入れる。選択したときだけ詳細パネルに表示する (3.6・3.7)。
+- 詳細パネル: `<aside id="detail" aria-live="polite">`。断片の中に置く。
+
+##### Service Interface
+```python
+from dataclasses import dataclass
+from typing import Literal
+
+@dataclass(frozen=True)
+class TileGrid:
+    cols: int
+    rows: int
+    width: int              # px
+    height: int             # px
+    size: Literal["standard", "compact"]
+
+def tile_grid(n: int) -> TileGrid | None:
+    """項目数 n のタブのタイルの格子。n = 0 は None。"""
+```
 
 ##### State Management (ブラウザ側)
 ```typescript
@@ -1078,48 +1204,164 @@ interface ViewState {
   selectedItemKey: string | null;  // 詳細パネルに出している項目
   lastSuccessAt: number | null;    // 最後に断片を差し替えた時刻 (epoch ms)
   staleReason: "auth" | "forbidden" | "server" | "network" | null;
+  requestSeq: number;              // 最後に出した断片の要求の連番
 }
 
 type RefreshResult =
-  | { kind: "ok"; html: string }
+  | { kind: "ok"; html: string; seq: number }
   | { kind: "auth" }        // 401 または opaqueredirect
   | { kind: "forbidden" }   // 403
   | { kind: "server"; status: number }
   | { kind: "network" };    // 通信断・タイムアウト
 
 interface FestivalClient {
-  refresh(): Promise<RefreshResult>;   // 15 秒ごと。10 秒で打ち切る
+  refresh(): Promise<RefreshResult>;   // 15 秒ごとと、項目の選択の直後。selectedItemKey を key に付ける。10 秒で打ち切る
   apply(result: RefreshResult): void;  // 差し替えと ViewState の再適用
   selectTab(tab: TabId): void;         // location.hash も更新
   selectItem(key: string | null): void;
 }
 ```
+- `selectItem` は、タイルに選択の印を付け、詳細パネルを「読み込み中」(`fest.detail.loading`) にして、すぐに `refresh` を呼ぶ。
 - `apply` の成功時の手順:
-  1. `#festival-fragment` を置き換える。
-  2. `selectedTab` のタブとパネルの `aria-selected`・`hidden` を戻す。
-  3. `selectedItemKey` の `<template>` があれば詳細パネルに複製し、タイルに選択の印を付ける。項目が消えていれば、詳細パネルに「この項目は現在ありません」と出す。
-  4. `lastSuccessAt` を更新し、警告を消す。
-- 失敗時: 表示を保ったまま、帯に警告を出す (2.5)。
+  1. 応答の `seq` が `requestSeq` と異なる (後から別の要求を出した) ときは、何もしない。選択を切り替えた直後に、古い項目の詳細を表示しないため。
+  2. `#festival-fragment` を置き換える。
+  3. `selectedTab` のタブとパネルの `aria-selected`・`hidden` を戻す。
+  4. `selectedItemKey` のタイルに選択の印を付ける。詳細パネルの中身は断片に含まれている。
+  5. `lastSuccessAt` を更新し、警告を消す。
+- 失敗時: 表示 (詳細パネルを含む) を保ったまま、帯に警告を出す (2.5)。
   - `auth`: 「表示が古い・再ログインが必要」と、`/admin/festival` へのリンク (ページ遷移でログインに進む)。
   - それ以外: 「表示が古い (最終更新 HH:MM:SS)」。
   - `lastSuccessAt` から 45 秒を超えたら、警告を強調する。
 - タブとタイルはキーボードで操作できるようにする (tablist・tab・tabpanel の role)。
+- 選択中の項目は、タブを切り替えても保つ (詳細パネルは別のタブの項目を表示し続ける)。
 
-**画面の構成と寸法の予算 (3.8)**:
-- 上部の帯 (固定、高さ 120px 以内): 異常と注意の件数、異常の項目名 (横並び。最大 5 件で、溢れた分は「ほか n 件」(`fest.band.more`))、最終更新時刻、更新の警告 (3.5)。件数と項目名は判定対象 (`judged = True`) の項目だけから求める。
-- タブ見出し (高さ 56px): 各タブの最悪の判定の記号と文字、異常の件数 (3.9)。最悪の判定は判定対象の項目だけから求め、重さは 取得失敗 が 注意 より重く、取得遅延 は 注意 より軽い。項目が無いタブ、または全項目が表示のみのタブは「–」とする。
-- 本文:
-  - 左はタイルの格子。`grid-template-columns: repeat(auto-fill, minmax(220px, 1fr))`、タイルの高さは 84px。
-  - 右は詳細パネル (幅 420px)。
-- 1920×1080 では本文の高さは約 880px で、タイルは 6 列 × 9 行 = 54 個まで収まる。
-- 想定の最大項目数は 1 タブ 40 個以下。容量のタブは、ノード 4 ノードで 16 個と CMS・DB (3 instance)・cloudflared・Tunnel で約 35 個になる。
-- 54 個を超える場合は、タイルを 64px の小型表示に切り替える (CSS のコンテナクエリ、または断片の `data-dense` 属性)。
+**画面の構成と寸法の予算 (1920×1080。3.8)**:
+
+| 領域 | 位置 | 幅 | 高さ | 内容 |
+|---|---|---|---|---|
+| 上部の帯 | 上端、全幅 | 1920 | 120 (固定) | 件数 (26px)・最終更新 (18px)、異常の項目名 (18px)、更新の警告と判定の停止 (15px) の 3 行。下端に 4px の色の線 |
+| タブ見出し | 帯の下、全幅 | 1920 | 56 | 4 つのタブ。各タブに最悪の判定と異常の件数 (3.9) |
+| タイルの格子 | 本文の左 | 1360 | 904 | 内側の余白 12px。タイルを置ける領域は 1336 × 880、タイルの間隔 8px |
+| 詳細パネル | 本文の右 | 560 | 904 | 内側の余白 16px。中身を置ける領域は 528 × 872 |
+
+- 上部の帯: 異常の項目名は横並びで最大 5 件、溢れた分は「ほか n 件」(`fest.band.more`)。件数と項目名は判定対象 (`judged = True`) の項目だけから求める (3.5)。
+- タブ見出し: 最悪の判定は判定対象の項目だけから求め、重さは 取得失敗 が 注意 より重く、取得遅延 は 注意 より軽い。項目が無いタブ、または全項目が表示のみのタブは「–」とする。
+
+**タイルの大きさの決め方 (3.15)**:
+
+`tile_grid(n)` は、タブの項目数 n から列数・行数・タイルの寸法を決める。ブラウザの幅には依存させず、1920×1080 の予算で決める。
+
+| 定数 | 値 |
+|---|---|
+| 格子の領域 | 幅 1336px、高さ 880px |
+| タイルの間隔 | 8px |
+| タイルの最小 | 幅 200px、高さ 108px |
+| タイルの最大 | 幅 640px、高さ 360px |
+| 標準表示の下限 | 幅 240px かつ 高さ 198px |
+| 列数の上限 | 6 (最小幅 200px と間隔 8px から決まる) |
+
+1. 列数 c = 1〜6 のそれぞれで、行数 r = ⌈n ÷ c⌉、幅 w = min(⌊(1336 − (c − 1) × 8) ÷ c⌋, 640)、高さ h = min(⌊(880 − (r − 1) × 8) ÷ r⌋, 360) を求める。
+2. w が 200 未満、または h が 108 未満の c は除く。
+3. 残った c のうち、w × h が最も大きいものを選ぶ。同じなら列数の少ない方を選ぶ。
+4. w ≥ 240 かつ h ≥ 198 なら標準表示、それ以外は小型表示にする。
+5. 格子は領域の左上から詰めて置く (最大寸法で止まったときは右と下が空く)。
+
+1 タブに置ける最大は 6 列 × 7 行 = 42 個。1920×1080 以外の画面 (手元の端末) では同じ寸法のまま、格子の領域をスクロールして見る。
+
+例 (算出結果):
+
+| 項目数 | 列 × 行 | タイル (幅 × 高さ) | 表示 |
+|---|---|---|---|
+| 1〜2 | 1 × n | 640 × 360 | 標準 |
+| 4 | 2 × 2 | 640 × 360 | 標準 |
+| 6 | 2 × 3 | 640 × 288 | 標準 |
+| 8 | 2 × 4 | 640 × 214 | 標準 |
+| 12 | 4 × 3 | 328 × 288 | 標準 |
+| 16 | 4 × 4 | 328 × 214 | 標準 |
+| 20 | 5 × 4 | 260 × 214 | 標準 |
+| 24 | 6 × 4 | 216 × 214 | 小型 |
+| 30 | 6 × 5 | 216 × 169 | 小型 |
+| 37〜42 | 6 × 7 | 216 × 118 | 小型 |
+
+**タイルの中身 (3.6・3.11)**:
+
+左端に判定の色の線 (6px)、枠線 1px、角丸 6px。各行は 1 行に収め、溢れた文字は末尾を省略する (`text-overflow: ellipsis`)。
+
+標準表示 (内側の余白 上下 10px・左右 12px、行の間隔 4px):
+
+| 行 | 高さ | 内容 |
+|---|---|---|
+| 1 | 24px | 項目名 (17px 太字) と、右寄せの判定のバッジ |
+| 2 | 38px | 現在値 (30px 太字) |
+| 3 | S = h − 158px (40px 以上) | スパークライン (幅は内側いっぱい)。グラフの対象でない項目は、現在値の続き (15px、折り返して行の高さまで) に使う |
+| 4 | 18px | 閾値 (13px)。閾値の無い項目は空ける |
+| 5 | 18px | 注記 (13px)。無ければ空ける |
+| 6 | 18px | 時刻 (13px、薄い色)。「データ HH:MM:SS・取得 HH:MM:SS」。データの時刻が無い項目は「取得 HH:MM:SS」だけ |
+
+小型表示 (内側の余白 上下 4px・左右 8px、行の間隔 2px):
+
+| 行 | 高さ | 内容 |
+|---|---|---|
+| 1 | 20px | 項目名 (14px 太字) と、右寄せの判定のバッジ (12px) |
+| 2 | R = h − 80px (28px 以上) | 左 55% に現在値 (20px 太字)、右 45% にスパークライン (高さ R)。グラフの対象でない項目は現在値が全幅を使う |
+| 3 | 14px | 閾値 (12px) |
+| 4 | 14px | 注記 (12px) |
+| 5 | 14px | 時刻 (12px、標準表示と同じ書式) |
+
+**スパークライン (3.11・3.13)**:
+- 直近 60 分の 1 分値。横軸は `floor(evaluated_at) − 59 分` から `floor(evaluated_at)` までの 60 個の分 (`floor` は分単位の切り捨て)。
+- `viewBox="0 0 600 100"`、`preserveAspectRatio="none"` で、タイルの行の幅と高さに合わせて伸ばす。線は 2px (`vector-effect: non-scaling-stroke`)、色はタイルの判定の色 (`currentColor`)。塗りは付けない。
+- 縦軸は 0 から `_nice_max(60 分の最大値)` まで。値がすべて 0、または記録が無いときは 0〜1。上下に 2 の余白を取る (y = 98 − 96 × 値 ÷ 上限)。
+- 軸・目盛・閾値の線・数値の文字は描かない (現在値と閾値はタイルの文字で読む)。`aria-hidden="true"`。
+- 記録の無い分 (欠測) では線を切り、前後を結ばない。前後が欠測の 1 点だけの分は、長さ 0 の線分を `stroke-linecap: round` で描いて点として見せる。
+- 60 分のうち記録が 1 つも無ければ、何も描かない。
+
+**詳細パネル (3.7・3.12〜3.14)**:
+
+項目を選ぶと、画面を遷移せずに右の詳細パネルに次を上から順に出す。中身を置ける領域は 528 × 872px。
+
+| 順 | 部分 | 高さの予算 | 内容 |
+|---|---|---|---|
+| 1 | 見出し | 28px | 項目名 (20px 太字) と判定のバッジ |
+| 2 | 現在値 | 36px | 26px 太字 |
+| 3 | 項目の情報 | 110px | 閾値・データの時刻・取得時刻・注記の表 (行 22px)。無い行は詰める。注記は 2 行まで折り返す |
+| 4 | 当日の推移 | 258px | 見出し (13px、20px)、折れ線 (528 × 220)、欠測の説明 (13px、18px)。グラフの対象の項目だけ |
+| 5 | 内訳 | 334px | 見出し (20px)、表の見出し行 (28px)、データ行 (26px) を最大 11 行。内訳のある項目だけ |
+| 6 | 補助のリンク | 24px | 参照先へのリンク (13px の文字のリンク)。参照先のある項目だけ |
+
+- 部分の間隔は、1 と 2・2 と 3 の間が 8px、それ以外が 16px。全部ある場合の合計は 854px で、872px に収まる。
+- 利用者が項目を選んでいない間は、表示中のタブで最も悪い判定の項目を自動で選び、詳細パネルに出す。最も悪い判定はタブ見出しと同じ順序 (`model.worst`) で決め、同じ判定が複数あればタイルの並びで先のものにする。表示のみの項目は、タブ内に判定対象の項目が無いときだけ候補にする。自動で選んだ項目は、更新のたびに選び直す (最も悪い項目が変われば詳細も切り替わる)。
+- 自動選択はブラウザ側で行う。断片を受け取ったら、利用者の選択が無ければ表示中のタブのタイルから候補を決め、その `key` で詳細を取り直す。タブを切り替えたときも、そのタブで利用者が選んだ項目が無ければ同じ規則で選ぶ。
+- 利用者がタイルを選んだら、その選択は自動では変えない。選択を外す操作 (選択中のタイルをもう一度選ぶ、または Esc) で自動選択に戻る。
+- タブに項目が 1 つも無いときだけ「項目を選ぶと推移と内訳を表示します」(`fest.detail.empty`) を出す。利用者が選んだ項目が消えたときは「この項目は現在ありません」(`fest.detail.gone`) を出し、次の更新で自動選択に戻る。
+- 自動更新のたびに、選択中の項目の推移と内訳を最新の値で描き直す (3.16)。
+- 内訳の行が 11 を超えるときは、先頭の 10 行と「ほか n 行」(`fest.detail.more_rows`) の行を出す。並び順は「内訳」の表のとおり。
+- 補助のリンクは、参照先の名前を載せた文字のリンク (例: 「Netdata を開く」) にする。ボタンの形にしない。状況の判断に要る値は 1〜5 で画面内に出しており、リンクは元の画面を開いて深掘りするときにだけ使う。外部のリンクは新しいタブで開く (`target="_blank" rel="noopener"`)。
+
+**当日の折れ線 (3.12・3.13)**:
+- 範囲は、評価時刻の日付 (JST) の 00:00 から評価時刻まで。`festival_history` から当該項目の 1 分値をこの範囲で読む (最大 1,440 点。間引かない)。
+- SVG は `viewBox="0 0 528 220"`。描画域は左 56px・右 72px・上 8px・下 24px を除いた 400 × 188px。
+- 縦軸: 0 から `_nice_max(範囲内の最大値と、注意・異常の閾値のうちの最大)` まで。値も閾値も無いときは 0〜1。目盛は 0・上限の半分・上限の 3 本の横線 (薄い色) と、左に値の文字 (12px、右寄せ)。値の文字は単位ごとに整形する (下表)。
+- 横軸: 時刻の目盛を正時に置き、下に「HH:00」(12px)。目盛の間隔は、範囲が 8 時間以下なら 1 時間、16 時間以下なら 2 時間、それ以上は 3 時間。
+- 値の線: 2px、色は本文の文字色 (`--fg`)。塗りは付けない。
+- 閾値の線 (`warn`・`crit` があるときだけ): 描画域の幅いっぱいの横線 1.5px。注意は `--warn` の破線 (`6 4`)、異常は `--crit` の破線 (`2 3`)。右の余白に「注意 85%」「異常 95%」(12px、線と同じ色) を置き、色だけに頼らない。2 つの文字の縦の間隔が 14px 未満なら、上側の文字を 14px 上へずらす。
+- 欠測: 記録の無い分で線を切り、前後を結ばない (補間しない)。1 点だけの分は、長さ 0 の線分を `stroke-linecap: round` で点として描く。折れ線の下に「線の途切れは記録なし (取得失敗・取得遅延など)」(`fest.detail.chart_gap`) を出す。
+- 範囲内に記録が 1 つも無いときは、折れ線の場所に「当日の記録がありません」(`fest.detail.chart_empty`) を出す。
+- `role="img"` と `aria-label` (「<項目名> の当日の推移」) を付ける。
+
+| 単位 (`MetricUnit`) | 軸と閾値の文字の書式 | 例 |
+|---|---|---|
+| `ratio` | 百分率、小数なし | `85%` |
+| `count` | 数値 (`{:g}`) | `10` |
+| `ms` | `{:g} ms` | `1500 ms` |
+| `seconds` | `{:g} 秒` | `120 秒` |
+| `rps` | `{:g}/s` | `80/s` |
 
 **Implementation Notes**
 - Integration: CSS と JS はページに埋め込み、外部のファイルを読まない。
 - Validation:
-  - 本書「Testing Strategy」の実ブラウザの検証 (1920×1080 で全タブの `scrollHeight <= clientHeight`、更新をまたいだタブと詳細の保持、401 の表示) を行う。
-- Risks: カメラの台数とモニターの数が増えると、項目数が予算を超える。小型表示と、実データでの検証で確かめる。
+  - 本書「Testing Strategy」の実ブラウザの検証 (1920×1080 で全タブの格子と詳細パネルに縦スクロールが無いこと、タイルの各行と詳細の各部分が予算に収まること、更新をまたいだタブと詳細の保持、401 の表示) を行う。
+- Risks: 1 タブの項目が 42 個を超えると、格子が 1920×1080 に収まらない。上限は 42 個のままとし、リハーサルで実際の項目数 (カメラの台数・モニターの数) を確かめる。超える見込みになったときは、3 段目の最小表示 (高さ 64px。スパークライン・閾値・注記をタイルに出さず、詳細パネルで見る) を足して対応する。
 
 **画面表記** (`festival/labels.py` の正本):
 
@@ -1143,12 +1385,103 @@ interface FestivalClient {
 | `fest.band.reauth` | 表示が古い・再ログインが必要 |
 | `fest.band.eval_stopped` | 判定が止まっている (最終判定 {time}) |
 | `fest.band.more` | ほか {n} 件 |
+| `fest.tile.observed_at` | データ {time} |
+| `fest.tile.fetched_at` | 取得 {time} |
 | `fest.detail.threshold` | 閾値 |
 | `fest.detail.fetched_at` | 取得時刻 |
 | `fest.detail.observed_at` | データの時刻 |
-| `fest.detail.link` | 詳細を見る |
+| `fest.detail.note` | 注記 |
+| `fest.detail.chart` | 当日の推移 ({start}〜{end}) |
+| `fest.detail.chart_aria` | {label} の当日の推移 |
+| `fest.detail.chart_gap` | 線の途切れは記録なし (取得失敗・取得遅延など) |
+| `fest.detail.chart_empty` | 当日の記録がありません |
+| `fest.detail.chart_warn` | 注意 {value} |
+| `fest.detail.chart_crit` | 異常 {value} |
+| `fest.detail.more_rows` | ほか {n} 行 |
+| `fest.detail.link` | {name} を開く |
+| `fest.detail.loading` | 読み込み中 |
+| `fest.detail.empty` | 項目を選ぶと推移と内訳を表示します |
 | `fest.detail.gone` | この項目は現在ありません |
+| `fest.link.cloudflare` | Cloudflare ダッシュボード |
+| `fest.link.netdata` | Netdata |
+| `fest.link.admin` | 運用ダッシュボード |
+| `fest.link.cms` | CMS 管理画面 |
+| `fest.link.healthchecks` | Healthchecks.io |
+| `fest.bd.worker_status` | 状態ごと |
+| `fest.bd.http_status` | ステータスごと |
+| `fest.bd.cache_status` | キャッシュの状態ごと |
+| `fest.bd.signage_origin` | 接続元ごと |
+| `fest.bd.quake_channel` | 上流ごと |
+| `fest.bd.parking_camera` | カメラごと |
+| `fest.bd.pod` | Pod ごと |
+| `fest.bd.db_instance` | instance ごと |
+| `fest.bd.node` | ノードごと |
+| `fest.col.status` | 状態 |
+| `fest.col.http_status` | ステータス |
+| `fest.col.cache_status` | キャッシュの状態 |
+| `fest.col.requests` | 要求数 |
+| `fest.col.errors` | エラー数 |
+| `fest.col.count` | 件数 |
+| `fest.col.origin` | 接続元 |
+| `fest.col.connections` | 接続数 |
+| `fest.col.channel` | 上流 |
+| `fest.col.connected` | 接続 |
+| `fest.col.receiving` | 受信 |
+| `fest.col.last_received` | 最終受信 |
+| `fest.col.test` | テスト |
+| `fest.col.camera` | カメラ |
+| `fest.col.lot` | 駐車場 |
+| `fest.col.captured` | 最終受信 |
+| `fest.col.judge_succeeded` | 判定の最終成功 |
+| `fest.col.judge_failures` | 連続失敗 |
+| `fest.col.pod` | Pod |
+| `fest.col.role` | 役割 |
+| `fest.col.ready` | Ready |
+| `fest.col.cpu` | CPU |
+| `fest.col.memory` | メモリ |
+| `fest.col.disk` | ディスク |
+| `fest.col.throttle` | スロットリング |
+| `fest.col.backends` | 接続 |
+| `fest.col.lag` | 遅延 |
+| `fest.col.restarts` | 再起動 |
+| `fest.col.node` | ノード |
+| `fest.bool.true` | はい |
+| `fest.bool.false` | いいえ |
 | `fest.unconfigured` | 当日監視の宣言がありません |
+
+- `fest.detail.link` の `{name}` には、項目の参照先の名前 (`fest.link.*`) を入れる。
+- 内訳の表の値の書式: 比率は `_pct` (小数 1 桁の百分率)、時刻は JST の `HH:MM:SS`、真偽は「はい」「いいえ」(`fest.bool.*`)、値が無いときは「—」。再起動は `capacity.cms.restarts` の現在値と同じ書式 (「なし」「OOM / 再起動 2 回」等)。
+
+#### FestivalChart
+
+| Field | Detail |
+|-------|--------|
+| Intent | 1 分値から、タイルのスパークラインと詳細の当日の折れ線をインライン SVG の文字列にする |
+| Requirements | 3.11, 3.12, 3.13 |
+
+- 寸法・軸・閾値の線・欠測の描き方は、FestivalPage の「スパークライン」「当日の折れ線」のとおり。
+- 入力の値だけから描き、SQLite も時計も読まない (テストで入力と出力だけを検証できる)。
+
+**Contracts**: Service [x]
+
+##### Service Interface
+```python
+from datetime import datetime
+from typing import Sequence
+
+from model import MetricUnit
+
+Point = tuple[datetime, float]   # (分, 値)。時刻順
+
+def sparkline(points: Sequence[Point], end_minute: datetime) -> str:
+    """end_minute − 59 分〜end_minute の 60 個の分のスパークライン。記録が無ければ空文字。"""
+
+def day_chart(points: Sequence[Point], start: datetime, end: datetime, unit: MetricUnit,
+              warn: float | None, crit: float | None, label: str) -> str:
+    """start (JST の 00:00)〜end の折れ線。記録が無ければ「当日の記録がありません」の要素。"""
+
+def format_axis(value: float, unit: MetricUnit) -> str: ...
+```
 
 #### AdminSnapshotFilter
 - `/admin/` に渡す snapshot から、`festival.` で始まる source_id を除く (D-1、1.5)。
@@ -1330,7 +1663,8 @@ interface QuakeRelayRpc {
 ## Data Models
 
 ### Logical Data Model
-- 当日監視の項目 (`FestivalItem`) は、評価のたびに作り直す。履歴は持たない (9.1)。
+- 当日監視の項目 (`FestivalItem`) は、評価のたびに作り直す。項目の判定・表示の値・内訳は最新値だけを持つ。
+- グラフの対象の項目の数値は、1 分に 1 点を `festival_history` に 24 時間分だけ持つ (9.1)。判定・内訳の推移は持たない。
 - 通知の状態 (`AlertState`) は、項目キーまたは情報源ごとに 1 行。異常の 1 回の期間 (開始から回復まで) を表す。回復の通知が成功したら行を消す。
 - 通知器の状態 (`NotifierState`) と生存確認の結果は、`festival_state` の 1 行。
 
@@ -1342,7 +1676,12 @@ CREATE TABLE IF NOT EXISTS festival_items (
     key TEXT PRIMARY KEY, category TEXT NOT NULL, label TEXT NOT NULL, status TEXT NOT NULL,
     value TEXT NOT NULL, threshold TEXT, observed_at TEXT, fetched_at TEXT,
     source_ids TEXT NOT NULL, link TEXT, note TEXT, notify INTEGER NOT NULL,
-    judged INTEGER NOT NULL DEFAULT 1);
+    judged INTEGER NOT NULL DEFAULT 1, metric REAL, unit TEXT, warn REAL, crit REAL,
+    breakdown TEXT, link_label TEXT);
+CREATE TABLE IF NOT EXISTS festival_history (
+    key TEXT NOT NULL, minute TEXT NOT NULL, value REAL NOT NULL,
+    PRIMARY KEY (key, minute)) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS festival_history_minute ON festival_history(minute);
 CREATE TABLE IF NOT EXISTS festival_alerts (
     key TEXT PRIMARY KEY, kind TEXT NOT NULL, label TEXT NOT NULL, notified_open INTEGER NOT NULL,
     opened_at TEXT NOT NULL, last_notified_at TEXT);
@@ -1351,16 +1690,47 @@ CREATE TABLE IF NOT EXISTS festival_state (
     last_success_at TEXT, last_failure_at TEXT, last_failure TEXT, not_before TEXT, halted INTEGER NOT NULL DEFAULT 0,
     heartbeat_ok_at TEXT, heartbeat_failed_at TEXT, heartbeat_failure TEXT);
 ```
-- `replace_festival_items` は、成功時に `evaluated_at` を更新し `last_eval_error` を NULL に戻す。
-- `FestivalItem`・`AlertState`・`NotifierState`・`FestivalStateRow` は `model.py` に置く。
-- `source_ids` はカンマ区切り。日時は既存と同じ ISO 8601 (UTC、`Z`)。
-- 行数は項目数 (100 未満) に比例し、増え続けない。既存の `RETENTION` には加えない。
-- 3 表は復元の対象外 (既存の collector の SQLite と同じ。dr.md の記述どおり)。失っても、次の評価で作り直される。
+- `replace_festival_items` は、成功時に `evaluated_at` を更新し `last_eval_error` を NULL に戻す。1 分値 (`history`) を渡されたときは、同じトランザクションで `festival_history` に `INSERT OR REPLACE` し、`minute` が `history_minute − 24 時間` より前の行を消す。
+- `FestivalItem`・`AlertState`・`NotifierState`・`FestivalStateRow`・`Breakdown`・`MetricUnit` は `model.py` に置く。
+- `source_ids` はカンマ区切り。日時は既存と同じ ISO 8601 (UTC、`Z`)。`festival_history.minute` は分単位に切り捨てた時刻 (秒は `00`)。
+- `festival_items.breakdown` は `Breakdown` の JSON (`{"title", "columns", "rows"}`)。値は表示用に整形済みの文字列。
+- `festival_history`:
+  - 主キー `(key, minute)`。詳細の折れ線 (1 項目の当日分) は主キーの範囲で読む。
+  - 索引 `festival_history_minute`。スパークライン (全項目の直近 60 分) と 24 時間を過ぎた行の削除は、この索引の範囲で読む・消す。
+  - 24 時間の削除は評価器の記録と同じ書き込みで行う。既存の `RETENTION` (1 日 1 回の `purge`) には加えない。
+- `festival_items`・`festival_alerts`・`festival_state` の行数は項目数 (100 未満) に比例し、増え続けない。
+- 4 表は復元の対象外 (既存の collector の SQLite と同じ。dr.md の記述どおり)。失っても、次の評価で作り直される。`festival_history` を失うと、失った時点より前の推移が消え、そこから記録し直す。
+
+```python
+from dataclasses import dataclass
+from typing import Literal
+
+MetricUnit = Literal["ratio", "count", "ms", "seconds", "rps"]
+
+@dataclass(frozen=True)
+class Breakdown:
+    title: str                          # 表の見出し (fest.bd.* の表記)
+    columns: tuple[str, ...]            # 列の見出し (fest.col.* の表記)
+    rows: tuple[tuple[str, ...], ...]   # 表示用に整形済みの値。並び順は FestivalCatalog の「内訳」の表のとおり
+```
+
+**1 分値の量の試算 (試算。実測ではない)**:
+- グラフの対象の項目数: ノード 4・DB の instance 3・駐車場カメラ N 台のとき、来場者影響 8、機能別 6 + 2N (サイネージ 1・スタンプ 3・バス 2・駐車場 2N)、容量 30 で計 44 + 2N。機能別のタブが 42 個に収まるカメラの上限 (16 台) で 76。余裕を見て 80 とする。
+- 行数: 80 項目 × 1,440 分 = 115,200 行で頭打ちになる (24 時間で消すため)。
+- 1 行の大きさ: キー約 30 バイト・分 20 バイト・値 8 バイトと SQLite の見出しで、主キーの B-tree に約 65 バイト、索引に約 55 バイト。計約 120 バイト。
+- ファイルの大きさ: 115,200 行 × 約 120 バイト ≈ 13.8MB。ページの空きを見込んで 16〜18MB。PVC `collector-data` (1Gi) に対して小さい。
+- 書き込み: 1 分に 1 トランザクションで、追加 80 行と削除 80 行。主キーがキー順のため、追加と削除はそれぞれ最大 80 個の葉のページに散る。1 分あたり約 160〜170 ページ (4KiB) ≈ 0.65MiB の WAL、1 日で約 0.9GiB。
+- 読み取り: 断片 1 回につき、スパークライン用に直近 60 分の約 4,800 行、詳細の折れ線用に 1 項目の当日分の最大 1,440 行。
 
 ```python
 class Store:  # 追加するメソッド
-    def replace_festival_items(self, items: Sequence["FestivalItem"], evaluated_at: datetime) -> None: ...
+    def replace_festival_items(self, items: Sequence["FestivalItem"], evaluated_at: datetime,
+                               history: Sequence[tuple[str, float]] = (),
+                               history_minute: datetime | None = None) -> None: ...
     def load_festival_items(self) -> list["FestivalItem"]: ...
+    def load_festival_history(self, since: datetime, until: datetime,
+                              key: str | None = None) -> dict[str, list[tuple[datetime, float]]]:
+        """[since, until] の 1 分値を項目キーごとに時刻順で返す。key を渡すとその項目だけ。"""
     def load_festival_state(self) -> "FestivalStateRow": ...
     def save_festival_eval_error(self, error: str) -> None: ...  # evaluated_at は進めない
     def save_festival_heartbeat(self, at: datetime, ok: bool, failure: str | None) -> None: ...
@@ -1368,6 +1738,7 @@ class Store:  # 追加するメソッド
     def apply_notifications(self, upserts: Sequence["AlertState"], deletes: Sequence[str],
                             notifier: "NotifierState") -> None: ...
 ```
+
 
 ### Data Contracts & Integration
 - `[festival]` の宣言の形 (`dashboard.toml`。値は初期値で、リハーサルで見直す。U-3):
@@ -1493,6 +1864,7 @@ cms_5xx_rate = 50
 | Discord の 429 | `retry_after` まで送らない | `infra.notifier` に最終失敗 |
 | Discord の 401・403・404 | 送信を止める | `infra.notifier` を注意にする |
 | 画面の fetch の 401 | 表示を保つ | 「表示が古い・再ログインが必要」 |
+| 1 分値の記録の失敗 (SQLite の書き込みの例外) | 評価の例外として扱う。その評価の `festival_items` も更新されない | 帯に「判定が止まっている」(続いた場合)。グラフはその分が欠測 |
 
 ### Monitoring
 - collector の JSON ログに、`festival_eval_failed`・`festival_notify_failed` (理由は状態コードか `network`・`timeout` だけ)・既存の `fetch_failed` を出す。
@@ -1504,18 +1876,29 @@ cms_5xx_rate = 50
 - **Unit Tests** (`app/tests/`、unittest):
   - `[festival]` の検証: 欠け・逆転・未知のキー・未知の source_id が `ConfigError` になる。
   - 判定関数: 閾値の境界 (注意・異常の等号)、最低要求数、時間外 (`event_days`・`parking_monitor` の `end` ちょうど・`inPeriod`)、内部アドレスの BAN の照合、閾値が未宣言の項目の表示のみ (通知も計画しない)。
+  - グラフの値: 「グラフの対象」の表の全項目で `metric`・`unit`・`warn`・`crit` が入り、表に無い項目では `unit` が `None`。期間の閾値の秒への換算。サイネージの閾値の線 (設置台数 − `signage_missing`、設置台数 0 で線なし)。表示のみの項目で線が無い。`visitor.worker.requests` が常に表示のみで通知を計画せず、帯とタブの件数に数えない。駐車場の受信の経過 (秒) と連続失敗回数、受信なしで `metric = None`。
+  - 内訳: 「内訳」の表の全項目で見出し・列・並び順が表のとおり。DB の 2 つの情報源の突き合わせと、片方が無いときの「—」。内訳の無い項目で `breakdown` が `None`。
   - 評価器: 情報源の `ERROR` と鮮度の超過が項目を上書きする。無効にした情報源の項目を作らない。
+  - 1 分値の記録: 分が変わって最初の評価だけが記録する。`ERROR`・`STALE`・`EMPTY`・`metric = None`・グラフの対象外の項目を記録しない。表示のみの項目は記録する。24 時間より前の行が消える。同じ分の再記録で上書きされる。
+  - Store: `festival_history` の主キー・上書き・期間の読み取り (全項目と 1 項目)・24 時間の削除。`festival_items` の内訳とグラフの列の往復。
+  - グラフ (`chart.py`): スパークラインの横軸 (60 個の分)、縦軸の上限 (0 だけ・記録なしで 0〜1)、欠測での線の切断、1 点だけの分。当日の折れ線の範囲 (JST の 00:00 から)、縦軸の上限に閾値を含めること、閾値の線と文字、文字が重なるときのずらし、目盛の間隔 (8・16 時間の境界)、記録なしの表示、単位ごとの書式。
+  - タイルの格子: `tile_grid()` が本書の例の表 (1・4・6・8・12・16・20・24・30・37・42 個) と一致する。0 個で `None`。標準と小型の境界。
   - 通知の計画: 異常・再通知・回復・対象外・情報源のまとめ・注意への下降で回復しないこと。送信の失敗で状態が変わらないこと。
-  - 取得層: GraphQL・AE・`/status`・stats・parking-health の fixture から Item を作る。protobuf の header の読み取り。Prometheus テキストの読み取り。kubelet の `/stats/summary` からの rss 対 limit、`/metrics/cadvisor` の 2 回分からのスロットリング率 (初回・カウンタの減少・`Δperiods` が 0 の扱い)。
+  - 取得層: GraphQL・AE・`/status`・stats・parking-health の fixture から Item を作る。`by_status`・`by_cache_status`・`by_pod` の内訳が fixture の行と一致する。protobuf の header の読み取り。Prometheus テキストの読み取り。kubelet の `/stats/summary` からの rss 対 limit、`/metrics/cadvisor` の 2 回分からのスロットリング率 (初回・カウンタの減少・`Δperiods` が 0 の扱い)。
   - http_client: 429 の `Retry-After` を `retry_after` にする。`redact_url` で URL がメッセージに残らない。
   - 生存確認: 評価が成功したときだけ、60 秒に 1 回まで ping する。評価の例外では ping しない。失敗の理由に URL が残らない。
 - **Integration Tests**:
-  - 偽の結果を入れた Collector と一時 SQLite で、評価 → 保存 → 断片の描画までを通す。
+  - 偽の結果を入れた Collector と一時 SQLite で、評価 → 保存 → 断片の描画までを通す。時計を進めて複数の分を評価し、断片のスパークラインと、`key` を付けた断片の当日の折れ線・内訳に反映されることを確かめる。
   - `/admin/` の要確認に `festival.*` の CRIT が出ないことを確かめる (1.5)。
   - 偽の Discord と偽の Healthchecks.io (ローカルの HTTP サーバー) で、429 → 待機 → 再送、まとめて 1 件、2000 文字の分割、ping の間隔を確かめる。本番の webhook と ping URL は使わない。
 - **E2E/UI Tests** (Playwright、headless、ローカルの collector と fixture の SQLite):
-  - 1920×1080 で、4 つのタブのそれぞれで本文に縦スクロールが無い (`scrollHeight <= clientHeight`)。項目数は想定の最大 (1 タブ 40 個) と、小型表示の閾値を超える数で確かめる。
-  - タブを切り替え、項目を選んだ状態で 2 回の自動更新を待ち、タブと詳細パネルが保たれる。
+  - 1920×1080 で、4 つのタブのそれぞれで格子と詳細パネルに縦スクロールが無い (`scrollHeight <= clientHeight`)。項目数は 1・12・20 (標準表示)・24・42 (小型表示) で確かめる。
+  - 各項目数で、タイルの寸法が `tile_grid()` の値と一致し、タイルの各行 (名前・現在値・スパークライン・閾値・注記・時刻) が予算の高さに収まる (要素の `getBoundingClientRect()` を実測する)。
+  - 詳細パネル: 内訳 11 行以上とグラフと注記 2 行を持つ項目を選び、各部分が予算の高さに収まり、パネルに縦スクロールが無い。
+  - 項目を選ぶと、ページを遷移せずに当日の折れ線 (閾値の線と文字つき) と内訳が出る。欠測のある fixture で線が途切れる。
+  - タブを切り替え、項目を選んだ状態で 2 回の自動更新を待ち、タブと詳細パネルが保たれ、詳細の値が更新後の値になる。
+  - 項目 A を選んだ直後に項目 B を選び、A の応答を遅らせても、詳細パネルに A が出ない。
+  - 開いた直後とタブの切り替え直後に、利用者が選ばなくても、そのタブで最も悪い判定の項目の詳細が出る。最も悪い項目が変わる fixture に差し替えると、次の更新で詳細が切り替わる。利用者が選んだ項目は、より悪い項目が現れても変わらず、選択を外すと自動選択に戻る。
   - 断片の応答を 401・500・通信断に差し替え、帯の警告と表示の保持を確かめる。
   - タブ見出しの最悪の判定・異常件数と、帯の件数・異常の項目名が一致する。
 - **aramakisai-web** (vitest):
@@ -1565,6 +1948,12 @@ cms_5xx_rate = 50
 **メモリ (9.6)**:
 - 現在の collector の実測は約 44Mi (2026-11-02)、limit は 160Mi。
 - 追加分の見積りは仮で +15〜25Mi。スレッド 11 本 (情報源 10・評価 1。通知と生存確認は評価のスレッドで行う)、項目 100 未満、GraphQL の応答は数 KB。
+- 推移と内訳の追加分 (試算。実測ではない) は +6〜10Mi:
+  - 書き込みの接続のページキャッシュ: SQLite の既定 (`cache_size = -2000`) で最大 2MiB。`festival_history` の分もこの上限の中に収まる。
+  - 断片 1 回の描画: スパークライン用の約 4,800 行と当日の折れ線用の最大 1,440 行を Python のオブジェクトにして約 1.8MiB、読み取りの接続のページキャッシュが最大 2MiB (要求ごとに閉じる)、生成する HTML が約 150KB。1 回あたり約 4MiB が一時的に要る。
+  - 同時に開く画面を 2 つとして、一時的な分の最大は約 8MiB。
+  - 内訳は `festival_items` の 1 行あたり 1KB 程度で、100 行未満。
+- 合計の見込み (試算): 44 + 25 + 10 = 約 79Mi。limit 160Mi の約 49% で、見直しの目安の 75% (120Mi) を下回る。
 - 本番に入れたあと、`make kubectl ARGS="top pod -n ops-dashboard"` で実測する。runbook に記録し、steering の監視スタック節の記述と合わせる。
 - 実測が limit の 75% (120Mi) を超えた場合は、増加の要因を調べ、limit の見直しをユーザーに諮る。
 
