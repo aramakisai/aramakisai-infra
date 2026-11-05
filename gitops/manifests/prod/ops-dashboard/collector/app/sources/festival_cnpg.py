@@ -7,6 +7,7 @@ from sources import _promtext, festival_workloads
 SOURCE_ID = "festival.cnpg"
 _NAMES = ("cnpg_backends_total", "cnpg_pg_settings_setting", "cnpg_pg_replication_lag",
           "cnpg_festival_unanalyzed_tables_count")
+_FIELDS = ("backends", "max_connections", "replication_lag_s", "unanalyzed_tables")
 
 
 def _first(samples):
@@ -36,7 +37,9 @@ def fetch(ctx):
             text = ctx.http.get_bytes(f"http://{e.ip}:9187/metrics", timeout=5).decode("utf-8", "replace")
         except Exception as err:  # Pod IP を含み得る例外文は保存しない
             last_err = err
-            items.append(Item(f"db.{e.pod}", e.pod, Status.STALE, {"role": e.role}, label("note.metrics_missing")))
+            # catalog が values[field] を直接読むので、正常時と同じキーを None で持たせる
+            items.append(Item(f"db.{e.pod}", e.pod, Status.STALE, {**dict.fromkeys(_FIELDS), "role": e.role},
+                              label("note.metrics_missing")))
             continue
         items.append(Item(f"db.{e.pod}", e.pod, Status.OK, _values(text, e.role)))
     if all(i.status == Status.STALE for i in items):

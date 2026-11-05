@@ -65,6 +65,8 @@ class CnpgTest(unittest.TestCase):
         self.assertEqual(by["db.db-2"].status, Status.STALE)
         self.assertIsNotNone(by["db.db-2"].note)
         self.assertNotIn("10.1.0.2", repr(by["db.db-2"]))
+        self.assertEqual(by["db.db-2"].values, {"role": "replica", "backends": None, "max_connections": None,
+                                                "replication_lag_s": None, "unanalyzed_tables": None})
         routes["http://10.1.0.1:9187/metrics"] = HttpError("GET -> 500", status=500)
         with self.assertRaises(HttpError):
             self.run_fetch(routes, (ep("db-1", "10.1.0.1", "primary"), ep("db-2", "10.1.0.2", "replica")))
