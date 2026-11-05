@@ -1,3 +1,5 @@
+import dataclasses
+import json
 import queue
 import sqlite3
 import threading
@@ -40,7 +42,12 @@ CREATE TABLE IF NOT EXISTS festival_items (
     key TEXT PRIMARY KEY, category TEXT NOT NULL, label TEXT NOT NULL, status TEXT NOT NULL,
     value TEXT NOT NULL, threshold TEXT, observed_at TEXT, fetched_at TEXT,
     source_ids TEXT NOT NULL, link TEXT, note TEXT, notify INTEGER NOT NULL,
-    judged INTEGER NOT NULL DEFAULT 1);
+    judged INTEGER NOT NULL DEFAULT 1, metric REAL, unit TEXT, warn REAL, crit REAL,
+    breakdown TEXT, link_label TEXT);
+CREATE TABLE IF NOT EXISTS festival_history (
+    key TEXT NOT NULL, minute TEXT NOT NULL, value REAL NOT NULL,
+    PRIMARY KEY (key, minute)) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS festival_history_minute ON festival_history(minute);
 CREATE TABLE IF NOT EXISTS festival_alerts (
     key TEXT PRIMARY KEY, kind TEXT NOT NULL, label TEXT NOT NULL, notified_open INTEGER NOT NULL,
     opened_at TEXT NOT NULL, last_notified_at TEXT);
@@ -62,6 +69,13 @@ RETENTION = (
     ("report_messages", "ingested_at", 400),
 )
 
+
+
+def _breakdown(s: str | None) -> model.Breakdown | None:
+    if not s:
+        return None
+    d = json.loads(s)
+    return model.Breakdown(d["title"], tuple(d["columns"]), tuple(tuple(r) for r in d["rows"]))
 
 
 def _iso_or_none(dt: datetime | None) -> str | None:
@@ -178,15 +192,28 @@ class Store:
         c.execute("INSERT OR IGNORE INTO festival_state(id) VALUES (1)")
         c.execute(f"UPDATE festival_state SET {', '.join(f'{k}=?' for k in cols)} WHERE id = 1", tuple(cols.values()))
 
-    def replace_festival_items(self, items: Sequence[model.FestivalItem], evaluated_at: datetime) -> None:
+    def replace_festival_items(self, items: Sequence[model.FestivalItem], evaluated_at: datetime,
+                               history: Sequence[tuple[str, float]] = (),
+                               history_minute: datetime | None = None) -> None:
         def run(c):
             c.execute("DELETE FROM festival_items")
             c.executemany(
                 "INSERT INTO festival_items(key,category,label,status,value,threshold,observed_at,fetched_at,"
-                "source_ids,link,note,notify,judged) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "source_ids,link,note,notify,judged,metric,unit,warn,crit,breakdown,link_label)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 [(i.key, i.category, i.label, str(i.status), i.value, i.threshold, _iso_or_none(i.observed_at),
-                  _iso_or_none(i.fetched_at), ",".join(i.source_ids), i.link, i.note, int(i.notify), int(i.judged))
+                  _iso_or_none(i.fetched_at), ",".join(i.source_ids), i.link, i.note, int(i.notify), int(i.judged),
+                  i.metric, i.unit, i.warn, i.crit,
+                  json.dumps(dataclasses.asdict(i.breakdown), ensure_ascii=False) if i.breakdown else None,
+                  i.link_label)
                  for i in items])
+            if history and history_minute is not None:
+                minute = model.iso(history_minute.replace(second=0, microsecond=0))
+                c.executemany("INSERT OR REPLACE INTO festival_history(key,minute,value) VALUES (?,?,?)",
+                              [(k, minute, v) for k, v in history])
+                # minute は秒が 00 の同一書式の文字列なので、辞書順の比較が時刻順と一致する
+                c.execute("DELETE FROM festival_history WHERE minute < ?",
+                          (model.iso(history_minute - timedelta(hours=24)),))
             self._set_festival_state(c, evaluated_at=model.iso(evaluated_at), last_eval_error=None)
         self.write(run)
 
@@ -195,8 +222,20 @@ class Store:
             r["key"], r["category"], r["label"], model.Status(r["status"]), r["value"], r["threshold"],
             _parse_or_none(r["observed_at"]), _parse_or_none(r["fetched_at"]),
             tuple(r["source_ids"].split(",")) if r["source_ids"] else (), r["link"], r["note"],
-            bool(r["notify"]), bool(r["judged"]))
+            bool(r["notify"]), bool(r["judged"]), r["metric"], r["unit"], r["warn"], r["crit"],
+            _breakdown(r["breakdown"]), r["link_label"])
             for r in self.query("SELECT * FROM festival_items ORDER BY key")]
+
+    def load_festival_history(self, since: datetime, until: datetime,
+                              key: str | None = None) -> dict[str, list[tuple[datetime, float]]]:
+        sql = "SELECT key, minute, value FROM festival_history WHERE minute >= ? AND minute <= ?"
+        args: tuple = (model.iso(since), model.iso(until))
+        if key is not None:
+            sql, args = sql + " AND key = ?", args + (key,)
+        out: dict[str, list[tuple[datetime, float]]] = {}
+        for r in self.query(sql + " ORDER BY key, minute", args):
+            out.setdefault(r["key"], []).append((model.parse_iso(r["minute"]), r["value"]))
+        return out
 
     def load_festival_state(self) -> model.FestivalStateRow:
         rows = self.query("SELECT * FROM festival_state WHERE id = 1")

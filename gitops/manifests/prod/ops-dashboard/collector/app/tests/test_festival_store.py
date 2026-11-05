@@ -4,7 +4,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 
 import store as store_mod
-from model import AlertState, FestivalItem, NotifierState, Status
+from model import AlertState, Breakdown, FestivalItem, NotifierState, Status
 
 NOW = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
 
@@ -36,6 +36,68 @@ class FestivalStoreTest(unittest.TestCase):
                  judged=False, source_ids=())
         self.store.replace_festival_items([a, b], NOW)
         self.assertEqual(self.store.load_festival_items(), [a, b])
+
+    def test_items_roundtrip_chart_and_breakdown_columns(self):
+        bd = Breakdown("fest.bd.worker", ("fest.col.status", "fest.col.requests"), (("200", "10"), ("500", "2")))
+        a = item("visitor.a", metric=0.5, unit="ratio", warn=0.1, crit=0.3, breakdown=bd, link_label="fest.link.cloudflare")
+        b = item("visitor.b")
+        self.store.replace_festival_items([a, b], NOW)
+        got = self.store.load_festival_items()
+        self.assertEqual(got, [a, b])
+        self.assertEqual(got[0].breakdown, bd)
+        self.assertIsNone(got[1].metric)
+        self.assertIsNone(got[1].breakdown)
+
+    def test_history_tables_exist(self):
+        names = {r[0] for r in self.store.query("SELECT name FROM sqlite_master")}
+        self.assertTrue({"festival_history", "festival_history_minute"} <= names)
+
+    def test_history_same_primary_key_is_overwritten(self):
+        self.store.replace_festival_items([item("a")], NOW, [("a", 1.0)], NOW)
+        self.store.replace_festival_items([item("a")], NOW, [("a", 2.0)], NOW)
+        self.assertEqual(self.store.load_festival_history(NOW, NOW), {"a": [(NOW, 2.0)]})
+
+    def test_history_minute_is_truncated_to_minute(self):
+        self.store.replace_festival_items([item("a")], NOW, [("a", 1.0)], NOW + timedelta(seconds=37))
+        self.assertEqual(self.store.load_festival_history(NOW, NOW), {"a": [(NOW, 1.0)]})
+
+    def test_load_history_by_range_all_items_and_one_item_in_time_order(self):
+        for m in (2, 0, 1, 3):
+            t = NOW + timedelta(minutes=m)
+            self.store.replace_festival_items([item("a")], t, [("a", float(m)), ("b", float(m) * 10)], t)
+        got = self.store.load_festival_history(NOW + timedelta(minutes=1), NOW + timedelta(minutes=2))
+        self.assertEqual(got, {"a": [(NOW + timedelta(minutes=1), 1.0), (NOW + timedelta(minutes=2), 2.0)],
+                               "b": [(NOW + timedelta(minutes=1), 10.0), (NOW + timedelta(minutes=2), 20.0)]})
+        only = self.store.load_festival_history(NOW, NOW + timedelta(minutes=3), key="b")
+        self.assertEqual(list(only), ["b"])
+        self.assertEqual([v for _, v in only["b"]], [0.0, 10.0, 20.0, 30.0])
+        self.assertEqual(self.store.load_festival_history(NOW + timedelta(hours=1), NOW + timedelta(hours=2)), {})
+
+    def test_history_older_than_24h_is_deleted_in_same_write(self):
+        old = NOW - timedelta(hours=24, minutes=1)
+        edge = NOW - timedelta(hours=24)
+        self.store.replace_festival_items([item("a")], old, [("a", 1.0)], old)
+        self.store.replace_festival_items([item("a")], edge, [("a", 2.0)], edge)
+        self.store.replace_festival_items([item("a")], NOW, [("a", 3.0)], NOW)
+        got = self.store.load_festival_history(old, NOW)
+        self.assertEqual(got, {"a": [(edge, 2.0), (NOW, 3.0)]})
+
+    def test_replace_without_history_keeps_history(self):
+        self.store.replace_festival_items([item("a")], NOW, [("a", 1.0)], NOW)
+        self.store.replace_festival_items([item("a")], NOW + timedelta(seconds=15))
+        self.assertEqual(self.store.load_festival_history(NOW, NOW), {"a": [(NOW, 1.0)]})
+
+    def test_history_write_rolls_back_with_items(self):
+        self.store.replace_festival_items([item("a")], NOW, [("a", 1.0)], NOW)
+        with self.assertRaises(Exception):
+            self.store.replace_festival_items([item("b", category=None)], NOW, [("a", 9.0)], NOW)
+        self.assertEqual(self.store.load_festival_history(NOW, NOW), {"a": [(NOW, 1.0)]})
+
+    def test_purge_leaves_history_alone(self):
+        old = NOW - timedelta(days=1000)
+        self.store.replace_festival_items([item("a")], old, [("a", 1.0)], old)
+        self.store.purge(NOW)
+        self.assertEqual(self.store.load_festival_history(old, old), {"a": [(old, 1.0)]})
 
     def test_replace_drops_items_not_in_new_evaluation_and_sets_evaluated_at(self):
         self.store.replace_festival_items([item("a"), item("b")], NOW)

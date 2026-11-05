@@ -3,7 +3,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import StrEnum
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Literal, Mapping, Sequence
 
 
 class Status(StrEnum):
@@ -53,6 +53,16 @@ class Source:
     timeout: float | None = None
 
 
+MetricUnit = Literal["ratio", "count", "ms", "seconds", "rps"]
+
+
+@dataclass(frozen=True)
+class Breakdown:
+    title: str  # 表記キー (fest.bd.*)。文字への解決は描画側
+    columns: tuple[str, ...]  # 表記キー (fest.col.*)
+    rows: tuple[tuple[str, ...], ...]  # 表示用に整形済み。真偽は表記キー (fest.bool.*) のまま
+
+
 @dataclass(frozen=True)
 class FestivalItem:
     """当日監視の項目 1 件の評価結果。SQLite の festival_items の 1 行に対応する。"""
@@ -69,6 +79,12 @@ class FestivalItem:
     note: str | None
     notify: bool
     judged: bool  # False は表示のみ (閾値が未宣言)
+    metric: float | None = None
+    unit: MetricUnit | None = None  # None はグラフの対象外
+    warn: float | None = None
+    crit: float | None = None
+    breakdown: Breakdown | None = None
+    link_label: str | None = None  # 表記キー (fest.link.*)
 
 
 @dataclass(frozen=True)
