@@ -9,7 +9,7 @@
   - 完了時: 実測で stats だけに届き、notify・ws には届かないことが確認され、トークンの ID と secret が Infisical の所定のキーに登録されている
   - _Requirements: 5.3, 9.3, 9.4_
 
-- [ ] 1.2 当日監視の生存確認のチェックを Healthchecks.io に作る
+- [x] 1.2 当日監視の生存確認のチェックを Healthchecks.io に作る
   - 既存の mailserver バックアップのチェックと同じ形で、チェック `festival-monitor` (初期値は仮の 1 分周期・3 分猶予) と、その ping URL の sensitive な出力を足す
   - 対象のリソースに限って適用し、ping URL を Infisical の所定のキーに手動で登録する
   - Healthchecks.io からの通知先は、既存の前例どおりコンソールで手動設定する (Terraform では管理しない)
