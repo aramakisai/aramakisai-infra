@@ -21,9 +21,12 @@ resource "cloudflare_ruleset" "directus_assets_cache" {
   # /api/media/file/:filename が実バイトを返す本体。両方 /api/media/ 配下で拡張子の
   # 有無が一定しないため、既定の拡張子ベースキャッシュに載らない。実バイトの方を
   # キャッシュしないと切り替え直後に懸念した「全画像が単一 pod を通る」が解消しない
+  # Cookie 付き (CMS ログイン中) の応答は非公開メディアを含みうる。override_origin で
+  # 30 日キャッシュされると Cookie 無しの匿名リクエストにも配られるため、Cookie 無しに限る。
+  # Authorization 付きは Cloudflare 既定で BYPASS されるため条件に含めない
   rules {
     description = "CMS media delivery (id パスの 302 と実ファイル本体)"
-    expression  = "(http.host eq \"cms.aramakisai.com\") and starts_with(http.request.uri.path, \"/api/media/\")"
+    expression  = "(http.host eq \"cms.aramakisai.com\") and starts_with(http.request.uri.path, \"/api/media/\") and (http.cookie eq \"\")"
     action      = "set_cache_settings"
     enabled     = true
 
