@@ -17,6 +17,19 @@ resource "cloudflare_ruleset" "directus_assets_cache" {
   kind    = "zone"
   phase   = "http_request_cache_settings"
 
+  # Cookie 付き要求でも .webp 等は Cloudflare 既定の拡張子ベースキャッシュに載り、
+  # ログイン中の応答が匿名に配られるため、明示的に bypass する。
+  rules {
+    description = "CMS media Cookie 付きはキャッシュしない"
+    expression  = "(http.host eq \"cms.aramakisai.com\") and starts_with(http.request.uri.path, \"/api/media/\") and (http.cookie ne \"\")"
+    action      = "set_cache_settings"
+    enabled     = true
+
+    action_parameters {
+      cache = false
+    }
+  }
+
   # CMS (Payload) のメディア配信。/api/media/serve/:id/:size は id パスの 302 で、
   # /api/media/file/:filename が実バイトを返す本体。両方 /api/media/ 配下で拡張子の
   # 有無が一定しないため、既定の拡張子ベースキャッシュに載らない。実バイトの方を
