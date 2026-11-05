@@ -25,7 +25,7 @@ spec:
       automountServiceAccountToken: false
       containers:
         - name: mail-agent
-          image: python:3.13-slim@sha256:bf44cdfcb76cd3b41e879bc058fc37ec5872002ccfde7fcb765e218cde0cd79c
+          image: python:3.13-slim@sha256:09a17cad02668ae61ece136b4fd36ac3849e14f670ebedb637ea3e15580525bc
           command: ["python", "/app/app.py"]
           env:
             # ルートファイルシステムが読み取り専用
