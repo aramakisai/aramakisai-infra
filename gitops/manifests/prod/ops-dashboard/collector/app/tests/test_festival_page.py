@@ -183,9 +183,9 @@ class FestivalPageTest(unittest.TestCase):
         self.assertIn("&lt;i&gt;x&lt;/i&gt;", d)
 
     def test_detail_link_is_text_link_with_name_and_new_tab_for_external(self):
-        _, d = self.detail("visitor.a", [item("visitor.a", link="https://app.netdata.cloud/", link_label="netdata")])
+        _, d = self.detail("visitor.a", [item("visitor.a", link="https://app.netdata.cloud/", link_label="fest.link.netdata")])
         self.assertIn('<a class="dlink" href="https://app.netdata.cloud/" target="_blank" rel="noopener">Netdata を開く</a>', d)
-        _, d = self.detail("visitor.a", [item("visitor.a", link="/admin/#sec-cluster", link_label="admin")])
+        _, d = self.detail("visitor.a", [item("visitor.a", link="/admin/#sec-cluster", link_label="fest.link.admin")])
         self.assertIn('href="/admin/#sec-cluster"', d)
         self.assertIn("運用ダッシュボード を開く", d)
         self.assertNotIn("_blank", d)

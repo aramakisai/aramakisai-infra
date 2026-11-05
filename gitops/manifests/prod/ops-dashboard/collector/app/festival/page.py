@@ -139,7 +139,7 @@ def _detail(store, i: FestivalItem, state, now: datetime) -> str:
     if href and i.link_label:
         ext = ' target="_blank" rel="noopener"' if href.startswith("https://") else ""
         link = (f'<p class="dl"><a class="dlink" href="{esc(href)}"{ext}>'
-                f'{esc(label("fest.detail.link", name=label("fest.link." + i.link_label)))}</a></p>')
+                f'{esc(label("fest.detail.link", name=label(i.link_label)))}</a></p>')
     return (f'<div class="dh"><h2>{esc(i.label)}</h2>{_badge(s)}</div><p class="dv">{esc(i.value)}</p>'
             f'<dl class="di">{dl}</dl>{_chart(store, i, state, now) if i.unit else ""}'
             f'{_breakdown(i.breakdown) if i.breakdown else ""}{link}')
