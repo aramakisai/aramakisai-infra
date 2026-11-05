@@ -1,4 +1,4 @@
-# cms の公開経路は cloudflared の Tunnel だけ
+# 公開経路は cloudflared の Tunnel。運用ダッシュボードの collector だけが Service 経由で状態を読む
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -16,6 +16,12 @@ spec:
           podSelector:
             matchLabels:
               app: cloudflared
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ops-dashboard
+          podSelector:
+            matchLabels:
+              app: collector
       ports:
         - {protocol: TCP, port: 3000}
 ---
