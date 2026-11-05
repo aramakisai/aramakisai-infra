@@ -12,6 +12,8 @@ const MAX_VUS = Number(__ENV.MAX_VUS || 500);
 // abortOnFail はエラー率がこの値を超えた時点でテストを即時停止する。本番へ印加するため、壊れた後も負荷を掛け続けないための安全弁。
 const ERROR_RATE_THRESHOLD = Number(__ENV.ERROR_RATE_THRESHOLD || 0.1);
 const SUMMARY_TOP = Number(__ENV.SUMMARY_TOP || 30);
+// Cloudflare の 60 秒エッジキャッシュを外し、オリジンへ全量届けるための乱数クエリ
+const CACHE_BUST = __ENV.CACHE_BUST === '1';
 
 // 比率データは本番の実測から逆算できるためリポジトリに置かず、実行時にファイルで渡す
 const MIX = JSON.parse(open(__ENV.MIX_FILE));
@@ -41,8 +43,9 @@ export const options = {
     },
   },
   thresholds: {
-    error_rate: [{ threshold: `rate<${ERROR_RATE_THRESHOLD}`, abortOnFail: true }],
-    http_req_failed: [{ threshold: `rate<${ERROR_RATE_THRESHOLD}`, abortOnFail: true }],
+    // 立ち上がり直後の少数サンプルで率が振れて abortOnFail が誤発火するため、評価開始を遅らせる
+    error_rate: [{ threshold: `rate<${ERROR_RATE_THRESHOLD}`, abortOnFail: true, delayAbortEval: '30s' }],
+    http_req_failed: [{ threshold: `rate<${ERROR_RATE_THRESHOLD}`, abortOnFail: true, delayAbortEval: '30s' }],
     // 空の閾値は、path ごとのサブメトリクスをサマリへ出すためだけに置く
     ...Object.fromEntries(
       PATHS.flatMap((p) => [`http_req_duration{name:${p}}`, `error_rate{name:${p}}`].map((k) => [k, []])),
@@ -66,7 +69,9 @@ export default function () {
   // 公開 API の where は「現在時刻(分単位)」を含み、フロントエンドは分ごとに別 URL を送る
   const now = encodeURIComponent(`${new Date().toISOString().slice(0, 16)}:00.000Z`);
   const url = pick().replace('__NOW__', now);
-  const res = http.get(`${BASE_URL}${url}`, { timeout: '10s', tags: { name: pathOf(url) } });
+  // name タグは pathOf(url) で付けるため、lt は集計の path 分割に影響しない
+  const target = CACHE_BUST ? `${url}${url.includes('?') ? '&' : '?'}lt=${Math.random().toString(36).slice(2)}` : url;
+  const res = http.get(`${BASE_URL}${target}`, { timeout: '10s', tags: { name: pathOf(url) } });
   const ok = check(res, { 'status is 2xx/3xx': (r) => r.status >= 200 && r.status < 400 });
   errorRate.add(!ok, { name: pathOf(url) });
 }

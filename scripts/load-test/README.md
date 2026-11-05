@@ -40,7 +40,7 @@ docker run --rm -i \
 | `RAMP_DURATION` | `10m` | `START_RATE` から `MAX_RATE` まで上げ続ける時間。plateau・ramp-down は設けない |
 | `PRE_ALLOCATED_VUS` | `50` | 事前確保する VU 数 |
 | `MAX_VUS` | `500` | 応答遅延時に追加確保できる VU 数上限 |
-| `ERROR_RATE_THRESHOLD` | `0.1` | エラー率がこの値を超えると `abortOnFail` により即時停止する |
+| `ERROR_RATE_THRESHOLD` | `0.1` | エラー率がこの値を超えると `abortOnFail` により停止する (`real-mix.js` は開始 30 秒後から評価する) |
 
 ## 記録項目
 
@@ -103,6 +103,10 @@ docker run --rm -i \
 ```
 
 `MIX_FILE` 以外の変数は `breakpoint.js` と同じ。追加で `HOLD_DURATION` (既定 `0s`) は、`MAX_RATE` に達した後そのレートを保つ時間。0 以外のとき `RAMP_DURATION` の後に同レートの保持段階が付く。保持中も閾値と `abortOnFail` は有効。保持段階の推移は `--out json=<file>` で時系列として取れる (コンテナで実行する場合は出力先を `-v` でマウントする)。追加で `SUMMARY_TOP` (既定 `30`) が path ごとの集計表に出す行数。
+
+`CACHE_BUST` (既定 off、`1` で有効) は、各リクエスト URL に乱数のクエリ `lt=<乱数>` (既存クエリがあれば `&lt=`、無ければ `?lt=`) を付与する。Cloudflare の 60 秒エッジキャッシュを外し、オリジンへ全量届けるために使う。`name` タグは付与前のクエリを除いた path なので、path ごとの集計には影響しない。
+
+`error_rate` と `http_req_failed` の閾値は `delayAbortEval: '30s'` を持つ。実行開始から 30 秒間は `abortOnFail` の評価を行わず、立ち上がり直後の少数サンプルによる誤停止を避ける。
 
 ### 出力
 
