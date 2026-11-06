@@ -408,7 +408,7 @@
   - Playwright (headless) で、ローカルの collector と fixture の SQLite を使い、1920×1080 で確かめる。検証後と失敗時にブラウザを閉じる
   - テストは `collector/app/tests/e2e_festival.py` に置き、`python3 -I` で手動で実行する (ファイル名を `test_` で始めず、CI の `unittest discover` の対象にしない)
   - 4 つのタブのそれぞれで、格子と詳細パネルに縦スクロールが無いこと (`scrollHeight <= clientHeight`)。項目数は 1・12・20 (標準表示)・24・42 (小型表示)
-  - 各項目数で、タイルの寸法が `tile_grid()` の値と一致し、タイルの各行 (名前・現在値・スパークライン・閾値・注記・時刻) が予算の高さに収まること (`getBoundingClientRect()` で実測する)
+  - 各項目数で、タイルの寸法が design の「タイルの大きさの決め方」の実際の寸法と一致し、タイルの各行 (名前・現在値・スパークライン・閾値・注記・時刻) が予算の高さに収まること (`getBoundingClientRect()` で実測する)
   - 内訳 11 行以上とグラフと注記 2 行を持つ項目を選び、詳細パネルの各部分が予算の高さに収まり、パネルに縦スクロールが無いこと
   - 項目を選ぶとページを遷移せずに当日の折れ線 (閾値の線と文字つき) と内訳が出ること、欠測のある fixture で線が途切れること
   - タブを切り替え、項目を選んだ状態で 2 回の自動更新を待ち、タブと詳細パネルが保たれ、詳細の値が更新後の値になること
@@ -449,7 +449,7 @@
   - _Depends: 8.13_
   - _Boundary: FestivalConfig、FestivalCatalog、FestivalNotifier、Store_
 
-- [ ] 8.15 非公開の閾値を環境変数で渡す
+- [x] 8.15 非公開の閾値を環境変数で渡す
   - `collector/app/config.py`: `parse_festival` に `private_thresholds: str | None` を足し、`parse`・`load` が環境変数 `OPS_FESTIVAL_PRIVATE_THRESHOLDS` の値を渡す (`main.run` は `config_mod.load` に `env` を渡す)。値は JSON のオブジェクト (キーは閾値名、値は `{"warn": …, "crit": …}`。`crit` 省略可。期間は toml と同じ書式の文字列) で、`[festival.thresholds]` に足し合わせる。同じ閾値名が両方にあれば `ConfigError`。向き・逆転・未知の閾値名は toml の閾値と同じ検証を通す。未設定・空文字なら足さない。JSON が壊れている・オブジェクトでないときは `ConfigError` にし、エラー文に値を含めない
   - `collector/external-secret.yaml`: 当日監視の並びに `OPS_FESTIVAL_PRIVATE_THRESHOLDS` を既存の `OPS_*` と同じ書き方で足す。`collector/deployment.yaml` は `envFrom` の `collector-secrets` で全キーが環境変数になるため変更しない
   - Infisical prod への値の登録: 実装者が infisical CLI (`infisical secrets set --env=prod`) で `OPS_FESTIVAL_PRIVATE_THRESHOLDS` を登録する。値 (JSON) は手元の負荷試験の分析結果から渡し、このタスクにもリポジトリにも書かない。登録のコマンドは出力を `/dev/null` に捨て、値を端末に出さない。登録の確認はキー名だけで行う (値の出力を伴う `get` は使わない)。登録後に ExternalSecret の反映と collector の再起動を待ち、画面の `capacity.cms.rps` が判定の対象になっていること (「表示のみ」でないこと) を確かめる
@@ -460,3 +460,14 @@
   - _Requirements: 3.3, 3.4, 9.4_
   - _Depends: 8.14_
   - _Boundary: FestivalConfig_
+
+- [x] 8.16 当日監視画面をウィンドウいっぱいに広げる
+  - `collector/app/festival/page.py` の CSS: `body` (232 行付近の `grid-template-columns:1360px 560px;grid-template-rows:120px 56px 904px;overflow:hidden`) を `grid-template-columns:1fr 560px;grid-template-rows:120px 56px 1fr` にし、高さを `100vh` (`100dvh`) にして `overflow:hidden` は保つ (ページ全体にスクロールを出さない)。`.band` (234 行付近) の `height:120px` は変えない。`#detail` (287 行付近) は `height:904px` をやめて行いっぱいの高さにし、`overflow:auto` で高さが足りなければパネルの中を縦にスクロールする。`.panel` (252 行付近) は `overflow:auto` のまま、格子の領域の縦横のスクロールを担う。タブ見出し (56px)・詳細パネルの幅 (560px)・`.daychart` (297 行付近) の 528px × 220px は変えない
+  - タイルの寸法: `--tile-w`・`--tile-h` (193 行付近) は `tile_grid()` の幅・高さをタイルの最小寸法として渡す。`tile_grid()` の値と既存のテストは変えない。格子の列は `minmax(var(--tile-w), 1fr)`、行は `minmax(var(--tile-h), 1fr)` で、領域が大きければ列・行とも均等に広がり、小さければ最小寸法のまま `.panel` の中をスクロールする。タイルの行 (標準表示のスパークラインの行 S = h' − 158、小型表示の行 2 の R = h' − 80) は、固定の高さをやめ、タイルの高さから残りを受け取る (他の行の高さは変えない)。文字の大きさは変えない
+  - 単体テスト (`collector/app/tests/test_festival_page.py`): 既存の `tile_grid()` のテストは値が変わらないので維持する。実際の寸法 (w'・h') の計算を design の式どおりに足し (1920×1080 の 1・2・4・6・8 個で 1336×880・1336×436・664×436・664×288・664×214、2197×1267 の 12 個で 397×350、2560×1440 の 12 個で 488×408、領域が w・h より小さいときは w・h のまま)、描画した CSS が `body` の固定の幅・高さ (`1360px`・`904px`) を持たないこと、`.panel` と `#detail` が `overflow:auto` であること、`--tile-w`・`--tile-h` が `tile_grid()` の値であることを確かめる
+  - 実ブラウザ (`collector/app/tests/e2e_festival.py`): 設計の Testing Strategy の E2E に、2560×1440 で余白が無いこと (格子の領域の右端が詳細パネルの左端、下端がウィンドウの下端に一致し、12 項目でタイルが 488 × 408) と、1366×768 で格子の領域が縦横にスクロールでき帯とタブ見出しの位置が動かないこと (ページ全体にスクロールが無く、詳細パネルは中で縦にスクロールできる) を足す
+  - テストファイル: `test_festival_page.py`、`e2e_festival.py`
+  - 完了時: 上記の単体テストが通り、collector の単体テストが通り、1920×1080 の E2E (全タブの格子と詳細パネルに縦スクロールが無いこと、タイルの寸法が実際の寸法と一致すること、タイルの各行と詳細の各部分が予算に収まること) が、寸法の期待値を新しい式に改めたうえで通り、2560×1440 と 1366×768 の E2E が通る
+  - _Requirements: 3.8, 3.15_
+  - _Depends: 8.15_
+  - _Boundary: FestivalPage_

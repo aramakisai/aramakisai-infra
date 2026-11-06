@@ -19,7 +19,7 @@ import main  # noqa: E402
 import store as store_mod  # noqa: E402
 from helpers import make_ctx  # noqa: E402
 from festival.labels import label  # noqa: E402
-from festival.page import TABS, tile_grid  # noqa: E402
+from festival.page import TABS, tile_grid, tile_size  # noqa: E402
 from model import Breakdown, FestivalItem, Status  # noqa: E402
 from playwright.sync_api import sync_playwright  # noqa: E402
 
@@ -232,7 +232,7 @@ MEASURE_DETAIL = """()=>{
   const q=s=>d.querySelector(s);
   return{d:{...r(d),sh:d.scrollHeight,ch:d.clientHeight},dh:r(q('.dh')),dv:r(q('.dv')),di:r(q('.di')),
     note:r([...d.querySelectorAll('.di dd')].pop()),
-    dc:{...r(q('.dc')),sh:q('.dc')?.scrollHeight,ch:q('.dc')?.clientHeight},dch3:r(q('.dc h3')),svg:r(q('.dc svg')),gap:r(q('.dc .gap')),
+    dc:{...r(q('.dc')),sh:q('.dc')?.scrollHeight,ch:q('.dc')?.clientHeight},dch3:r(q('.dc h3')),svg:r(q('.dc svg')),
     db:{...r(q('.db')),sh:q('.db')?.scrollHeight,ch:q('.db')?.clientHeight},dbh3:r(q('.db h3')),th:r(q('.db th')),
     tds:[...d.querySelectorAll('.db tbody tr')].map(tr=>r(tr.querySelector('td'))),
     more:d.querySelector('.db tr.more')?.textContent??null,dl:r(q('.dl'))};
@@ -249,24 +249,28 @@ class LayoutTest(Base):
         self.page.click(f'[role=tab][data-tab-id={cat}]')
         self.wait_title(f"項目 {cat}.i00")
 
-    def check_tile_rows(self, n, m):
+    def check_tile_rows(self, n, m, view=(1920, 1080)):
         g = tile_grid(n)
+        gw, gh = tile_size(n, *view)
+        g = g._replace(w=gw, h=gh)
         self.assertEqual(m["panel"]["size"], g.size)
         self.assertEqual(len(m["tiles"]), n)
         px, py = m["panel"]["x"] + 12, m["panel"]["y"] + 12
+        t0 = m["tiles"][0]
         for idx, t in enumerate(m["tiles"]):
             with self.subTest(n=n, tile=idx):
-                self.assertAlmostEqual(t["w"], g.w, delta=TOL)
-                self.assertAlmostEqual(t["h"], g.h, delta=TOL)
-                self.assertAlmostEqual(t["x"], px + (idx % g.cols) * (g.w + 8), delta=TOL)
-                self.assertAlmostEqual(t["y"], py + (idx // g.cols) * (g.h + 8), delta=TOL)
+                # 1fr の幅・高さは小数になる。設計の式は切り捨てなので 1px 未満の差を許す
+                self.assertAlmostEqual(t["w"], g.w, delta=1)
+                self.assertAlmostEqual(t["h"], g.h, delta=1)
+                self.assertAlmostEqual(t["x"], px + (idx % g.cols) * (t0["w"] + 8), delta=TOL)
+                self.assertAlmostEqual(t["y"], py + (idx // g.cols) * (t0["h"] + 8), delta=TOL)
                 self.assertLessEqual(t["sh"], t["ch"])
                 self.check_rows(g, t)
 
     def check_rows(self, g, t):
         rows, nc = t["rows"], t["nc"]
         if g.size == "standard":
-            s = max(40, g.h - 158)
+            s = max(40, t["h"] - 158)
             y = t["y"] + 1 + 10
             v_h = 42 + s if nc else 38
             bands = {"h": (y, 24), "v": (y + 28, v_h)}
@@ -277,7 +281,7 @@ class LayoutTest(Base):
             h_th = 18
             exact = ("h", "v", "sp", "th", "no", "t")
         else:
-            r = max(28, g.h - 80)
+            r = max(28, t["h"] - 80)
             y = t["y"] + 1 + 4
             bands = {"h": (y, 20), "v": (y + 22, r)}
             if not nc:
@@ -324,11 +328,10 @@ class LayoutTest(Base):
         near(m["dv"]["h"], 36, "dv")
         near(m["di"]["h"], 110, "di")
         near(m["note"]["h"], 44, "note 2 行")
-        near(m["dc"]["h"], 258, "dc")
+        near(m["dc"]["h"], 240, "dc")
         near(m["dch3"]["h"], 20, "dc h3")
         near(m["svg"]["w"], 528, "svg w")
         near(m["svg"]["h"], 220, "svg h")
-        near(m["gap"]["h"], 18, "gap")
         self.assertLessEqual(m["dc"]["sh"], m["dc"]["ch"])
         near(m["dbh3"]["h"], 20, "db h3")
         near(m["th"]["h"], 28, "db th")
@@ -349,6 +352,66 @@ class LayoutTest(Base):
         near(m["dl"]["y"], bottom("db") + 16, "db-link")
         self.assertLessEqual(bottom("dl"), m["d"]["y"] + m["d"]["h"] - 16 + TOL)
         self.assertLessEqual(m["d"]["sh"], m["d"]["ch"])
+
+
+class FluidLayoutTest(Base):
+    open_n = LayoutTest.open_n
+
+    def open_at(self, w, h, n):
+        self.page.set_viewport_size({"width": w, "height": h})
+        self.open_n(n)
+
+    def test_1920x1080_tile_sizes(self):
+        want = {1: (1336, 880), 4: (664, 436), 12: (328, 288), 20: (260, 214), 24: (216, 214), 37: (216, 118),
+                42: (216, 118)}
+        for n, (tw, th) in want.items():
+            self.open_at(1920, 1080, n)
+            m = self.page.evaluate(MEASURE_TILES)
+            with self.subTest(n=n):
+                self.assertAlmostEqual(m["tiles"][0]["w"], tw, delta=1)
+                self.assertAlmostEqual(m["tiles"][0]["h"], th, delta=1)
+
+    def test_2560x1440_has_no_margin(self):
+        for n, (tw, th) in {12: (488, 408), 4: (984, 616)}.items():
+            self.open_at(2560, 1440, n)
+            m = self.page.evaluate(MEASURE_TILES)
+            d = self.page.evaluate("()=>{const b=document.querySelector('#detail').getBoundingClientRect();return{x:b.x,bottom:b.bottom}}")
+            p, last = m["panel"], m["tiles"][-1]
+            with self.subTest(n=n):
+                self.assertAlmostEqual(m["tiles"][0]["w"], tw, delta=1)
+                self.assertAlmostEqual(m["tiles"][0]["h"], th, delta=1)
+                self.assertAlmostEqual(p["x"] + p["w"], d["x"], delta=TOL)
+                self.assertAlmostEqual(p["y"] + p["h"], 1440, delta=TOL)
+                self.assertAlmostEqual(d["bottom"], 1440, delta=TOL)
+                self.assertAlmostEqual(last["x"] + last["w"], p["x"] + p["w"] - 12, delta=TOL)
+                self.assertAlmostEqual(last["y"] + last["h"], p["y"] + p["h"] - 12, delta=TOL)
+                self.assertLessEqual(m["panel"]["sh"], m["panel"]["ch"])
+
+    def test_1366x768_scrolls_inside_grid_only(self):
+        self.open_at(1366, 768, 12)
+        fixed = "()=>['#festival-band','.tabs'].map(s=>{const b=document.querySelector(s).getBoundingClientRect();return[b.y,b.height]})"
+        before = self.page.evaluate(fixed)
+        m = self.page.evaluate(MEASURE_TILES)
+        g = tile_grid(12)
+        self.assertAlmostEqual(m["tiles"][0]["w"], g.w, delta=TOL)
+        self.assertAlmostEqual(m["tiles"][0]["h"], g.h, delta=TOL)
+        self.assertGreater(m["panel"]["sh"], m["panel"]["ch"])
+        self.assertTrue(self.page.evaluate("()=>{const p=[...document.querySelectorAll('.panel')].find(p=>!p.hidden);return p.scrollWidth>p.clientWidth}"))
+        self.assertLessEqual(m["doc"]["sh"], m["doc"]["ch"])
+        self.assertEqual(self.page.evaluate("document.documentElement.scrollWidth<=document.documentElement.clientWidth"), True)
+        self.page.evaluate("()=>{const p=[...document.querySelectorAll('.panel')].find(p=>!p.hidden);p.scrollTop=p.scrollHeight;p.scrollLeft=p.scrollWidth}")
+        self.assertEqual(self.page.evaluate(fixed), before)
+        self.assertEqual(self.page.evaluate("[window.scrollX,window.scrollY]"), [0, 0])
+        self.wait_title("項目 visitor.i00")
+        d = self.page.evaluate("()=>{const e=document.querySelector('#detail');return[e.scrollHeight,e.clientHeight]}")
+        self.assertGreater(d[0], d[1])
+
+    def test_fluid_screenshots(self):
+        out = Path(os.environ.get("E2E_FLUID_SHOTS", SHOTS))
+        for w, h, n in ((2560, 1440, 12), (2560, 1440, 4), (1920, 1080, 12), (1920, 1080, 30), (1366, 768, 12)):
+            self.open_at(w, h, n)
+            self.page.wait_for_timeout(200)
+            self.page.screenshot(path=str(out / f"fluid-{w}x{h}-{n}.png"))
 
 
 class DetailChartTest(Base):
@@ -387,7 +450,7 @@ class DetailChartTest(Base):
         self.assertIn(label("fest.detail.chart_warn", value="3%"), texts)
         self.assertIn(label("fest.detail.chart_crit", value="5%"), texts)
         self.assertEqual(self.page.locator("#detail .db tbody tr").count(), 11)
-        self.assertEqual(self.page.locator("#detail .gap").inner_text(), label("fest.detail.chart_gap"))
+        self.assertEqual(self.page.locator("#detail .gap").count(), 0)
         self.assertEqual(self.page.locator("#detail a.dlink").get_attribute("target"), "_blank")
         self.assertEqual(self.page.locator("#detail a.dlink").inner_text(), label("fest.detail.link", name=label("fest.link.netdata")))
 

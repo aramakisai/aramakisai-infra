@@ -283,7 +283,7 @@ Terraform・Ansible で発行できないため、各サービスの管理画面
 | 資格情報 | 権限 | 所有アカウント | Infisical キー | ローテーション |
 |----------|------|----------------|----------------|----------------|
 | Hetzner Cloud API トークン | プロジェクトの Read | インフラ運用の Hetzner プロジェクト | `OPS_HCLOUD_READ_TOKEN` | 期限なし。担当者交代時・漏洩疑い時 |
-| Cloudflare アカウント API トークン | Billing Read、Account Analytics Read、Access: Audit Logs Read、Cloudflare Tunnel Read (zone 権限なし) | aramakisai の Cloudflare アカウント所有 (個人に紐づかない) | `OPS_CLOUDFLARE_READ_TOKEN` | 有効期限 1 年。期限前に再発行し `dashboard.toml` の `credentials` の期限日も更新 |
+| Cloudflare アカウント API トークン | Billing Read、Account Analytics Read、Access: Audit Logs Read、Cloudflare Tunnel Read、Zone: Analytics Read (aramakisai.com) | aramakisai の Cloudflare アカウント所有 (個人に紐づかない) | `OPS_CLOUDFLARE_READ_TOKEN` | 有効期限 1 年。期限前に再発行し `dashboard.toml` の `credentials` の期限日も更新 |
 | GitHub App `aramakisai-ops-dashboard` | Repository: Actions/Pull requests/Issues/Metadata read、Organization: Administration read。`aramakisai-infra`・`aramakisai-web` のみにインストール。Webhook 無効 | aramakisai organization 所有 | `OPS_GITHUB_APP_ID`, `OPS_GITHUB_APP_INSTALLATION_ID`, `OPS_GITHUB_APP_PRIVATE_KEY` | 秘密鍵は期限なし。担当者交代時・漏洩疑い時に再生成。インストールトークンは ESO が 30 分ごとに更新 |
 | HCP Terraform organization トークン | organization トークン (Explorer と subscription の GET のみ使用) | aramakisai organization | `OPS_TFC_TOKEN` | 有効期限 12 か月。期限前に再発行し `dashboard.toml` の期限日も更新 |
 | Netdata Cloud API トークン | `scope:grafana-plugin` | Netdata space を所有する運用アカウント | `OPS_NETDATA_API_TOKEN` | 期限なし。所有アカウント引き継ぎ時に再発行 |

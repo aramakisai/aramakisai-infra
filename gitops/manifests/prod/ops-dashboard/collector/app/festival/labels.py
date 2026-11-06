@@ -27,7 +27,6 @@ LABELS: dict[str, str] = {
     "fest.detail.note": "注記",
     "fest.detail.chart": "当日の推移 ({start}〜{end})",
     "fest.detail.chart_aria": "{label} の当日の推移",
-    "fest.detail.chart_gap": "線の途切れは記録なし (取得失敗・取得遅延など)",
     "fest.detail.chart_empty": "当日の記録がありません",
     "fest.detail.chart_warn": "注意 {value}",
     "fest.detail.chart_crit": "異常 {value}",

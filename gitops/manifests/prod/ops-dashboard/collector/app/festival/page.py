@@ -75,6 +75,16 @@ def tile_grid(n: int) -> Grid | None:
     return Grid(c, r, w, h, "standard" if w >= STANDARD_MIN_W and h >= STANDARD_MIN_H else "compact")
 
 
+def tile_size(n: int, view_w: int, view_h: int) -> tuple[int, int] | None:
+    """ウィンドウの寸法 (幅 view_w・高さ view_h) で実際に描かれるタイルの寸法。tile_grid の寸法が最小。"""
+    g = tile_grid(n)
+    if g is None:
+        return None
+    w = (view_w - 584 - (g.cols - 1) * GAP) // g.cols
+    h = (view_h - 200 - (g.rows - 1) * GAP) // g.rows
+    return max(w, g.w), max(h, g.h)
+
+
 def _times(i: FestivalItem) -> str:
     fetched = label("fest.tile.fetched_at", time=_hms(i.fetched_at))
     if not i.observed_at:
@@ -119,7 +129,7 @@ def _chart(store, i: FestivalItem, state, now: datetime) -> str:
     points = store.load_festival_history(start, end, key=i.key).get(i.key, [])
     return (f'<section class="dc"><h3>{esc(label("fest.detail.chart", start=start.strftime("%H:%M"), end=end.strftime("%H:%M")))}</h3>'
             f'{day_chart(points, start, end, i.unit, i.warn, i.crit, i.label)}'
-            f'<p class="gap">{esc(label("fest.detail.chart_gap"))}</p></section>')
+            f'</section>')
 
 
 def _detail(store, i: FestivalItem, state, now: datetime) -> str:
@@ -227,9 +237,9 @@ CSS = """
 --ok:#1d7a3a;--warn:#9a5b00;--crit:#b3261e;--error:#6a2c91;--stale:#4a5568;--empty:#4a5568;--info:#4a5568}
 @media(prefers-color-scheme:dark){:root{--bg:#12161c;--fg:#e6e9ef;--card:#1b212b;--line:#343c4a;--mute:#9aa6b8;
 --ok:#6fcf8a;--warn:#f0b04a;--crit:#ff8a80;--error:#d7a5f5;--stale:#a9b4c6;--empty:#a9b4c6;--info:#a9b4c6}}
-*{box-sizing:border-box}html,body{height:100%;margin:0}
+*{box-sizing:border-box}html,body{margin:0}
 body{background:var(--bg);color:var(--fg);font:15px/1.4 system-ui,"Hiragino Sans","Noto Sans JP",sans-serif;
-display:grid;grid-template-columns:1360px 560px;grid-template-rows:120px 56px 904px;overflow:hidden}
+display:grid;grid-template-columns:1fr 560px;grid-template-rows:120px 56px 1fr;height:100vh;overflow:hidden}
 #festival-fragment{display:contents}
 .band{grid-column:1/-1;grid-row:1;height:120px;overflow:hidden;display:grid;grid-template-columns:1fr auto;
 gap:2px 24px;align-items:center;padding:8px 16px;background:var(--card);border-bottom:4px solid var(--ok)}
@@ -248,15 +258,15 @@ background:var(--bg);color:var(--fg);font:inherit;font-size:17px;cursor:pointer;
 .badge.s-ok{color:var(--ok)}.badge.s-warn{color:var(--warn)}.badge.s-crit{color:var(--crit)}
 .badge.s-error{color:var(--error);background:color-mix(in srgb,var(--error) 12%,transparent)}
 .badge.s-stale,.badge.s-info{color:var(--stale)}.badge.s-empty{color:var(--empty)}
-.panels{grid-column:1;grid-row:3;min-height:0}
-.panel{height:100%;overflow:auto;padding:12px;display:grid;grid-template-columns:repeat(var(--cols),var(--tile-w));
-grid-auto-rows:var(--tile-h);gap:8px;align-content:start;justify-content:start}
+.panels{grid-column:1;grid-row:3;min-height:0;min-width:0}
+.panel{height:100%;overflow:auto;padding:12px;display:grid;grid-template-columns:repeat(var(--cols),minmax(var(--tile-w),1fr));
+grid-auto-rows:minmax(var(--tile-h),1fr);gap:8px}
 .panel[hidden]{display:none}
 .tile{display:grid;grid-template-columns:minmax(0,1fr);min-width:0;min-height:0;overflow:hidden;text-align:left;
 font:inherit;color:var(--fg);background:var(--card);border:1px solid var(--line);border-left:6px solid var(--ok);
 border-radius:6px;cursor:pointer;padding:10px 12px;gap:4px;
 grid-template-areas:"h" "v" "sp" "th" "no" "t";
-grid-template-rows:24px 38px max(40px,calc(var(--tile-h) - 158px)) 18px 18px 18px}
+grid-template-rows:24px 38px minmax(40px,1fr) 18px 18px 18px}
 .tile.s-warn{border-left-color:var(--warn)}.tile.s-crit{border-left-color:var(--crit);background:color-mix(in srgb,var(--crit) 10%,var(--card))}
 .tile.s-error{border-left-color:var(--error)}.tile.s-stale,.tile.s-empty{border-left-color:var(--stale)}
 .tile.s-info{border-left-color:var(--info);border-left-style:dashed}
@@ -270,7 +280,7 @@ grid-template-rows:24px 38px max(40px,calc(var(--tile-h) - 158px)) 18px 18px 18p
 .tile.s-stale .sp,.tile.s-empty .sp,.tile.s-info .sp{color:var(--stale)}
 .tile .spark{display:block;width:100%;height:100%}
 .panel[data-size=standard] .tile.nc{grid-template-areas:"h" "v" "th" "no" "t";
-grid-template-rows:24px calc(42px + max(40px,calc(var(--tile-h) - 158px))) 18px 18px 18px}
+grid-template-rows:24px minmax(82px,1fr) 18px 18px 18px}
 /* 30px に収まらない現在値の続きを、同じ要素の 2 行目以降に 15px で折り返して出す */
 .panel[data-size=standard] .tile.nc .v{font-size:15px;font-weight:400;line-height:normal;white-space:normal;
 overflow:hidden;overflow-wrap:anywhere;text-overflow:clip}
@@ -278,13 +288,13 @@ overflow:hidden;overflow-wrap:anywhere;text-overflow:clip}
 .tile .th,.tile .no,.tile .t{font-size:13px;line-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tile .th{grid-area:th}.tile .no{grid-area:no}.tile .t{grid-area:t;color:var(--mute)}
 .panel[data-size=compact] .tile{padding:4px 8px;gap:2px;grid-template-columns:55fr 45fr;
-grid-template-areas:"h h" "v sp" "th th" "no no" "t t";grid-template-rows:20px max(28px,calc(var(--tile-h) - 80px)) 14px 14px 14px}
+grid-template-areas:"h h" "v sp" "th th" "no no" "t t";grid-template-rows:20px minmax(28px,1fr) 14px 14px 14px}
 .panel[data-size=compact] .tile.nc{grid-template-areas:"h h" "v v" "th th" "no no" "t t"}
 .panel[data-size=compact] .tile.nc .sp{display:none}
 .panel[data-size=compact] .tile .n{font-size:14px}.panel[data-size=compact] .tile .badge{font-size:12px}
 .panel[data-size=compact] .tile .v{font-size:20px;line-height:28px;align-self:center}
 .panel[data-size=compact] .tile .th,.panel[data-size=compact] .tile .no,.panel[data-size=compact] .tile .t{font-size:12px;line-height:14px}
-#detail{grid-column:2;grid-row:3;height:904px;overflow:auto;padding:16px;background:var(--card);border-left:1px solid var(--line)}
+#detail{grid-column:2;grid-row:3;min-height:0;overflow:auto;padding:16px;background:var(--card);border-left:1px solid var(--line)}
 #detail>*{margin:0}#detail>*+*{margin-top:16px}#detail>.dv,#detail>.di{margin-top:8px}
 #detail .dh{height:28px;display:flex;align-items:center;gap:8px}
 #detail h2{font-size:20px;line-height:28px;margin:0;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
@@ -293,11 +303,10 @@ grid-template-areas:"h h" "v sp" "th th" "no no" "t t";grid-template-rows:20px m
 #detail dt{color:var(--mute)}
 #detail dd{margin:0;min-width:0;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;overflow:hidden}
 #detail h3{margin:0;font-size:13px;line-height:20px;font-weight:400;color:var(--mute)}
-#detail .dc{height:258px;overflow:hidden}
+#detail .dc{height:240px;overflow:hidden}
 #detail .daychart{display:block;width:528px;height:220px;color:var(--mute);fill:currentColor}
 #detail .daychart text{fill:currentColor}
 #detail .chart-empty{height:220px;display:flex;align-items:center;justify-content:center;color:var(--mute)}
-#detail .gap{margin:0;font-size:13px;line-height:18px;color:var(--mute)}
 #detail .db{max-height:334px;overflow:hidden}
 #detail .db h3{font-size:15px;line-height:20px;font-weight:700;color:var(--fg)}
 #detail table{width:100%;table-layout:fixed;border-collapse:separate;border-spacing:0;font-size:13px}

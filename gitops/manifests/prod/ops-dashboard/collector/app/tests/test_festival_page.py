@@ -141,7 +141,8 @@ class FestivalPageTest(unittest.TestCase):
         self.assertIn('class="daychart"', d)
         self.assertIn("名前 visitor.a の当日の推移", d)
         self.assertIn("当日の推移 (00:00〜12:00)", d)
-        self.assertIn(label("fest.detail.chart_gap"), d)
+        self.assertNotIn('class="gap"', d)
+        self.assertNotIn("線の途切れ", d)
         self.assertIn("注意 80%", d)
         self.assertIn("異常 90%", d)
         self.assertEqual(d.count("M"), 2)  # 欠測で 2 本の線に分かれる
@@ -230,6 +231,29 @@ class FestivalPageTest(unittest.TestCase):
             g = page.tile_grid(n)
             self.assertEqual((g.cols, g.rows, g.w, g.h, g.size), want, n)
         self.assertIsNone(page.tile_grid(0))
+
+    def test_tile_size_fills_window_with_tile_grid_as_minimum(self):
+        want = {(1920, 1080, 1): (1336, 880), (1920, 1080, 2): (1336, 436), (1920, 1080, 4): (664, 436),
+                (1920, 1080, 6): (664, 288), (1920, 1080, 8): (664, 214), (1920, 1080, 12): (328, 288),
+                (1920, 1080, 20): (260, 214), (1920, 1080, 24): (216, 214), (1920, 1080, 37): (216, 118),
+                (2197, 1267, 12): (397, 350), (2560, 1440, 12): (488, 408), (2560, 1440, 4): (984, 616)}
+        for (w, h, n), size in want.items():
+            self.assertEqual(page.tile_size(n, w, h), size, (w, h, n))
+        # 領域が最小寸法より小さいときは tile_grid の寸法のまま
+        self.assertEqual(page.tile_size(12, 1366, 768), (328, 288))
+        self.assertIsNone(page.tile_size(0, 1920, 1080))
+
+    def test_css_has_fluid_layout(self):
+        css = page.CSS
+        self.assertNotIn("1360px", css)
+        self.assertNotIn("904px", css)
+        self.assertIn("grid-template-columns:1fr 560px;grid-template-rows:120px 56px 1fr", css)
+        self.assertIn("height:100vh", css)
+        self.assertIn("minmax(var(--tile-w),1fr)", css)
+        self.assertIn("minmax(var(--tile-h),1fr)", css)
+        self.assertRegex(re.search(r"\.panels\{[^}]*}", css).group(0), r"min-width:0")
+        for sel in (".panel{", "#detail{"):
+            self.assertRegex(re.search(re.escape(sel) + r"[^}]*}", css).group(0), r"overflow:auto")
 
     def test_panel_carries_size_and_grid_variables(self):
         def panel(n):
