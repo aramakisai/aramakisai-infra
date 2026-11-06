@@ -125,4 +125,46 @@ resource "cloudflare_ruleset" "directus_assets_cache" {
       }
     }
   }
+
+  # 旧 2025 年版 WordPress (Worker が origin-2025 へ転送) のアーカイブは更新されないため、
+  # エッジで 1 日キャッシュしてオリジンへの負荷を減らす。
+  # Cookie 付き (wp-admin ログイン中・コメント投稿者など) の応答は匿名に配られないよう対象外。
+  # 管理系と REST/cron は応答が動的なので /2025/ 配下でも除外する。
+  # browser_ttl はオリジンの Cache-Control に従う。
+  rules {
+    description = "旧 2025 年版アーカイブ (/2025/) を 1 日エッジキャッシュ (Cookie 付きと管理系は除外)"
+    expression = replace(trimspace(<<-EOT
+      (http.host eq "aramakisai.com")
+      and starts_with(http.request.uri.path, "/2025/")
+      and (http.request.method eq "GET")
+      and (http.cookie eq "")
+      and not (
+        http.request.uri.path contains "/wp-json"
+        or http.request.uri.path contains "/wp-admin"
+        or http.request.uri.path contains "/wp-login"
+        or http.request.uri.path contains "/wp-cron"
+      )
+    EOT
+    ), "/\\s+/", " ")
+    action  = "set_cache_settings"
+    enabled = true
+
+    action_parameters {
+      cache = true
+      edge_ttl {
+        mode    = "override_origin"
+        default = 86400
+      }
+      browser_ttl {
+        mode = "respect_origin"
+      }
+    }
+  }
+}
+
+# Smart Tiered Cache。アップストリームのデータセンターをゾーンごとに 1 つ自動選定し、
+# エッジからオリジンへの取得を集約する (Argo の有料 Tiered Caching とは別物で追加料金なし)。
+resource "cloudflare_tiered_cache" "smart" {
+  zone_id    = var.cloudflare_zone_id
+  cache_type = "smart"
 }
