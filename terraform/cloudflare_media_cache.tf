@@ -17,11 +17,13 @@ resource "cloudflare_ruleset" "directus_assets_cache" {
   kind    = "zone"
   phase   = "http_request_cache_settings"
 
-  # Cookie 付き要求でも .webp 等は Cloudflare 既定の拡張子ベースキャッシュに載り、
-  # ログイン中の応答が匿名に配られるため、明示的に bypass する。
+  # CMS ログイン Cookie (payload-token) 付き要求でも .webp 等は Cloudflare 既定の拡張子
+  # ベースキャッシュに載り、ログイン中の応答が匿名に配られるため、明示的に bypass する。
+  # 条件を Cookie 全般にしないのは、GA 等の Cookie (domain=.aramakisai.com) が全来場者に
+  # 付き、画像要求が全てキャッシュを素通りしてオリジンの 304 が 520 になるため。
   rules {
     description = "CMS media Cookie 付きはキャッシュしない"
-    expression  = "(http.host eq \"cms.aramakisai.com\") and starts_with(http.request.uri.path, \"/api/media/\") and (http.cookie ne \"\")"
+    expression  = "(http.host eq \"cms.aramakisai.com\") and starts_with(http.request.uri.path, \"/api/media/\") and (http.cookie contains \"payload-token=\")"
     action      = "set_cache_settings"
     enabled     = true
 
@@ -34,12 +36,12 @@ resource "cloudflare_ruleset" "directus_assets_cache" {
   # /api/media/file/:filename が実バイトを返す本体。両方 /api/media/ 配下で拡張子の
   # 有無が一定しないため、既定の拡張子ベースキャッシュに載らない。実バイトの方を
   # キャッシュしないと切り替え直後に懸念した「全画像が単一 pod を通る」が解消しない
-  # Cookie 付き (CMS ログイン中) の応答は非公開メディアを含みうる。override_origin で
-  # 30 日キャッシュされると Cookie 無しの匿名リクエストにも配られるため、Cookie 無しに限る。
+  # ログイン中 (payload-token 付き) の応答は非公開メディアを含みうる。override_origin で
+  # 30 日キャッシュされると匿名リクエストにも配られるため、ログイン Cookie 無しに限る。
   # Authorization 付きは Cloudflare 既定で BYPASS されるため条件に含めない
   rules {
     description = "CMS media delivery (id パスの 302 と実ファイル本体)"
-    expression  = "(http.host eq \"cms.aramakisai.com\") and starts_with(http.request.uri.path, \"/api/media/\") and (http.cookie eq \"\")"
+    expression  = "(http.host eq \"cms.aramakisai.com\") and starts_with(http.request.uri.path, \"/api/media/\") and not (http.cookie contains \"payload-token=\")"
     action      = "set_cache_settings"
     enabled     = true
 
@@ -61,6 +63,12 @@ resource "cloudflare_ruleset" "directus_assets_cache" {
           }
           value = 60
         }
+      }
+      # 応答の Age はエッジの保持期間まで増える。browser_ttl が edge_ttl より短いと
+      # ブラウザが毎回再検証し、オリジンの 304 が 520 になる。
+      browser_ttl {
+        mode    = "override_origin"
+        default = 31536000
       }
     }
   }
