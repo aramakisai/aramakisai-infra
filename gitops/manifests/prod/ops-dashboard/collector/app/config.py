@@ -1,3 +1,4 @@
+import json
 import re
 import tomllib
 from dataclasses import dataclass, field
@@ -291,7 +292,19 @@ def _threshold(name: str, raw: Any) -> Threshold:
     return Threshold(warn, crit)
 
 
-def parse_festival(raw: Mapping[str, Any]) -> FestivalConfig:
+def _private_thresholds(text: str | None) -> dict:
+    if not text or not text.strip():
+        return {}
+    try:
+        obj = json.loads(text)
+    except ValueError:
+        obj = None
+    if not isinstance(obj, dict):
+        raise ConfigError("OPS_FESTIVAL_PRIVATE_THRESHOLDS: JSON のオブジェクトが必要です")
+    return obj
+
+
+def parse_festival(raw: Mapping[str, Any], private_thresholds: str | None = None) -> FestivalConfig:
     top = _table(raw, "festival", (
         "page_url", "renotify", "source_failure_grace", "quake_url", "bus_feed_base", "disabled_sources",
         "max_age", "cloudflare", "parking", "signage", "cms", "cloudflared", "uptime_monitors", "falco",
@@ -319,13 +332,26 @@ def parse_festival(raw: Mapping[str, Any]) -> FestivalConfig:
     th = top["thresholds"]
     if not isinstance(th, Mapping):
         raise ConfigError("festival.thresholds: 表が必要です")
+    private = _private_thresholds(private_thresholds)
+    both = sorted(set(th) & set(private))
+    if both:
+        raise ConfigError(f"festival.thresholds: 非公開の閾値と宣言が重複しています: {both}")
+    th = {**th, **private}
     unknown_th = set(th) - set(THRESHOLD_DIRECTIONS)
     if unknown_th:
         raise ConfigError(f"festival.thresholds: 未知の閾値名: {sorted(unknown_th)}")
     absent = sorted(set(THRESHOLD_DIRECTIONS) - OPTIONAL_THRESHOLDS - set(th))
     if absent:
         raise ConfigError(f"festival.thresholds: 閾値名が欠けています: {absent}")
-    thresholds = {name: _threshold(name, v) for name, v in th.items()}
+    thresholds = {}
+    for name, v in th.items():
+        try:
+            thresholds[name] = _threshold(name, v)
+        except ConfigError as e:
+            if name not in private:
+                raise
+            # 非公開の値が文面に載らないよう、名前だけを残す
+            raise ConfigError(f"OPS_FESTIVAL_PRIVATE_THRESHOLDS.{name}: 閾値の形式が不正です") from None
 
     mr = _table(top["min_requests"], "festival.min_requests", MIN_REQUESTS_KEYS)
     min_requests = {k: _int(mr, k, "festival.min_requests") for k in MIN_REQUESTS_KEYS}
@@ -368,7 +394,7 @@ def parse_festival(raw: Mapping[str, Any]) -> FestivalConfig:
     )
 
 
-def parse(text: str) -> Config:
+def parse(text: str, private_thresholds: str | None = None) -> Config:
     try:
         raw = tomllib.loads(text)
     except tomllib.TOMLDecodeError as e:
@@ -385,12 +411,12 @@ def parse(text: str) -> Config:
             raise ConfigError(f"sources: 未知の情報源です: {sid}")
     return Config(_plans(raw.get("plans", [])), servers, _thresholds(raw.get("thresholds", {})), creds,
                   tuple(raw.get("exclude", {}).get("namespaces_or_names", [])), sources,
-                  parse_festival(raw["festival"]) if "festival" in raw else None)
+                  parse_festival(raw["festival"], private_thresholds) if "festival" in raw else None)
 
 
-def load(path) -> Config:
+def load(path, private_thresholds: str | None = None) -> Config:
     try:
         text = Path(path).read_text(encoding="utf-8")
     except OSError as e:
         raise ConfigError(f"宣言ファイルを読めません: {e}") from None
-    return parse(text)
+    return parse(text, private_thresholds)

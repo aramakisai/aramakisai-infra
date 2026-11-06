@@ -189,7 +189,7 @@ def run(argv=None, env=None) -> int:
     args = ap.parse_args(argv)
 
     try:
-        cfg = config_mod.load(args.config)
+        cfg = config_mod.load(args.config, env.get("OPS_FESTIVAL_PRIVATE_THRESHOLDS"))
     except config_mod.ConfigError as e:
         print(f"invalid config: {e}", file=sys.stderr)
         return 1

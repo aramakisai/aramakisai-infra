@@ -208,5 +208,56 @@ class ParseFestivalTest(unittest.TestCase):
             config.parse("festival = 1\n")
 
 
+class PrivateThresholdsTest(unittest.TestCase):
+    def parse(self, private, raw=None):
+        return config.parse_festival(raw or raw_festival(), private)
+
+    def test_added_to_toml_thresholds(self):
+        f = self.parse('{"cms_rps": {"warn": 11, "crit": 22}}')
+        self.assertEqual(f.thresholds["cms_rps"], config.Threshold(11, 22))
+        self.assertEqual(f.thresholds["cms_ready_ratio"], config.Threshold(1.0, 0.5))
+
+    def test_crit_may_be_omitted(self):
+        self.assertEqual(self.parse('{"cms_rps": {"warn": 11}}').thresholds["cms_rps"], config.Threshold(11, None))
+
+    def test_duration_uses_toml_format(self):
+        f = self.parse('{"bus_feed_age": {"warn": "1m", "crit": "3m"}}', _without("bus_feed_age"))
+        self.assertEqual(f.thresholds["bus_feed_age"], config.Threshold(timedelta(minutes=1), timedelta(minutes=3)))
+
+    def test_unset_or_empty_adds_nothing(self):
+        for v in (None, ""):
+            self.assertNotIn("cms_rps", self.parse(v).thresholds)
+
+    def test_same_name_in_both_is_error(self):
+        raw = raw_festival()
+        raw["thresholds"]["cms_rps"] = {"warn": 1, "crit": 2}
+        with self.assertRaises(config.ConfigError):
+            self.parse('{"cms_rps": {"warn": 11}}', raw)
+
+    def test_broken_or_non_object_json_is_error_without_value(self):
+        for bad in ('{"cms_rps": {"warn": 9871', '[1]', '"s9871"', '9871', 'null'):
+            with self.assertRaises(config.ConfigError) as cm:
+                self.parse(bad)
+            self.assertNotIn("9871", str(cm.exception), bad)
+
+    def test_unknown_name_and_reversed_are_errors(self):
+        for bad in ('{"nope": {"warn": 1}}', '{"cms_rps": {"warn": 22, "crit": 11}}',
+                    '{"cms_rps": {"crit": 11}}', '{"cms_rps": {"warn": "x"}}'):
+            with self.assertRaises(config.ConfigError, msg=bad):
+                self.parse(bad)
+
+    def test_parse_and_load_take_value(self):
+        text = PROD_TOML.read_text(encoding="utf-8")
+        self.assertIn("cms_rps", config.parse(text, '{"cms_rps": {"warn": 11, "crit": 22}}').festival.thresholds)
+        self.assertIn("cms_rps", config.load(PROD_TOML, '{"cms_rps": {"warn": 11}}').festival.thresholds)
+        self.assertNotIn("cms_rps", config.load(PROD_TOML).festival.thresholds)
+
+
+def _without(name):
+    raw = raw_festival()
+    raw["thresholds"].pop(name, None)
+    return raw
+
+
 if __name__ == "__main__":
     unittest.main()
