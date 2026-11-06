@@ -46,11 +46,12 @@ spec:
               done
               exit 1
           env:
+            # DDL には owner 接続が要る。web / worker の DATABASE_URL は payload_app で DML のみ
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
                   name: cms-secrets
-                  key: DATABASE_URL
+                  key: DATABASE_OWNER_URL
             - name: PAYLOAD_SECRET
               valueFrom:
                 secretKeyRef:
