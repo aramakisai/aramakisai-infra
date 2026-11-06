@@ -38,6 +38,9 @@ spec:
 
   monitoring:
     customQueriesConfigMap:
+      # CNPG が defaulting で補う値。書いておかないと ArgoCD が常に OutOfSync になる
+      - name: cnpg-default-monitoring
+        key: queries
       - name: directus-db-monitoring
         key: queries
 
