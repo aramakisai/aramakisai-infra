@@ -426,3 +426,37 @@
   - steering の dr.md の「運用ダッシュボードのデータ (collector の SQLite)」に、当日監視の 4 表 (評価結果・通知の状態・状態・1 分値) も復元の対象外で、失うと通知の状態と推移が初期化されることを足す
   - 完了時: runbook と steering に推移の保持とメモリの見積りの記述がある
   - _Requirements: 9.1, 9.6_
+
+- [ ] 8.13 サイネージの接続数を判定せず表示のみにする
+  - 設置台数 (`installed`) と `signage_missing` の閾値を設定から取り除き、`function.signage.prod` は閾値名を持たない表示のみの項目にする。`judge` が `judged = False` の `Judgement` を直接返し、現在値は「{prod} 台」とする。グラフは接続数の値だけで、閾値の線 (`warn`・`crit`) は `None` にする
+  - 取り除く箇所: `collector/app/config.py` の `SignageTarget.installed`・`_table` の許可キー `("url", "installed")`・`SignageTarget` の生成・閾値の宣言を検証する表の `signage_missing`、`collector/dashboard.toml` の `[festival.signage]` の `installed` とそのコメント・`[festival.thresholds]` の `signage_missing`、`collector/app/festival/catalog.py` の `_signage` の設置台数との比較・`installed <= 0` の分岐・`signage_missing` の判定・線の算出、`collector/app/tests/test_festival_catalog.py` の `SignageTest` (`test_against_installed`・`test_zero_installed_is_display_only`)・`test_signage_line_is_installed_minus_missing`・`test_signage_without_installed_has_no_line`・グラフの対象の表の `function.signage.prod` の注記、`collector/app/tests/test_festival_config.py` の `f.signage.installed` の検証 (33 行付近) と不正値の検証の `installed` の 2 件 (160・161 行付近)
+  - テストファイル: `test_festival_catalog.py`、`test_festival_config.py`
+  - 完了時: `function.signage.prod` が接続数にかかわらず `judged = False` で線が `None` であり、通知を計画せず帯とタブの件数に数えられないこと、`[festival.signage]` に `installed`・`[festival.thresholds]` に `signage_missing` を宣言すると `ConfigError` になること、内訳が従来どおり出ることを単体テストで確かめ、collector の単体テストが通る
+  - _Requirements: 5.3, 6.13_
+  - _Depends: 8.3_
+  - _Boundary: FestivalCatalog_
+
+- [ ] 8.14 閾値を根拠のある値に改め、根拠の無い項目を表示のみにする
+  - `collector/dashboard.toml` の `[festival.thresholds]` を design の「閾値」の表どおりに改める。表にない閾値名 (`cms_cache_hit_ratio`・`stamp_failed`・`stamp_d1_failed`・`stamp_rate_limited`・`db_replica_lag_s`・`db_backends`・`node_memory_ratio`・`db_unanalyzed_tables`・`parking_judge_failures`・`parking_judge_success_age`) は宣言しない。異常を宣言しない閾値 (`worker_error_rate`・`worker_exceeded`・`worker_cpu_p99_ms`・`media_5xx`・`db_memory_rss_ratio`) は `crit` を書かない。`min_requests` は 50 のまま
+  - `collector/app/config.py`: `OPTIONAL_THRESHOLDS` に上の 10 個の閾値名と `cms_rps` を入れる。`dashboard.toml` は `cms_rps` を宣言しない (値は 8.15 で足す)。`Threshold.crit` を `float | timedelta | None` にし、`_threshold` は `crit` を省略できる表として読む (`_table` の必須キーを `warn` だけにして `crit` を任意にする)。`crit` を省略したときは注意と異常の大小の検証をしない
+  - `collector/app/festival/catalog.py`: `grade` は `th.crit` が `None` のとき異常を返さない。`threshold_text` は `th.crit` が `None` のとき「注意 ≥ x」だけを返す。`with_chart` は `crit` が `None` なら線を `None` にする。駐車場の `_judge` (435 行付近。`thresholds["parking_judge_failures"]`・`["parking_judge_success_age"]` を直接引く) は、宣言した閾値だけで判定し、どちらも宣言されていないときは `judged = False` の `Judgement` を返す。`_restart_status` は `crashloop` が真のときだけ `Status.CRIT` を返し、それ以外 (再起動・OOM) は `Status.OK` を返す (`_cms_restarts`・`_db_restarts` の現在値の文字 `_restart_text` は変えない)。`judged_value` と閾値の判定で `crit` が `None` の閾値を使う項目は `alert_on_warn = True` にする。`Judgement` と `FestivalItem` に `alert_on_warn: bool` を足し、`collector/app/store.py` の `festival_items` に列 `alert_on_warn` を足して往復させる
+  - `collector/app/festival/notify.py` の `plan`: `alert_on_warn` の項目は `Status.WARN` で異常と同じ通知 (開く・再通知・回復) を計画する。`alert_on_warn` でない項目は従来どおり `Status.CRIT` で計画し、注意では回復にしない。`Notice` に `warn: bool` を足し、注意の通知は `_line` で「🟡 注意: <項目名> — 現在 <値> (<閾値の文字>)」(再通知は「🟡 注意 (継続): …」)、`_header` は「異常 n 件・注意 n 件・回復 n 件」(0 件の区分は出さない。注意は異常と別に数える) にする
+  - 表示のみの項目は `judged = False`・通知しない・帯とタブの件数に数えない (既存の `judged = False` の扱いに乗る)。`restart_window` のコメント・設定はそのまま使う
+  - 直すテスト: `collector/app/tests/test_festival_config.py` (`cms_cache_hit_ratio` を使う宣言の検証と、`cms_rps`・`tunnel_connections`・`bus_feed_age` の逆転・等号の検証を、宣言する閾値名に合わせて直す。`crit` 省略の読み込み、`crit` 省略で注意と異常の検証をしないこと、`warn` 省略が `ConfigError` になることを足す)、`collector/app/tests/test_festival_catalog.py` (`judged_value` の `cms_cache_hit_ratio` を使うテスト、`capacity.cms.restarts`・`capacity.db.restarts` の判定のテスト (406〜410 行付近)、`capacity.db.unanalyzed` の判定 (428 行付近)、グラフの対象の表 (618〜639 行付近) の閾値の線、`crit` 省略の `grade`・`threshold_text`・線のテストを足す)、`collector/app/tests/test_festival_notify.py` (`alert_on_warn` の項目が注意で通知・注意のまま再通知・正常で回復、取得遅延で凍結、`alert_on_warn` でない項目は注意で通知しないこと、注意の行・見出しの書式を足す)、`collector/app/tests/test_festival_store.py` (`alert_on_warn` の往復)、`collector/app/tests/test_festival_evaluate.py`・`test_festival_page.py`・`test_festival_integration.py` のうち、削除した閾値名や再起動の判定に依存するもの
+  - テストファイル: `test_festival_config.py`、`test_festival_catalog.py`、`test_festival_evaluate.py`、`test_festival_notify.py`、`test_festival_store.py`、`test_festival_page.py`、`test_festival_integration.py`
+  - 完了時: `dashboard.toml` の閾値が design の表と一致し (宣言する閾値名が表のとおり)、`crit` を省略した閾値の項目が注意までで異常にならず閾値の文字と線に異常が出ないこと、`crit` を省略した閾値の項目が注意で通知され (「🟡 注意: …」、見出しに「注意 n 件」) 注意から回復すると回復が通知されること、`capacity.cms.restarts`・`capacity.db.restarts` が CrashLoop のときだけ異常で再起動・OOM のみでは正常であること、表示のみにする項目が `judged = False` で通知を計画せず帯とタブの件数に数えられないこと、`cms_cache_hit_ratio` などを宣言すると通常の判定に戻ることを単体テストで確かめ、collector の単体テストが通る
+  - _Requirements: 3.3, 3.4, 6.7, 6.13, 8.1, 8.2_
+  - _Depends: 8.13_
+  - _Boundary: FestivalConfig、FestivalCatalog、FestivalNotifier、Store_
+
+- [ ] 8.15 非公開の閾値を環境変数で渡す
+  - `collector/app/config.py`: `parse_festival` に `private_thresholds: str | None` を足し、`parse`・`load` が環境変数 `OPS_FESTIVAL_PRIVATE_THRESHOLDS` の値を渡す (`main.run` は `config_mod.load` に `env` を渡す)。値は JSON のオブジェクト (キーは閾値名、値は `{"warn": …, "crit": …}`。`crit` 省略可。期間は toml と同じ書式の文字列) で、`[festival.thresholds]` に足し合わせる。同じ閾値名が両方にあれば `ConfigError`。向き・逆転・未知の閾値名は toml の閾値と同じ検証を通す。未設定・空文字なら足さない。JSON が壊れている・オブジェクトでないときは `ConfigError` にし、エラー文に値を含めない
+  - `collector/external-secret.yaml`: 当日監視の並びに `OPS_FESTIVAL_PRIVATE_THRESHOLDS` を既存の `OPS_*` と同じ書き方で足す。`collector/deployment.yaml` は `envFrom` の `collector-secrets` で全キーが環境変数になるため変更しない
+  - Infisical prod への値の登録: 実装者が infisical CLI (`infisical secrets set --env=prod`) で `OPS_FESTIVAL_PRIVATE_THRESHOLDS` を登録する。値 (JSON) は手元の負荷試験の分析結果から渡し、このタスクにもリポジトリにも書かない。登録のコマンドは出力を `/dev/null` に捨て、値を端末に出さない。登録の確認はキー名だけで行う (値の出力を伴う `get` は使わない)。登録後に ExternalSecret の反映と collector の再起動を待ち、画面の `capacity.cms.rps` が判定の対象になっていること (「表示のみ」でないこと) を確かめる
+  - `.kiro/steering/tech.md` の「Infisical で管理するシークレット一覧」の運用ダッシュボードの行に `OPS_FESTIVAL_PRIVATE_THRESHOLDS` のキー名を足す (値は書かない)
+  - テスト (`test_festival_config.py`): toml の閾値に環境変数の閾値が足し合わさること、同じ閾値名が両方にあると `ConfigError`、壊れた JSON・オブジェクトでない JSON で `ConfigError` かつエラー文に値が出ないこと、未設定・空で足さず `cms_rps` が表示のみになること、未知の閾値名・注意と異常の逆転が `ConfigError` になること。テストの値は実測値を含まないダミーにする
+  - テストファイル: `test_festival_config.py`
+  - 完了時: 上記のテストを含む collector の単体テストが通り、`kustomize build` が通り、本番で `OPS_FESTIVAL_PRIVATE_THRESHOLDS` の登録後に `cms_rps` が判定される
+  - _Requirements: 3.3, 3.4, 9.4_
+  - _Depends: 8.14_
+  - _Boundary: FestivalConfig_

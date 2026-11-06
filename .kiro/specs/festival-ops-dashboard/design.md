@@ -217,7 +217,7 @@ gitops/manifests/prod/ops-dashboard/collector/app/
   - `metrics.k8s.io` の pods の get・list を足す (D-12)。
   - `apps` の deployments の get を足す (U-7)。
   - `""` の `nodes/metrics` の get を足す (kubelet の `/metrics/cadvisor`。festival.workloads)。
-- `collector/external-secret.yaml`: 「Security Considerations」の 6 キーを足す。
+- `collector/external-secret.yaml`: 「Security Considerations」の 7 キーを足す。
 - `collector/deployment.yaml`: initContainer に `festival/` のコピーを足し、volume `src-festival` を足す。
 - `kustomization.yaml`:
   - `collector-sources` に新しいファイルを列挙する。
@@ -278,7 +278,7 @@ sequenceDiagram
 ```mermaid
 stateDiagram-v2
     [*] --> Quiet
-    Quiet --> AlertPending: 異常に入る
+    Quiet --> AlertPending: 異常に入る (alert_on_warn の項目は注意に入る)
     AlertPending --> Alerting: 異常の通知が成功
     Alerting --> Alerting: 再通知の間隔を超えて再通知が成功
     Alerting --> RecoverPending: 正常または時間外に戻る
@@ -288,7 +288,8 @@ stateDiagram-v2
     RemovedPending --> [*]: 対象外になった通知が成功
 ```
 
-- 「注意」と「取得遅延」「取得失敗」の項目は、異常の状態を変えない (通知も回復もしない)。異常の途中で注意に下がった場合も、回復とはみなさない。
+- 異常を宣言しない閾値の項目 (`alert_on_warn = True`) は、「注意」を異常と同じ扱いにする。注意に入ると通知し、注意から正常または時間外に戻ると回復を通知する。
+- `alert_on_warn = False` の項目では、「注意」と「取得遅延」「取得失敗」は異常の状態を変えない (通知も回復もしない)。異常の途中で注意に下がった場合も、回復とはみなさない。`alert_on_warn = True` の項目でも、「取得遅延」「取得失敗」は状態を変えない。
 - 情報源の取得失敗 (`Status.ERROR`)、または取得時刻が鮮度の上限を超えた状態が `source_failure_grace` 以上続くと、情報源の単位で 1 件の通知にする (R8.4)。その情報源に依存する項目は、項目としては通知しない。
 
 ### 画面の更新
@@ -357,7 +358,7 @@ sequenceDiagram
 | 4.6 | 遅延による過小評価を避ける | festival.cloudflare、festival.stamp | 時間窓 `[floor(now)-8m, floor(now)-3m)` | — |
 | 5.1 | カメラごとの最終受信 | festival.parking、FestivalCatalog | `ParkingHealthResponse` | 取得・評価・通知 |
 | 5.2 | カメラごとの判定の最終成功・最終失敗・直近のエラー・連続失敗 | CMS の判定状態、festival.parking | `judge_health`、`ParkingHealthResponse` | 取得・評価・通知 |
-| 5.3 | 本番からのサイネージ接続数と設置台数 | SignageHub、SiteEntry、festival.signage | `GET /api/signage/stats` | 取得・評価・通知 |
+| 5.3 | 本番からのサイネージ接続数 | SignageHub、SiteEntry、festival.signage | `GET /api/signage/stats` | 取得・評価・通知 |
 | 5.4 | 地震リレーの定期起動の継続 | QuakeRelay、festival.quake | `/status` の `cron.lastRunAt` | 取得・評価・通知 |
 | 5.5 | 上流ごとの接続・最終受信・Discord の成否 | festival.quake | `/status` の `channels`・`discord` | 取得・評価・通知 |
 | 5.6 | スタンプの記録失敗・D1 失敗・レート制限 | festival.stamp | AE SQL | 取得・評価・通知 |
@@ -435,11 +436,15 @@ sequenceDiagram
 
 **Responsibilities & Constraints**
 - 既存の `Config` に `festival: FestivalConfig | None` を足す。`[festival]` が無ければ `None` で、当日監視の情報源・評価・通知は何もしない。その場合、`/admin/festival` は「未設定」を表示する。
-- 未知のキー、閾値名の欠け、注意と異常の大小の逆転、未知の source_id は、起動の失敗にする (既存の流儀)。
+- 未知のキー、閾値名の欠け、注意と異常の大小の逆転 (両方を宣言したとき)、未知の source_id は、起動の失敗にする (既存の流儀)。
+- 閾値の `crit` は省略できる。省略した閾値は注意までを判定し、異常にしない。`warn` は省略できない。
 - `[festival.max_age]` は、次の 15 個の source_id すべての宣言を必須にする (欠ければ起動の失敗)。`festival.*` の 10 個 (`cloudflare`・`stamp`・`quake`・`signage`・`parking`・`schedule`・`bus`・`nodes`・`workloads`・`cnpg`) と、`monitor.uptimerobot`・`monitor.healthchecks`・`connect.tunnel`・`ci.github`・`mail.fail2ban`。
 - 閾値の向き (`THRESHOLD_DIRECTIONS`)、省略できる閾値名 (`OPTIONAL_THRESHOLDS`)、必須の source_id (`FESTIVAL_SOURCE_IDS`・`FESTIVAL_MAX_AGE_SOURCES`) は `config.py` の定数に置く。
-  - 例外として、FestivalCatalog が「省略できる」とした閾値名 (`cms_cache_hit_ratio`) は欠けてよい。欠けている間、その項目は判定せず表示だけを行う (6.13)。
+  - 例外として、FestivalCatalog が「省略できる」とした閾値名 (`cms_rps`・`cms_cache_hit_ratio`・`stamp_failed`・`stamp_d1_failed`・`stamp_rate_limited`・`db_replica_lag_s`・`db_backends`・`node_memory_ratio`・`db_unanalyzed_tables`・`parking_judge_failures`・`parking_judge_success_age`) は欠けてよい。欠けている間、その項目は判定せず表示だけを行う (6.13)。
 - 期間は既存の `parse_duration` (`30m`・`36h`・`8d`) を使う。
+- 非公開の閾値: 環境変数 `OPS_FESTIVAL_PRIVATE_THRESHOLDS` (JSON のオブジェクト。キーは閾値名、値は `[festival.thresholds]` と同じ形の `{"warn": …, "crit": …}`。`crit` は省略でき、期間は toml と同じ書式の文字列) を、`[festival.thresholds]` に足し合わせる。
+  - 同じ閾値名が両方にあれば `ConfigError`。向き・逆転・未知の閾値名は toml の閾値と同じ規則で検証する。
+  - 環境変数が無い、または空なら足さない。JSON が壊れているときは `ConfigError` にし、エラー文に値を出さない。
 - 開催日と駐車場の監視時間は宣言しない。CMS の `site_settings` が正本 (D-7)。
 
 **Contracts**: Service [x]
@@ -455,7 +460,7 @@ Direction = Literal["above", "below"]  # above: 値が大きいほど悪い
 @dataclass(frozen=True)
 class Threshold:
     warn: float | timedelta
-    crit: float | timedelta
+    crit: float | timedelta | None   # None は異常を宣言しない
 
 @dataclass(frozen=True)
 class FestivalConfig:
@@ -463,7 +468,7 @@ class FestivalConfig:
     renotify: timedelta
     source_failure_grace: timedelta
     max_age: Mapping[str, timedelta]               # source_id -> 鮮度の上限
-    thresholds: Mapping[str, Threshold]            # 閾値名 -> 注意・異常。省略できる閾値名は欠けてよい (後述)
+    thresholds: Mapping[str, Threshold]            # 閾値名 -> 注意・異常 (異常は省略できる)。省略できる閾値名は欠けてよい (後述)
     min_requests: Mapping[str, int]                # 比率の判定に要る最低要求数
     cloudflare: "CloudflareTargets"
     parking: "ParkingTarget"
@@ -490,7 +495,6 @@ class ParkingTarget:
 @dataclass(frozen=True)
 class SignageTarget:
     url: str                # https://aramakisai.com/api/signage/stats
-    installed: int          # サイネージ設置台数。リハーサルで確認した台数を設定する (U-3)
 
 @dataclass(frozen=True)
 class CmsTargets:
@@ -499,7 +503,7 @@ class CmsTargets:
     pod_selector: str       # "app=cms"
     db_cluster: str         # "directus-db"
     service_base: str       # "http://cms.prod.svc.cluster.local:80"
-    restart_window: timedelta   # CMS と DB の Pod の直近の再起動・OOM を見る窓。30m (仮)
+    restart_window: timedelta   # CMS と DB の Pod の直近の再起動・OOM を表示する窓。30m
 
 @dataclass(frozen=True)
 class CloudflaredTarget:
@@ -512,15 +516,15 @@ class FalcoTarget:
     warn_priority: str      # この優先度以上を注意
     crit_priority: str      # この優先度以上を異常
 
-def parse_festival(raw: Mapping[str, object]) -> FestivalConfig: ...  # 誤りは ConfigError
+def parse_festival(raw: Mapping[str, object], private_thresholds: str | None = None) -> FestivalConfig: ...  # 誤りは ConfigError。private_thresholds は OPS_FESTIVAL_PRIVATE_THRESHOLDS の値
 ```
 - Preconditions: TOML として正しい。
-- Postconditions: 各閾値で、`above` の項目は warn ≤ crit、`below` の項目は warn ≥ crit が成り立つ。向きは `FestivalCatalog` の定義と照合する。
+- Postconditions: `crit` を宣言した各閾値で、`above` の項目は warn ≤ crit、`below` の項目は warn ≥ crit が成り立つ。向きは `FestivalCatalog` の定義と照合する。
 - Invariants: 宣言の値はプロセスの生存中は変わらない。変更は ConfigMap のハッシュが変わることによる Pod の再作成で反映される (3.4)。
 
 **Implementation Notes**
 - Validation: `test_festival_config.py` で、欠け・逆転・未知のキーが起動の失敗になることを確かめる。
-- Risks: 閾値の初期値は仮 (U-3)。リハーサル (Migration Strategy) で見直す。
+- Risks: 根拠のある閾値だけを宣言する。根拠の無い項目は宣言せず表示のみにし、開催前の負荷試験とリハーサルで記録してから決める (Migration Strategy)。
 
 ### sources (取得層)
 
@@ -637,8 +641,8 @@ def internal_networks() -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, 
 - CMS:
   - `apps/v1` の Deployment `cms` の `spec.replicas` (U-7) と、セレクタに一致する Pod を取る。
   - Ready の Pod の数。
-  - 直近の再起動。`lastState.terminated.finishedAt` が `[festival.cms] restart_window` (30m、仮) 以内のもの。
-  - OOMKilled と CrashLoopBackOff の有無。
+  - 直近の再起動。`lastState.terminated.finishedAt` が `[festival.cms] restart_window` (30m) 以内のもの。
+  - OOMKilled と CrashLoopBackOff の有無。OOMKilled の有無は `restart_window` 以内の終了だけを数える。
   - `metrics.k8s.io` の pods の CPU 使用量と、コンテナの CPU limit の比の最大値。
   - CPU のスロットリング率の Pod ごとの最大値 (後述)。
 - DB:
@@ -723,12 +727,13 @@ def parse_samples(text: str, names: Iterable[str]) -> Mapping[str, list[tuple[Ma
 - 当日の異常把握に使わない情報 (課金・利用枠・DMARC・TLS-RPT・メール配送) は、定義に含めない (1.4)。
 - 1 つの項目キーは 1 つの区分に属する。
 - 判定の結果は `Status.OK`・`WARN`・`CRIT`・`EMPTY` (時間外)。`ERROR` と `STALE` は FestivalEvaluator が上書きする。
-- 表示のみの項目 (6.13): 閾値名が `OPTIONAL_THRESHOLDS` にあり、`[festival.thresholds]` に宣言されていない項目は、`status = Status.OK`・`threshold = None`・`judged = False` の `Judgement` を返す。
+- 表示のみの項目 (6.13): 閾値名が `OPTIONAL_THRESHOLDS` にあり、`[festival.thresholds]` に宣言されていない項目は、`status = Status.OK`・`threshold = None`・`judged = False` の `Judgement` を返す。`function.parking.judge.<id>` は 2 つの閾値名のうち宣言したものだけで判定し、どちらも宣言されていないときに表示のみにする。
   - FestivalEvaluator は、取得失敗・取得遅延の上書きを判定する項目と同じく行う。
   - FestivalNotifier は `judged = False` の項目を計画しない (通知しない)。
   - FestivalPage は判定の文字を「表示のみ」(`fest.status.info`) にし、正常の色を使わない。帯とタブ見出しの件数・最悪の判定には数えない。
   - 閾値を宣言すれば、宣言の変更だけで通常の判定に変わる (3.4)。
-  - `visitor.worker.requests` (項目名「Worker 要求数」、現在値「{requests} 件」) は閾値名を持たない表示のみの項目で、`judge` が `judged = False` の `Judgement` を直接返す。表示・通知・件数の扱いは上と同じ。
+  - `visitor.worker.requests` (項目名「Worker 要求数」、現在値「{requests} 件」)・`function.signage.prod` (項目名「サイネージ接続数 (本番)」、現在値「{prod} 台」) は閾値名を持たない表示のみの項目で、`judge` が `judged = False` の `Judgement` を直接返す。表示・通知・件数の扱いは上と同じ。
+- 異常を宣言しない閾値 (`crit` が `None`): `grade` は注意までを返し、異常を返さない。`threshold_text` は「注意 ≥ x」だけを返し、グラフの閾値の線は `crit` を `None` にする。この閾値で判定する項目は `alert_on_warn = True` にし、注意で通知する (FestivalNotifier)。
 - グラフの値 (3.11・3.12): グラフの対象の項目 (後述の表) は、表示用の文字 (`value`) とは別に、数値 (`metric`)・単位 (`unit`)・閾値の線の値 (`warn`・`crit`) を `Judgement` に入れる。`metric` の単位は `unit` に従い、期間の閾値 (`timedelta`) は秒に換算する。表示のみの項目は `warn`・`crit` を `None` にする。
 - 内訳 (3.14): 内訳を持つ項目 (後述の表) は、情報源の結果から表示用に整形した `Breakdown` を `Judgement` に入れる。内訳のために情報源へ問い合わせを足さない。
 
@@ -755,17 +760,18 @@ class Judgement:
     label: str
     status: Status
     value: str                      # 表示用の現在値
-    threshold: str | None           # 表示用の閾値 (「注意 ≥ 1.0% / 異常 ≥ 5.0%」)
+    threshold: str | None           # 表示用の閾値 (「注意 ≥ 3.0% / 異常 ≥ 10.0%」)
     observed_at: datetime | None    # データの時刻 (取得時刻と異なるとき)
     note: str | None = None
     judged: bool = True             # False は表示のみ (閾値が未宣言。6.13)
+    alert_on_warn: bool = False     # True は注意で通知する (異常を宣言しない閾値の項目)
     metric: float | None = None     # グラフの値。グラフの対象でない項目と、値を算出できないときは None
     unit: MetricUnit | None = None  # None はグラフの対象外
     warn: float | None = None       # 閾値の線 (metric と同じ単位)。閾値が無い・表示のみのときは None
     crit: float | None = None
     breakdown: Breakdown | None = None
 
-# 宣言を省略できる閾値名 {"cms_cache_hit_ratio"} は config.py の OPTIONAL_THRESHOLDS に置く
+# 宣言を省略できる閾値名 (表示のみにする項目の閾値名) は config.py の OPTIONAL_THRESHOLDS に置く
 
 @dataclass(frozen=True)
 class EvalInput:
@@ -810,7 +816,7 @@ CATALOG: tuple[ItemGroup, ...]
 | 来場者影響 | `visitor.uptime.<id>` | monitor.uptimerobot | 既存の判定 (down は異常、paused は注意) | — | `/admin/#sec-monitoring` |
 | 機能別 | `function.parking.capture.<id>` | festival.parking, festival.schedule | 最終受信からの経過。最終受信の時刻が無いときは異常 (時間外は時間外) | `parking_capture_age` | CMS 管理画面 |
 | 機能別 | `function.parking.judge.<id>` | festival.parking, festival.schedule | 連続失敗回数と最終成功からの経過の悪い方。最終成功の時刻が無いときは経過を異常とする (時間外は時間外) | `parking_judge_failures`、`parking_judge_success_age` | CMS 管理画面 |
-| 機能別 | `function.signage.prod` | festival.signage | 本番の接続数 (設置台数を下回ると注意。`signage_missing` 台以上欠けると異常)。設置台数が 0 の間は判定せず表示のみ | `signage_missing` | Cloudflare ダッシュボード |
+| 機能別 | `function.signage.prod` | festival.signage | 本番の接続数。閾値を持たず、常に表示のみ (`judged = False`) | — | Cloudflare ダッシュボード |
 | 機能別 | `function.quake.cron` | festival.quake | 最終実行からの経過。期間内で最終実行の時刻が無いときは異常 (期間外は時間外) | `quake_cron_age` | — |
 | 機能別 | `function.quake.channel.<name>` | festival.quake | receiving が偽なら注意。`unreachable` が真なら全系統を異常 (期間外は時間外)。定期起動の情報が無い応答では期間内として扱う | — | — |
 | 機能別 | `function.quake.discord` | festival.quake | disabled は異常。configured が偽、または最終失敗が最終成功より新しい場合は注意 | — | — |
@@ -819,18 +825,18 @@ CATALOG: tuple[ItemGroup, ...]
 | 機能別 | `function.stamp.rate_limited` | festival.stamp | レート制限の件数 | `stamp_rate_limited` | Cloudflare ダッシュボード |
 | 機能別 | `function.bus.<feed>` | festival.bus | 生成時刻からの経過。開催日で絞らず、常に判定する (U-5) | `bus_feed_age` | — |
 | 容量 | `capacity.cms.ready` | festival.workloads | Ready ÷ 宣言数 (下回るほど悪い)。宣言数が 0 のときは Ready 率 0 として扱い、異常 | `cms_ready_ratio` | `/admin/#sec-cluster` |
-| 容量 | `capacity.cms.restarts` | festival.workloads | 直近の再起動は注意。OOM と CrashLoop は異常 | — | `/admin/#sec-cluster` |
+| 容量 | `capacity.cms.restarts` | festival.workloads CrashLoopBackOff の Pod があれば異常、なければ正常。再起動・OOM は現在値の文字に出し、判定しない。CrashLoop は `restart_window` に依存しない (現在の `waiting` 状態) | — | `/admin/#sec-cluster` |
 | 容量 | `capacity.cms.cpu` | festival.workloads | CPU 対 limit の最大 | `pod_cpu_ratio` | Netdata |
 | 容量 | `capacity.db.primary_cpu` | festival.workloads | primary の CPU 対 limit | `pod_cpu_ratio` | Netdata |
 | 容量 | `capacity.db.connections` | festival.cnpg | primary の接続数 ÷ 上限 | `db_connections_ratio` | `/admin/#sec-data` |
 | 容量 | `capacity.db.backends.<pod>` | festival.cnpg | instance ごとのクライアント接続数 (全 instance) | `db_backends` | `/admin/#sec-data` |
 | 容量 | `capacity.db.memory.<pod>` | festival.workloads | instance ごとのメモリ (rss) 対 memory limit | `db_memory_rss_ratio` | Netdata |
-| 容量 | `capacity.db.restarts` | festival.workloads | 全 instance のうち直近の再起動があれば注意、OOM と CrashLoop は異常 (`capacity.cms.restarts` と同じ規則)。該当する Pod 名を表示 | — | `/admin/#sec-cluster` |
+| 容量 | `capacity.db.restarts` | festival.workloads | 全 instance のうち CrashLoopBackOff の Pod があれば異常、なければ正常 (`capacity.cms.restarts` と同じ)。再起動・OOM は現在値の文字に出し、判定しない。該当する Pod 名を表示 | — | `/admin/#sec-cluster` |
 | 容量 | `capacity.db.unanalyzed` | festival.cnpg | primary の、統計情報が一度も取得されていない表の数 | `db_unanalyzed_tables` | `/admin/#sec-data` |
 | 容量 | `capacity.db.lag.<pod>` | festival.cnpg | replica の遅延 (秒) | `db_replica_lag_s` | `/admin/#sec-data` |
 | 容量 | `capacity.cms.throttle` | festival.workloads | CMS の Pod の CPU スロットリング率の最大 | `cpu_throttle_ratio` | Netdata |
 | 容量 | `capacity.cms.rps` | festival.cloudflare | (`cms` の requests − `media` の requests) ÷ 窓の秒数 (300) | `cms_rps` | Cloudflare ダッシュボード |
-| 容量 | `capacity.cms.cache_hit` | festival.cloudflare | `cms_cache` の hits ÷ lookups (lookups が 0 なら値なし)。閾値の宣言が無い間は表示のみ | `cms_cache_hit_ratio` (省略可) | Cloudflare ダッシュボード |
+| 容量 | `capacity.cms.cache_hit` | festival.cloudflare | `cms_cache` の hits ÷ lookups (lookups が 0 なら値なし)。閾値の宣言が無い間は表示のみ | `cms_cache_hit_ratio` | Cloudflare ダッシュボード |
 | 容量 | `capacity.cloudflared.cpu` | festival.workloads | cloudflared の Pod の CPU 対 limit の最大 | `pod_cpu_ratio` | Netdata |
 | 容量 | `capacity.cloudflared.throttle` | festival.workloads | cloudflared の Pod の CPU スロットリング率の最大 | `cpu_throttle_ratio` | Netdata |
 | 容量 | `capacity.node.<name>.ready` | festival.nodes | NotReady は異常 | — | Netdata |
@@ -860,7 +866,7 @@ CATALOG: tuple[ItemGroup, ...]
 
 | 項目キー | 値 (`metric`) | 単位 | 閾値の線 |
 |---|---|---|---|
-| `visitor.worker.requests` | 要求数 (5 分の窓) | `count` | なし (表示のみ) |
+| `visitor.worker.requests` | 要求数 (5 分の窓) | `count` | なし |
 | `visitor.worker.error_rate` | errors ÷ requests (requests が 0 なら 0)。最低要求数未満でも値は入れる | `ratio` | `worker_error_rate` |
 | `visitor.worker.exceeded` | exceededResources の件数 (5 分の窓) | `count` | `worker_exceeded` |
 | `visitor.worker.cpu_p99` | CPU 時間の p99 | `ms` | `worker_cpu_p99_ms` |
@@ -870,7 +876,7 @@ CATALOG: tuple[ItemGroup, ...]
 | `visitor.media.5xx` | 5xx の件数 (5 分の窓) | `count` | `media_5xx` |
 | `function.parking.capture.<id>` | 最終受信からの経過 (最終受信の時刻が無いときは None) | `seconds` | `parking_capture_age` |
 | `function.parking.judge.<id>` | 判定の連続失敗回数 | `count` | `parking_judge_failures` |
-| `function.signage.prod` | 本番の接続数 | `count` | 設置台数 − `signage_missing` の注意・異常 (接続数がこの値以下で注意・異常)。設置台数が 0 の間は線なし |
+| `function.signage.prod` | 本番の接続数 | `count` | なし |
 | `function.stamp.failed` | 記録失敗の件数 (5 分の窓) | `count` | `stamp_failed` |
 | `function.stamp.d1_failed` | D1 失敗の件数 (5 分の窓) | `count` | `stamp_d1_failed` |
 | `function.stamp.rate_limited` | レート制限の件数 (5 分の窓) | `count` | `stamp_rate_limited` |
@@ -878,7 +884,7 @@ CATALOG: tuple[ItemGroup, ...]
 | `capacity.cms.cpu` | CPU 対 limit の最大 | `ratio` | `pod_cpu_ratio` |
 | `capacity.cms.throttle` | CPU スロットリング率の最大 | `ratio` | `cpu_throttle_ratio` |
 | `capacity.cms.rps` | メディアを除く毎秒の要求数 | `rps` | `cms_rps` |
-| `capacity.cms.cache_hit` | hits ÷ lookups (lookups が 0 なら None) | `ratio` | `cms_cache_hit_ratio` (未宣言の間は線なし) |
+| `capacity.cms.cache_hit` | hits ÷ lookups (lookups が 0 なら None) | `ratio` | `cms_cache_hit_ratio` |
 | `capacity.db.primary_cpu` | primary の CPU 対 limit | `ratio` | `pod_cpu_ratio` |
 | `capacity.db.connections` | primary の接続数 ÷ 上限 | `ratio` | `db_connections_ratio` |
 | `capacity.db.backends.<pod>` | instance の接続数 | `count` | `db_backends` |
@@ -972,6 +978,7 @@ class FestivalItem:
     note: str | None
     notify: bool
     judged: bool                     # False は表示のみ (6.13)
+    alert_on_warn: bool              # True は注意で通知する
     metric: float | None             # グラフの値 (Judgement から移す)
     unit: "MetricUnit | None"        # None はグラフの対象外
     warn: float | None               # 閾値の線
@@ -1024,8 +1031,8 @@ class FestivalEvaluator:
   - 1 件は 2000 文字以内。超える分は次の評価に回す。
   - `allowed_mentions: {"parse": []}` を付け、メンションを起こさない (CMS のカメラ通知と同じ)。
 - 送る規則 (「通知の状態」図):
-  - 項目 (`notify = True` かつ `judged = True`) が `CRIT` に入る → 異常の通知。表示のみの項目 (`judged = False`) は計画しない (6.13)。
-  - 異常のまま `renotify` を超える → 再通知。
+  - 項目 (`notify = True` かつ `judged = True`) が `CRIT` に入る → 異常の通知。`alert_on_warn = True` の項目は `WARN` に入ったときに通知する。表示のみの項目 (`judged = False`) は計画しない (6.13)。
+  - 異常 (`alert_on_warn = True` の項目は注意) のまま `renotify` を超える → 再通知。
   - `OK` または `EMPTY` (時間外) に戻る → 回復の通知。
   - 異常中の項目が評価から消える → 「対象外になった」通知。
   - 情報源の失敗が `source_failure_grace` 以上続く → 情報源の単位で 1 件。その情報源に依存する項目は、失敗の間は項目として扱わない (状態を凍結する)。
@@ -1053,6 +1060,7 @@ NoticeKind = Literal["alert", "reminder", "recover", "removed", "source_alert", 
 class Notice:
     key: str                  # 項目キー、または "source:<source_id>"
     kind: NoticeKind
+    warn: bool                # alert・reminder が注意の通知 (alert_on_warn の項目)
     label: str
     value: str | None
     threshold: str | None
@@ -1102,12 +1110,15 @@ class FestivalNotifier:
 
 **通知の書式** (例。日本語、1 件に複数行):
 ```
-[当日監視] 異常 2 件・回復 1 件
-🔴 異常: CMS の 5xx 比率 — 現在 6.2% (異常 ≥ 5.0%)
+[当日監視] 異常 2 件・注意 1 件・回復 1 件
+🔴 異常: CMS の 5xx 比率 — 現在 12.4% (異常 ≥ 10.0%)
 🔴 異常: 情報源 Cloudflare の取得に失敗 (3 分以上) — http_429
+🟡 注意: Worker のエラー率 — 現在 3.1% (注意 ≥ 2.0%)
 🟢 回復: ノード prod-node-2 のメモリ — 現在 71.0%
 https://dash.aramakisai.com/admin/festival
 ```
+- 見出しは件数が 0 の区分を出さない。注意は `alert_on_warn = True` の項目の通知で、異常とは別に数える。
+- 再通知の行は「🟡 注意 (継続): <項目名> — 現在 <値> (<閾値の文字>)」、回復の行は「🟢 回復: <項目名> — 現在 <値>」で、異常と同じ書き方にする。
 - 項目名・現在値・閾値・画面への参照を載せる (8.1)。IP・トークン・メールアドレスは載せない。
 
 #### FestivalHeartbeat
@@ -1676,7 +1687,7 @@ CREATE TABLE IF NOT EXISTS festival_items (
     key TEXT PRIMARY KEY, category TEXT NOT NULL, label TEXT NOT NULL, status TEXT NOT NULL,
     value TEXT NOT NULL, threshold TEXT, observed_at TEXT, fetched_at TEXT,
     source_ids TEXT NOT NULL, link TEXT, note TEXT, notify INTEGER NOT NULL,
-    judged INTEGER NOT NULL DEFAULT 1, metric REAL, unit TEXT, warn REAL, crit REAL,
+    judged INTEGER NOT NULL DEFAULT 1, alert_on_warn INTEGER NOT NULL DEFAULT 0, metric REAL, unit TEXT, warn REAL, crit REAL,
     breakdown TEXT, link_label TEXT);
 CREATE TABLE IF NOT EXISTS festival_history (
     key TEXT NOT NULL, minute TEXT NOT NULL, value REAL NOT NULL,
@@ -1741,7 +1752,7 @@ class Store:  # 追加するメソッド
 
 
 ### Data Contracts & Integration
-- `[festival]` の宣言の形 (`dashboard.toml`。値は初期値で、リハーサルで見直す。U-3):
+- `[festival]` の宣言の形 (`dashboard.toml`):
 
 ```toml
 [festival]
@@ -1780,7 +1791,6 @@ enabled = false
 
 [festival.signage]
 url = "https://aramakisai.com/api/signage/stats"
-installed = 0   # リハーサルで全端末を接続して確認した台数を設定する (U-3)。0 の間は判定しない
 
 [festival.cms]
 namespace = "prod"
@@ -1788,7 +1798,7 @@ deployment = "cms"
 pod_selector = "app=cms"
 db_cluster = "directus-db"
 service_base = "http://cms.prod.svc.cluster.local:80"
-restart_window = "30m"   # CMS と DB の Pod に共通。仮。リハーサルで見直す (U-3)
+restart_window = "30m"   # CMS と DB の Pod に共通。表示する再起動の窓
 
 [festival.cloudflared]
 namespace = "cloudflared"
@@ -1808,43 +1818,38 @@ worker_error_rate = 50
 cms_5xx_rate = 50
 
 [festival.thresholds]
-# 表「閾値の初期値 (仮)」を参照。cms_cache_hit_ratio は宣言しない (表示のみ)
+# 表「閾値」を参照。表にない閾値名 (OPTIONAL_THRESHOLDS) は宣言しない。異常を宣言しない閾値は crit を書かない
+worker_error_rate = { warn = 0.02 }
+cms_5xx_rate = { warn = 0.03, crit = 0.10 }
 ```
 
-**閾値の初期値 (仮。リハーサルで見直す。U-3)**:
+**閾値**:
 
-| 閾値名 | 向き | 注意 | 異常 | 根拠 |
-|---|---|---|---|---|
-| `worker_error_rate` | above | 0.01 | 0.05 | 仮 |
-| `worker_exceeded` | above | 1 | 10 | 1 件でも CPU などの上限に達した要求がある |
-| `worker_cpu_p99_ms` | above | 200 | 1000 | `[limits] cpu_ms = 5000` より十分に小さい値 |
-| `cms_5xx_rate` | above | 0.01 | 0.05 | 仮 |
-| `cms_origin_p95_ms` | above | 1500 | 3000 | 平常時の p95 で注意に入らない値にする。仮 |
-| `media_4xx` | above | 20 | 100 | 5 分あたり。仮 |
-| `media_5xx` | above | 1 | 10 | 5 分あたり。仮 |
-| `parking_capture_age` | above | 10m | 15m | CMS のカメラ停止通知 (15 分) に揃える |
-| `parking_judge_failures` | above | 1 | 5 | 仮 |
-| `parking_judge_success_age` | above | 10m | 20m | 仮 |
-| `signage_missing` | above | 1 | 3 | 設置台数から欠けた台数。仮 |
-| `quake_cron_age` | above | 7m | 12m | cron は 5 分ごと。2 回欠けたら異常 |
-| `stamp_failed` | above | 1 | 10 | 5 分あたり。仮 |
-| `stamp_d1_failed` | above | 1 | 10 | 5 分あたり。仮 |
-| `stamp_rate_limited` | above | 10 | 100 | 5 分あたり。仮 |
-| `bus_feed_age` | above | 2m | 5m | 生成間隔は約 30 秒 (RN-10) |
-| `cms_ready_ratio` | below | 1.0 未満 | 0.5 未満 | 仮 |
-| `pod_cpu_ratio` | above | 0.8 | 0.95 | 仮 |
-| `db_connections_ratio` | above | 0.7 | 0.9 | 仮 |
-| `db_replica_lag_s` | above | 10 | 60 | 仮 |
-| `db_backends` | above | 25 | 40 | instance ごとのクライアント接続数。仮 |
-| `db_memory_rss_ratio` | above | 0.7 | 0.85 | rss 対 memory limit。ページキャッシュを含む値は平常時でも limit 近くになるため rss で見る。仮 |
-| `db_unanalyzed_tables` | above | 1 | 10 | 仮 |
-| `cpu_throttle_ratio` | above | 0.25 | 0.5 | 前回の取得からのスロットリングされた期間の比率。CMS と cloudflared で共用。仮 |
-| `cms_rps` | above | 80 | 115 | 負荷試験で測った容量に余裕を残す値。DB の改善後に測り直す。仮 |
-| `cms_cache_hit_ratio` | below | 未設定 | 未設定 | 根拠が無いため宣言しない (表示のみ)。リハーサルで平常値を取って閾値を決める |
-| `node_cpu_ratio` | above | 0.85 | 0.95 | 仮 |
-| `node_memory_ratio` | above | 0.85 | 0.95 | 既存の `memory_warn` に揃える |
-| `node_disk_ratio` | above | 0.85 | 0.95 | 既存の `disk_warn`・`disk_crit` に揃える |
-| `tunnel_connections` | below | 4 未満 | 1 未満 | 仮 |
+| 閾値名 | 向き | 注意 | 異常 | 窓 | 根拠 |
+|---|---|---|---|---|---|
+| `worker_error_rate` | above | 0.02 | — | 5 分 | 平常は 0 (`min_requests` 50 で 1 件が 0.02)。異常の水準は実例が無い |
+| `worker_exceeded` | above | 1 | — | 5 分 | 平常は 0 |
+| `worker_cpu_p99_ms` | above | 1000 | — | 5 分 | 平常の最大を超える値 |
+| `cms_5xx_rate` | above | 0.03 | 0.10 | 5 分 | 注意は平常の p99 付近、異常は平常の最大を超え負荷試験の劣化時を下回る値 |
+| `cms_origin_p95_ms` | above | 3000 | 10000 | 5 分 | 注意は平常の p99 付近、異常は障害期間の水準 |
+| `cms_rps` | above | 非公開 (`OPS_FESTIVAL_PRIVATE_THRESHOLDS`) | 非公開 (`OPS_FESTIVAL_PRIVATE_THRESHOLDS`) | 5 分 | 負荷試験で応答の p95 が上がり始めた点 (注意) と 5xx が出始めた点 (異常)。実測値は公開しない |
+| `media_4xx` | above | 20 | 100 | 5 分 | 注意は平常の 0.3% の窓、異常は平常の最大を超える値 |
+| `media_5xx` | above | 1 | — | 5 分 | 平常で 1 件以上の窓は 0.5% |
+| `cms_ready_ratio` | below | 1.0 未満 | 0.5 未満 | その時点 | 0.5 未満はノード 2 台以上の喪失に相当 |
+| `pod_cpu_ratio` | above | 0.5 | 0.85 | その時点 | 注意は平常時の最大 (rollout 時 0.4) を超える値、異常は負荷試験で応答の p95 が上がり始めた CPU 対 limit (Pod の最大) |
+| `cpu_throttle_ratio` | above | 0.3 | 0.7 | 前回の取得から | 注意は負荷前の 30 秒窓の最大 (0.25) を超える値、異常は負荷試験で応答の p95 が上がり始めたスロットリング率 (Pod の最大)。CMS と cloudflared で共用 |
+| `db_connections_ratio` | above | 0.5 | 0.7 | その時点 | CMS の接続プール (primary 側 5 × Pod 数) と他のクライアントから決まる上限を超える値 |
+| `db_memory_rss_ratio` | above | 0.5 | — | その時点 | 平常 p95 約 10%、負荷試験の最大約 30%。JIT 無効化後の構成で OOM・劣化は起きておらず、異常の水準は実例が無い。ページキャッシュを含む値は平常時でも limit 近くになるため rss で見る |
+| `node_cpu_ratio` | above | 0.75 | 0.9 | その時点 | 注意は現行構成の負荷試験の最大を超える値、異常は過去の試験でノードの悪化が始まった水準 |
+| `node_disk_ratio` | above | 0.85 | 0.95 | その時点 | 既存の `disk_warn`・`disk_crit` |
+| `tunnel_connections` | below | 12 未満 | 8 未満 | その時点 | cloudflared 3 Pod × 4 本。8 未満は 2 Pod 以上の喪失 |
+| `parking_capture_age` | above | 10m | 15m | 経過時間 | 撮影は 5 分ごと。1 回・2 回の欠落。15 分は CMS のカメラ停止通知 |
+| `quake_cron_age` | above | 7m | 12m | 経過時間 | cron は 5 分ごと。1 回・2 回の欠落 |
+| `bus_feed_age` | above | 2m | 5m | 経過時間 | 生成間隔 約 30 秒 |
+
+- 注意は本番の平常時の分布の外 (p99 付近)、異常は負荷試験で劣化が始まった点または構成から決まる上限にする。データで導けない側は宣言しない (異常の「—」は `crit` を書かない)。
+- 次の閾値名は宣言しない。その項目は表示のみにし、開催前の負荷試験とリハーサルで値を記録してから決める (Migration Strategy の「開催前に記録して閾値を決めるもの」): `cms_cache_hit_ratio`・`stamp_failed`・`stamp_d1_failed`・`stamp_rate_limited`・`db_replica_lag_s`・`node_memory_ratio`・`db_unanalyzed_tables`・`parking_judge_failures`・`parking_judge_success_age`。`db_backends` は、負荷試験で replica の接続数が応答の悪化と関係しなかったため宣言しない。`cms_rps` の値は `dashboard.toml` に書かず、環境変数 `OPS_FESTIVAL_PRIVATE_THRESHOLDS` で渡す。この環境変数が無いときは表示のみになる。
+- `min_requests` は 50 件。10 件以下では 1 件で比率が大きく振れる。
 
 ## Error Handling
 
@@ -1875,8 +1880,8 @@ cms_5xx_rate = 50
 
 - **Unit Tests** (`app/tests/`、unittest):
   - `[festival]` の検証: 欠け・逆転・未知のキー・未知の source_id が `ConfigError` になる。
-  - 判定関数: 閾値の境界 (注意・異常の等号)、最低要求数、時間外 (`event_days`・`parking_monitor` の `end` ちょうど・`inPeriod`)、内部アドレスの BAN の照合、閾値が未宣言の項目の表示のみ (通知も計画しない)。
-  - グラフの値: 「グラフの対象」の表の全項目で `metric`・`unit`・`warn`・`crit` が入り、表に無い項目では `unit` が `None`。期間の閾値の秒への換算。サイネージの閾値の線 (設置台数 − `signage_missing`、設置台数 0 で線なし)。表示のみの項目で線が無い。`visitor.worker.requests` が常に表示のみで通知を計画せず、帯とタブの件数に数えない。駐車場の受信の経過 (秒) と連続失敗回数、受信なしで `metric = None`。
+  - 判定関数: 閾値の境界 (注意・異常の等号)、最低要求数、時間外 (`event_days`・`parking_monitor` の `end` ちょうど・`inPeriod`)、内部アドレスの BAN の照合、閾値が未宣言の項目の表示のみ (通知も計画しない)、`crit` を宣言しない閾値の判定 (注意までで異常にならない・閾値の文字と線に異常が出ない)、`alert_on_warn` の項目が注意で通知し注意からの回復で回復を通知すること、再起動の項目が CrashLoop のときだけ異常になること。
+  - グラフの値: 「グラフの対象」の表の全項目で `metric`・`unit`・`warn`・`crit` が入り、表に無い項目では `unit` が `None`。期間の閾値の秒への換算。表示のみの項目で線が無い。`visitor.worker.requests` が常に表示のみで通知を計画せず、帯とタブの件数に数えない。駐車場の受信の経過 (秒) と連続失敗回数、受信なしで `metric = None`。
   - 内訳: 「内訳」の表の全項目で見出し・列・並び順が表のとおり。DB の 2 つの情報源の突き合わせと、片方が無いときの「—」。内訳の無い項目で `breakdown` が `None`。
   - 評価器: 情報源の `ERROR` と鮮度の超過が項目を上書きする。無効にした情報源の項目を作らない。
   - 1 分値の記録: 分が変わって最初の評価だけが記録する。`ERROR`・`STALE`・`EMPTY`・`metric = None`・グラフの対象外の項目を記録しない。表示のみの項目は記録する。24 時間より前の行が消える。同じ分の再記録で上書きされる。
@@ -1916,6 +1921,7 @@ cms_5xx_rate = 50
   - ハブのサービストークンは、`/api/signage/stats` 専用の Access アプリにだけ許可する (U-2)。
 - シークレット (9.4):
   - 新しいキーは Infisical に置き、ExternalSecret で渡す。値をリポジトリ・ログ・画面・通知に出さない。
+  - 公開しない閾値は、Infisical の 1 つのキー `OPS_FESTIVAL_PRIVATE_THRESHOLDS` に JSON でまとめて渡す。設計・テスト・ログ・エラー文にその値を書かない。
   - Discord の webhook の URL と Healthchecks.io の ping URL は、`redact_url` でエラー文から除く。
 - 個人を識別できる情報 (9.5): GraphQL で clientIP 等の次元を選ばない。fail2ban の IP は照合にだけ使い、件数だけを表示する。駐車場はカメラ名と時刻だけを返す。
 
@@ -1926,6 +1932,7 @@ cms_5xx_rate = 50
 | `SIGNAGE_QUAKE_STATUS_TOKEN` (新規) | リレーの `/status` の読み取り | collector-secrets、リレーの secrets-file | ランダム値を生成 |
 | `OPS_PARKING_HEALTH_TOKEN` (新規) | CMS の parking-health | collector-secrets、cms-secrets | ランダム値を生成 |
 | `OPS_SIGNAGE_ACCESS_CLIENT_ID`・`OPS_SIGNAGE_ACCESS_CLIENT_SECRET` (新規) | ハブの stats への Access | collector-secrets | `terraform/access.tf` の新しいサービストークンの出力を、apply 後に手動で登録 (signage_notify と同じ手順) |
+| `OPS_FESTIVAL_PRIVATE_THRESHOLDS` (新規) | 公開しない閾値 (JSON。`cms_rps`) | collector-secrets | 負荷試験の結果から決めて手動で登録 |
 
 - collector 用のサービストークンは `duration = "8760h"`・`min_days_for_renewal = 30`・`create_before_destroy` (既存の `signage_notify` と同じ) とする。`dashboard.toml` の `[[credentials]]` に期限を宣言し、既存の期限表示に載せる。
 
@@ -1978,7 +1985,7 @@ flowchart LR
 ```
 
 **実装順**:
-1. Infisical prod にランダム値のキーを登録する (`SIGNAGE_QUAKE_STATUS_TOKEN`・`OPS_PARKING_HEALTH_TOKEN`)。web 側のデプロイより前に要る (下表の前提)。
+1. Infisical prod にランダム値のキーを登録する (`SIGNAGE_QUAKE_STATUS_TOKEN`・`OPS_PARKING_HEALTH_TOKEN`)。`OPS_FESTIVAL_PRIVATE_THRESHOLDS` は決めた値を登録する。web 側のデプロイより前に要る (下表の前提)。
 2. web 側の改修 3 件を、それぞれ dev 向けの PR で出す。順序の依存は無く、並行してよい。
 3. 3 件を dev から main へのリリースで本番に入れる。
 4. infra 側:
@@ -2008,17 +2015,29 @@ flowchart LR
 
 2026-11-11 (水)〜11-12 (木) に行い、11-13 (金) に最終確認する。WBS にも同じ内容で登録する (登録は別に行う)。
 
-1. 本番反映から 24 時間以上の平常値をもとに、閾値を見直す PR を出す。Cache API のヒット率 (`cms_cache_hit_ratio`) は、平常値をもとに閾値を決めて宣言する。
+1. 次の「開催前に記録して閾値を決めるもの」を記録し、閾値を宣言する PR を出す。
 2. 本部のモニター (1920×1080) で次を確認する。
    - 4 つのタブがスクロールなしで表示されること。
    - 15 秒ごとの更新中にタブが維持されること。
    - 数時間放置してもセッションが続くこと。
-3. サイネージの全端末を本番サイトに接続し、本番の接続数が設置台数と一致することを確認する。その台数を `dashboard.toml` (`[festival.signage] installed`) に設定する。
-4. 監視時間内に駐車場カメラを稼働させ、判定成功時刻と連続失敗回数の表示を確認する。
-5. 閾値を一時的に下げる設定で 1 項目を異常にし、当日チャンネルへの異常通知・回復通知と、再通知の間隔を確認する。確認後は設定を元に戻す。
-6. Healthchecks.io の `festival-monitor` に ping が届いていることと、通知先が設定済みであることを確認する。
-7. スタッフ画面の操作に合わせて AE (スタンプ) の反映遅延を実測し、時間窓の仮置きを確定させる。
-8. WBS「荒牧祭当日」の対応表を読み合わせる。
+3. 監視時間内に駐車場カメラを稼働させ、判定成功時刻と連続失敗回数の表示を確認する。
+4. 閾値を一時的に下げる設定で 1 項目を異常にし、当日チャンネルへの異常通知・回復通知と、再通知の間隔を確認する。確認後は設定を元に戻す。
+5. Healthchecks.io の `festival-monitor` に ping が届いていることと、通知先が設定済みであることを確認する。
+6. スタッフ画面の操作に合わせて AE (スタンプ) の反映遅延を実測し、時間窓の仮置きを確定させる。
+7. WBS「荒牧祭当日」の対応表を読み合わせる。
+
+**開催前に記録して閾値を決めるもの**: 表示のみの項目は、次の場面で値を記録してから閾値を決める。
+
+| 場面 | 項目 | 記録する値 |
+|---|---|---|
+| 負荷試験 | `db_replica_lag_s` | replica の遅延 |
+| 負荷試験 | `node_memory_ratio` | ノードのメモリ使用率 |
+| リハーサル | `stamp_failed`・`stamp_d1_failed`・`stamp_rate_limited` | スタンプの処理結果 (記録失敗・D1 失敗・レート制限の件数) |
+| リハーサル | `parking_judge_failures`・`parking_judge_success_age` | 駐車場の判定の成否 (日中と日没前後) |
+| リハーサル | `bus_feed_age` | バスフィードの日中の生成間隔 |
+| リハーサル | `cms_cache_hit_ratio` | Cache API のヒット率 |
+| リハーサル | `capacity.cms.restarts`・`capacity.db.restarts` | 再起動の窓 (運用上いつの再起動を見たいか) |
+| リハーサル | `db_unanalyzed_tables` | 統計情報の無い表の数 |
 
 ## 未決事項
 
@@ -2028,7 +2047,7 @@ flowchart LR
 |---|---|---|---|
 | U-1 | サイネージの接続元の識別値 | 既存の `STAMP_ENV` を再利用する | SignageHub stats と SiteEntry |
 | U-2 | collector のサービストークンを許可する Access アプリ | `/api/signage/stats` 専用の Access アプリにする。公開 HTTP アプリ同士が重なったときの優先は公式ドキュメントで確認できていないため、実装の最初に実測で確かめる。実測が失敗した場合は、原因を添えてユーザーに諮り、決まるまで `disabled_sources` で `festival.signage` を止めて他の作業を進める | SignageHub stats と SiteEntry、Modified Files、Security Considerations |
-| U-3 | 閾値・鮮度・再通知の初期値と設置台数 | 仮の値で始め、リハーサルで見直す。設置台数はリハーサルで確認した台数を設定する | Data Contracts & Integration、Migration Strategy の「リハーサル」 |
+| U-3 | 閾値・鮮度・再通知の値 | 根拠のある閾値だけを宣言し、根拠の無い項目は表示のみにする。不足データは負荷試験とリハーサルで記録してから決める | Data Contracts & Integration、Migration Strategy の「リハーサル」 |
 | U-4 | 通知を有効にする期間 | 本番に入れた時点から常に通知する。開催日に限る切り替えは設けず、`notify_enabled` は設けない | FestivalConfig、FestivalNotifier、Data Contracts & Integration |
 | U-5 | バスの判定の期間 | 開催日で絞らず、常に判定する | FestivalCatalog |
 | U-6 | fail2ban の照合範囲 | ノードの `status.addresses` と `spec.podCIDRs` だけを照合する | festival.nodes、FestivalCatalog |

@@ -117,7 +117,7 @@
 |---|---|---|
 | 5.1 カメラごとの最終受信時刻 | 新規 (web 側に口が要る) | `parking_cameras.last_captured_at` は CMS 内部の値で、コレクションは非公開。collector から読む口が無い |
 | 5.2 AI 判定の成功・失敗・見送りの件数と最終成功時刻 | 新規 (web 側に口が要る) | `parking_snapshots` の `judge_status` と `judged_at` は、役員 (`executiveOnlyField`) だけが読める。users に API キー認証は無い。前例は `cms/src/endpoints/parking-ingest.ts` の Bearer 方式 (カメラのトークンをハッシュで照合) |
-| 5.3 サイネージの接続数 | 新規 | `durableObjectsPeriodicGroups.max.activeWebsocketConnections` で取れる。ハブは固定名の 1 インスタンスで、namespaceId で絞れる。設置台数は宣言で持つ。dev と PR プレビューのサイトも本番のハブに繋ぐため (`signage-hub/wrangler.toml` のコメント)、接続数に本番以外の接続が混ざり得る。ハブには公開 URL も `[observability]` も無いが、5.3 には不要 |
+| 5.3 サイネージの接続数 | 新規 | `durableObjectsPeriodicGroups.max.activeWebsocketConnections` で取れる。ハブは固定名の 1 インスタンスで、namespaceId で絞れる。dev と PR プレビューのサイトも本番のハブに繋ぐため (`signage-hub/wrangler.toml` のコメント)、接続数に本番以外の接続が混ざり得る。ハブには公開 URL も `[observability]` も無いが、5.3 には不要 |
 | 5.4 地震リレーの定期起動 | 新規 | `durableObjectsInvocationsAdaptiveGroups` で QuakeRelay の jsrpc の呼び出しを分単位で数える。`workersInvocationsScheduled` は 2026-10-27 以降の記録が欠けているため使わない |
 | 5.5 上流ごとの接続・最終受信・Discord の成否 | 新規 | 地震リレー Worker の `GET /status` (Bearer `SIGNAGE_QUAKE_TOKEN`) が `channels.*.connected / lastReceivedAt / receiving`、`unreachable`、`discord.lastSuccessAt / lastFailureAt / disabled` を返す。ただし同じトークンで `POST /dismiss` (状態変更) もできる (Constraint、R9.3) |
 | 5.6 スタンプラリーの失敗 | 新規 | AE `aramakisai_stamp_metrics`。blob3 が outcome、double7 が d1Failed。prod と dev が同じ dataset に書くため、blob1 (`STAMP_ENV`) で本番に絞る必要がある。レート制限を表す outcome の値は Unknown。SQL API の呼び出しは `billing_cloudflare.py` に実装がある |
@@ -276,7 +276,7 @@ DB のメトリクスへの経路 (6.2・6.3):
 - **K-3**: 判定と通知を描画から切り離した定期評価にする。評価間隔、再通知の間隔、まとめの単位も決める。
 - **K-4**: `[festival]` の宣言の形。次の項目を含む。
   - 期間・時間帯
-  - 閾値・期待値 (設置台数、CMS の宣言数)
+  - 閾値・期待値 (CMS の宣言数)
   - 項目ごとの鮮度の上限
   - リンク
   - `[[servers]]` との関係
