@@ -84,6 +84,35 @@ class PlanTest(Base):
     def test_downgrade_to_warn_does_not_recover(self):
         self.assertEqual(self.plan(ev([item("a", Status.WARN)]), {"a": alert("a")}), [])
 
+    def test_alert_on_warn_item_opens_alert_on_warn(self):
+        got = self.plan(ev([item("a", Status.WARN, alert_on_warn=True)]))
+        self.assertEqual(self.kinds(got), [("a", "alert")])
+        self.assertTrue(got[0].warn)
+
+    def test_alert_on_warn_item_crit_is_not_a_warn_notice(self):
+        got = self.plan(ev([item("a", Status.CRIT, alert_on_warn=True)]))
+        self.assertEqual((self.kinds(got), got[0].warn), ([("a", "alert")], False))
+
+    def test_alert_on_warn_item_renotifies_while_warn(self):
+        i = item("a", Status.WARN, alert_on_warn=True)
+        self.assertEqual(self.plan(ev([i]), {"a": alert("a", last=NOW - CFG.renotify + timedelta(seconds=1))}), [])
+        got = self.plan(ev([i]), {"a": alert("a", last=NOW - CFG.renotify)})
+        self.assertEqual((self.kinds(got), got[0].warn), ([("a", "reminder")], True))
+
+    def test_alert_on_warn_item_recovers_on_ok_and_empty(self):
+        for st in (Status.OK, Status.EMPTY):
+            got = self.plan(ev([item("a", st, alert_on_warn=True)]), {"a": alert("a")})
+            self.assertEqual(self.kinds(got), [("a", "recover")])
+
+    def test_alert_on_warn_item_freezes_on_stale_and_error(self):
+        for st in (Status.STALE, Status.ERROR):
+            self.assertEqual(self.plan(ev([item("a", st, alert_on_warn=True)]), {"a": alert("a")}), [])
+            self.assertEqual(self.plan(ev([item("a", st, alert_on_warn=True)])), [])
+
+    def test_plain_item_warn_neither_opens_nor_recovers(self):
+        self.assertEqual(self.plan(ev([item("a", Status.WARN)])), [])
+        self.assertEqual(self.plan(ev([item("a", Status.WARN)]), {"a": alert("a")}), [])
+
     def test_stale_and_error_do_not_change_state(self):
         for st in (Status.STALE, Status.ERROR):
             self.assertEqual(self.plan(ev([item("a", st)]), {"a": alert("a")}), [])
@@ -146,6 +175,27 @@ class SendTest(Base):
         self.assertTrue(http.calls[0]["redact_url"])
         self.assertEqual(self.store.load_alert_states()["a"].notified_open, True)
         self.assertEqual(self.store.load_festival_state().notifier.last_success_at, NOW)
+
+    def test_warn_notices_use_warn_line_and_header(self):
+        http = FakeHttp()
+        n = self.notifier(http)
+        notices = [Notice("a", "alert", "A", "3.1%", "注意 ≥ 2.0%", since=NOW, warn=True),
+                   Notice("b", "reminder", "B", "4.0%", "注意 ≥ 2.0%", since=NOW, warn=True),
+                   Notice("c", "alert", "C", "12.4%", "異常 ≥ 10.0%", since=NOW),
+                   Notice("d", "recover", "D", "1.0%")]
+        n.send(notices, NOW)
+        content = json.loads(http.calls[0]["data"])["content"]
+        self.assertEqual(content.splitlines()[:5], [
+            "[当日監視] 異常 1 件・注意 2 件・回復 1 件",
+            "🟡 注意: A — 現在 3.1% (注意 ≥ 2.0%)",
+            "🟡 注意 (継続): B — 現在 4.0% (注意 ≥ 2.0%)",
+            "🔴 異常: C — 現在 12.4% (異常 ≥ 10.0%)",
+            "🟢 回復: D — 現在 1.0%"])
+
+    def test_header_omits_zero_groups_and_counts_warn_separately(self):
+        http = FakeHttp()
+        self.notifier(http).send([Notice("a", "alert", "A", "3.1%", "注意 ≥ 2.0%", since=NOW, warn=True)], NOW)
+        self.assertTrue(json.loads(http.calls[0]["data"])["content"].startswith("[当日監視] 注意 1 件\n"))
 
     def test_recover_deletes_alert_state(self):
         self.store.apply_notifications([alert("a")], [], self.store.load_festival_state().notifier)

@@ -45,7 +45,11 @@ THRESHOLD_DIRECTIONS: Mapping[str, Direction] = {
 }
 DURATION_THRESHOLDS = frozenset({"parking_capture_age", "parking_judge_success_age", "quake_cron_age", "bus_feed_age"})
 # 宣言が無い間は判定せず表示だけを行う閾値名
-OPTIONAL_THRESHOLDS = frozenset({"cms_cache_hit_ratio"})
+OPTIONAL_THRESHOLDS = frozenset({
+    "cms_rps", "cms_cache_hit_ratio", "stamp_failed", "stamp_d1_failed", "stamp_rate_limited",
+    "db_replica_lag_s", "db_backends", "node_memory_ratio", "db_unanalyzed_tables",
+    "parking_judge_failures", "parking_judge_success_age",
+})
 MIN_REQUESTS_KEYS = ("worker_error_rate", "cms_5xx_rate")
 
 
@@ -91,7 +95,7 @@ class Thresholds:
 @dataclass(frozen=True)
 class Threshold:
     warn: float | timedelta
-    crit: float | timedelta
+    crit: float | timedelta | None  # None は異常を宣言しない (注意までを判定する)
 
 
 @dataclass(frozen=True)
@@ -243,11 +247,11 @@ def _thresholds(raw: Mapping) -> Thresholds:
     return Thresholds(**kw)
 
 
-def _table(raw: Any, where: str, keys: tuple[str, ...]) -> Mapping[str, Any]:
-    """キーが keys と過不足なく一致する表であることを確かめる。"""
+def _table(raw: Any, where: str, keys: tuple[str, ...], optional: tuple[str, ...] = ()) -> Mapping[str, Any]:
+    """キーが keys と過不足なく一致する表 (optional は省略できる) であることを確かめる。"""
     if not isinstance(raw, Mapping):
         raise ConfigError(f"{where}: 表が必要です")
-    unknown = set(raw) - set(keys)
+    unknown = set(raw) - set(keys) - set(optional)
     if unknown:
         raise ConfigError(f"{where}: 未知のキー: {sorted(unknown)}")
     missing = [k for k in keys if k not in raw]
@@ -271,16 +275,18 @@ def _str(d: Mapping, key: str, where: str) -> str:
 
 def _threshold(name: str, raw: Any) -> Threshold:
     where = f"festival.thresholds.{name}"
-    t = _table(raw, where, ("warn", "crit"))
+    t = _table(raw, where, ("warn",), ("crit",))
+    keys = [k for k in ("warn", "crit") if k in t]
     if name in DURATION_THRESHOLDS:
-        warn, crit = (parse_duration(t[k], f"{where}.{k}") for k in ("warn", "crit"))
+        vals = {k: parse_duration(t[k], f"{where}.{k}") for k in keys}
     else:
-        for k in ("warn", "crit"):
+        for k in keys:
             if isinstance(t[k], bool) or not isinstance(t[k], (int, float)):
                 raise ConfigError(f"{where}.{k}: 数値が必要です: {t[k]!r}")
-        warn, crit = t["warn"], t["crit"]
+        vals = {k: t[k] for k in keys}
+    warn, crit = vals["warn"], vals.get("crit")
     # 向きごとに、注意が異常より軽い側にあること (等しいのは許す)
-    if (warn > crit) if THRESHOLD_DIRECTIONS[name] == "above" else (warn < crit):
+    if crit is not None and ((warn > crit) if THRESHOLD_DIRECTIONS[name] == "above" else (warn < crit)):
         raise ConfigError(f"{where}: 注意と異常が逆転しています (向き: {THRESHOLD_DIRECTIONS[name]})")
     return Threshold(warn, crit)
 

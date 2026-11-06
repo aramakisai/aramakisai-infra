@@ -150,6 +150,13 @@ class FestivalPageTest(unittest.TestCase):
         self.assertEqual(since, datetime(2026, 11, 13, 15, 0, tzinfo=timezone.utc))
         self.assertEqual(until, NOW)
 
+    def test_detail_chart_without_crit_draws_warn_line_only(self):
+        it = item("visitor.a", metric=0.5, unit="ratio", warn=0.8, crit=None, threshold="注意 ≥ 80%")
+        self.store.replace_festival_items([it], NOW, history=[("visitor.a", 0.5)], history_minute=NOW)
+        _, d = self.detail("visitor.a")
+        self.assertIn("注意 80%", d)
+        self.assertNotIn("異常 ", d.split('class="daychart"')[1].split("</svg>")[0])
+
     def test_detail_chart_empty_and_absent_for_non_chart_item(self):
         _, d = self.detail("visitor.a", [item("visitor.a", metric=0.5, unit="ratio")])
         self.assertIn(label("fest.detail.chart_empty"), d)

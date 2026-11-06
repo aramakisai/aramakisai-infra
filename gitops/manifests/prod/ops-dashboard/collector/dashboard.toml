@@ -230,33 +230,24 @@ crit_priority = "critical"
 worker_error_rate = 50
 cms_5xx_rate = 50
 
-# cms_cache_hit_ratio は平常値を取るまで宣言しない (表示のみ)
+# 値の根拠は design の「閾値」の表。表にない閾値名 (OPTIONAL_THRESHOLDS) は宣言しない。
+# 異常を宣言しない閾値は crit を書かない。
 [festival.thresholds]
-worker_error_rate = { warn = 0.01, crit = 0.05 }
-worker_exceeded = { warn = 1, crit = 10 }
-worker_cpu_p99_ms = { warn = 200, crit = 1000 }
-cms_5xx_rate = { warn = 0.01, crit = 0.05 }
-cms_origin_p95_ms = { warn = 1500, crit = 3000 }
+worker_error_rate = { warn = 0.02 }
+worker_exceeded = { warn = 1 }
+worker_cpu_p99_ms = { warn = 1000 }
+cms_5xx_rate = { warn = 0.03, crit = 0.10 }
+cms_origin_p95_ms = { warn = 3000, crit = 10000 }
 media_4xx = { warn = 20, crit = 100 }
-media_5xx = { warn = 1, crit = 10 }
+media_5xx = { warn = 1 }
 parking_capture_age = { warn = "10m", crit = "15m" }
-parking_judge_failures = { warn = 1, crit = 5 }
-parking_judge_success_age = { warn = "10m", crit = "20m" }
 quake_cron_age = { warn = "7m", crit = "12m" }
-stamp_failed = { warn = 1, crit = 10 }
-stamp_d1_failed = { warn = 1, crit = 10 }
-stamp_rate_limited = { warn = 10, crit = 100 }
 bus_feed_age = { warn = "2m", crit = "5m" }
 cms_ready_ratio = { warn = 1.0, crit = 0.5 }
-pod_cpu_ratio = { warn = 0.8, crit = 0.95 }
-db_connections_ratio = { warn = 0.7, crit = 0.9 }
-db_replica_lag_s = { warn = 10, crit = 60 }
-db_backends = { warn = 25, crit = 40 }
-db_memory_rss_ratio = { warn = 0.7, crit = 0.85 }
-db_unanalyzed_tables = { warn = 1, crit = 10 }
-cpu_throttle_ratio = { warn = 0.25, crit = 0.5 }
-cms_rps = { warn = 80, crit = 115 }
-node_cpu_ratio = { warn = 0.85, crit = 0.95 }
-node_memory_ratio = { warn = 0.85, crit = 0.95 }
+pod_cpu_ratio = { warn = 0.5, crit = 0.85 }
+db_connections_ratio = { warn = 0.5, crit = 0.7 }
+db_memory_rss_ratio = { warn = 0.5 }
+cpu_throttle_ratio = { warn = 0.3, crit = 0.7 }
+node_cpu_ratio = { warn = 0.75, crit = 0.9 }
 node_disk_ratio = { warn = 0.85, crit = 0.95 }
-tunnel_connections = { warn = 4, crit = 1 }
+tunnel_connections = { warn = 12, crit = 8 }

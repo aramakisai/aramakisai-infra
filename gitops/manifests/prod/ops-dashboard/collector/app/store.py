@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS festival_items (
     key TEXT PRIMARY KEY, category TEXT NOT NULL, label TEXT NOT NULL, status TEXT NOT NULL,
     value TEXT NOT NULL, threshold TEXT, observed_at TEXT, fetched_at TEXT,
     source_ids TEXT NOT NULL, link TEXT, note TEXT, notify INTEGER NOT NULL,
-    judged INTEGER NOT NULL DEFAULT 1, metric REAL, unit TEXT, warn REAL, crit REAL,
+    judged INTEGER NOT NULL DEFAULT 1, alert_on_warn INTEGER NOT NULL DEFAULT 0, metric REAL, unit TEXT, warn REAL, crit REAL,
     breakdown TEXT, link_label TEXT);
 CREATE TABLE IF NOT EXISTS festival_history (
     key TEXT NOT NULL, minute TEXT NOT NULL, value REAL NOT NULL,
@@ -199,11 +199,11 @@ class Store:
             c.execute("DELETE FROM festival_items")
             c.executemany(
                 "INSERT INTO festival_items(key,category,label,status,value,threshold,observed_at,fetched_at,"
-                "source_ids,link,note,notify,judged,metric,unit,warn,crit,breakdown,link_label)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "source_ids,link,note,notify,judged,alert_on_warn,metric,unit,warn,crit,breakdown,link_label)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 [(i.key, i.category, i.label, str(i.status), i.value, i.threshold, _iso_or_none(i.observed_at),
                   _iso_or_none(i.fetched_at), ",".join(i.source_ids), i.link, i.note, int(i.notify), int(i.judged),
-                  i.metric, i.unit, i.warn, i.crit,
+                  int(i.alert_on_warn), i.metric, i.unit, i.warn, i.crit,
                   json.dumps(dataclasses.asdict(i.breakdown), ensure_ascii=False) if i.breakdown else None,
                   i.link_label)
                  for i in items])
@@ -222,7 +222,7 @@ class Store:
             r["key"], r["category"], r["label"], model.Status(r["status"]), r["value"], r["threshold"],
             _parse_or_none(r["observed_at"]), _parse_or_none(r["fetched_at"]),
             tuple(r["source_ids"].split(",")) if r["source_ids"] else (), r["link"], r["note"],
-            bool(r["notify"]), bool(r["judged"]), r["metric"], r["unit"], r["warn"], r["crit"],
+            bool(r["notify"]), bool(r["judged"]), bool(r["alert_on_warn"]), r["metric"], r["unit"], r["warn"], r["crit"],
             _breakdown(r["breakdown"]), r["link_label"])
             for r in self.query("SELECT * FROM festival_items ORDER BY key")]
 

@@ -436,7 +436,7 @@
   - _Depends: 8.3_
   - _Boundary: FestivalCatalog_
 
-- [ ] 8.14 閾値を根拠のある値に改め、根拠の無い項目を表示のみにする
+- [x] 8.14 閾値を根拠のある値に改め、根拠の無い項目を表示のみにする
   - `collector/dashboard.toml` の `[festival.thresholds]` を design の「閾値」の表どおりに改める。表にない閾値名 (`cms_cache_hit_ratio`・`stamp_failed`・`stamp_d1_failed`・`stamp_rate_limited`・`db_replica_lag_s`・`db_backends`・`node_memory_ratio`・`db_unanalyzed_tables`・`parking_judge_failures`・`parking_judge_success_age`) は宣言しない。異常を宣言しない閾値 (`worker_error_rate`・`worker_exceeded`・`worker_cpu_p99_ms`・`media_5xx`・`db_memory_rss_ratio`) は `crit` を書かない。`min_requests` は 50 のまま
   - `collector/app/config.py`: `OPTIONAL_THRESHOLDS` に上の 10 個の閾値名と `cms_rps` を入れる。`dashboard.toml` は `cms_rps` を宣言しない (値は 8.15 で足す)。`Threshold.crit` を `float | timedelta | None` にし、`_threshold` は `crit` を省略できる表として読む (`_table` の必須キーを `warn` だけにして `crit` を任意にする)。`crit` を省略したときは注意と異常の大小の検証をしない
   - `collector/app/festival/catalog.py`: `grade` は `th.crit` が `None` のとき異常を返さない。`threshold_text` は `th.crit` が `None` のとき「注意 ≥ x」だけを返す。`with_chart` は `crit` が `None` なら線を `None` にする。駐車場の `_judge` (435 行付近。`thresholds["parking_judge_failures"]`・`["parking_judge_success_age"]` を直接引く) は、宣言した閾値だけで判定し、どちらも宣言されていないときは `judged = False` の `Judgement` を返す。`_restart_status` は `crashloop` が真のときだけ `Status.CRIT` を返し、それ以外 (再起動・OOM) は `Status.OK` を返す (`_cms_restarts`・`_db_restarts` の現在値の文字 `_restart_text` は変えない)。`judged_value` と閾値の判定で `crit` が `None` の閾値を使う項目は `alert_on_warn = True` にする。`Judgement` と `FestivalItem` に `alert_on_warn: bool` を足し、`collector/app/store.py` の `festival_items` に列 `alert_on_warn` を足して往復させる

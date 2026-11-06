@@ -79,6 +79,7 @@ class FestivalItem:
     note: str | None
     notify: bool
     judged: bool  # False は表示のみ (閾値が未宣言)
+    alert_on_warn: bool = False  # True は注意で通知する (異常を宣言しない閾値の項目)
     metric: float | None = None
     unit: MetricUnit | None = None  # None はグラフの対象外
     warn: float | None = None

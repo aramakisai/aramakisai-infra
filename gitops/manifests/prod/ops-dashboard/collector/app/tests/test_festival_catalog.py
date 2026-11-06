@@ -62,6 +62,30 @@ class GradeTest(unittest.TestCase):
         self.assertEqual(catalog.threshold_text("tunnel_connections", config.Threshold(4, 1), catalog._num),
                          "注意 < 4 / 異常 < 1")
 
+    def test_without_crit_grade_never_returns_crit(self):
+        above = config.Threshold(1, None)
+        self.assertEqual([catalog.grade("worker_exceeded", above, v) for v in (0, 1, 1000)],
+                         [Status.OK, Status.WARN, Status.WARN])
+        below = config.Threshold(4, None)
+        self.assertEqual([catalog.grade("tunnel_connections", below, v) for v in (4, 3, 0)],
+                         [Status.OK, Status.WARN, Status.WARN])
+
+    def test_threshold_text_without_crit_is_warn_only(self):
+        self.assertEqual(catalog.threshold_text("worker_error_rate", config.Threshold(0.02, None), catalog._pct),
+                         "注意 ≥ 2.0%")
+        self.assertEqual(catalog.threshold_text("tunnel_connections", config.Threshold(12, None), catalog._num),
+                         "注意 < 12")
+
+    def test_chart_line_without_crit_has_no_crit(self):
+        inp = EvalInput(NOW, with_thresholds(cms_cache_hit_ratio=config.Threshold(0.5, None)), {}, {}, ())
+        j = catalog.judged_value(inp, "cms_cache_hit_ratio", "k", "l", 0.3, "30.0%", catalog._pct, mu="ratio")
+        self.assertEqual((j.warn, j.crit, j.alert_on_warn, j.status), (0.5, None, True, Status.WARN))
+
+    def test_alert_on_warn_follows_crit_omission(self):
+        inp = EvalInput(NOW, CFG, {}, {}, ())
+        self.assertTrue(catalog.judged_value(inp, "worker_error_rate", "k", "l", 0.0, "0", catalog._pct).alert_on_warn)
+        self.assertFalse(catalog.judged_value(inp, "cms_5xx_rate", "k", "l", 0.0, "0", catalog._pct).alert_on_warn)
+
     def test_optional_threshold_undeclared_is_display_only(self):
         inp = EvalInput(NOW, CFG, {}, {}, ())
         j = catalog.judged_value(inp, "cms_cache_hit_ratio", "k", "l", 0.1, "10.0%", catalog._pct)
@@ -89,17 +113,21 @@ class VisitorTest(unittest.TestCase):
         self.assertEqual(js["visitor.worker.error_rate"].observed_at, datetime(2026, 6, 1, 11, 57, tzinfo=timezone.utc))
 
     def test_error_rate_boundary(self):
-        js = judge({"festival.cloudflare": cf_result(worker={"errors": 10})})  # 10/1000 = 1.0%
+        js = judge({"festival.cloudflare": cf_result(worker={"errors": 19})})
+        self.assertEqual(js["visitor.worker.error_rate"].status, Status.OK)
+        js = judge({"festival.cloudflare": cf_result(worker={"errors": 20})})  # 20/1000 = 2.0%
         self.assertEqual(js["visitor.worker.error_rate"].status, Status.WARN)
-        self.assertEqual(js["visitor.worker.error_rate"].value, "1.0% (10/1000)")
-        js = judge({"festival.cloudflare": cf_result(worker={"errors": 50})})
-        self.assertEqual(js["visitor.worker.error_rate"].status, Status.CRIT)
+        self.assertEqual(js["visitor.worker.error_rate"].value, "2.0% (20/1000)")
+        self.assertEqual(js["visitor.worker.error_rate"].threshold, "注意 ≥ 2.0%")
+        self.assertTrue(js["visitor.worker.error_rate"].alert_on_warn)
+        js = judge({"festival.cloudflare": cf_result(worker={"errors": 500})})
+        self.assertEqual(js["visitor.worker.error_rate"].status, Status.WARN)  # 異常は宣言しない
 
     def test_min_requests_is_ok_below_and_judged_at(self):
         below = judge({"festival.cloudflare": cf_result(worker={"requests": 49, "errors": 49})})
         self.assertEqual(below["visitor.worker.error_rate"].status, Status.OK)
         at = judge({"festival.cloudflare": cf_result(worker={"requests": 50, "errors": 50})})
-        self.assertEqual(at["visitor.worker.error_rate"].status, Status.CRIT)
+        self.assertEqual(at["visitor.worker.error_rate"].status, Status.WARN)
         cms = judge({"festival.cloudflare": cf_result(cms={"requests": 49, "status_5xx": 49})})
         self.assertEqual(cms["visitor.cms.5xx_rate"].status, Status.OK)
 
@@ -109,12 +137,12 @@ class VisitorTest(unittest.TestCase):
 
     def test_counts_and_latencies(self):
         js = judge({"festival.cloudflare": cf_result(
-            worker={"exceeded": 1, "cpu_p99_ms": 1000}, cms={"origin_p95_ms": 1500},
+            worker={"exceeded": 1, "cpu_p99_ms": 1000}, cms={"origin_p95_ms": 3000},
             media={"status_4xx": 100, "status_5xx": 1})})
         self.assertEqual(
             {k: js[k].status for k in ("visitor.worker.exceeded", "visitor.worker.cpu_p99", "visitor.cms.origin_p95",
                                        "visitor.media.4xx", "visitor.media.5xx")},
-            {"visitor.worker.exceeded": Status.WARN, "visitor.worker.cpu_p99": Status.CRIT,
+            {"visitor.worker.exceeded": Status.WARN, "visitor.worker.cpu_p99": Status.WARN,
              "visitor.cms.origin_p95": Status.WARN, "visitor.media.4xx": Status.CRIT, "visitor.media.5xx": Status.WARN})
 
     def test_no_result_makes_no_items(self):
@@ -177,9 +205,9 @@ def parking(*cams):
 
 
 class ParkingTest(unittest.TestCase):
-    def run_(self, cams=None, sched=None, now=None):
+    def run_(self, cams=None, sched=None, now=None, cfg=CFG):
         res = {"festival.parking": cams or parking(), "festival.schedule": sched or schedule()}
-        inp = EvalInput(now or NOW, CFG, res, {}, ())
+        inp = EvalInput(now or NOW, cfg, res, {}, ())
         return {j.key: j for g in catalog.FUNCTION_GROUPS for j in g.judge(inp)}
 
     def test_healthy(self):
@@ -195,13 +223,33 @@ class ParkingTest(unittest.TestCase):
         self.assertEqual(self.run_(parking(camera(last_captured_at=None)))["function.parking.capture.1"].status,
                          Status.CRIT)
 
+    PARKING_JUDGE = dict(parking_judge_failures=config.Threshold(1, 5),
+                         parking_judge_success_age=config.Threshold(timedelta(minutes=10), timedelta(minutes=20)))
+
+    def test_judge_is_display_only_when_neither_threshold_is_declared(self):
+        j = self.run_(parking(camera(judge_consecutive_failures=9, judge_last_succeeded_at=None)))[
+            "function.parking.judge.1"]
+        self.assertEqual((j.status, j.judged, j.threshold, j.alert_on_warn), (Status.OK, False, None, False))
+        self.assertEqual(j.value, "連続失敗 9 回 / 成功なし")
+
     def test_judge_worse_of_failures_and_age(self):
-        j = lambda **kw: self.run_(parking(camera(**kw)))["function.parking.judge.1"].status
+        cfg = with_thresholds(**self.PARKING_JUDGE)
+        j = lambda **kw: self.run_(parking(camera(**kw)), cfg=cfg)["function.parking.judge.1"].status
         self.assertEqual(j(judge_consecutive_failures=1), Status.WARN)
         self.assertEqual(j(judge_consecutive_failures=5), Status.CRIT)
         self.assertEqual(j(judge_last_succeeded_at=ago(minutes=10)), Status.WARN)
         self.assertEqual(j(judge_last_succeeded_at=ago(minutes=20), judge_consecutive_failures=1), Status.CRIT)
         self.assertEqual(j(judge_last_succeeded_at=None), Status.CRIT)
+
+    def test_judge_uses_only_the_declared_threshold(self):
+        cfg = with_thresholds(parking_judge_failures=config.Threshold(1, 5))
+        j = self.run_(parking(camera(judge_consecutive_failures=1, judge_last_succeeded_at=None)),
+                      cfg=cfg)["function.parking.judge.1"]
+        self.assertEqual((j.status, j.judged, j.threshold), (Status.WARN, True, "失敗 注意 ≥ 1 / 異常 ≥ 5"))
+        cfg = with_thresholds(parking_judge_success_age=config.Threshold(timedelta(minutes=10), None))
+        j = self.run_(parking(camera(judge_consecutive_failures=9, judge_last_succeeded_at=None)),
+                      cfg=cfg)["function.parking.judge.1"]
+        self.assertEqual((j.status, j.judged, j.alert_on_warn, j.threshold), (Status.WARN, True, True, "経過 注意 ≥ 10 分"))
 
     def test_out_of_hours_boundary_end_is_inclusive(self):
         at = lambda h, m, s=0: self.run_(now=datetime(2026, 6, 1, h, m, s, tzinfo=timezone(timedelta(hours=9)))
@@ -305,7 +353,11 @@ class StampBusTest(unittest.TestCase):
         r = result("festival.stamp", [Item("stamp", "s", Status.OK, {
             "failed": 1, "rate_limited": 100, "d1_failed": 0, "window_end": "2026-06-01T11:57:00Z"})])
         js = fjudge({"festival.stamp": r})
-        self.assertEqual({k: j.status for k, j in js.items()}, {
+        self.assertEqual({k: (j.status, j.judged) for k, j in js.items()}, {
+            "function.stamp.failed": (Status.OK, False), "function.stamp.rate_limited": (Status.OK, False),
+            "function.stamp.d1_failed": (Status.OK, False)})
+        cfg = with_thresholds(stamp_failed=config.Threshold(1, 10), stamp_rate_limited=config.Threshold(10, 100))
+        self.assertEqual({k: j.status for k, j in fjudge({"festival.stamp": r}, cfg).items()}, {
             "function.stamp.failed": Status.WARN, "function.stamp.rate_limited": Status.CRIT,
             "function.stamp.d1_failed": Status.OK})
 
@@ -372,7 +424,7 @@ class CapacityTest(unittest.TestCase):
                 Item("cms_cache", "c", Status.OK, {"lookups": 0, "hits": 0, "window_end": "2026-06-01T11:57:00Z"})]),
             "festival.nodes": result("festival.nodes", [node("n1")]),
             "connect.tunnel": result("connect.tunnel", [Item("tunnel", "tunnel", Status.OK,
-                                                            {"state": "healthy", "connections": 4})])})
+                                                            {"state": "healthy", "connections": 12})])})
         self.assertEqual(set(js), {
             "capacity.cms.ready", "capacity.cms.restarts", "capacity.cms.cpu", "capacity.db.primary_cpu",
             "capacity.db.connections", "capacity.db.backends.db-1", "capacity.db.backends.db-2",
@@ -393,12 +445,16 @@ class CapacityTest(unittest.TestCase):
         self.assertEqual(w(ready=1).status, Status.WARN)  # 0.5 は異常の境界 (未満) に達しない
         self.assertEqual(w(ready=0).status, Status.CRIT)
 
-    def test_restart_rules_cms_and_db(self):
+    def test_only_crashloop_is_crit_for_restarts(self):
         w = lambda **o: self.j({"festival.workloads": result("festival.workloads", [wl_cms(**o), wl_db("db-1", **o)])})
-        self.assertEqual(w(restarts_recent=1)["capacity.cms.restarts"].status, Status.WARN)
-        self.assertEqual(w(oom_recent=True)["capacity.cms.restarts"].status, Status.CRIT)
-        self.assertEqual(w(crashloop=True)["capacity.db.restarts"].status, Status.CRIT)
+        for kw in ({"restarts_recent": 1}, {"oom_recent": True}, {"restarts_recent": 3, "oom_recent": True}):
+            for key in ("capacity.cms.restarts", "capacity.db.restarts"):
+                self.assertEqual(w(**kw)[key].status, Status.OK, (kw, key))
+        for key in ("capacity.cms.restarts", "capacity.db.restarts"):
+            self.assertEqual(w(crashloop=True)[key].status, Status.CRIT, key)
+        self.assertEqual(w(oom_recent=True)["capacity.cms.restarts"].value, "OOM")
         self.assertEqual(w(restarts_recent=2)["capacity.db.restarts"].value, "db-1 (再起動 2 回)")
+        self.assertEqual(w(crashloop=True)["capacity.db.restarts"].value, "db-1 (CrashLoop)")
         self.assertEqual(w()["capacity.db.restarts"].value, "なし")
 
     def test_throttle_and_cpu_none_carry_note(self):
@@ -414,9 +470,11 @@ class CapacityTest(unittest.TestCase):
         js = self.j({"festival.workloads": result("festival.workloads", [
                         wl_db("p", cpu_ratio=0.95), wl_db("r", "replica", cpu_ratio=0.99)]),
                      "festival.cnpg": result("festival.cnpg", [
-                         cnpg_db("p", backends=70, unanalyzed_tables=10), cnpg_db("r", "replica", replication_lag_s=10)])})
+                         cnpg_db("p", backends=70, unanalyzed_tables=10), cnpg_db("r", "replica", replication_lag_s=10)])},
+                    with_thresholds(db_unanalyzed_tables=config.Threshold(1, 10),
+                                    db_replica_lag_s=config.Threshold(10, 60)))
         self.assertEqual(js["capacity.db.primary_cpu"].status, Status.CRIT)  # replica の 0.99 は混ざらない
-        self.assertEqual(js["capacity.db.connections"].status, Status.WARN)  # 0.7
+        self.assertEqual(js["capacity.db.connections"].status, Status.CRIT)  # 0.7
         self.assertEqual(js["capacity.db.unanalyzed"].status, Status.CRIT)
         self.assertEqual(js["capacity.db.lag.r"].status, Status.WARN)
         self.assertNotIn("capacity.db.lag.p", js)
@@ -425,8 +483,17 @@ class CapacityTest(unittest.TestCase):
         cf = lambda cms, media: self.j({"festival.cloudflare": result("festival.cloudflare", [
             Item("cms", "cms", Status.OK, {"requests": cms, "window_end": "2026-06-01T11:57:00Z"}),
             Item("media", "media", Status.OK, {"requests": media})])})["capacity.cms.rps"]
-        self.assertEqual(cf(30000, 6000).status, Status.WARN)  # 80 req/s ちょうど
-        self.assertEqual(cf(30000, 30000).status, Status.OK)  # 全部メディアなら 0
+        self.assertEqual(cf(30000, 6000).metric, 80.0)  # (30000-6000)/300
+        self.assertEqual(cf(30000, 30000).metric, 0.0)  # 全部メディアなら 0
+
+    def test_rps_display_only_until_declared(self):
+        cf = {"festival.cloudflare": result("festival.cloudflare", [
+            Item("cms", "cms", Status.OK, {"requests": 30000, "window_end": "2026-06-01T11:57:00Z"}),
+            Item("media", "media", Status.OK, {"requests": 6000})])}
+        self.assertEqual((self.j(cf)["capacity.cms.rps"].judged, self.j(cf)["capacity.cms.rps"].status),
+                         (False, Status.OK))
+        cfg = with_thresholds(cms_rps=config.Threshold(80, 115))
+        self.assertEqual(self.j(cf, cfg)["capacity.cms.rps"].status, Status.WARN)  # 80 req/s ちょうど
 
     def test_cache_hit_display_only_until_declared(self):
         cache = {"festival.cloudflare": result("festival.cloudflare", [
@@ -445,19 +512,20 @@ class CapacityTest(unittest.TestCase):
 
     def test_node_rules(self):
         js = self.j({"festival.nodes": result("festival.nodes", [
-            node("a", ready=False, cpu_ratio=0.85, memory_ratio=0.95, disk_ratio=None)])})
+            node("a", ready=False, cpu_ratio=0.75, memory_ratio=0.95, disk_ratio=None)])})
         self.assertEqual(js["capacity.node.a.ready"].status, Status.CRIT)
         self.assertEqual(js["capacity.node.a.cpu"].status, Status.WARN)
-        self.assertEqual(js["capacity.node.a.memory"].status, Status.CRIT)
+        self.assertEqual((js["capacity.node.a.memory"].status, js["capacity.node.a.memory"].judged), (Status.OK, False))
         self.assertEqual((js["capacity.node.a.disk"].status, js["capacity.node.a.disk"].value), (Status.OK, "—"))
 
     def test_tunnel_takes_worse_of_state_and_connections(self):
         t = lambda status, conns: self.j({"connect.tunnel": result("connect.tunnel", [
             Item("tunnel", "tunnel", status, {"state": "x", "connections": conns})])})["capacity.tunnel"].status
-        self.assertEqual(t(Status.OK, 4), Status.OK)
-        self.assertEqual(t(Status.OK, 3), Status.WARN)
-        self.assertEqual(t(Status.OK, 0), Status.CRIT)
-        self.assertEqual(t(Status.CRIT, 4), Status.CRIT)
+        self.assertEqual(t(Status.OK, 12), Status.OK)
+        self.assertEqual(t(Status.OK, 11), Status.WARN)
+        self.assertEqual(t(Status.OK, 8), Status.WARN)
+        self.assertEqual(t(Status.OK, 7), Status.CRIT)
+        self.assertEqual(t(Status.CRIT, 12), Status.CRIT)
 
 
 class InfraTest(unittest.TestCase):

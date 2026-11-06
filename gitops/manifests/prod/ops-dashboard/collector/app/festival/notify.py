@@ -23,6 +23,7 @@ class Notice:
     threshold: str | None = None
     reason: str | None = None
     since: datetime | None = None  # 異常・情報源の失敗が始まった時刻
+    warn: bool = False  # alert・reminder が注意の通知 (alert_on_warn の項目)
 
 
 @dataclass(frozen=True)
@@ -35,10 +36,11 @@ class SendOutcome:
 def _line(n: Notice, grace_min: int) -> str:
     cur = f" — 現在 {n.value}" if n.value else ""
     th = f" ({n.threshold})" if n.threshold else ""
+    mark = "🟡 注意" if n.warn else "🔴 異常"
     if n.kind == "alert":
-        return f"🔴 異常: {n.label}{cur}{th}"
+        return f"{mark}: {n.label}{cur}{th}"
     if n.kind == "reminder":
-        return f"🔴 異常 (継続): {n.label}{cur}{th}"
+        return f"{mark} (継続): {n.label}{cur}{th}"
     if n.kind == "recover":
         return f"🟢 回復: {n.label}{cur}"
     if n.kind == "removed":
@@ -50,7 +52,9 @@ def _line(n: Notice, grace_min: int) -> str:
 
 def _header(sent: Sequence[Notice]) -> str:
     count = lambda kinds: sum(1 for n in sent if n.kind in kinds)  # noqa: E731
-    parts = [(f"異常 {c} 件") for c in [count(("alert", "reminder", "source_alert"))] if c]
+    warn = sum(1 for n in sent if n.warn and n.kind in ("alert", "reminder"))
+    parts = [f"異常 {c} 件" for c in [count(("alert", "reminder", "source_alert")) - warn] if c]
+    parts += [f"注意 {warn} 件"] if warn else []
     parts += [f"回復 {c} 件" for c in [count(("recover", "source_recover"))] if c]
     parts += [f"対象外 {c} 件" for c in [count(("removed",))] if c]
     return "[当日監視] " + "・".join(parts)
@@ -84,14 +88,16 @@ class FestivalNotifier:
                 continue  # 失敗中の情報源に依存する項目は状態を凍結する (情報源の単位で通知する)
             a = alerts.get(i.key)
             opened = a is not None and a.notified_open
-            if i.status is Status.CRIT:
+            if i.status is Status.CRIT or (i.alert_on_warn and i.status is Status.WARN):
+                warn = i.status is Status.WARN
                 if not opened:
-                    notices.append(Notice(i.key, "alert", i.label, i.value, i.threshold, since=now))
+                    notices.append(Notice(i.key, "alert", i.label, i.value, i.threshold, since=now, warn=warn))
                 elif now - (a.last_notified_at or a.opened_at) >= cfg.renotify:
-                    notices.append(Notice(i.key, "reminder", i.label, i.value, i.threshold, since=a.opened_at))
+                    notices.append(Notice(i.key, "reminder", i.label, i.value, i.threshold, since=a.opened_at,
+                                          warn=warn))
             elif i.status in (Status.OK, Status.EMPTY) and opened:
                 notices.append(Notice(i.key, "recover", i.label, i.value))
-            # 注意・取得遅延・取得失敗は状態を変えない (異常から注意への下降も回復にしない)
+            # alert_on_warn でない項目の注意と、取得遅延・取得失敗は状態を変えない (異常から注意への下降も回復にしない)
         for key, a in alerts.items():
             if a.kind == "item" and a.notified_open and key not in seen:
                 notices.append(Notice(key, "removed", a.label))

@@ -31,6 +31,7 @@ class Judgement:
     observed_at: datetime | None
     note: str | None = None
     judged: bool = True  # False は表示のみ (省略できる閾値が未宣言)
+    alert_on_warn: bool = False  # True は注意で通知する (異常を宣言しない閾値の項目)
     metric: float | None = None  # グラフの値。値を算出できないときは None
     unit: MetricUnit | None = None  # None はグラフの対象外
     warn: float | None = None  # 閾値の線 (metric と同じ単位。期間は秒)
@@ -77,12 +78,18 @@ def grade(name: str, th: Threshold, value: float | None) -> Status:
     if value is None:
         return Status.OK
     if THRESHOLD_DIRECTIONS[name] == "above":
-        return Status.CRIT if value >= th.crit else Status.WARN if value >= th.warn else Status.OK
-    return Status.CRIT if value < th.crit else Status.WARN if value < th.warn else Status.OK
+        if th.crit is not None and value >= th.crit:
+            return Status.CRIT
+        return Status.WARN if value >= th.warn else Status.OK
+    if th.crit is not None and value < th.crit:
+        return Status.CRIT
+    return Status.WARN if value < th.warn else Status.OK
 
 
 def threshold_text(name: str, th: Threshold, fmt: Callable[[float], str]) -> str:
     sym = _SYMBOL[THRESHOLD_DIRECTIONS[name]]
+    if th.crit is None:
+        return f"注意 {sym} {fmt(th.warn)}"
     return f"注意 {sym} {fmt(th.warn)} / 異常 {sym} {fmt(th.crit)}"
 
 
@@ -108,7 +115,8 @@ def judged_value(inp: EvalInput, name: str, key: str, label: str, value: float |
         j = Judgement(key, label, Status.OK, text, None, observed_at, note, judged=False)
     else:
         status = Status.OK if skip else grade(name, th, value)
-        j = Judgement(key, label, status, text, threshold_text(name, th, fmt), observed_at, note)
+        j = Judgement(key, label, status, text, threshold_text(name, th, fmt), observed_at, note,
+                      alert_on_warn=th.crit is None)
     return j if mu is None else replace(with_chart(inp, j, name, mu), metric=_f(value))
 
 
@@ -433,18 +441,26 @@ def _capture(inp: EvalInput, cam: Item, key: str, label: str) -> Judgement:
 
 
 def _judge(inp: EvalInput, cam: Item, key: str, label: str) -> Judgement:
-    th_f = inp.config.thresholds["parking_judge_failures"]
-    th_a = inp.config.thresholds["parking_judge_success_age"]
+    th_f = inp.config.thresholds.get("parking_judge_failures")
+    th_a = inp.config.thresholds.get("parking_judge_success_age")
     fails = cam.values["judge_consecutive_failures"]
     ts = cam.values["judge_last_succeeded_at"]
     age = _age(inp, ts)
-    s_age = Status.CRIT if age is None else grade("parking_judge_success_age", th_a, age)
-    status = worst([grade("parking_judge_failures", th_f, fails), s_age])
     text = f"連続失敗 {fails} 回 / " + ("成功なし" if age is None else f"最終成功から {_dur(age)}")
-    thr = (f"失敗 {threshold_text('parking_judge_failures', th_f, _num)} / "
-           f"経過 {threshold_text('parking_judge_success_age', th_a, _dur)}")
+    at = parse_iso(ts) if ts else None
     err = cam.values.get("judge_last_error") if fails else None
-    return Judgement(key, label, status, text, thr, parse_iso(ts) if ts else None, err, metric=float(fails))
+    if th_f is None and th_a is None:
+        return Judgement(key, label, Status.OK, text, None, at, err, judged=False, metric=float(fails))
+    grades, thr = [], []
+    if th_f is not None:
+        grades.append(grade("parking_judge_failures", th_f, fails))
+        thr.append(f"失敗 {threshold_text('parking_judge_failures', th_f, _num)}")
+    if th_a is not None:
+        none_status = Status.WARN if th_a.crit is None else Status.CRIT
+        grades.append(none_status if age is None else grade("parking_judge_success_age", th_a, age))
+        thr.append(f"経過 {threshold_text('parking_judge_success_age', th_a, _dur)}")
+    return Judgement(key, label, worst(grades), text, " / ".join(thr), at, err, metric=float(fails),
+                     alert_on_warn=any(t.crit is None for t in (th_f, th_a) if t is not None))
 
 
 def _signage(inp: EvalInput):
@@ -631,7 +647,7 @@ def _cms_ready(inp):
 
 
 def _restart_status(v) -> Status:
-    return Status.CRIT if v["oom_recent"] or v["crashloop"] else Status.WARN if v["restarts_recent"] else Status.OK
+    return Status.CRIT if v["crashloop"] else Status.OK
 
 
 def _restart_text(v) -> str:
@@ -656,7 +672,7 @@ def _db_restarts(inp):
     hit = []
     for i in pods:
         status = _worse(status, _restart_status(i.values))
-        if _restart_status(i.values) is not Status.OK:
+        if _restart_text(i.values) != "なし":
             hit.append(f"{i.key.removeprefix('db.')} ({_restart_text(i.values)})")
     yield Judgement("capacity.db.restarts", "DB 再起動", status, ", ".join(hit) or "なし", None, None)
 

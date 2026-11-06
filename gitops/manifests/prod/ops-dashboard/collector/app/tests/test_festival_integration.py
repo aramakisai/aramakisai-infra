@@ -89,6 +89,9 @@ class FestivalFlowTest(unittest.TestCase):
             internal_networks=lambda: ())
 
     def test_evaluation_reaches_fragment_but_not_admin_page(self):
+        self.col.results["festival.cloudflare"] = SourceResult("festival.cloudflare", Status.OK, NOW, NOW, (
+            WORKER, Item("cms", "cms", Status.OK, {"requests": 1000, "status_5xx": 900, "origin_p95_ms": 100,
+                                                   "window_end": "2026-06-01T11:57:00Z"})), None)
         self.evaluator().tick()
         frag = page.render_fragment(self.store, CFG, NOW)
         self.assertIn("festival-fragment", frag)
@@ -159,12 +162,14 @@ class FestivalFlowTest(unittest.TestCase):
     def test_simultaneous_alerts_are_one_message(self):
         d = self.server()
         self.col.results["festival.cloudflare"] = SourceResult("festival.cloudflare", Status.OK, NOW, NOW, (
-            WORKER, Item("cms", "cms", Status.OK, {"requests": 1000, "status_5xx": 900, "origin_p95_ms": 9000,
+            WORKER, Item("cms", "cms", Status.OK, {"requests": 1000, "status_5xx": 900, "origin_p95_ms": 12000,
                                                    "window_end": "2026-06-01T11:57:00Z"})), None)
         self.evaluator(discord=d).tick()
         self.assertEqual(len(d.requests), 1)
         content = json.loads(d.requests[0][1])["content"]
         self.assertGreaterEqual(content.count("🔴 異常:"), 2)
+        self.assertEqual(content.count("🟡 注意: Worker エラー率"), 1)  # alert_on_warn の項目
+        self.assertTrue(content.startswith("[当日監視] 異常 2 件・注意 1 件"))
         self.assertEqual(content.count("[当日監視]"), 1)
 
     def test_over_2000_chars_defers_rest_to_next_send(self):

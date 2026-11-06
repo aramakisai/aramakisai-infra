@@ -37,6 +37,14 @@ class FestivalStoreTest(unittest.TestCase):
         self.store.replace_festival_items([a, b], NOW)
         self.assertEqual(self.store.load_festival_items(), [a, b])
 
+    def test_items_roundtrip_alert_on_warn(self):
+        a = item("visitor.a", Status.WARN, alert_on_warn=True)
+        b = item("visitor.b", Status.WARN)
+        self.store.replace_festival_items([a, b], NOW)
+        got = self.store.load_festival_items()
+        self.assertEqual(got, [a, b])
+        self.assertEqual([i.alert_on_warn for i in got], [True, False])
+
     def test_items_roundtrip_chart_and_breakdown_columns(self):
         bd = Breakdown("fest.bd.worker", ("fest.col.status", "fest.col.requests"), (("200", "10"), ("500", "2")))
         a = item("visitor.a", metric=0.5, unit="ratio", warn=0.1, crit=0.3, breakdown=bd, link_label="fest.link.cloudflare")

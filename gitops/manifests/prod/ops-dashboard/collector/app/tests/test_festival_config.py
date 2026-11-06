@@ -20,10 +20,17 @@ class ParseFestivalTest(unittest.TestCase):
         self.assertIsNotNone(f)
         self.assertEqual(f.renotify, timedelta(minutes=30))
         self.assertEqual(f.max_age["festival.bus"], timedelta(minutes=2))
-        self.assertEqual(f.thresholds["worker_error_rate"], config.Threshold(0.01, 0.05))
+        self.assertEqual(f.thresholds["worker_error_rate"], config.Threshold(0.02, None))
         self.assertEqual(f.thresholds["bus_feed_age"], config.Threshold(timedelta(minutes=2), timedelta(minutes=5)))
         self.assertEqual(f.thresholds["cms_ready_ratio"], config.Threshold(1.0, 0.5))
-        self.assertNotIn("cms_cache_hit_ratio", f.thresholds)
+        self.assertEqual(f.thresholds["cms_5xx_rate"], config.Threshold(0.03, 0.10))
+        for name in ("worker_error_rate", "worker_exceeded", "worker_cpu_p99_ms", "media_5xx", "db_memory_rss_ratio"):
+            self.assertIsNone(f.thresholds[name].crit, name)
+        self.assertEqual(config.OPTIONAL_THRESHOLDS, {
+            "cms_rps", "cms_cache_hit_ratio", "stamp_failed", "stamp_d1_failed", "stamp_rate_limited",
+            "db_replica_lag_s", "db_backends", "node_memory_ratio", "db_unanalyzed_tables",
+            "parking_judge_failures", "parking_judge_success_age"})
+        self.assertEqual(set(f.thresholds), set(config.THRESHOLD_DIRECTIONS) - config.OPTIONAL_THRESHOLDS)
         self.assertEqual(f.min_requests, {"worker_error_rate": 50, "cms_5xx_rate": 50})
         self.assertEqual(f.cms.restart_window, timedelta(minutes=30))
         self.assertEqual((f.cms.namespace, f.cms.pod_selector, f.cms.service_base),
@@ -41,15 +48,17 @@ class ParseFestivalTest(unittest.TestCase):
         self.assertIsNone(config.parse('[[servers]]\nname = "n"\n').festival)
 
     def test_optional_threshold_may_be_missing_or_declared(self):
+        for name in sorted(config.OPTIONAL_THRESHOLDS):
+            raw = raw_festival()
+            self.assertNotIn(name, config.parse_festival(raw).thresholds, name)
         raw = raw_festival()
-        self.assertNotIn("cms_cache_hit_ratio", config.parse_festival(raw).thresholds)
         raw["thresholds"]["cms_cache_hit_ratio"] = {"warn": 0.5, "crit": 0.2}
         self.assertEqual(config.parse_festival(raw).thresholds["cms_cache_hit_ratio"], config.Threshold(0.5, 0.2))
 
     def test_missing_required_threshold(self):
         raw = raw_festival()
-        del raw["thresholds"]["cms_rps"]
-        with self.assertRaisesRegex(config.ConfigError, "cms_rps"):
+        del raw["thresholds"]["cms_ready_ratio"]
+        with self.assertRaisesRegex(config.ConfigError, "cms_ready_ratio"):
             config.parse_festival(raw)
 
     def test_unknown_threshold_name(self):
@@ -60,13 +69,13 @@ class ParseFestivalTest(unittest.TestCase):
 
     def test_reversed_above_threshold(self):
         raw = raw_festival()
-        raw["thresholds"]["cms_rps"] = {"warn": 120, "crit": 80}
-        with self.assertRaisesRegex(config.ConfigError, "cms_rps"):
+        raw["thresholds"]["cms_5xx_rate"] = {"warn": 0.2, "crit": 0.1}
+        with self.assertRaisesRegex(config.ConfigError, "cms_5xx_rate"):
             config.parse_festival(raw)
 
     def test_reversed_below_threshold(self):
         raw = raw_festival()
-        raw["thresholds"]["tunnel_connections"] = {"warn": 1, "crit": 4}
+        raw["thresholds"]["tunnel_connections"] = {"warn": 8, "crit": 12}
         with self.assertRaisesRegex(config.ConfigError, "tunnel_connections"):
             config.parse_festival(raw)
 
@@ -78,13 +87,31 @@ class ParseFestivalTest(unittest.TestCase):
 
     def test_equal_warn_and_crit_is_allowed(self):
         raw = raw_festival()
-        raw["thresholds"]["cms_rps"] = {"warn": 100, "crit": 100}
-        self.assertEqual(config.parse_festival(raw).thresholds["cms_rps"], config.Threshold(100, 100))
+        raw["thresholds"]["cms_5xx_rate"] = {"warn": 0.1, "crit": 0.1}
+        self.assertEqual(config.parse_festival(raw).thresholds["cms_5xx_rate"], config.Threshold(0.1, 0.1))
 
-    def test_threshold_needs_warn_and_crit_only(self):
-        for bad in ({"warn": 1}, {"warn": 1, "crit": 2, "x": 3}, 5, {"warn": "a", "crit": 2}, {"warn": True, "crit": 2}):
+    def test_crit_may_be_omitted_and_skips_ordering_check(self):
+        raw = raw_festival()
+        raw["thresholds"]["cms_5xx_rate"] = {"warn": 0.5}
+        raw["thresholds"]["tunnel_connections"] = {"warn": 12}
+        raw["thresholds"]["bus_feed_age"] = {"warn": "9m"}
+        th = config.parse_festival(raw).thresholds
+        self.assertEqual(th["cms_5xx_rate"], config.Threshold(0.5, None))
+        self.assertEqual(th["tunnel_connections"], config.Threshold(12, None))
+        self.assertEqual(th["bus_feed_age"], config.Threshold(timedelta(minutes=9), None))
+
+    def test_warn_is_required(self):
+        for bad in ({}, {"crit": 0.1}):
             raw = raw_festival()
-            raw["thresholds"]["cms_rps"] = bad
+            raw["thresholds"]["cms_5xx_rate"] = bad
+            with self.assertRaisesRegex(config.ConfigError, "warn", msg=bad):
+                config.parse_festival(raw)
+
+    def test_threshold_shape_and_types(self):
+        for bad in ({"warn": 1, "crit": 2, "x": 3}, 5, {"warn": "a", "crit": 2}, {"warn": True, "crit": 2},
+                    {"warn": 1, "crit": "a"}, {"warn": 1, "crit": None}):
+            raw = raw_festival()
+            raw["thresholds"]["cms_5xx_rate"] = bad
             with self.assertRaises(config.ConfigError, msg=bad):
                 config.parse_festival(raw)
 

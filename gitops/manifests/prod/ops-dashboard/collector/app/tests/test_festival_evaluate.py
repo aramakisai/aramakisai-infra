@@ -64,8 +64,8 @@ class EvaluateTest(unittest.TestCase):
     def test_judged_value_passes_through_when_source_is_fresh(self):
         self.results["festival.cloudflare"] = cf()
         i = self.items(self.ev())["visitor.worker.error_rate"]
-        self.assertEqual(i.status, Status.CRIT)  # 8.0% は異常
-        self.assertTrue(i.notify and i.judged)
+        self.assertEqual(i.status, Status.WARN)  # 8.0% は注意 (異常は宣言しない)
+        self.assertTrue(i.notify and i.judged and i.alert_on_warn)
 
     def test_source_error_overrides_status_and_keeps_last_value(self):
         self.results["festival.cloudflare"] = cf(Status.ERROR, error="HttpError: boom")
@@ -80,7 +80,7 @@ class EvaluateTest(unittest.TestCase):
 
     def test_fetch_exactly_at_max_age_is_fresh(self):
         self.results["festival.cloudflare"] = cf(fetched=NOW - CFG.max_age["festival.cloudflare"])
-        self.assertEqual(self.items(self.ev())["visitor.worker.error_rate"].status, Status.CRIT)
+        self.assertEqual(self.items(self.ev())["visitor.worker.error_rate"].status, Status.WARN)
 
     def test_override_applies_to_display_only_items(self):
         th = {k: v for k, v in CFG.thresholds.items() if k != "cms_cache_hit_ratio"}
@@ -148,7 +148,11 @@ class EvaluateTest(unittest.TestCase):
         self.results["festival.schedule"] = SourceResult("festival.schedule", Status.OK, NOW, NOW, (sched, day), None)
         cfg = dataclasses.replace(CFG, parking=dataclasses.replace(CFG.parking, enabled=True))
         i = self.items(self.ev(cfg))["function.parking.judge.1"]
-        self.assertEqual((i.status, i.note), (Status.CRIT, "boom"))
+        self.assertEqual((i.status, i.judged, i.note), (Status.OK, False, "boom"))
+        cfg = dataclasses.replace(cfg, thresholds={**cfg.thresholds,
+                                                   "parking_judge_failures": config.Threshold(1, 5)})
+        i = self.items(self.ev(cfg))["function.parking.judge.1"]
+        self.assertEqual((i.status, i.judged, i.note), (Status.CRIT, True, "boom"))
 
     def test_source_stale_notes_mean_stale(self):
         for note in ("取得遅延", label("note.metrics_missing")):

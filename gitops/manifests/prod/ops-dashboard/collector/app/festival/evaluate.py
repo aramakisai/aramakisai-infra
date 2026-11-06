@@ -96,7 +96,7 @@ class FestivalEvaluator:
                 status = Status.STALE
                 note = "; ".join(reasons) if reasons else j.note
             out.append(FestivalItem(key=j.key, label=j.label, status=status, value=j.value, threshold=j.threshold,
-                                    observed_at=j.observed_at, note=note, judged=j.judged, metric=j.metric, unit=j.unit, warn=j.warn, crit=j.crit,
+                                    observed_at=j.observed_at, note=note, judged=j.judged, alert_on_warn=j.alert_on_warn, metric=j.metric, unit=j.unit, warn=j.warn, crit=j.crit,
                                     breakdown=j.breakdown, **base))
         return out
 
