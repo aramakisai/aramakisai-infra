@@ -5,6 +5,7 @@ namespace: prod
 
 resources:
   - db-cluster.yaml
+  - db-monitoring.yaml
   - scheduled-backup.yaml
   - db-init-job.yaml
   - analyze-job.yaml

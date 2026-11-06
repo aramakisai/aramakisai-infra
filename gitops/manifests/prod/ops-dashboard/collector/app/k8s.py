@@ -44,3 +44,7 @@ class K8sClient:
         # k3s の kubelet 提供証明書は API サーバーと同じ server CA の署名で SAN に InternalIP を含むため、
         # ServiceAccount の ca.crt で検証できる
         return self.http.get_json(f"https://{node_ip}:10250/stats/summary", bearer=self._token())
+
+    def kubelet_text(self, node_ip: str, path: str) -> str:
+        """kubelet の Prometheus テキスト (/metrics/cadvisor 等)。権限は nodes/metrics。"""
+        return self.http.get_bytes(f"https://{node_ip}:10250{path}", bearer=self._token()).decode("utf-8", "replace")

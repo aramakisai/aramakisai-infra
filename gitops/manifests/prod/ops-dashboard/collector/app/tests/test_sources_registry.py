@@ -35,7 +35,7 @@ class RegistryTest(unittest.TestCase):
         got = sources.load_sources()
         import config
         for s in got:
-            self.assertIn(s.source_id, config.KNOWN_SOURCE_IDS)
+            self.assertIn(s.source_id, config.KNOWN_SOURCE_IDS + config.FESTIVAL_SOURCE_IDS)
 
 
 if __name__ == "__main__":

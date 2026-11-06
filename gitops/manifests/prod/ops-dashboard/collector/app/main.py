@@ -12,6 +12,10 @@ from urllib.parse import parse_qs, urlsplit
 
 import config as config_mod
 import falco_ingest
+from festival import page as festival_page
+from festival.evaluate import FestivalEvaluator
+from festival.heartbeat import FestivalHeartbeat
+from festival.notify import FestivalNotifier
 import model
 import store as store_mod
 from render import page as render_page
@@ -94,6 +98,11 @@ class Collector:
                 snap[s.source_id] = self._execute(s, s.render, None, query)
         return snap
 
+    def latest(self) -> dict[str, SourceResult]:
+        """保持している最新結果の写し。描画時に評価する情報源は実行しない。"""
+        with self._lock:
+            return dict(self.results)
+
     def _loop(self, s: Source):
         while not self._stop.is_set():
             self.collect(s)
@@ -134,6 +143,9 @@ class _Quiet(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
+FESTIVAL_PREFIX = "festival."
+
+
 def make_web_server(collector: Collector, addr, render=render_page.render) -> ThreadingHTTPServer:
     class Handler(_Quiet):
         def do_GET(self):
@@ -142,11 +154,25 @@ def make_web_server(collector: Collector, addr, render=render_page.render) -> Th
                 return self.reply(200, b"ok")
             if u.path in ("/admin/", "/admin"):
                 try:
-                    page = self.render(collector.snapshot(parse_qs(u.query)), parse_qs(u.query))
+                    # 当日監視の結果は /admin/ の要確認に混ぜない (別画面で扱う)
+                    snap = {k: v for k, v in collector.snapshot(parse_qs(u.query)).items()
+                            if not k.startswith(FESTIVAL_PREFIX)}
+                    page = self.render(snap, parse_qs(u.query))
                 except Exception as e:
                     log("render_failed", error=model.safe_error(e))
                     return self.reply(500, b"render failed")
                 return self.reply(200, page.encode(), "text/html; charset=utf-8")
+            if u.path in (festival_page.PAGE_PATH, festival_page.FRAGMENT_PATH):
+                fn = festival_page.render_page if u.path == festival_page.PAGE_PATH else festival_page.render_fragment
+                try:
+                    args = (collector.store, collector.ctx.config.festival, utcnow())
+                    if fn is festival_page.render_fragment:
+                        args += (parse_qs(u.query).get("key", [None])[0],)
+                    body = fn(*args)
+                except Exception as e:
+                    log("festival_render_failed", error=model.safe_error(e))
+                    return self.reply(500, b"render failed")
+                return self.reply(200, body.encode(), "text/html; charset=utf-8")
             self.reply(404, b"not found")
 
     Handler.render = staticmethod(render)
@@ -163,7 +189,7 @@ def run(argv=None, env=None) -> int:
     args = ap.parse_args(argv)
 
     try:
-        cfg = config_mod.load(args.config)
+        cfg = config_mod.load(args.config, env.get("OPS_FESTIVAL_PRIVATE_THRESHOLDS"))
     except config_mod.ConfigError as e:
         print(f"invalid config: {e}", file=sys.stderr)
         return 1
@@ -179,11 +205,19 @@ def run(argv=None, env=None) -> int:
     falco = falco_ingest.make_falco_server(store, ("", args.falco_port), env.get("OPS_FALCO_WEBHOOK_TOKEN", ""), log=log)
     threading.Thread(target=falco.serve_forever, name="falco-http", daemon=True).start()
     collector.start()
+    stop_festival = threading.Event()
+    if cfg.festival is not None:
+        evaluator = FestivalEvaluator(
+            cfg.festival, collector.latest, store,
+            FestivalNotifier(cfg.festival, store, ctx.http, env.get("DISCORD_FESTIVAL_WEBHOOK_URL")),
+            utcnow, FestivalHeartbeat(ctx.http, env.get("HEALTHCHECKS_FESTIVAL_MONITOR_PING_URL"), store))
+        threading.Thread(target=evaluator.run, args=(stop_festival,), name="festival-eval", daemon=True).start()
     signal.signal(signal.SIGTERM, lambda *a: threading.Thread(target=web.shutdown).start())
     log("started", web=args.web_port, falco=args.falco_port)
     try:
         web.serve_forever()
     finally:
+        stop_festival.set()
         collector.stop()
         falco.shutdown()
         store.close()

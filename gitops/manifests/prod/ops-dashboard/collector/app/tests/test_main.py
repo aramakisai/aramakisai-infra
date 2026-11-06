@@ -6,9 +6,12 @@ import time
 import unittest
 import urllib.error
 import urllib.request
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 import falco_ingest
+from festival import page as festival_page
+from unittest import mock
 import main
 import model
 import store as store_mod
@@ -133,6 +136,24 @@ class CollectorTest(unittest.TestCase):
         s = Source("a", timedelta(minutes=1), lambda ctx: ok_result("a", ctx.now()))
         self.assertIn("a", self.collector([s]).results)
 
+    def test_latest_returns_a_copy_without_running_render_time_sources(self):
+        called = []
+        s = Source("r", None, None, render=lambda ctx, q: (called.append(1), ok_result("r", ctx.now()))[1])
+        a = Source("a", timedelta(minutes=1), lambda ctx: ok_result("a", ctx.now()))
+        c = self.collector([s, a])
+        c.collect(a)
+        got = c.latest()
+        self.assertEqual(set(got), {"a"})
+        self.assertEqual(called, [])
+        got.pop("a")
+        self.assertIn("a", c.results)
+
+    def test_latest_includes_festival_results(self):
+        f = Source("festival.x", timedelta(minutes=1), lambda ctx: ok_result("festival.x", ctx.now()))
+        c = self.collector([f])
+        c.collect(f)
+        self.assertIn("festival.x", c.latest())
+
     def test_scheduler_runs_and_stops(self):
         n = []
         s = Source("a", timedelta(milliseconds=20), lambda ctx: (n.append(1), ok_result("a", ctx.now()))[1])
@@ -190,6 +211,27 @@ class ServerTest(unittest.TestCase):
         self.web.RequestHandlerClass.render = staticmethod(lambda snap, q: 1 / 0)
         self.assertEqual(req(self.w + "/admin/")[0], 500)
 
+    def test_admin_snapshot_excludes_festival_sources(self):
+        self.col.results["festival.x"] = ok_result("festival.x", T0)
+        self.assertEqual(req(self.w + "/admin/")[1], b"PAGE good")
+
+    def test_festival_page_and_fragment(self):
+        code, body = req(self.w + "/admin/festival")
+        self.assertEqual(code, 200)
+        self.assertIn(b'id="festival-fragment"', body)
+        code, body = req(self.w + "/admin/festival/fragment")
+        self.assertEqual(code, 200)
+        self.assertTrue(body.startswith(b'<div id="festival-fragment"'))
+
+    def test_festival_fragment_passes_key_query(self):
+        code, body = req(self.w + "/admin/festival/fragment?key=visitor.a")
+        self.assertEqual(code, 200)
+        self.assertIn(b'data-key="visitor.a"', body.split(b">", 1)[0])
+
+    def test_festival_render_failure_is_500(self):
+        with mock.patch.object(festival_page, "render_fragment", side_effect=ZeroDivisionError):
+            self.assertEqual(req(self.w + "/admin/festival/fragment")[0], 500)
+
     def falco_post(self, body, token="s3cret"):
         h = {"Content-Type": "application/json"}
         if token is not None:
@@ -236,6 +278,37 @@ class MainConfigTest(unittest.TestCase):
             p = os.path.join(d, "x.toml")
             open(p, "w").write("[[plans")
             self.assertNotEqual(main.run(["--config", p, "--db", os.path.join(d, "db")], env={}), 0)
+
+
+class AdminFlaggedTest(unittest.TestCase):
+    """既定の描画で、当日監視の異常が /admin/ の要確認に現れないこと。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.store = store_mod.Store(os.path.join(self.tmp.name, "t.db"))
+        self.col = main.Collector(make_ctx(store=self.store), self.store, [])
+        crit = SourceResult("x", Status.CRIT, T0, T0, (Item("k", "L", Status.CRIT, {}, None),), None)
+        err = SourceResult("x", Status.ERROR, T0, None, (), "boom")
+        self.col.results["festival.cloudflare"] = replace(crit, source_id="festival.cloudflare")
+        self.col.results["festival.quake"] = replace(err, source_id="festival.quake")
+        self.web = main.make_web_server(self.col, ("127.0.0.1", 0))
+        threading.Thread(target=self.web.serve_forever, daemon=True).start()
+        self.w = f"http://127.0.0.1:{self.web.server_address[1]}"
+
+    def tearDown(self):
+        self.web.shutdown()
+        self.web.server_close()
+        self.store.close()
+        self.tmp.cleanup()
+
+    def test_festival_results_do_not_reach_admin_page(self):
+        code, body = req(self.w + "/admin/")
+        self.assertEqual(code, 200)
+        self.assertNotIn(b"festival.", body)
+
+    def test_control_non_festival_crit_still_flagged(self):
+        self.col.results["other.x"] = SourceResult("other.x", Status.CRIT, T0, T0, (Item("k", "L", Status.CRIT, {}, None),), None)
+        self.assertIn(b"other.x", req(self.w + "/admin/")[1])
 
 
 if __name__ == "__main__":

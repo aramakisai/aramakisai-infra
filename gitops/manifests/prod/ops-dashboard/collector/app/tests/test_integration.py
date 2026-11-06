@@ -32,7 +32,7 @@ class IntegrationTest(unittest.TestCase):
     def test_prod_config_valid_and_all_sources_registered(self):
         config.load(PROD_TOML)
         ids = {s.source_id for s in load_sources()}
-        self.assertEqual(ids, set(config.KNOWN_SOURCE_IDS))
+        self.assertEqual(ids, set(config.KNOWN_SOURCE_IDS + config.FESTIVAL_SOURCE_IDS))
 
     def test_kustomization_ships_every_module(self):
         # configMapGenerator に無いモジュールは Pod に配布されず、節は黙って読み飛ばされる
@@ -47,7 +47,9 @@ class IntegrationTest(unittest.TestCase):
     def test_every_source_failing_still_renders(self):
         sources = [s for s in load_sources() if s.interval is not None]
         col = self.collect_all(sources)
-        self.assertTrue(all(r.status is Status.ERROR for r in col.results.values()))
+        # 駐車場は宣言で無効 (問い合わせない) のため EMPTY
+        self.assertTrue(all(r.status is (Status.EMPTY if sid == "festival.parking" else Status.ERROR)
+                            for sid, r in col.results.items()))
         html = page.render(col.snapshot({}), {})
         self.assertIn("<html", html)
 

@@ -1,0 +1,23 @@
+# 当日監視画面 (ops-dashboard) が見る指標。pg_stat_user_tables の統計が無い表は
+# プランナが誤った見積りをするため、その数を primary の 9187 番に出す。
+# payload データベースは PreSync Job が作るため target_databases で明示する
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: directus-db-monitoring
+  namespace: prod
+  labels:
+    cnpg.io/reload: ""
+data:
+  queries: |
+    festival_unanalyzed_tables:
+      query: |
+        SELECT count(*) AS count
+        FROM pg_stat_user_tables
+        WHERE last_analyze IS NULL AND last_autoanalyze IS NULL
+      primary: true
+      target_databases: ["payload"]
+      metrics:
+        - count:
+            usage: GAUGE
+            description: "統計情報が一度も取得されていない表の数"

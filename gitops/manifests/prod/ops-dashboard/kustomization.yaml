@@ -53,6 +53,7 @@ configMapGenerator:
       - collector/app/sources/__init__.py
       - collector/app/sources/_buckets.py
       - collector/app/sources/_common.py
+      - collector/app/sources/_promtext.py
       - collector/app/sources/auth_zitadel.py
       - collector/app/sources/billing_cloudflare.py
       - collector/app/sources/billing_github.py
@@ -67,12 +68,32 @@ configMapGenerator:
       - collector/app/sources/cluster_workloads.py
       - collector/app/sources/connect_tailscale.py
       - collector/app/sources/connect_tunnel.py
+      - collector/app/sources/festival_cloudflare.py
+      - collector/app/sources/festival_cnpg.py
+      - collector/app/sources/festival_nodes.py
+      - collector/app/sources/festival_workloads.py
+      - collector/app/sources/festival_stamp.py
+      - collector/app/sources/festival_signage.py
+      - collector/app/sources/festival_quake.py
+      - collector/app/sources/festival_bus.py
+      - collector/app/sources/festival_parking.py
+      - collector/app/sources/festival_schedule.py
       - collector/app/sources/mail.py
       - collector/app/sources/monitor_healthchecks.py
       - collector/app/sources/monitor_uptimerobot.py
       - collector/app/sources/node_maintenance.py
       - collector/app/sources/node_resources.py
       - collector/app/sources/security_falco.py
+  - name: collector-festival
+    files:
+      - collector/app/festival/__init__.py
+      - collector/app/festival/catalog.py
+      - collector/app/festival/chart.py
+      - collector/app/festival/evaluate.py
+      - collector/app/festival/heartbeat.py
+      - collector/app/festival/labels.py
+      - collector/app/festival/notify.py
+      - collector/app/festival/page.py
   - name: collector-render
     files:
       - collector/app/render/__init__.py

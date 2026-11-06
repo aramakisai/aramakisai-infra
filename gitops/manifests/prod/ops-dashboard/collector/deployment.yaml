@@ -38,15 +38,17 @@ spec:
           command:
             - sh
             - -c
-            - mkdir -p /app/sources /app/render/sections &&
+            - mkdir -p /app/sources /app/festival /app/render/sections &&
               cp /src/app/* /app/ &&
               cp /src/sources/* /app/sources/ &&
+              cp /src/festival/* /app/festival/ &&
               cp /src/render/* /app/render/ &&
               cp /src/render-sections/* /app/render/sections/
           volumeMounts:
             - {name: app, mountPath: /app}
             - {name: src-app, mountPath: /src/app, readOnly: true}
             - {name: src-sources, mountPath: /src/sources, readOnly: true}
+            - {name: src-festival, mountPath: /src/festival, readOnly: true}
             - {name: src-render, mountPath: /src/render, readOnly: true}
             - {name: src-render-sections, mountPath: /src/render-sections, readOnly: true}
           resources:
@@ -110,6 +112,8 @@ spec:
           configMap: {name: collector-app}
         - name: src-sources
           configMap: {name: collector-sources}
+        - name: src-festival
+          configMap: {name: collector-festival}
         - name: src-render
           configMap: {name: collector-render}
         - name: src-render-sections
