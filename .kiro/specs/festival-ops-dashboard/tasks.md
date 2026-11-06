@@ -461,7 +461,7 @@
   - _Depends: 8.14_
   - _Boundary: FestivalConfig_
 
-- [ ] 8.16 当日監視画面をウィンドウいっぱいに広げる
+- [x] 8.16 当日監視画面をウィンドウいっぱいに広げる
   - `collector/app/festival/page.py` の CSS: `body` (232 行付近の `grid-template-columns:1360px 560px;grid-template-rows:120px 56px 904px;overflow:hidden`) を `grid-template-columns:1fr 560px;grid-template-rows:120px 56px 1fr` にし、高さを `100vh` (`100dvh`) にして `overflow:hidden` は保つ (ページ全体にスクロールを出さない)。`.band` (234 行付近) の `height:120px` は変えない。`#detail` (287 行付近) は `height:904px` をやめて行いっぱいの高さにし、`overflow:auto` で高さが足りなければパネルの中を縦にスクロールする。`.panel` (252 行付近) は `overflow:auto` のまま、格子の領域の縦横のスクロールを担う。タブ見出し (56px)・詳細パネルの幅 (560px)・`.daychart` (297 行付近) の 528px × 220px は変えない
   - タイルの寸法: `--tile-w`・`--tile-h` (193 行付近) は `tile_grid()` の幅・高さをタイルの最小寸法として渡す。`tile_grid()` の値と既存のテストは変えない。格子の列は `minmax(var(--tile-w), 1fr)`、行は `minmax(var(--tile-h), 1fr)` で、領域が大きければ列・行とも均等に広がり、小さければ最小寸法のまま `.panel` の中をスクロールする。タイルの行 (標準表示のスパークラインの行 S = h' − 158、小型表示の行 2 の R = h' − 80) は、固定の高さをやめ、タイルの高さから残りを受け取る (他の行の高さは変えない)。文字の大きさは変えない
   - 単体テスト (`collector/app/tests/test_festival_page.py`): 既存の `tile_grid()` のテストは値が変わらないので維持する。実際の寸法 (w'・h') の計算を design の式どおりに足し (1920×1080 の 1・2・4・6・8 個で 1336×880・1336×436・664×436・664×288・664×214、2197×1267 の 12 個で 397×350、2560×1440 の 12 個で 488×408、領域が w・h より小さいときは w・h のまま)、描画した CSS が `body` の固定の幅・高さ (`1360px`・`904px`) を持たないこと、`.panel` と `#detail` が `overflow:auto` であること、`--tile-w`・`--tile-h` が `tile_grid()` の値であることを確かめる
