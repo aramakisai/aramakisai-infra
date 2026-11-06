@@ -129,7 +129,7 @@ def _chart(store, i: FestivalItem, state, now: datetime) -> str:
     points = store.load_festival_history(start, end, key=i.key).get(i.key, [])
     return (f'<section class="dc"><h3>{esc(label("fest.detail.chart", start=start.strftime("%H:%M"), end=end.strftime("%H:%M")))}</h3>'
             f'{day_chart(points, start, end, i.unit, i.warn, i.crit, i.label)}'
-            f'<p class="gap">{esc(label("fest.detail.chart_gap"))}</p></section>')
+            f'</section>')
 
 
 def _detail(store, i: FestivalItem, state, now: datetime) -> str:
@@ -307,7 +307,6 @@ grid-template-areas:"h h" "v sp" "th th" "no no" "t t";grid-template-rows:20px m
 #detail .daychart{display:block;width:528px;height:220px;color:var(--mute);fill:currentColor}
 #detail .daychart text{fill:currentColor}
 #detail .chart-empty{height:220px;display:flex;align-items:center;justify-content:center;color:var(--mute)}
-#detail .gap{margin:0;font-size:13px;line-height:18px;color:var(--mute)}
 #detail .db{max-height:334px;overflow:hidden}
 #detail .db h3{font-size:15px;line-height:20px;font-weight:700;color:var(--fg)}
 #detail table{width:100%;table-layout:fixed;border-collapse:separate;border-spacing:0;font-size:13px}

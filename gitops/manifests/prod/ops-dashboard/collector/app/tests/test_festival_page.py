@@ -141,7 +141,8 @@ class FestivalPageTest(unittest.TestCase):
         self.assertIn('class="daychart"', d)
         self.assertIn("名前 visitor.a の当日の推移", d)
         self.assertIn("当日の推移 (00:00〜12:00)", d)
-        self.assertIn(label("fest.detail.chart_gap"), d)
+        self.assertNotIn('class="gap"', d)
+        self.assertNotIn("線の途切れ", d)
         self.assertIn("注意 80%", d)
         self.assertIn("異常 90%", d)
         self.assertEqual(d.count("M"), 2)  # 欠測で 2 本の線に分かれる

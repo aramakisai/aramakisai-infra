@@ -1365,7 +1365,7 @@ interface FestivalClient {
 - 横軸: 時刻の目盛を正時に置き、下に「HH:00」(12px)。目盛の間隔は、範囲が 8 時間以下なら 1 時間、16 時間以下なら 2 時間、それ以上は 3 時間。
 - 値の線: 2px、色は本文の文字色 (`--fg`)。塗りは付けない。
 - 閾値の線 (`warn`・`crit` があるときだけ): 描画域の幅いっぱいの横線 1.5px。注意は `--warn` の破線 (`6 4`)、異常は `--crit` の破線 (`2 3`)。右の余白に「注意 85%」「異常 95%」(12px、線と同じ色) を置き、色だけに頼らない。2 つの文字の縦の間隔が 14px 未満なら、上側の文字を 14px 上へずらす。
-- 欠測: 記録の無い分で線を切り、前後を結ばない (補間しない)。1 点だけの分は、長さ 0 の線分を `stroke-linecap: round` で点として描く。折れ線の下に「線の途切れは記録なし (取得失敗・取得遅延など)」(`fest.detail.chart_gap`) を出す。
+- 欠測: 記録の無い分で線を切り、前後を結ばない (補間しない)。1 点だけの分は、長さ 0 の線分を `stroke-linecap: round` で点として描く。
 - 範囲内に記録が 1 つも無いときは、折れ線の場所に「当日の記録がありません」(`fest.detail.chart_empty`) を出す。
 - `role="img"` と `aria-label` (「<項目名> の当日の推移」) を付ける。
 
@@ -1413,7 +1413,6 @@ interface FestivalClient {
 | `fest.detail.note` | 注記 |
 | `fest.detail.chart` | 当日の推移 ({start}〜{end}) |
 | `fest.detail.chart_aria` | {label} の当日の推移 |
-| `fest.detail.chart_gap` | 線の途切れは記録なし (取得失敗・取得遅延など) |
 | `fest.detail.chart_empty` | 当日の記録がありません |
 | `fest.detail.chart_warn` | 注意 {value} |
 | `fest.detail.chart_crit` | 異常 {value} |

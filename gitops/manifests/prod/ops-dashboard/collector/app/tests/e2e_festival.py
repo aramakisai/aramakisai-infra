@@ -232,7 +232,7 @@ MEASURE_DETAIL = """()=>{
   const q=s=>d.querySelector(s);
   return{d:{...r(d),sh:d.scrollHeight,ch:d.clientHeight},dh:r(q('.dh')),dv:r(q('.dv')),di:r(q('.di')),
     note:r([...d.querySelectorAll('.di dd')].pop()),
-    dc:{...r(q('.dc')),sh:q('.dc')?.scrollHeight,ch:q('.dc')?.clientHeight},dch3:r(q('.dc h3')),svg:r(q('.dc svg')),gap:r(q('.dc .gap')),
+    dc:{...r(q('.dc')),sh:q('.dc')?.scrollHeight,ch:q('.dc')?.clientHeight},dch3:r(q('.dc h3')),svg:r(q('.dc svg')),
     db:{...r(q('.db')),sh:q('.db')?.scrollHeight,ch:q('.db')?.clientHeight},dbh3:r(q('.db h3')),th:r(q('.db th')),
     tds:[...d.querySelectorAll('.db tbody tr')].map(tr=>r(tr.querySelector('td'))),
     more:d.querySelector('.db tr.more')?.textContent??null,dl:r(q('.dl'))};
@@ -332,7 +332,6 @@ class LayoutTest(Base):
         near(m["dch3"]["h"], 20, "dc h3")
         near(m["svg"]["w"], 528, "svg w")
         near(m["svg"]["h"], 220, "svg h")
-        near(m["gap"]["h"], 18, "gap")
         self.assertLessEqual(m["dc"]["sh"], m["dc"]["ch"])
         near(m["dbh3"]["h"], 20, "db h3")
         near(m["th"]["h"], 28, "db th")
@@ -451,7 +450,7 @@ class DetailChartTest(Base):
         self.assertIn(label("fest.detail.chart_warn", value="3%"), texts)
         self.assertIn(label("fest.detail.chart_crit", value="5%"), texts)
         self.assertEqual(self.page.locator("#detail .db tbody tr").count(), 11)
-        self.assertEqual(self.page.locator("#detail .gap").inner_text(), label("fest.detail.chart_gap"))
+        self.assertEqual(self.page.locator("#detail .gap").count(), 0)
         self.assertEqual(self.page.locator("#detail a.dlink").get_attribute("target"), "_blank")
         self.assertEqual(self.page.locator("#detail a.dlink").inner_text(), label("fest.detail.link", name=label("fest.link.netdata")))
 
