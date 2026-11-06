@@ -427,7 +427,7 @@
   - 完了時: runbook と steering に推移の保持とメモリの見積りの記述がある
   - _Requirements: 9.1, 9.6_
 
-- [ ] 8.13 サイネージの接続数を判定せず表示のみにする
+- [x] 8.13 サイネージの接続数を判定せず表示のみにする
   - 設置台数 (`installed`) と `signage_missing` の閾値を設定から取り除き、`function.signage.prod` は閾値名を持たない表示のみの項目にする。`judge` が `judged = False` の `Judgement` を直接返し、現在値は「{prod} 台」とする。グラフは接続数の値だけで、閾値の線 (`warn`・`crit`) は `None` にする
   - 取り除く箇所: `collector/app/config.py` の `SignageTarget.installed`・`_table` の許可キー `("url", "installed")`・`SignageTarget` の生成・閾値の宣言を検証する表の `signage_missing`、`collector/dashboard.toml` の `[festival.signage]` の `installed` とそのコメント・`[festival.thresholds]` の `signage_missing`、`collector/app/festival/catalog.py` の `_signage` の設置台数との比較・`installed <= 0` の分岐・`signage_missing` の判定・線の算出、`collector/app/tests/test_festival_catalog.py` の `SignageTest` (`test_against_installed`・`test_zero_installed_is_display_only`)・`test_signage_line_is_installed_minus_missing`・`test_signage_without_installed_has_no_line`・グラフの対象の表の `function.signage.prod` の注記、`collector/app/tests/test_festival_config.py` の `f.signage.installed` の検証 (33 行付近) と不正値の検証の `installed` の 2 件 (160・161 行付近)
   - テストファイル: `test_festival_catalog.py`、`test_festival_config.py`

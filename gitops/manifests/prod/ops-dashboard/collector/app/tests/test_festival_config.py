@@ -30,7 +30,6 @@ class ParseFestivalTest(unittest.TestCase):
                          ("prod", "app=cms", "http://cms.prod.svc.cluster.local:80"))
         self.assertEqual((f.cloudflared.namespace, f.cloudflared.pod_selector), ("cloudflared", "app=cloudflared"))
         self.assertFalse(f.parking.enabled)
-        self.assertEqual(f.signage.installed, 0)
         self.assertEqual(f.disabled_sources, [])
         self.assertEqual(f.falco.window, timedelta(minutes=15))
 
@@ -156,9 +155,18 @@ class ParseFestivalTest(unittest.TestCase):
         with self.assertRaises(config.ConfigError):
             config.parse_festival(raw)
 
+    def test_signage_installed_and_missing_threshold_are_rejected(self):
+        raw = raw_festival()
+        raw["signage"]["installed"] = 10
+        with self.assertRaises(config.ConfigError):
+            config.parse_festival(raw)
+        raw = raw_festival()
+        raw["thresholds"]["signage_missing"] = {"warn": 1, "crit": 3}
+        with self.assertRaises(config.ConfigError):
+            config.parse_festival(raw)
+
     def test_wrong_types(self):
-        for path, key, bad in ((("parking",), "enabled", "no"), (("signage",), "installed", -1),
-                               (("signage",), "installed", True), (("min_requests",), "cms_5xx_rate", 1.5),
+        for path, key, bad in ((("parking",), "enabled", "no"), (("min_requests",), "cms_5xx_rate", 1.5),
                                ((), "page_url", 3), ((), "disabled_sources", "festival.bus")):
             raw = raw_festival()
             t = raw

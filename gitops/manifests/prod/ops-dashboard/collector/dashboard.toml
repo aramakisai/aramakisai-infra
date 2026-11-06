@@ -202,10 +202,8 @@ hub_object_name = "signage-hub"
 [festival.parking]
 enabled = false
 
-# installed はリハーサルで全端末を接続して確認した台数を設定する。0 の間は判定しない
 [festival.signage]
 url = "https://aramakisai.com/api/signage/stats"
-installed = 0
 
 [festival.cms]
 namespace = "prod"
@@ -244,7 +242,6 @@ media_5xx = { warn = 1, crit = 10 }
 parking_capture_age = { warn = "10m", crit = "15m" }
 parking_judge_failures = { warn = 1, crit = 5 }
 parking_judge_success_age = { warn = "10m", crit = "20m" }
-signage_missing = { warn = 1, crit = 3 }
 quake_cron_age = { warn = "7m", crit = "12m" }
 stamp_failed = { warn = 1, crit = 10 }
 stamp_d1_failed = { warn = 1, crit = 10 }

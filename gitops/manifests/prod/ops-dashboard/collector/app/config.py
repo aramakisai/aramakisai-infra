@@ -35,7 +35,7 @@ THRESHOLD_DIRECTIONS: Mapping[str, Direction] = {
     "worker_error_rate": "above", "worker_exceeded": "above", "worker_cpu_p99_ms": "above",
     "cms_5xx_rate": "above", "cms_origin_p95_ms": "above", "media_4xx": "above", "media_5xx": "above",
     "parking_capture_age": "above", "parking_judge_failures": "above", "parking_judge_success_age": "above",
-    "signage_missing": "above", "quake_cron_age": "above", "stamp_failed": "above", "stamp_d1_failed": "above",
+    "quake_cron_age": "above", "stamp_failed": "above", "stamp_d1_failed": "above",
     "stamp_rate_limited": "above", "bus_feed_age": "above", "cms_ready_ratio": "below",
     "pod_cpu_ratio": "above", "db_connections_ratio": "above", "db_replica_lag_s": "above",
     "db_backends": "above", "db_memory_rss_ratio": "above", "db_unanalyzed_tables": "above",
@@ -110,7 +110,6 @@ class ParkingTarget:
 @dataclass(frozen=True)
 class SignageTarget:
     url: str
-    installed: int
 
 
 @dataclass(frozen=True)
@@ -329,7 +328,7 @@ def parse_festival(raw: Mapping[str, Any]) -> FestivalConfig:
     pk = _table(top["parking"], "festival.parking", ("enabled",))
     if not isinstance(pk["enabled"], bool):
         raise ConfigError("festival.parking.enabled: 真偽値が必要です")
-    sg = _table(top["signage"], "festival.signage", ("url", "installed"))
+    sg = _table(top["signage"], "festival.signage", ("url",))
     cms = _table(top["cms"], "festival.cms", (
         "namespace", "deployment", "pod_selector", "db_cluster", "service_base", "restart_window"))
     cfd = _table(top["cloudflared"], "festival.cloudflared", ("namespace", "pod_selector"))
@@ -350,7 +349,7 @@ def parse_festival(raw: Mapping[str, Any]) -> FestivalConfig:
         cloudflare=CloudflareTargets(*(_str(cf, k, "festival.cloudflare") for k in (
             "worker_script", "cms_host", "media_path_like", "hub_object_name"))),
         parking=ParkingTarget(pk["enabled"]),
-        signage=SignageTarget(_str(sg, "url", "festival.signage"), _int(sg, "installed", "festival.signage")),
+        signage=SignageTarget(_str(sg, "url", "festival.signage")),
         quake_url=_str(top, "quake_url", "festival"), bus_feed_base=_str(top, "bus_feed_base", "festival"),
         disabled_sources=list(disabled),
         cms=CmsTargets(*(_str(cms, k, "festival.cms") for k in (

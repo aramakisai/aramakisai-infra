@@ -243,19 +243,11 @@ def signage(prod):
 
 
 class SignageTest(unittest.TestCase):
-    def status(self, prod, installed):
-        cfg = dataclasses.replace(CFG, signage=dataclasses.replace(CFG.signage, installed=installed))
-        return fjudge({"festival.signage": signage(prod)}, cfg)["function.signage.prod"]
-
-    def test_against_installed(self):
-        s = lambda prod: self.status(prod, 10).status
-        self.assertEqual([s(10), s(12), s(9), s(8), s(7), s(0)],
-                         [Status.OK, Status.OK, Status.WARN, Status.WARN, Status.CRIT, Status.CRIT])
-        self.assertEqual(self.status(9, 10).value, "9 / 10 台")
-
-    def test_zero_installed_is_display_only(self):
-        j = self.status(0, 0)
-        self.assertEqual((j.status, j.judged), (Status.OK, False))
+    def test_display_only_regardless_of_count(self):
+        for prod in (0, 3, 12):
+            j = fjudge({"festival.signage": signage(prod)})["function.signage.prod"]
+            self.assertEqual((j.status, j.judged, j.value, j.threshold, j.warn, j.crit, j.metric),
+                             (Status.OK, False, f"{prod} 台", None, None, None, prod))
 
 
 def quake(cron=..., channels=None, unreachable=False, discord=None):
@@ -616,7 +608,7 @@ GRAPH = {
     "visitor.media.5xx": ("count", "media_5xx"),
     "function.parking.capture.1": ("seconds", "parking_capture_age"),
     "function.parking.judge.1": ("count", "parking_judge_failures"),
-    "function.signage.prod": ("count", None),  # 線は設置台数から求める (別のテスト)
+    "function.signage.prod": ("count", None),
     "function.stamp.failed": ("count", "stamp_failed"),
     "function.stamp.d1_failed": ("count", "stamp_d1_failed"),
     "function.stamp.rate_limited": ("count", "stamp_rate_limited"),
@@ -652,8 +644,7 @@ class ChartMetaTest(unittest.TestCase):
             self.assertIsNotNone(j.metric, key)
             th = CFG.thresholds.get(name) if name else None
             want = (None, None) if th is None else (_sec(th.warn), _sec(th.crit))
-            if key != "function.signage.prod":
-                self.assertEqual((j.warn, j.crit), want, key)
+            self.assertEqual((j.warn, j.crit), want, key)
 
     def test_non_graph_items_have_no_chart_fields(self):
         for key, j in judge(full_results()).items():
@@ -697,17 +688,6 @@ class ChartMetaTest(unittest.TestCase):
         cfg = with_thresholds(cms_cache_hit_ratio=config.Threshold(0.5, 0.2))
         j = judge(full_results(), cfg)["capacity.cms.cache_hit"]
         self.assertEqual((j.warn, j.crit), (0.5, 0.2))
-
-    def test_signage_line_is_installed_minus_missing(self):
-        cfg = dataclasses.replace(CFG, signage=dataclasses.replace(CFG.signage, installed=10))
-        j = judge(full_results(), cfg)["function.signage.prod"]
-        m = CFG.thresholds["signage_missing"]
-        self.assertEqual((j.metric, j.unit, j.warn, j.crit), (9, "count", 10 - m.warn, 10 - m.crit))
-
-    def test_signage_without_installed_has_no_line(self):
-        cfg = dataclasses.replace(CFG, signage=dataclasses.replace(CFG.signage, installed=0))
-        j = judge(full_results(), cfg)["function.signage.prod"]
-        self.assertEqual((j.metric, j.unit, j.warn, j.crit, j.judged), (9, "count", None, None, False))
 
     def test_worker_requests_is_display_only(self):
         j = judge({"festival.cloudflare": cf_result()})["visitor.worker.requests"]

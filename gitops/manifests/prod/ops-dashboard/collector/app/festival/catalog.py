@@ -451,16 +451,10 @@ def _signage(inp: EvalInput):
     item = find_item(inp, "festival.signage", "connections")
     if item is None:
         return
-    prod, installed = item.values["prod"], inp.config.signage.installed
+    prod = item.values["prod"]
     at = parse_iso(item.values["at"]) if item.values.get("at") else None
-    if installed <= 0:
-        yield Judgement("function.signage.prod", "サイネージ接続数 (本番)", Status.OK, f"{prod} 台 (設置台数未設定)",
-                        None, at, judged=False, metric=prod, unit="count")
-        return
-    j = judged_value(inp, "signage_missing", "function.signage.prod", "サイネージ接続数 (本番)",
-                     max(installed - prod, 0), f"{prod} / {installed} 台", _num, observed_at=at, mu="count")
-    # 判定は欠けた台数だが、グラフの値は接続数なので線も接続数の側に換算する (この値以下で注意・異常)
-    yield replace(j, metric=prod, warn=installed - j.warn, crit=installed - j.crit)
+    yield Judgement("function.signage.prod", "サイネージ接続数 (本番)", Status.OK, f"{prod} 台",
+                    None, at, judged=False, metric=prod, unit="count")
 
 
 def _quake_cron_item(inp: EvalInput) -> Item | None:
