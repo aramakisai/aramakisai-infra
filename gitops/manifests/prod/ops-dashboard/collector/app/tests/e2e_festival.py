@@ -328,7 +328,7 @@ class LayoutTest(Base):
         near(m["dv"]["h"], 36, "dv")
         near(m["di"]["h"], 110, "di")
         near(m["note"]["h"], 44, "note 2 行")
-        near(m["dc"]["h"], 258, "dc")
+        near(m["dc"]["h"], 240, "dc")
         near(m["dch3"]["h"], 20, "dc h3")
         near(m["svg"]["w"], 528, "svg w")
         near(m["svg"]["h"], 220, "svg h")

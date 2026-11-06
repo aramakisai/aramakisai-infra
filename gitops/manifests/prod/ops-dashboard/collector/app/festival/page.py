@@ -303,7 +303,7 @@ grid-template-areas:"h h" "v sp" "th th" "no no" "t t";grid-template-rows:20px m
 #detail dt{color:var(--mute)}
 #detail dd{margin:0;min-width:0;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;overflow:hidden}
 #detail h3{margin:0;font-size:13px;line-height:20px;font-weight:400;color:var(--mute)}
-#detail .dc{height:258px;overflow:hidden}
+#detail .dc{height:240px;overflow:hidden}
 #detail .daychart{display:block;width:528px;height:220px;color:var(--mute);fill:currentColor}
 #detail .daychart text{fill:currentColor}
 #detail .chart-empty{height:220px;display:flex;align-items:center;justify-content:center;color:var(--mute)}
