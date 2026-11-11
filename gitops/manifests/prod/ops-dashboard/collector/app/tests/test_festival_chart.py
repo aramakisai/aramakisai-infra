@@ -174,6 +174,7 @@ class FormatAxisTest(unittest.TestCase):
         self.assertEqual(f(1500, "ms"), "1500 ms")
         self.assertEqual(f(120, "seconds"), "120 秒")
         self.assertEqual(f(80, "rps"), "80/s")
+        self.assertEqual(f(12.5, "mbps"), "12.5 Mbps")
         self.assertEqual(f(2.5, "count"), "2.5")
 
 

@@ -402,7 +402,8 @@ def cnpg_db(pod, role="primary", **over):
 
 
 def node(name, **over):
-    v = {"ready": True, "cpu_ratio": 0.1, "memory_ratio": 0.2, "disk_ratio": 0.3, "addresses_count": 2, **over}
+    v = {"ready": True, "cpu_ratio": 0.1, "memory_ratio": 0.2, "disk_ratio": 0.3, "addresses_count": 2,
+         "net_rx_bps": 12_500_000, "net_tx_bps": 625_000, **over}
     return Item(f"node.{name}", name, Status.OK, v)
 
 
@@ -431,7 +432,8 @@ class CapacityTest(unittest.TestCase):
             "capacity.db.memory.db-1", "capacity.db.memory.db-2", "capacity.db.restarts", "capacity.db.unanalyzed",
             "capacity.db.lag.db-2", "capacity.cms.throttle", "capacity.cms.rps", "capacity.cms.cache_hit",
             "capacity.cloudflared.cpu", "capacity.cloudflared.throttle", "capacity.node.n1.ready",
-            "capacity.node.n1.cpu", "capacity.node.n1.memory", "capacity.node.n1.disk", "capacity.tunnel"})
+            "capacity.node.n1.cpu", "capacity.node.n1.memory", "capacity.node.n1.disk", "capacity.node.n1.net_rx",
+            "capacity.node.n1.net_tx", "capacity.tunnel"})
         self.assertEqual({j.status for j in js.values()}, {Status.OK})
         self.assertEqual(js["capacity.cms.rps"].value, "8.00 req/s")  # (3000-600)/300、メディアを除く
         self.assertEqual(js["capacity.db.connections"].value, "10.0% (10/100)")
@@ -517,6 +519,17 @@ class CapacityTest(unittest.TestCase):
         self.assertEqual(js["capacity.node.a.cpu"].status, Status.WARN)
         self.assertEqual((js["capacity.node.a.memory"].status, js["capacity.node.a.memory"].judged), (Status.OK, False))
         self.assertEqual((js["capacity.node.a.disk"].status, js["capacity.node.a.disk"].value), (Status.OK, "—"))
+
+    def test_node_network_is_display_only(self):
+        js = self.j({"festival.nodes": result("festival.nodes", [
+            node("a"), node("b", net_rx_bps=None, net_tx_bps=None)])})
+        rx = js["capacity.node.a.net_rx"]
+        self.assertEqual((rx.label, rx.value, rx.judged, rx.status, rx.unit, rx.metric, rx.warn),
+                         ("a 受信", "100.0 Mbps", False, Status.OK, "mbps", 100.0, None))
+        tx = js["capacity.node.a.net_tx"]
+        self.assertEqual((tx.label, tx.value, tx.metric), ("a 送信", "5.0 Mbps", 5.0))
+        none = js["capacity.node.b.net_rx"]
+        self.assertEqual((none.value, none.metric, none.judged, none.status), ("—", None, False, Status.OK))
 
     def test_tunnel_takes_worse_of_state_and_connections(self):
         t = lambda status, conns: self.j({"connect.tunnel": result("connect.tunnel", [
@@ -666,7 +679,7 @@ def full_results(cache=None):
 
 # 設計「グラフの対象」の表。キー -> (単位, 閾値名)
 GRAPH = {
-    "visitor.worker.requests": ("count", None),
+    "visitor.worker.requests": ("rps", None),
     "visitor.worker.error_rate": ("ratio", "worker_error_rate"),
     "visitor.worker.exceeded": ("count", "worker_exceeded"),
     "visitor.worker.cpu_p99": ("ms", "worker_cpu_p99_ms"),
@@ -698,6 +711,8 @@ GRAPH = {
     "capacity.node.a.cpu": ("ratio", "node_cpu_ratio"),
     "capacity.node.a.memory": ("ratio", "node_memory_ratio"),
     "capacity.node.a.disk": ("ratio", "node_disk_ratio"),
+    "capacity.node.a.net_rx": ("mbps", None),
+    "capacity.node.a.net_tx": ("mbps", None),
     "capacity.tunnel": ("count", "tunnel_connections"),
 }
 
@@ -727,7 +742,7 @@ class ChartMetaTest(unittest.TestCase):
 
     def test_metric_values(self):
         js = judge(full_results())
-        self.assertEqual(js["visitor.worker.requests"].metric, 1000)
+        self.assertAlmostEqual(js["visitor.worker.requests"].metric, 1000 / 300)
         self.assertEqual(js["visitor.worker.error_rate"].metric, 0.0)
         self.assertEqual(js["capacity.cms.cache_hit"].metric, 0.3)
         self.assertEqual(js["capacity.cms.rps"].metric, 8.0)
@@ -760,7 +775,9 @@ class ChartMetaTest(unittest.TestCase):
     def test_worker_requests_is_display_only(self):
         j = judge({"festival.cloudflare": cf_result()})["visitor.worker.requests"]
         self.assertEqual((j.label, j.value, j.status, j.judged, j.threshold, j.warn, j.crit),
-                         ("Worker 要求数", "1000 件", Status.OK, False, None, None, None))
+                         ("Worker 要求数 (秒間)", "3.33 req/s", Status.OK, False, None, None, None))
+        self.assertAlmostEqual(j.metric, 1000 / 300)
+        self.assertEqual(j.unit, "rps")
         self.assertEqual(j.observed_at, datetime(2026, 6, 1, 11, 57, tzinfo=timezone.utc))
 
     def test_link_labels(self):

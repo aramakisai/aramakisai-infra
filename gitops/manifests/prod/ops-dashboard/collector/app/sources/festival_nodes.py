@@ -11,6 +11,8 @@ SOURCE_ID = "festival.nodes"
 
 # fail2ban の照合用。IP なので Item には入れず、評価器が internal_networks() で受け取る。
 _networks: tuple = ()
+# ノード名 -> (取得時刻, rxBytes, txBytes)。kubelet のカウンタは累積値なので前回との差でレートを出す
+_net_prev: dict = {}
 
 
 def internal_networks() -> tuple:
@@ -32,13 +34,35 @@ def _ratio(usage, capacity):
     return round(quantity(usage) / quantity(capacity), 4) if usage and quantity(capacity) else None
 
 
-def _disk(ctx, n):
+def _summary(ctx, n):
     ip = next((a["address"] for a in n["status"].get("addresses", []) if a["type"] == "InternalIP"), None)
     try:
-        fs = ctx.k8s.kubelet_stats(ip)["node"]["fs"]
-        return round(fs["usedBytes"] / fs["capacityBytes"], 4)
-    except (HttpError, KeyError, TypeError, ZeroDivisionError):
+        return ctx.k8s.kubelet_stats(ip)["node"]
+    except (HttpError, KeyError, TypeError):
         return None
+
+
+def _disk(node):
+    try:
+        fs = node["fs"]
+        return round(fs["usedBytes"] / fs["capacityBytes"], 4)
+    except (KeyError, TypeError, ZeroDivisionError):
+        return None
+
+
+def _net_rates(name, node, now):
+    """(rx, tx) のバイト毎秒。初回・カウンタ減少 (再起動)・値欠落は None。"""
+    try:
+        cur = (now, node["network"]["rxBytes"], node["network"]["txBytes"])
+    except (KeyError, TypeError):
+        _net_prev.pop(name, None)
+        return None, None
+    prev = _net_prev.get(name)
+    _net_prev[name] = cur
+    secs = (now - prev[0]).total_seconds() if prev else 0
+    if secs <= 0 or cur[1] < prev[1] or cur[2] < prev[2]:
+        return None, None
+    return (cur[1] - prev[1]) / secs, (cur[2] - prev[2]) / secs
 
 
 def fetch(ctx):
@@ -52,7 +76,9 @@ def fetch(ctx):
         name = n["metadata"]["name"]
         u = usage.get(name, {})
         cap = n["status"]["capacity"]
-        disk = _disk(ctx, n)
+        summary = _summary(ctx, n)
+        disk = _disk(summary)
+        rx, tx = _net_rates(name, summary, ctx.now())
         addrs = _addresses(n)
         nets += [ipaddress.ip_network(a) for a in addrs]
         nets += [ipaddress.ip_network(c) for c in n.get("spec", {}).get("podCIDRs", [])]
@@ -60,7 +86,8 @@ def fetch(ctx):
                           {"ready": (condition(n, "Ready") or {}).get("status") == "True",
                            "cpu_ratio": _ratio(u.get("cpu"), cap["cpu"]),
                            "memory_ratio": _ratio(u.get("memory"), cap["memory"]),
-                           "disk_ratio": disk, "addresses_count": len(addrs)},
+                           "disk_ratio": disk, "addresses_count": len(addrs),
+                           "net_rx_bps": rx, "net_tx_bps": tx},
                           label("note.metrics_missing") if disk is None or not u else None))
     global _networks
     _networks = tuple(nets)

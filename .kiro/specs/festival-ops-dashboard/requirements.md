@@ -100,7 +100,7 @@
 **Objective:** As a 管理者, I want 来場者がエラーを受けているかを把握したい, so that 来場者影響のある異常を最優先で対応できる
 
 #### Acceptance Criteria
-1. The 当日監視画面 shall 来場者向けサイトの Worker (`aramakisai-web`) について、直近の時間窓におけるリクエスト数・エラー率・リソース超過の件数・CPU 時間の上位分位を表示し判定する
+1. The 当日監視画面 shall 来場者向けサイトの Worker (`aramakisai-web`) について、直近の時間窓における秒間リクエスト数・エラー率・リソース超過の件数・CPU 時間の上位分位を表示し判定する
 2. The 当日監視画面 shall CMS (`cms.aramakisai.com`) について、来場者からの直接要求と Worker から CMS への取得要求に限った、直近の時間窓におけるリクエスト数・5xx の比率・オリジン応答時間の上位分位を表示し判定する
 3. The 当日監視画面 shall CMS の 5xx の集計から、Worker のキャッシュ照会の記録 (オリジンへの要求ではないもの) を除外する
 4. The 当日監視画面 shall CMS メディア配信 (`/api/media/`) について、直近の時間窓における 4xx・5xx の件数を表示し判定する
@@ -127,7 +127,7 @@
 1. The 当日監視画面 shall CMS の Pod について、Ready 数と宣言数の対比、直近の再起動・OOM の有無、CPU 使用量と limit の対比を表示し判定する
 2. The 当日監視画面 shall CMS の DB (CNPG `directus-db`) の primary について、CPU 使用量と limit の対比、接続数と上限の対比を表示し判定する
 3. The 当日監視画面 shall CMS の DB の replica について、primary からの遅延を表示し判定する
-4. The 当日監視画面 shall 全ノードについて、Ready 状態、CPU・メモリ・ルートディスクの使用率を表示し判定する
+4. The 当日監視画面 shall 全ノードについて、Ready 状態、CPU・メモリ・ルートディスクの使用率を表示し判定し、ネットワークの送受信量 (判定なし) を表示する
 5. The 当日監視画面 shall Cloudflare Tunnel の状態と接続数を表示し判定する
 6. The 当日監視画面 shall CMS の DB の各 instance について、ページキャッシュを含まないメモリ使用量と memory limit の対比を表示し判定する
 7. The 当日監視画面 shall CMS の DB の各 instance について、直近の再起動・OOM・再起動の繰り返しの有無を表示し判定する

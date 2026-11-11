@@ -53,7 +53,7 @@ class Source:
     timeout: float | None = None
 
 
-MetricUnit = Literal["ratio", "count", "ms", "seconds", "rps"]
+MetricUnit = Literal["ratio", "count", "ms", "seconds", "rps", "mbps"]
 
 
 @dataclass(frozen=True)
