@@ -35,6 +35,7 @@ LABELS: dict[str, str] = {
     "fest.unit.ms": "{value} ms",
     "fest.unit.seconds": "{value} 秒",
     "fest.unit.rps": "{value}/s",
+    "fest.unit.mbps": "{value} Mbps",
     "fest.detail.more_rows": "ほか {n} 行",
     "fest.detail.link": "{name} を開く",
     "fest.detail.loading": "読み込み中",

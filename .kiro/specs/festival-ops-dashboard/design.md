@@ -162,7 +162,7 @@ gitops/manifests/prod/ops-dashboard/collector/app/
 │   ├── festival_parking.py      # CMS /api/ops/parking-health
 │   ├── festival_schedule.py     # CMS site_settings (開催日・駐車場の監視時間)
 │   ├── festival_bus.py          # ODPT の 2 フィードの header.timestamp
-│   ├── festival_nodes.py        # ノードの Ready・CPU・メモリ・ディスク (k8s のノード一覧が正)
+│   ├── festival_nodes.py        # ノードの Ready・CPU・メモリ・ディスク・ネットワーク送受信 (k8s のノード一覧が正)
 │   ├── festival_workloads.py    # CMS・DB・cloudflared の Pod (Ready・再起動・OOM・CPU 対 limit・メモリ・スロットリング・primary) と Pod ごとの内訳
 │   ├── festival_cnpg.py         # CNPG の instance の :9187 (接続数・上限・replica 遅延・統計情報の無い表)
 │   └── _promtext.py             # Prometheus テキスト形式の最小の読み取り
@@ -545,7 +545,7 @@ def parse_festival(raw: Mapping[str, object], private_thresholds: str | None = N
 | `festival.parking` | 60 秒 | `/api/ops/parking-health` | `camera.<id>`: name, lot, last_captured_at, device_received_at, judge_last_succeeded_at, judge_last_failed_at, judge_last_error, judge_consecutive_failures, lot_status_updated_at |
 | `festival.schedule` | 5 分 | `site_settings` (認証なし) | `monitor`: start, end<br>`event_day.<n>`: start_at, end_at |
 | `festival.bus` | 30 秒 | ODPT の `trip_update`・`vehicle` | `feed.trip_update`・`feed.vehicle`: header_timestamp |
-| `festival.nodes` | 60 秒 | k8s nodes、`metrics.k8s.io` nodes、kubelet | `node.<name>`: ready, cpu_ratio, memory_ratio, disk_ratio, addresses_count<br>(アドレスと podCIDRs は fail2ban の照合用に、メモリ内の値として評価器に渡す。後述) |
+| `festival.nodes` | 60 秒 | k8s nodes、`metrics.k8s.io` nodes、kubelet | `node.<name>`: ready, cpu_ratio, memory_ratio, disk_ratio, net_rx_bps, net_tx_bps, addresses_count<br>(アドレスと podCIDRs は fail2ban の照合用に、メモリ内の値として評価器に渡す。後述) |
 | `festival.workloads` | 30 秒 | k8s pods・deployments・CNPG Cluster・`metrics.k8s.io` pods、対象の Pod があるノードの kubelet (`/stats/summary`・`/metrics/cadvisor`) | `cms`: replicas, ready, restarts_recent, oom_recent, crashloop, cpu_ratio_max, throttle_ratio_max, by_pod<br>`db.<pod>`: role, cpu_ratio, memory_rss_ratio, restarts_recent, oom_recent, crashloop, ip<br>`cloudflared`: pods, cpu_ratio_max, throttle_ratio_max, by_pod |
 | `festival.cnpg` | 30 秒 | 各 DB の Pod の `:9187/metrics` | `db.<pod>`: role, backends, max_connections, replication_lag_s, unanalyzed_tables (primary だけ) |
 
@@ -627,7 +627,8 @@ def read_header_timestamp(feed: bytes) -> int:
 
 #### festival.nodes
 - 期待集合は Kubernetes のノード一覧 (D-5)。`[[servers]]` は使わない。
-- ノードごとに、Ready の condition、`metrics.k8s.io` の CPU・メモリ使用量対 capacity、kubelet `/stats/summary` のルートディスクの使用率を取る。1 ノードの kubelet に届かなければ、そのノードのディスクだけ `STALE` にする。
+- ノードごとに、Ready の condition、`metrics.k8s.io` の CPU・メモリ使用量対 capacity、kubelet `/stats/summary` のルートディスクの使用率と `node.network` (既定インターフェース) の `rxBytes`・`txBytes` を取る。1 ノードの kubelet に届かなければ、そのノードのディスクとネットワークだけ `STALE` にする。
+- ネットワークの受信・送信量 (`net_rx_bps`・`net_tx_bps`、バイト毎秒) は、ノード名ごとにモジュール内の変数に前回の取得時刻とカウンタ値を保持し、差分を経過秒で割って出す。初回・カウンタの減少 (ノードの再起動)・値の欠落は `None`。
 - fail2ban の照合用に、ノードの `status.addresses` の全アドレスと `spec.podCIDRs` を取る。これらは IP なので `Item.values` に入れない。情報源のモジュール内の変数に最新値を保持し、評価器は `sources.festival_nodes.internal_networks()` を呼んで受け取る。
 
 ```python
@@ -732,7 +733,7 @@ def parse_samples(text: str, names: Iterable[str]) -> Mapping[str, list[tuple[Ma
   - FestivalNotifier は `judged = False` の項目を計画しない (通知しない)。
   - FestivalPage は判定の文字を「表示のみ」(`fest.status.info`) にし、正常の色を使わない。帯とタブ見出しの件数・最悪の判定には数えない。
   - 閾値を宣言すれば、宣言の変更だけで通常の判定に変わる (3.4)。
-  - `visitor.worker.requests` (項目名「Worker 要求数」、現在値「{requests} 件」)・`function.signage.prod` (項目名「サイネージ接続数 (本番)」、現在値「{prod} 台」) は閾値名を持たない表示のみの項目で、`judge` が `judged = False` の `Judgement` を直接返す。表示・通知・件数の扱いは上と同じ。
+  - `visitor.worker.requests` (項目名「Worker 要求数 (秒間)」、現在値「{rps:.2f} req/s」)・`function.signage.prod` (項目名「サイネージ接続数 (本番)」、現在値「{prod} 台」) は閾値名を持たない表示のみの項目で、`judge` が `judged = False` の `Judgement` を直接返す。表示・通知・件数の扱いは上と同じ。
 - 異常を宣言しない閾値 (`crit` が `None`): `grade` は注意までを返し、異常を返さない。`threshold_text` は「注意 ≥ x」だけを返し、グラフの閾値の線は `crit` を `None` にする。この閾値で判定する項目は `alert_on_warn = True` にし、注意で通知する (FestivalNotifier)。
 - グラフの値 (3.11・3.12): グラフの対象の項目 (後述の表) は、表示用の文字 (`value`) とは別に、数値 (`metric`)・単位 (`unit`)・閾値の線の値 (`warn`・`crit`) を `Judgement` に入れる。`metric` の単位は `unit` に従い、期間の閾値 (`timedelta`) は秒に換算する。表示のみの項目は `warn`・`crit` を `None` にする。
 - 内訳 (3.14): 内訳を持つ項目 (後述の表) は、情報源の結果から表示用に整形した `Breakdown` を `Judgement` に入れる。内訳のために情報源へ問い合わせを足さない。
@@ -805,7 +806,7 @@ CATALOG: tuple[ItemGroup, ...]
 
 | 区分 | 項目キー | 依存する情報源 | 判定 | 閾値名 | 参照先 |
 |---|---|---|---|---|---|
-| 来場者影響 | `visitor.worker.requests` | festival.cloudflare | 要求数 (5 分の窓)。閾値を持たず、常に表示のみ (`judged = False`) | — | Cloudflare ダッシュボード |
+| 来場者影響 | `visitor.worker.requests` | festival.cloudflare | 5 分の窓の要求数を窓の秒数で割った秒間要求数。閾値を持たず、常に表示のみ (`judged = False`) | — | Cloudflare ダッシュボード |
 | 来場者影響 | `visitor.worker.error_rate` | festival.cloudflare | errors ÷ requests (最低要求数未満は正常) | `worker_error_rate` | Cloudflare ダッシュボード |
 | 来場者影響 | `visitor.worker.exceeded` | festival.cloudflare | exceededResources の件数 | `worker_exceeded` | Cloudflare ダッシュボード |
 | 来場者影響 | `visitor.worker.cpu_p99` | festival.cloudflare | CPU 時間の p99 (ms) | `worker_cpu_p99_ms` | Cloudflare ダッシュボード |
@@ -843,6 +844,8 @@ CATALOG: tuple[ItemGroup, ...]
 | 容量 | `capacity.node.<name>.cpu` | festival.nodes | 使用率 | `node_cpu_ratio` | Netdata |
 | 容量 | `capacity.node.<name>.memory` | festival.nodes | 使用率 | `node_memory_ratio` | Netdata |
 | 容量 | `capacity.node.<name>.disk` | festival.nodes | ルートディスクの使用率 | `node_disk_ratio` | `/admin/#sec-node` |
+| 容量 | `capacity.node.<name>.net_rx` | festival.nodes | 受信量 (Mbps、小数 1 桁)。閾値を持たず、常に表示のみ (`judged = False`) | — | `/admin/#sec-node` |
+| 容量 | `capacity.node.<name>.net_tx` | festival.nodes | 送信量 (Mbps、小数 1 桁)。閾値を持たず、常に表示のみ (`judged = False`) | — | `/admin/#sec-node` |
 | 容量 | `capacity.tunnel` | connect.tunnel | 既存の状態の判定と、接続数 | `tunnel_connections` | `/admin/#sec-connect` |
 | 基盤・セキュリティ | `infra.incidents` | ci.github | dr-incident があれば異常、infra-alert があれば注意。件数と表題の一覧 | — | `/admin/#sec-cluster` |
 | 基盤・セキュリティ | `infra.falco` | (SQLite の falco_events) | 窓内の優先度別の件数。`crit_priority` 以上は異常、`warn_priority` 以上は注意 | — | `/admin/#sec-falco` |
@@ -866,7 +869,7 @@ CATALOG: tuple[ItemGroup, ...]
 
 | 項目キー | 値 (`metric`) | 単位 | 閾値の線 |
 |---|---|---|---|
-| `visitor.worker.requests` | 要求数 (5 分の窓) | `count` | なし |
+| `visitor.worker.requests` | 秒間要求数 (5 分の窓の平均) | `rps` | なし |
 | `visitor.worker.error_rate` | errors ÷ requests (requests が 0 なら 0)。最低要求数未満でも値は入れる | `ratio` | `worker_error_rate` |
 | `visitor.worker.exceeded` | exceededResources の件数 (5 分の窓) | `count` | `worker_exceeded` |
 | `visitor.worker.cpu_p99` | CPU 時間の p99 | `ms` | `worker_cpu_p99_ms` |
@@ -894,6 +897,7 @@ CATALOG: tuple[ItemGroup, ...]
 | `capacity.cloudflared.cpu` | CPU 対 limit の最大 | `ratio` | `pod_cpu_ratio` |
 | `capacity.cloudflared.throttle` | CPU スロットリング率の最大 | `ratio` | `cpu_throttle_ratio` |
 | `capacity.node.<name>.cpu`・`.memory`・`.disk` | 使用率 | `ratio` | `node_cpu_ratio`・`node_memory_ratio`・`node_disk_ratio` |
+| `capacity.node.<name>.net_rx`・`.net_tx` | Mbps | `mbps` | なし |
 | `capacity.tunnel` | 接続数 | `count` | `tunnel_connections` |
 
 - 値を算出できないとき (メトリクスが無い、lookups が 0 など) は `metric = None` にする (記録しない)。
@@ -912,7 +916,7 @@ CATALOG: tuple[ItemGroup, ...]
 | `capacity.cms.ready`・`.restarts`・`.cpu`・`.throttle` | Pod ごと | Pod・Ready・CPU・スロットリング・再起動 | festival.workloads `cms.by_pod` | Pod 名順 |
 | `capacity.cloudflared.cpu`・`.throttle` | Pod ごと | Pod・CPU・スロットリング | festival.workloads `cloudflared.by_pod` | Pod 名順 |
 | `capacity.db.*` (`primary_cpu`・`connections`・`backends.<pod>`・`memory.<pod>`・`restarts`・`unanalyzed`・`lag.<pod>`) | instance ごと | Pod・役割・CPU・メモリ・接続・遅延・再起動 | festival.workloads の `db.*` と festival.cnpg の `db.*` を Pod 名で突き合わせる | primary を先頭、残りは Pod 名順 |
-| `capacity.node.<name>.*` (`ready`・`cpu`・`memory`・`disk`) | ノードごと | ノード・Ready・CPU・メモリ・ディスク | festival.nodes の `node.*` | ノード名順 |
+| `capacity.node.<name>.*` (`ready`・`cpu`・`memory`・`disk`・`net_rx`・`net_tx`) | ノードごと | ノード・Ready・CPU・メモリ・ディスク | festival.nodes の `node.*` | ノード名順 |
 
 - 表に無い項目は内訳を持たない。`capacity.tunnel` は、既存の情報源 `connect.tunnel` の取得内容を変えない (Out of Boundary) ため持たない。
 - CPU・メモリ・ディスク・スロットリングの列は、それぞれ CPU 対 limit・メモリ (rss) 対 limit・使用率・スロットリング率 (ノードは使用率)。
@@ -1376,6 +1380,7 @@ interface FestivalClient {
 | `ms` | `{:g} ms` | `1500 ms` |
 | `seconds` | `{:g} 秒` | `120 秒` |
 | `rps` | `{:g}/s` | `80/s` |
+| `mbps` | `{:g} Mbps` | `12.5 Mbps` |
 
 **Implementation Notes**
 - Integration: CSS と JS はページに埋め込み、外部のファイルを読まない。
@@ -1724,7 +1729,7 @@ CREATE TABLE IF NOT EXISTS festival_state (
 from dataclasses import dataclass
 from typing import Literal
 
-MetricUnit = Literal["ratio", "count", "ms", "seconds", "rps"]
+MetricUnit = Literal["ratio", "count", "ms", "seconds", "rps", "mbps"]
 
 @dataclass(frozen=True)
 class Breakdown:

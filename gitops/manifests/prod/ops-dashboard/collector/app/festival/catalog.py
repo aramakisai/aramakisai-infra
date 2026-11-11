@@ -11,6 +11,7 @@ from typing import Callable, Iterable, Mapping
 from config import OPTIONAL_THRESHOLDS, THRESHOLD_DIRECTIONS, FestivalConfig, Threshold
 from model import Breakdown, FestivalStateRow, Item, MetricUnit, SourceResult, Status, parse_iso, worst
 from render.sections.monitoring import NETDATA_URL
+from sources.festival_cloudflare import WINDOW
 from sources.security_falco import PRIORITIES
 
 
@@ -350,13 +351,13 @@ def _uptime(inp: EvalInput):
 def _worker_requests(inp: EvalInput):
     item = find_item(inp, "festival.cloudflare", "worker")
     if item is not None:
-        n = item.values["requests"]
-        yield Judgement("visitor.worker.requests", "Worker 要求数", Status.OK, f"{n} 件", None, _window_end(item),
-                        judged=False, metric=n, unit="count")
+        rps = item.values["requests"] / CF_WINDOW_SECONDS
+        yield Judgement("visitor.worker.requests", "Worker 要求数 (秒間)", Status.OK, f"{rps:.2f} req/s", None,
+                        _window_end(item), judged=False, metric=rps, unit="rps")
 
 
 VISITOR_GROUPS: tuple[ItemGroup, ...] = (
-    _group("visitor.worker.requests", "Worker 要求数", _CF, _worker_requests),
+    _group("visitor.worker.requests", "Worker 要求数 (秒間)", _CF, _worker_requests),
     _group("visitor.worker.error_rate", "Worker エラー率", _CF, _worker_error_rate, bd=_bd_worker),
     _group("visitor.worker.exceeded", "Worker リソース超過", _CF,
            _metric("festival.cloudflare", "worker", "exceeded", "worker_exceeded",
@@ -592,7 +593,7 @@ NODE_LINK = "/admin/#sec-node"
 CONNECT_LINK = "/admin/#sec-connect"
 FALCO_LINK = "/admin/#sec-falco"
 FAIL2BAN_LINK = "/admin/#sec-fail2ban"
-CF_WINDOW_SECONDS = 300  # festival_cloudflare の窓 [floor(now)-8分, floor(now)-3分)
+CF_WINDOW_SECONDS = WINDOW.total_seconds()
 _WORKLOADS, _CNPG, _NODES = "festival.workloads", "festival.cnpg", "festival.nodes"
 _RANK = {Status.OK: 0, Status.WARN: 1, Status.CRIT: 2}
 
@@ -720,6 +721,11 @@ def _node(inp):
                                   ("disk_ratio", "node_disk_ratio", "disk")):
             yield _jv(inp, i, name, f"capacity.node.{n}.{what}", f"{n} {what.upper() if what == 'cpu' else what}",
                       v[field], _pct, mu="ratio")
+        for field, what, text in (("net_rx_bps", "net_rx", "受信"), ("net_tx_bps", "net_tx", "送信")):
+            mbps = None if v[field] is None else v[field] * 8 / 1e6
+            yield Judgement(f"capacity.node.{n}.{what}", f"{n} {text}", Status.OK,
+                            "—" if mbps is None else f"{mbps:.1f} Mbps", None, None,
+                            i.note if mbps is None else None, judged=False, metric=mbps, unit="mbps")
 
 
 _cap = lambda key, label, sources, judge, link, bd=None: _group(  # noqa: E731
