@@ -31,6 +31,22 @@ def cf_result(**over):
     return result("festival.cloudflare", [Item(k, k, Status.OK, v) for k, v in vals.items()])
 
 
+def traffic_items(counts=None, caches=None):
+    """sources.festival_cloudflare._traffic と同じ形の項目。counts は設定のホスト順に対応しない部分だけ指定する。"""
+    counts = {"aramakisai.com": 700, "cms.aramakisai.com": 50, "other": 50} if counts is None else counts
+    caches = caches or {"aramakisai.com": {"hit": 600, "miss": 100}, "cms.aramakisai.com": {"dynamic": 50},
+                        "other": {"hit": 50}}
+    hosts = [*CFG.cloudflare.traffic_hosts, "other"]
+    we = "2026-06-01T11:57:00Z"
+    return [Item("traffic.total", "全リクエスト", Status.OK, {
+        "requests": sum(counts.values()), "window_end": we,
+        "by_host": [{"host": h, "count": counts.get(h, 0)} for h in hosts]}),
+        *[Item(f"traffic.host.{h}", h, Status.OK, {
+            "requests": counts.get(h, 0), "window_end": we,
+            "by_cache_status": [{"cache_status": k, "count": n} for k, n in caches.get(h, {}).items()]})
+          for h in hosts]]
+
+
 def judge(results, cfg=CFG):
     inp = EvalInput(NOW, cfg, results, {}, ())
     return {j.key: j for g in CATALOG for j in g.judge(inp)}
@@ -660,7 +676,7 @@ def full_results(cache=None):
     """グラフの対象の全項目 (カメラ・DB instance・ノードを各 1 つ以上) を作れる入力。"""
     return {
         "festival.cloudflare": result("festival.cloudflare", [
-            *cf_result(cms={"requests": 3000}, media={"requests": 600}).items,
+            *cf_result(cms={"requests": 3000}, media={"requests": 600}).items, *traffic_items(),
             Item("cms_cache", "c", Status.OK, {"lookups": 100, "hits": 30, "window_end": "2026-06-01T11:57:00Z"} if cache is None else cache)]),
         "festival.parking": parking(), "festival.schedule": schedule(),
         "festival.signage": signage(9),
@@ -687,6 +703,12 @@ GRAPH = {
     "visitor.cms.origin_p95": ("ms", "cms_origin_p95_ms"),
     "visitor.media.4xx": ("count", "media_4xx"),
     "visitor.media.5xx": ("count", "media_5xx"),
+    "traffic.total": ("rps", None),
+    **{f"traffic.host.{h}": ("rps", None) for h in (*CFG.cloudflare.traffic_hosts, "other")},
+    "traffic.worker.requests": ("rps", None),
+    "traffic.cms.rps": ("rps", "cms_rps"),
+    "traffic.node.a.net_rx": ("mbps", None),
+    "traffic.node.a.net_tx": ("mbps", None),
     "function.parking.capture.1": ("seconds", "parking_capture_age"),
     "function.parking.judge.1": ("count", "parking_judge_failures"),
     "function.signage.prod": ("count", None),
@@ -943,3 +965,70 @@ class BreakdownTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TrafficTest(unittest.TestCase):
+    def j(self, results=None, cfg=CFG):
+        inp = EvalInput(NOW, cfg, full_results() if results is None else results, {}, ())
+        return {j.key: j for g in catalog.TRAFFIC_GROUPS for j in g.judge(inp)}
+
+    def test_order_total_hosts_other_then_duplicates(self):
+        keys = list(self.j())
+        hosts = [f"traffic.host.{h}" for h in CFG.cloudflare.traffic_hosts]
+        self.assertEqual(keys, ["traffic.total", *hosts, "traffic.host.other", "traffic.worker.requests",
+                                "traffic.cms.rps", "traffic.node.a.net_rx", "traffic.node.a.net_tx"])
+
+    def test_rps_has_three_significant_digits(self):
+        self.assertEqual([catalog._rps(v) for v in (0, 0.75, 9.996, 10, 26.4, 99.96, 100, 139.71, 1234.5)],
+                         ["0.00", "0.75", "10.0", "10.0", "26.4", "100", "100", "140", "1234"])
+
+    def test_total_and_hosts(self):
+        js = self.j()
+        t = js["traffic.total"]
+        self.assertEqual((t.label, t.value, t.judged, t.unit, t.status), ("全リクエスト (秒間)", "2.67 req/s", False, "rps",
+                                                                        Status.OK))
+        self.assertAlmostEqual(t.metric, 800 / 300)
+        h = js["traffic.host.cms.aramakisai.com"]
+        self.assertEqual((h.label, h.value, h.judged, h.unit), ("cms.aramakisai.com", "0.17 req/s", False, "rps"))
+        self.assertEqual(js["traffic.host.other"].label, "その他")
+        self.assertEqual(js["traffic.host.dash.aramakisai.com"].value, "0.00 req/s")
+
+    def test_total_breakdown_sorted_by_rps(self):
+        rows = self.j()["traffic.total"].breakdown.rows
+        self.assertEqual(self.j()["traffic.total"].breakdown.columns, ("fest.col.host", "fest.col.rps", "fest.col.count"))
+        self.assertEqual(rows[:3], (("aramakisai.com", "2.33", "700"), ("cms.aramakisai.com", "0.17", "50"),
+                                    ("その他", "0.17", "50")))
+        self.assertEqual(len(rows), 15)
+
+    def test_host_breakdown_by_cache_status(self):
+        bd = self.j()["traffic.host.aramakisai.com"].breakdown
+        self.assertEqual(bd.columns, ("fest.col.cache_status", "fest.col.count", "fest.col.ratio"))
+        self.assertEqual(bd.rows, (("hit", "600", "85.7%"), ("miss", "100", "14.3%")))
+        self.assertIsNone(self.j()["traffic.host.dash.aramakisai.com"].breakdown)
+
+    def test_duplicates_match_originals_but_are_not_judged(self):
+        cfg = with_thresholds(cms_rps=config.Threshold(1, 20))
+        inp = EvalInput(NOW, cfg, full_results(), {}, ())
+        orig = {j.key: j for g in catalog.CATALOG for j in g.judge(inp)}
+        for new, old in (("traffic.worker.requests", "visitor.worker.requests"), ("traffic.cms.rps", "capacity.cms.rps"),
+                         ("traffic.node.a.net_rx", "capacity.node.a.net_rx"),
+                         ("traffic.node.a.net_tx", "capacity.node.a.net_tx")):
+            n, o = orig[new], orig[old]
+            self.assertEqual(dataclasses.replace(n, key=o.key, judged=o.judged, status=o.status,
+                                                 alert_on_warn=o.alert_on_warn), o, new)
+            self.assertFalse(n.judged, new)
+            self.assertEqual(n.status, Status.OK, new)
+        self.assertEqual(orig["capacity.cms.rps"].status, Status.WARN)  # 元は判定される
+        self.assertNotIn("traffic.node.a.cpu", orig)
+        nodes = next(g for g in catalog.TRAFFIC_GROUPS if g.key_prefix == "traffic.node.")
+        self.assertIsNotNone(orig["traffic.node.a.net_rx"].breakdown)
+        self.assertEqual(nodes.category, catalog.Category.TRAFFIC)
+
+    def test_old_results_without_traffic_items_yield_nothing_for_them(self):
+        old = full_results()
+        old["festival.cloudflare"] = result("festival.cloudflare", [
+            i for i in old["festival.cloudflare"].items if not i.key.startswith("traffic.")])
+        keys = set(self.j(old))
+        self.assertEqual(keys, {"traffic.worker.requests", "traffic.cms.rps", "traffic.node.a.net_rx",
+                                "traffic.node.a.net_tx"})
+        self.assertEqual(self.j({}), {})

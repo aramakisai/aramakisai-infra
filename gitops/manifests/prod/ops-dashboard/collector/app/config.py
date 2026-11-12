@@ -105,6 +105,7 @@ class CloudflareTargets:
     cms_host: str
     media_path_like: str
     hub_object_name: str
+    traffic_hosts: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -356,7 +357,11 @@ def parse_festival(raw: Mapping[str, Any], private_thresholds: str | None = None
     mr = _table(top["min_requests"], "festival.min_requests", MIN_REQUESTS_KEYS)
     min_requests = {k: _int(mr, k, "festival.min_requests") for k in MIN_REQUESTS_KEYS}
 
-    cf = _table(top["cloudflare"], "festival.cloudflare", ("worker_script", "cms_host", "media_path_like", "hub_object_name"))
+    cf = _table(top["cloudflare"], "festival.cloudflare", ("worker_script", "cms_host", "media_path_like", "hub_object_name", "traffic_hosts"))
+    hosts = cf["traffic_hosts"]
+    if not isinstance(hosts, list) or not hosts or not all(isinstance(h, str) and h for h in hosts) \
+            or len(set(hosts)) != len(hosts):
+        raise ConfigError("festival.cloudflare.traffic_hosts: 重複しない空でない文字列の配列が必要です")
     pk = _table(top["parking"], "festival.parking", ("enabled",))
     if not isinstance(pk["enabled"], bool):
         raise ConfigError("festival.parking.enabled: 真偽値が必要です")
@@ -379,7 +384,7 @@ def parse_festival(raw: Mapping[str, Any], private_thresholds: str | None = None
         source_failure_grace=parse_duration(top["source_failure_grace"], "festival.source_failure_grace"),
         max_age=max_age, thresholds=thresholds, min_requests=min_requests,
         cloudflare=CloudflareTargets(*(_str(cf, k, "festival.cloudflare") for k in (
-            "worker_script", "cms_host", "media_path_like", "hub_object_name"))),
+            "worker_script", "cms_host", "media_path_like", "hub_object_name")), tuple(hosts)),
         parking=ParkingTarget(pk["enabled"]),
         signage=SignageTarget(_str(sg, "url", "festival.signage")),
         quake_url=_str(top, "quake_url", "festival"), bus_feed_base=_str(top, "bus_feed_base", "festival"),

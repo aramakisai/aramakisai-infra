@@ -12,7 +12,7 @@ from render.components import JST, Raw, _MARK, esc
 
 PAGE_PATH = "/admin/festival"
 FRAGMENT_PATH = "/admin/festival/fragment"
-TABS = ("visitor", "function", "capacity", "infra")
+TABS = ("visitor", "traffic", "function", "capacity", "infra")
 # 格子の領域 (1360x904 から内側の余白 12px を引いた寸法) とタイルの寸法の制約。ブラウザの幅には依存させない
 GRID_W, GRID_H, GAP = 1336, 880, 8
 TILE_MIN_W, TILE_MIN_H, TILE_MAX_W, TILE_MAX_H = 200, 108, 640, 360
@@ -24,7 +24,7 @@ BAND_NAMES_MAX = 5
 KEY_MAX = 200
 BREAKDOWN_MAX_ROWS = 11
 
-_MARKS = {**{s.value: m for s, m in _MARK.items()}, "info": "◇"}
+_MARKS = {s.value: m for s, m in _MARK.items()}
 
 
 def _view_status(i: FestivalItem) -> str:
@@ -33,7 +33,10 @@ def _view_status(i: FestivalItem) -> str:
 
 
 def _badge(name: str) -> str:
-    return f'<span class="badge s-{name}"><span aria-hidden="true">{_MARKS[name]}</span> {esc(label("fest.status." + name))}</span>'
+    if name == "info":
+        return ""
+    return (f'<span class="badge s-{name}" role="img" aria-label="{esc(label("fest.status." + name))}">'
+            f'<span aria-hidden="true">{_MARKS[name]}</span></span>')
 
 
 def _hms(dt: datetime | None) -> str:
@@ -215,6 +218,26 @@ def _sparks(store, items, state) -> dict[str, str]:
     return {i.key: sparkline(hist[i.key], end) for i in items if i.unit and i.key in hist}
 
 
+def _traffic_rank(hosts: tuple[str, ...]):
+    """トラフィックのタブの並び: 全リクエスト、設定のホスト順、その他、Worker、CMS、ノード名順の受信・送信。"""
+    def rank(i: FestivalItem):
+        k = i.key
+        if k == "traffic.total":
+            return (0,)
+        if k == "traffic.host.other":
+            return (2,)
+        if k.startswith("traffic.host."):
+            h = k.removeprefix("traffic.host.")
+            return (1, hosts.index(h) if h in hosts else len(hosts))
+        if k == "traffic.worker.requests":
+            return (3,)
+        if k == "traffic.cms.rps":
+            return (4,)
+        node, _, kind = k.removeprefix("traffic.node.").rpartition(".")
+        return (5, node, kind != "net_rx")
+    return rank
+
+
 def render_fragment(store, festival, now: datetime, key: str | None = None) -> str:
     """festival は config.festival。None (宣言なし) のときは宣言が無い旨だけを出す。key は選択中の項目。"""
     state = store.load_festival_state()
@@ -225,6 +248,7 @@ def render_fragment(store, festival, now: datetime, key: str | None = None) -> s
         return f'{root}<p class="unconf">{esc(label("fest.unconfigured"))}</p></div>'
     items = store.load_festival_items()
     by = {c: [i for i in items if i.category == c] for c in TABS}
+    by["traffic"].sort(key=_traffic_rank(festival.cloudflare.traffic_hosts))
     tabs = "".join(_tab_head(c, by[c], c == TABS[0]) for c in TABS)
     sparks = _sparks(store, items, state)
     panels = "".join(_panel(c, by[c], c == TABS[0], sparks) for c in TABS)
@@ -257,7 +281,7 @@ background:var(--bg);color:var(--fg);font:inherit;font-size:17px;cursor:pointer;
 .badge{display:inline-block;padding:0 8px;border-radius:10px;border:1px solid currentColor;font-size:13px;font-weight:600;white-space:nowrap}
 .badge.s-ok{color:var(--ok)}.badge.s-warn{color:var(--warn)}.badge.s-crit{color:var(--crit)}
 .badge.s-error{color:var(--error);background:color-mix(in srgb,var(--error) 12%,transparent)}
-.badge.s-stale,.badge.s-info{color:var(--stale)}.badge.s-empty{color:var(--empty)}
+.badge.s-stale{color:var(--stale)}.badge.s-empty{color:var(--empty)}
 .panels{grid-column:1;grid-row:3;min-height:0;min-width:0}
 .panel{height:100%;overflow:auto;padding:12px;display:grid;grid-template-columns:repeat(var(--cols),minmax(var(--tile-w),1fr));
 grid-auto-rows:minmax(var(--tile-h),1fr);gap:8px}
@@ -323,7 +347,7 @@ button:focus-visible,a:focus-visible{outline:3px solid var(--fg);outline-offset:
 JS = r"""
 (()=>{
 const L=JSON.parse(document.getElementById('festival-labels').textContent);
-const TABS=['visitor','function','capacity','infra'];
+const TABS=['visitor','traffic','function','capacity','infra'];
 const $=(s,r=document)=>r.querySelector(s);
 const hashTab=()=>{const h=location.hash.slice(1);return TABS.includes(h)?h:'visitor'};
 // key: 利用者が選んだ項目、auto: 自動選択の項目、gone: key の項目が消えたことを 1 回表示済み、seq: 最後に出した断片の要求の連番
@@ -406,7 +430,7 @@ document.addEventListener('keydown',e=>{
   if(e.key==='Escape'&&st.key){selectItem(null);return}
   const b=e.target.closest&&e.target.closest('[role=tab]');if(!b)return;
   const i=TABS.indexOf(b.dataset.tabId);
-  const j={ArrowRight:(i+1)%4,ArrowLeft:(i+3)%4,Home:0,End:3}[e.key];
+  const j={ArrowRight:(i+1)%TABS.length,ArrowLeft:(i+TABS.length-1)%TABS.length,Home:0,End:TABS.length-1}[e.key];
   if(j===undefined)return;
   e.preventDefault();selectTab(TABS[j]);$('#tab-'+TABS[j]).focus();
 });

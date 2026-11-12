@@ -40,6 +40,20 @@ class ParseFestivalTest(unittest.TestCase):
         self.assertEqual(f.disabled_sources, [])
         self.assertEqual(f.falco.window, timedelta(minutes=15))
 
+    def test_traffic_hosts(self):
+        hosts = config.load(PROD_TOML).festival.cloudflare.traffic_hosts
+        self.assertEqual(len(hosts), 14)
+        self.assertEqual((hosts[0], hosts[-1]), ("aramakisai.com", "origin-2025.aramakisai.com"))
+        for bad in ([], "a.example.com", ["a", "a"], ["a", ""], ["a", 1]):
+            raw = raw_festival()
+            raw["cloudflare"]["traffic_hosts"] = bad
+            with self.assertRaisesRegex(config.ConfigError, "traffic_hosts"):
+                config.parse_festival(raw)
+        raw = raw_festival()
+        del raw["cloudflare"]["traffic_hosts"]
+        with self.assertRaisesRegex(config.ConfigError, "traffic_hosts"):
+            config.parse_festival(raw)
+
     def test_signage_service_token_is_declared_as_credential(self):
         cfg = config.load(PROD_TOML)
         self.assertIn("collector サイネージ Service Token", [c.name for c in cfg.credentials])

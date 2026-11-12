@@ -197,6 +197,23 @@ worker_script = "aramakisai-web"
 cms_host = "cms.aramakisai.com"
 media_path_like = "/api/media/%"
 hub_object_name = "signage-hub"
+# トラフィックタブに出すホスト (表示順)。一覧に無いホストの件数は「その他」に合算する
+traffic_hosts = [
+  "aramakisai.com",
+  "dev.aramakisai.com",
+  "shift.aramakisai.com",
+  "karaage.aramakisai.com",
+  "cms.aramakisai.com",
+  "idp.aramakisai.com",
+  "argocd.aramakisai.com",
+  "presence.aramakisai.com",
+  "vault.aramakisai.com",
+  "dash.aramakisai.com",
+  "webmail.aramakisai.com",
+  "api.aramakisai.com",
+  "www.aramakisai.com",
+  "origin-2025.aramakisai.com",
+]
 
 # web 側の反映前は false
 [festival.parking]
