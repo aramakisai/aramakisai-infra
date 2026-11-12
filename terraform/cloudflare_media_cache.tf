@@ -75,9 +75,12 @@ resource "cloudflare_ruleset" "directus_assets_cache" {
 
   # CMS の公開 JSON 応答 (GET /api/*) をエッジで 60 秒キャッシュする。
   # サイネージ・駐車場は保存から数秒以内の反映が要件、announcements/topics は公開日時で
-  # 保存なしに公開へ切り替わるため除外する。ただしサイトの取得には即時反映の要件が無いため、
-  # 目印のクエリ __edge=1 付きに限り performance_slots / stages / sponsors / globals/site_settings
-  # をキャッシュ対象に戻す。目印があっても他の除外は解除しない。
+  # 保存なしに公開へ切り替わるため除外する。ただしサイトの取得には即時反映の要件が無く、
+  # 公開日時の条件を分単位に丸めた URL で取得するため 60 秒の遅れが公開時刻を越えて残らない。
+  # そこで目印のクエリ __edge=1 付きに限り performance_slots / stages / sponsors /
+  # globals/site_settings / announcements / topics と media 一覧 (/api/media 完全一致) を
+  # キャッシュ対象に戻す。/api/media/ 配下は別ルールの管轄なので戻さない。
+  # 目印があっても他の除外は解除しない。
   # Cookie/Authorization 付きは認証状態で応答が変わるため対象外。
   rules {
     description = "CMS 公開 JSON 応答を 60 秒エッジキャッシュ (即時反映が要る系統と認証付きは除外)"
@@ -112,6 +115,9 @@ resource "cloudflare_ruleset" "directus_assets_cache" {
             or starts_with(http.request.uri.path, "/api/stages")
             or starts_with(http.request.uri.path, "/api/sponsors")
             or starts_with(http.request.uri.path, "/api/globals/site_settings")
+            or starts_with(http.request.uri.path, "/api/announcements")
+            or starts_with(http.request.uri.path, "/api/topics")
+            or http.request.uri.path eq "/api/media"
           )
         )
       )
