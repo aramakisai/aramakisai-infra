@@ -30,6 +30,8 @@ query($tag: string!, $start: Time, $end: Time, $hubStart: Time, $hubEnd: Time,
       count dimensions { edgeResponseStatus } }
     cmsCache: httpRequestsAdaptiveGroups(limit: 100, filter: {clientRequestHTTPHost: $cmsHost, requestSource: "edgeWorkerCacheAPI", clientRequestHTTPMethodName: "GET", datetime_geq: $start, datetime_lt: $end}) {
       count dimensions { cacheStatus } }
+    traffic: httpRequestsAdaptiveGroups(limit: 1000, filter: {requestSource: "eyeball", datetime_geq: $start, datetime_lt: $end}) {
+      count dimensions { clientRequestHTTPHost cacheStatus } }
     hub: durableObjectsPeriodicGroups(limit: 100, filter: {name: $hub, datetimeMinute_geq: $hubStart, datetimeMinute_lt: $hubEnd}) {
       max { activeWebsocketConnections } dimensions { datetimeMinute } }
   } }
@@ -60,6 +62,25 @@ def _by_status(rows):
 
 def _first(rows, group, key):
     return rows[0][group][key] if rows else 0
+
+
+def _traffic(rows, hosts, we):
+    """traffic.total と、設定のホストごと・その他の項目。0 件のホストも項目にする。"""
+    by_host = {h: {} for h in hosts}
+    other = {}
+    for r in rows:
+        d = r["dimensions"]
+        bucket = by_host.get(d["clientRequestHTTPHost"], other)
+        bucket[d["cacheStatus"]] = bucket.get(d["cacheStatus"], 0) + r["count"]
+    groups = [(h, by_host[h]) for h in hosts] + [("other", other)]
+    items = [Item("traffic.total", "全リクエスト", Status.OK, {
+        "requests": sum(sum(c.values()) for _, c in groups), "window_end": we,
+        "by_host": [{"host": h, "count": sum(c.values())} for h, c in groups]})]
+    for h, c in groups:
+        items.append(Item(f"traffic.host.{h}", h, Status.OK, {
+            "requests": sum(c.values()), "window_end": we,
+            "by_cache_status": [{"cache_status": k, "count": n} for k, n in c.items()]}))
+    return items
 
 
 def fetch(ctx):
@@ -105,6 +126,8 @@ def fetch(ctx):
             "window_end": we,
             "by_cache_status": [{"cache_status": r["dimensions"]["cacheStatus"], "count": r["count"]} for r in cache]}),
     ]
+
+    items += _traffic(a["traffic"], cf.traffic_hosts, we)
 
     by_minute = {}
     for r in a["hub"]:

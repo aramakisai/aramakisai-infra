@@ -139,6 +139,38 @@ class SelectionTest(Base):
         self.assertEqual(self.detail_title(), "項目 visitor.c")
 
 
+class TrafficTabTest(Base):
+    items = [item("visitor.a", value="1.0%"),
+             item("traffic.total", category="traffic", value="2.00 req/s", judged=False),
+             item("traffic.host.cms.aramakisai.com", category="traffic", value="0.50 req/s", judged=False),
+             item("function.f1", category="function")]
+
+    def test_tab_order_and_keyboard_wrap(self):
+        self.page.goto(self.url)
+        ids = self.page.evaluate("[...document.querySelectorAll('[role=tab]')].map(t=>t.dataset.tabId)")
+        self.assertEqual(ids, list(TABS))
+        self.assertEqual(self.page.get_attribute("[role=tab][aria-selected=true]", "data-tab-id"), "visitor")
+        self.page.focus("#tab-visitor")
+        self.page.keyboard.press("ArrowRight")
+        self.assertEqual(self.page.get_attribute("[role=tab][aria-selected=true]", "data-tab-id"), "traffic")
+        self.page.keyboard.press("End")
+        self.assertEqual(self.page.get_attribute("[role=tab][aria-selected=true]", "data-tab-id"), TABS[-1])
+        self.page.keyboard.press("ArrowRight")
+        self.assertEqual(self.page.get_attribute("[role=tab][aria-selected=true]", "data-tab-id"), "visitor")
+        self.page.keyboard.press("ArrowLeft")
+        self.assertEqual(self.page.get_attribute("[role=tab][aria-selected=true]", "data-tab-id"), TABS[-1])
+
+    def test_dotted_host_key_selects_and_survives_refresh(self):
+        self.page.goto(self.url)
+        self.page.click("[role=tab][data-tab-id=traffic]")
+        self.page.click('.tile[data-key="traffic.host.cms.aramakisai.com"]')
+        self.wait_title("項目 traffic.host.cms.aramakisai.com")
+        self.tick()
+        self.wait_title("項目 traffic.host.cms.aramakisai.com")
+        self.assertEqual(self.page.get_attribute('.tile[aria-pressed=true]', "data-key"),
+                         "traffic.host.cms.aramakisai.com")
+
+
 class AutoSelectTest(Base):
     items = [item("visitor.a", Status.OK), item("visitor.b", Status.WARN), item("visitor.c", Status.WARN),
              item("function.f1", Status.CRIT, "function"), item("function.f2", Status.OK, "function")]
@@ -483,7 +515,7 @@ def status_fixture():
 READ_HEADS = """()=>({counts:document.querySelector('.counts').textContent,
   names:[...document.querySelectorAll('.names li')].map(e=>e.textContent),
   tabs:Object.fromEntries([...document.querySelectorAll('[role=tab]')].map(t=>[t.dataset.tabId,
-    {badge:t.querySelector('.badge').textContent.trim(),cnt:t.querySelector('.cnt').textContent}])),
+    {badge:t.querySelector('.badge').getAttribute('aria-label')??t.querySelector('.badge').textContent.trim(),cnt:t.querySelector('.cnt').textContent}])),
   critTiles:[...document.querySelectorAll('.tile.s-crit[data-rank]')].length,
   warnTiles:[...document.querySelectorAll('.tile.s-warn[data-rank]')].length})"""
 

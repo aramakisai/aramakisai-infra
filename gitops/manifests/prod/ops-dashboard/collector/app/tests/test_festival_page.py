@@ -5,11 +5,13 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 
+import config
 import store as store_mod
 from festival import page
 from festival.labels import label
 from model import Breakdown, FestivalItem, Status
 
+FEST = config.load(os.path.join(os.path.dirname(__file__), "..", "..", "dashboard.toml")).festival
 NOW = datetime(2026, 11, 14, 3, 0, 0, tzinfo=timezone.utc)  # JST 12:00:00
 
 
@@ -31,9 +33,9 @@ class FestivalPageTest(unittest.TestCase):
         self.store.close()
         self.tmp.cleanup()
 
-    def frag(self, items, at=NOW, now=NOW):
+    def frag(self, items, at=NOW, now=NOW, **kw):
         self.store.replace_festival_items(items, at)
-        return page.render_fragment(self.store, object(), now)
+        return page.render_fragment(self.store, FEST, now, **kw)
 
     def test_band_counts_and_critical_names_match_tabs(self):
         html = self.frag([
@@ -55,10 +57,12 @@ class FestivalPageTest(unittest.TestCase):
         self.assertIn("正常", tabs["capacity"])
         self.assertIn("注意", tabs["infra"])
         self.assertIn("来場者影響", tabs["visitor"])
+        self.assertEqual(list(tabs), ["visitor", "traffic", "function", "capacity", "infra"])
+        self.assertIn("トラフィック", tabs["traffic"])
 
     def test_display_only_item_is_not_counted_and_has_no_ok_color(self):
         html = self.frag([item("capacity.cache", Status.OK, "capacity", judged=False)])
-        self.assertIn("表示のみ", html)
+        self.assertNotIn("表示のみ", html)
         tile = re.search(r'<button type="button" class="tile[^"]*"[^>]*data-key="capacity.cache".*?</button>', html, re.S).group(0)
         self.assertIn("s-info", tile)
         self.assertNotIn("s-ok", tile)
@@ -66,10 +70,37 @@ class FestivalPageTest(unittest.TestCase):
         capacity_tab = re.search(r'role="tab"[^>]*data-tab-id="capacity".*?</button>', html, re.S).group(0)
         self.assertNotIn("s-ok", capacity_tab)
 
+    def test_status_chip_is_icon_only_with_aria_label(self):
+        html = self.frag([item("visitor.a", Status.CRIT)], key="visitor.a")
+        tile = re.search(r'<button type="button" class="tile[^"]*"[^>]*data-key="visitor.a".*?</button>', html, re.S).group(0)
+        self.assertIn('<span class="badge s-crit" role="img" aria-label="異常"><span aria-hidden="true">✖</span></span>', tile)
+        self.assertNotIn("</span> 異常", html)
+        self.assertIn('aria-label="異常"', re.search(r'<div class="dh">.*?</div>', html, re.S).group(0))
+        self.assertIn('aria-label="異常"', re.search(r'role="tab"[^>]*data-tab-id="visitor".*?</button>', html, re.S).group(0))
+
+    def test_display_only_has_no_chip_in_tile_and_detail_but_keeps_dashed_edge(self):
+        html = self.frag([item("capacity.cache", Status.OK, "capacity", judged=False)], key="capacity.cache")
+        self.assertNotIn("badge", re.search(r'<button type="button" class="tile[^"]*"[^>]*data-key="capacity.cache".*?</button>',
+                                            html, re.S).group(0))
+        self.assertNotIn("badge", re.search(r'<div class="dh">.*?</div>', html, re.S).group(0))
+        self.assertIn("tile s-info", html)
+
+    def test_traffic_tab_order(self):
+        hosts = FEST.cloudflare.traffic_hosts
+        keys = ["traffic.node.b.net_tx", "traffic.node.a.net_tx", "traffic.node.a.net_rx", "traffic.cms.rps",
+                "traffic.worker.requests", "traffic.host.other", f"traffic.host.{hosts[2]}", f"traffic.host.{hosts[0]}",
+                "traffic.total"]
+        html = self.frag([item(k, category="traffic", judged=False) for k in keys])
+        panel = re.search(r'id="panel-traffic".*?</div>', html, re.S).group(0)
+        self.assertEqual(re.findall(r'data-key="([^"]+)"', panel),
+                         ["traffic.total", f"traffic.host.{hosts[0]}", f"traffic.host.{hosts[2]}", "traffic.host.other",
+                          "traffic.worker.requests", "traffic.cms.rps", "traffic.node.a.net_rx", "traffic.node.a.net_tx",
+                          "traffic.node.b.net_tx"])
+
     def test_display_only_with_stale_shows_stale(self):
         html = self.frag([item("capacity.cache", Status.STALE, "capacity", judged=False)])
         self.assertIn("取得遅延", html)
-        self.assertNotIn("表示のみ</span></button>", html)
+        self.assertNotIn("表示のみ", html)
 
     def test_tile_shows_name_status_value_and_fetched_time_in_jst(self):
         html = self.frag([item("visitor.a", Status.WARN, fetched_at=NOW - timedelta(seconds=5))])
@@ -82,7 +113,7 @@ class FestivalPageTest(unittest.TestCase):
     def detail(self, key, items=None, **kw):
         if items is not None:
             self.store.replace_festival_items(items, NOW)
-        html = page.render_fragment(self.store, object(), NOW, key=key, **kw)
+        html = page.render_fragment(self.store, FEST, NOW, key=key, **kw)
         m = re.search(r'<aside id="detail" aria-live="polite"[^>]*>(.*)</aside>', html, re.S)
         return html, m.group(1)
 
@@ -119,7 +150,7 @@ class FestivalPageTest(unittest.TestCase):
         self.assertEqual(self.store.query("SELECT COUNT(*) FROM festival_items")[0][0], 1)
 
     def test_detail_key_value_is_escaped_in_root_attribute(self):
-        html = page.render_fragment(self.store, object(), NOW, key='a"b<c')
+        html = page.render_fragment(self.store, FEST, NOW, key='a"b<c')
         root = html.split(">", 1)[0]
         self.assertIn('data-key="a&quot;b&lt;c"', root)
 
@@ -208,12 +239,12 @@ class FestivalPageTest(unittest.TestCase):
     def test_fragment_root_carries_evaluated_at_and_stale_flag(self):
         html = self.frag([item("visitor.a")])
         self.assertIn(f'id="festival-fragment" data-evaluated-at="2026-11-14T03:00:00Z" data-eval-stale="false"', html)
-        late = page.render_fragment(self.store, object(), NOW + timedelta(seconds=61))
+        late = page.render_fragment(self.store, FEST, NOW + timedelta(seconds=61))
         self.assertIn('data-eval-stale="true"', late)
         self.assertIn("判定が止まっている (最終判定 12:00:00)", late)
 
     def test_never_evaluated_is_stale(self):
-        html = page.render_fragment(self.store, object(), NOW)
+        html = page.render_fragment(self.store, FEST, NOW)
         self.assertIn('data-eval-stale="true"', html)
         self.assertIn("判定が止まっている (最終判定 -)", html)
 
@@ -283,7 +314,7 @@ class FestivalPageTest(unittest.TestCase):
             self.store.replace_festival_items(
                 [item("visitor.a", metric=0.1 * m, unit="ratio"), item("visitor.b")], at,
                 history=[("visitor.a", 0.1 * m)], history_minute=at)
-        html = page.render_fragment(self.store, object(), NOW)
+        html = page.render_fragment(self.store, FEST, NOW)
         a = re.search(r'data-key="visitor.a".*?</button>', html, re.S).group(0)
         b = re.search(r'data-key="visitor.b".*?</button>', html, re.S).group(0)
         self.assertIn('class="spark"', a)
@@ -305,7 +336,7 @@ class FestivalPageTest(unittest.TestCase):
 
     def test_page_includes_fragment_detail_frame_and_labels(self):
         self.store.replace_festival_items([item("visitor.a")], NOW)
-        html = page.render_page(self.store, object(), NOW)
+        html = page.render_page(self.store, FEST, NOW)
         self.assertIn("<title>当日監視</title>", html)
         self.assertEqual(html.count('id="detail"'), 1)
         self.assertIn('id="festival-fragment"', html)
@@ -315,7 +346,7 @@ class FestivalPageTest(unittest.TestCase):
 
     def test_page_passes_loading_label_to_script(self):
         self.store.replace_festival_items([item("visitor.a")], NOW)
-        html = page.render_page(self.store, object(), NOW)
+        html = page.render_page(self.store, FEST, NOW)
         data = json.loads(re.search(r'id="festival-labels">(.*?)</script>', html, re.S).group(1))
         self.assertEqual(data["loading"], "読み込み中")
 
@@ -328,7 +359,6 @@ class FestivalPageTest(unittest.TestCase):
         self.assertNotIn("data-rank", rank["visitor.c"])
 
     def test_labels_cover_design_table(self):
-        self.assertEqual(label("fest.status.info"), "表示のみ")
         self.assertEqual(label("fest.detail.link", name=label("fest.link.netdata")), "Netdata を開く")
         for k in ("fest.detail.note", "fest.detail.more_rows", "fest.detail.empty", "fest.link.cloudflare",
                   "fest.link.admin", "fest.link.cms", "fest.link.healthchecks"):

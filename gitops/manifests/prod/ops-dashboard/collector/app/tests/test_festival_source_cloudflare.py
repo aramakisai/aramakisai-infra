@@ -7,6 +7,7 @@ from model import Status
 from sources import festival_cloudflare as fc
 
 NOW = datetime(2026, 6, 1, 12, 0, 30, tzinfo=timezone.utc)
+CFG_HOSTS = make_ctx().config.festival.cloudflare.traffic_hosts
 ENV = {"OPS_CLOUDFLARE_READ_TOKEN": "t", "TF_VAR_cloudflare_account_id": "ACC"}
 
 
@@ -25,6 +26,12 @@ def gql(hub_minutes=("2026-06-01T11:57:00Z",)):
                   {"count": 1, "dimensions": {"edgeResponseStatus": 502}}],
         "cmsCache": [{"count": 80, "dimensions": {"cacheStatus": "hit"}},
                      {"count": 20, "dimensions": {"cacheStatus": "miss"}}],
+        "traffic": [
+            {"count": 600, "dimensions": {"clientRequestHTTPHost": "aramakisai.com", "cacheStatus": "hit"}},
+            {"count": 100, "dimensions": {"clientRequestHTTPHost": "aramakisai.com", "cacheStatus": "miss"}},
+            {"count": 50, "dimensions": {"clientRequestHTTPHost": "cms.aramakisai.com", "cacheStatus": "dynamic"}},
+            {"count": 30, "dimensions": {"clientRequestHTTPHost": "unknown.example.com", "cacheStatus": "hit"}},
+            {"count": 20, "dimensions": {"clientRequestHTTPHost": "other.example.com", "cacheStatus": "hit"}}],
         "hub": [{"max": {"activeWebsocketConnections": n}, "dimensions": {"datetimeMinute": m}}
                 for n, m in zip((5, 9), hub_minutes)],
     }]}}}
@@ -96,7 +103,7 @@ class CloudflareTest(unittest.TestCase):
     def test_empty_rows_are_zero(self):
         resp = gql()
         a = resp["data"]["viewer"]["accounts"][0]
-        for k in ("workers", "workersCpu", "cms", "cmsLatency", "media", "cmsCache", "hub"):
+        for k in ("workers", "workersCpu", "cms", "cmsLatency", "media", "cmsCache", "traffic", "hub"):
             a[k] = []
         r, _, it = run(resp)
         self.assertEqual(it["worker"].values["requests"], 0)
@@ -121,6 +128,26 @@ class CloudflareTest(unittest.TestCase):
         _, _, it = run(gql(("2026-06-01T11:54:00Z", "2026-06-01T11:55:00Z")))
         self.assertIsNotNone(it["hub_total"].note)
         self.assertEqual(it["hub_total"].values["minute"], "2026-06-01T11:55:00Z")
+
+    def test_traffic_items(self):
+        r, http, it = run(gql())
+        hosts = CFG_HOSTS
+        self.assertEqual([i.key for i in r.items if i.key.startswith("traffic.")],
+                         ["traffic.total", *[f"traffic.host.{h}" for h in hosts], "traffic.host.other"])
+        self.assertEqual(it["traffic.total"].values["requests"], 800)
+        self.assertEqual(it["traffic.total"].values["window_end"], "2026-06-01T11:57:00Z")
+        by_host = {r["host"]: r["count"] for r in it["traffic.total"].values["by_host"]}
+        self.assertEqual(by_host["aramakisai.com"], 700)
+        self.assertEqual(by_host["cms.aramakisai.com"], 50)
+        self.assertEqual(by_host["other"], 50)  # 一覧外の 2 ホストを合算
+        self.assertEqual(by_host["dash.aramakisai.com"], 0)  # 窓内 0 件でも項目を作る
+        self.assertEqual(len(by_host), len(hosts) + 1)
+        self.assertEqual(it["traffic.host.aramakisai.com"].values["by_cache_status"],
+                         [{"cache_status": "hit", "count": 600}, {"cache_status": "miss", "count": 100}])
+        self.assertEqual(it["traffic.host.dash.aramakisai.com"].values["requests"], 0)
+        q = http.calls[0]["body"]["query"]
+        self.assertIn('requestSource: "eyeball"', q)
+        self.assertIn("clientRequestHTTPHost cacheStatus", q)
 
     def test_graphql_errors_raise(self):
         with self.assertRaises(RuntimeError):

@@ -17,6 +17,7 @@ from sources.security_falco import PRIORITIES
 
 class Category(StrEnum):
     VISITOR = "visitor"
+    TRAFFIC = "traffic"
     FUNCTION = "function"
     CAPACITY = "capacity"
     INFRA = "infra"
@@ -132,6 +133,14 @@ def _pct(v: float) -> str:
 
 def _num(v: float) -> str:
     return f"{v:g}"
+
+
+def _rps(v: float) -> str:
+    """有効数字 3 桁: 10 未満は小数 2 桁、100 未満は小数 1 桁、それ以上は整数。丸めで桁が上がる値 (9.996) も上の桁の書式にする。"""
+    for digits, limit in ((2, 10), (1, 100)):
+        if round(v, digits) < limit:
+            return f"{v:.{digits}f}"
+    return f"{v:.0f}"
 
 
 def _ms(v: float) -> str:
@@ -352,7 +361,7 @@ def _worker_requests(inp: EvalInput):
     item = find_item(inp, "festival.cloudflare", "worker")
     if item is not None:
         rps = item.values["requests"] / CF_WINDOW_SECONDS
-        yield Judgement("visitor.worker.requests", "Worker 要求数 (秒間)", Status.OK, f"{rps:.2f} req/s", None,
+        yield Judgement("visitor.worker.requests", "Worker 要求数 (秒間)", Status.OK, f"{_rps(rps)} req/s", None,
                         _window_end(item), judged=False, metric=rps, unit="rps")
 
 
@@ -690,7 +699,7 @@ def _cms_rps(inp):
     if cms is not None and media is not None:
         rps = max(cms.values["requests"] - media.values["requests"], 0) / CF_WINDOW_SECONDS
         yield judged_value(inp, "cms_rps", "capacity.cms.rps", "CMS リクエスト (メディア除く)", rps,
-                           f"{rps:.2f} req/s", lambda v: f"{v:g}", observed_at=_window_end(cms), mu="rps")
+                           f"{_rps(rps)} req/s", lambda v: f"{v:g}", observed_at=_window_end(cms), mu="rps")
 
 
 def _cache_hit(inp):
@@ -767,6 +776,77 @@ CAPACITY_GROUPS: tuple[ItemGroup, ...] = (
               "cloudflared CPU スロットリング率", _pct), NETDATA_URL, bd=_bd_cloudflared_pods),
     _cap("capacity.node.", "ノード", (_NODES,), _node, NODE_LINK, bd=_bd_nodes),
     _cap("capacity.tunnel", "Tunnel", ("connect.tunnel",), _tunnel, CONNECT_LINK),
+)
+
+
+# --- トラフィック ---
+
+_OTHER = "other"
+_OTHER_LABEL = "その他"
+
+
+def _traffic_total(inp: EvalInput):
+    item = find_item(inp, "festival.cloudflare", "traffic.total")
+    if item is not None:
+        rps = item.values["requests"] / CF_WINDOW_SECONDS
+        yield Judgement("traffic.total", "全リクエスト (秒間)", Status.OK, f"{_rps(rps)} req/s", None,
+                        _window_end(item), judged=False, metric=rps, unit="rps")
+
+
+def _traffic_hosts(inp: EvalInput):
+    for item in _items(inp, "festival.cloudflare", "traffic.host."):
+        rps = item.values["requests"] / CF_WINDOW_SECONDS
+        yield Judgement(item.key, _OTHER_LABEL if item.key.endswith(f".{_OTHER}") else item.label, Status.OK,
+                        f"{_rps(rps)} req/s", None, _window_end(item), judged=False, metric=rps, unit="rps")
+
+
+def _bd_traffic_host(inp):
+    item = find_item(inp, "festival.cloudflare", "traffic.total")
+    if item is None:
+        return None
+    rows = sorted(item.values["by_host"], key=lambda r: (-r["count"], r["host"] == _OTHER))
+    return Breakdown("fest.bd.traffic_host", ("fest.col.host", "fest.col.rps", "fest.col.count"),
+                     tuple((_OTHER_LABEL if r["host"] == _OTHER else r["host"],
+                            _rps(r["count"] / CF_WINDOW_SECONDS), str(r["count"])) for r in rows))
+
+
+def _bd_traffic_cache(inp, judgement: Judgement):
+    item = find_item(inp, "festival.cloudflare", judgement.key)
+    rows = sorted(item.values["by_cache_status"], key=lambda r: (-r["count"], r["cache_status"])) if item else []
+    if not rows:
+        return None
+    total = sum(r["count"] for r in rows)
+    return Breakdown("fest.bd.cache_status", ("fest.col.cache_status", "fest.col.count", "fest.col.ratio"),
+                     tuple((r["cache_status"], str(r["count"]), _pct(r["count"] / total)) for r in rows))
+
+
+def _host_with_cache_breakdown(inp: EvalInput):
+    return [replace(j, breakdown=_bd_traffic_cache(inp, j)) for j in _traffic_hosts(inp)]
+
+
+def _duplicate(judge, old: str, new: str, only: Callable[[str], bool] = lambda key: True):
+    """元の判定関数の結果を key だけ差し替えて表示のみで複製する。複製は異常件数に数えない。"""
+    def wrapped(inp: EvalInput):
+        for j in judge(inp):
+            if only(j.key):
+                yield replace(j, key=new + j.key.removeprefix(old), status=Status.OK, judged=False,
+                              alert_on_warn=False)
+    return wrapped
+
+
+_traffic = lambda key, label, judge, link, bd=None: _group(  # noqa: E731
+    key, label, _CF, judge, link, Category.TRAFFIC, bd)
+
+TRAFFIC_GROUPS: tuple[ItemGroup, ...] = (
+    _traffic("traffic.total", "全リクエスト", _traffic_total, CLOUDFLARE_DASHBOARD, bd=_bd_traffic_host),
+    _traffic("traffic.host.", "ホスト別リクエスト", _host_with_cache_breakdown, CLOUDFLARE_DASHBOARD),
+    _traffic("traffic.worker.requests", "Worker 要求数 (秒間)",
+             _duplicate(_worker_requests, "visitor.", "traffic."), CLOUDFLARE_DASHBOARD),
+    _traffic("traffic.cms.rps", "CMS リクエスト",
+             _duplicate(_cms_rps, "capacity.", "traffic."), CLOUDFLARE_DASHBOARD),
+    _group("traffic.node.", "ノード送受信", (_NODES,),
+           _duplicate(_node, "capacity.", "traffic.", lambda k: k.endswith((".net_rx", ".net_tx"))), NODE_LINK,
+           Category.TRAFFIC, _bd_nodes),
 )
 
 
@@ -886,4 +966,4 @@ INFRA_GROUPS: tuple[ItemGroup, ...] = (
     _infra("infra.heartbeat", "生存確認", (), _heartbeat, HEALTHCHECKS_CONSOLE, False),
 )
 
-CATALOG: tuple[ItemGroup, ...] = VISITOR_GROUPS + FUNCTION_GROUPS + CAPACITY_GROUPS + INFRA_GROUPS
+CATALOG: tuple[ItemGroup, ...] = VISITOR_GROUPS + TRAFFIC_GROUPS + FUNCTION_GROUPS + CAPACITY_GROUPS + INFRA_GROUPS
