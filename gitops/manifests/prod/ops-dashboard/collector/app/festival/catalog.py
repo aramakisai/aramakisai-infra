@@ -698,7 +698,7 @@ def _cms_rps(inp):
     cms, media = find_item(inp, "festival.cloudflare", "cms"), find_item(inp, "festival.cloudflare", "media")
     if cms is not None and media is not None:
         rps = max(cms.values["requests"] - media.values["requests"], 0) / CF_WINDOW_SECONDS
-        yield judged_value(inp, "cms_rps", "capacity.cms.rps", "CMS リクエスト (メディア除く)", rps,
+        yield judged_value(inp, "cms_rps", "capacity.cms.rps", "CMS 要求数 (メディア除く)", rps,
                            f"{_rps(rps)} req/s", lambda v: f"{v:g}", observed_at=_window_end(cms), mu="rps")
 
 
