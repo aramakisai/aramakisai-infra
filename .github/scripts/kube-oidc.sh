@@ -77,7 +77,7 @@ cmd_token() {
   [[ -z "${GITHUB_ACTIONS:-}" ]] || echo "::add-mask::${tok}" >&2
 
   payload="$(cut -d. -f2 <<<"${tok}" | tr '_-' '/+')"
-  payload="${payload}$(printf '=%.0s' $(seq 1 $(((4 - ${#payload} % 4) % 4))))"
+  case $(( ${#payload} % 4 )) in 2) payload+="==" ;; 3) payload+="=" ;; esac
   exp="$(base64 -d <<<"${payload}" 2>/dev/null | jq -r '.exp // empty')" || true
   [[ "${exp}" =~ ^[0-9]+$ ]] || die "ID トークンから exp を読めません"
 
