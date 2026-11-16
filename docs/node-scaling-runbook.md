@@ -237,7 +237,14 @@ A-1 と同じ手順でスナップショット名を `pre-scalein` として取�
 
 ### B-2. ワークロードの配置を変更前へ戻す
 
-A-8 で変更した `replicas` と配置制約を変更前の値へ戻す PR をマージする。削除対象ノード上で稼働するものを事前に減らす。cloudflared は `gitops/manifests/prod/cloudflared/deployment.yaml` の `replicas: 3` が 3 ノード構成前提 (`topologySpreadConstraints` は `ScheduleAnyway` のため 1 ノードでも全 Pod がスケジュールされる)。縮退では `replicas` を `1` へ戻す (`prod-node-1` 以外の Pod は削除対象ノードの drain で退避される)。PodDisruptionBudget は `maxUnavailable: 1` で、Pod 1 つでも drain は詰まらない。検証: k3d で Deployment のレプリカ数を元に戻す操作を確認 (**k3d**)。
+A-8 で変更した `replicas` と配置制約を変更前の値へ戻す PR をマージする。削除対象ノード上で稼働するものを事前に減らす。
+
+- cloudflared (`gitops/manifests/prod/cloudflared/deployment.yaml`): `replicas` を `3` から `2` (3 ノード化前の値) へ戻し、`strategy` と `topologySpreadConstraints` を外して `pdb.yaml` を削除する。`prod-node-1` 以外の Pod は削除対象ノードの drain で退避される。
+- CMS (`gitops/manifests/prod/cms/deployment.yaml`): `replicas: 1`、`strategy: Recreate`、`topologySpreadConstraints` なし、`pdb.yaml` 削除、resources は requests cpu `250m`・limits cpu `2000m` へ戻す。
+- Zitadel (`gitops/manifests/prod/zitadel/deployment.yaml`): `replicas` を `3` から `1` へ戻す。
+- `DATABASE_REPLICA_URL` (`directus-db-ro` 接続) を `cms`・`cms-worker`・`cms-migrate` と `cms-secrets` の ExternalSecret から外す。B-3 で待機系を削除すると読み取りレプリカが無くなるため、B-3 より前に反映する。未設定のとき CMS は primary のみで起動する。
+
+検証: k3d で Deployment のレプリカ数を元に戻す操作を確認 (**k3d**)。
 
 ### B-3. データ層を単一構成へ戻す
 

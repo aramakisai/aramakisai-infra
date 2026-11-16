@@ -258,13 +258,13 @@ sequenceDiagram
     participant CNPG as CNPG クラスタ
 
     Ops->>K3s: etcd スナップショット取得とノード外退避
+    Ops->>K3s: レプリカ数と配置制約を変更前の値へ戻し、読み取りレプリカ接続を外す
     Ops->>CNPG: 各クラスタの Primary の所在を確認
     alt Primary が prod-node-1 以外にある
         Ops->>CNPG: switchover で Primary を prod-node-1 へ移す
     end
     Ops->>CNPG: instances を 1 へ戻しコミット
     CNPG-->>Ops: Standby の削除完了
-    Ops->>K3s: レプリカ数と配置制約を変更前の値へ戻す
     loop 追加ノードごとに 1 台ずつ
         Ops->>K3s: ノードを削除
         K3s-->>Ops: etcd メンバー数とクォーラム状態を確認

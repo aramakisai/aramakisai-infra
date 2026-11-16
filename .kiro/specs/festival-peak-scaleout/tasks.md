@@ -343,7 +343,9 @@
   - _Requirements: 5.1, 5.8_
 
 - [ ] 6.2 ワークロードの配置を変更前へ戻す
-  - レプリカ数と配置制約を変更前の値へ戻す。cloudflared の `replicas` (3) も対象である。CMS は 5.8 の変更前の値 (`replicas: 1`、`Recreate`、配置制約・PDB なし) へ戻し、`pdb.yaml` を削除する
+  - レプリカ数と配置制約を変更前の値へ戻す。cloudflared は `replicas` を 3 から 2 (3 ノード化前の値) へ戻し、`pdb.yaml` を削除する
+  - CMS は 5.8 の変更前の値 (`replicas: 1`、`Recreate`、配置制約・PDB なし、requests cpu 250m・limits cpu 2000m) へ戻し、`pdb.yaml` を削除する
+  - 6.3 より前の前提として、CMS (`cms`・`cms-worker`・`cms-migrate`) と `cms-secrets` から `DATABASE_REPLICA_URL` (`directus-db-ro` 接続) を外す。待機系の削除後は読み取りレプリカが存在しなくなる
   - 削除対象ノード上で稼働するものを事前に減らす
   - Zitadel 本体 (`gitops/manifests/prod/zitadel/deployment.yaml`) の replicas を 3 から 1 へ戻す
   - 完了状態: 対象ワークロードが変更前の構成で稼働していること
