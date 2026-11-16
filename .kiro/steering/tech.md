@@ -78,13 +78,8 @@ Authentik 時代の定義は `terraform/authentik_*.tf.disabled` として残す
 - **Swap設定**: 全ノード共通で 4GB swap を Ansible（swap ロール）で作成。kubelet `fail-swap-on=false` を設定（ホスト側プロセスの OOM 安全弁）。Pod cgroup には swap を割り当てない「NoSwap」挙動を維持し、K8s 資源モデルの予測可能性を保つ。
 - **障害復旧**: dr-trigger が障害を通知し、人が dr-recovery を起動・承認して復旧する (単一ノード構成のみ自動化)。詳細は [dr.md](dr.md) 参照。
 
-### CMS の読み取りレプリカ
-- CMS (Payload) はトランザクション外の読み取りを `directus-db-ro` (role=replica の 2 台) へ分散する。接続先は `cms-secrets` の `DATABASE_REPLICA_URL`。`-r` は primary も含むので使わない。書き込みとトランザクションは `-rw` (primary)
-- 書き込んだ Pod は、その後 2 秒間 (`readReplicasAfterWriteInterval`) は読み取りも primary で行う。この規則は Pod 単位で、別 Pod の読み取りは replica へ行く
-- **replica が全滅すると読み取りはエラーになる**。primary へのフォールバックはない。復旧は `cms-secrets` から `DATABASE_REPLICA_URL` を外す (Reloader が cms を再起動する)
-- 起動時に replica へ TCP で到達できなければ CMS は警告を出して primary のみで起動する
-- `cms-migrate` Job は `DATABASE_REPLICA_URL: ""` を `env` で上書きし、primary だけを使う
-- 接続数は Pod ごとに primary 10 本と replica 10 本。rollout 中の 7 Pod でも `max_connections` 100 に収まる
+### CMS のデータベース接続
+- CMS (Payload) の接続先は `directus-db-rw` (primary) のみ。CNPG `directus-db` は 1 インスタンスで、読み取りレプリカ (`directus-db-ro`・`DATABASE_REPLICA_URL`) は使わない
 
 ### CMS のジョブ実行 (cms-worker)
 - Payload のジョブ(招待メール送信等)の取得には排他がなく、autoRun が全レプリカで発火すると同じジョブが重複実行される。このため実行は専用 Deployment `cms-worker` (replicas 1、`Recreate`、Service・PDB なし) に限る
@@ -140,8 +135,8 @@ email claim を読むため、`ansible/roles/zitadel-bootstrap/vars/resources.ym
 ### ノード増減の検証 (festival-peak-scaleout)
 手順は `docs/node-scaling-runbook.md`。Hetzner 実機の検証は `scripts/scaletest/scaletest.sh` を `infisical run --env=staging --path=/scaletest` 配下で実行する。専用の Hetzner プロジェクト `scaletest`・SSH 鍵 `scaletest-key`・Tailscale OAuth クライアント (scope `devices:core` と `auth_keys` の write、タグは `tag:scaletest` のみ) は再検証用に残す。検証 VM は `tag:scaletest` で登録され、本番ノードと他の検証 VM へは tailnet で到達できない (ノード間は private network `10.250.0.0/16`)。
 
-### Terraform の適用範囲 (festival-peak-scaleout)
-`terraform/main.tf` の `prod-node-2` / `prod-node-3` はイベント期間外は未 apply で保留している。plan に作成差分が出るため、ops 関連など無関係な変更の apply は `-target` で対象リソースに絞る。
+### Terraform の適用範囲
+`terraform/main.tf` の `locals.nodes` は `prod-node-1` のみ (単一ノード)。placement group は `terraform/placement.tf` に残す。
 
 ### zitadel-bootstrap 系 playbook
 本番では `ZITADEL_EXTERNAL_DOMAIN=idp.aramakisai.com` の指定が必須 (README のコマンド例参照)。`--check` 非対応: 参照 API の応答を前提とする処理が check モードで失敗する。

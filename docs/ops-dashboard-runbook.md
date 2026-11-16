@@ -23,7 +23,7 @@ CPU・メモリ使用率と K3s バージョン (ノード間で異なれば両�
 `gitops/manifests/prod/ops-dashboard/collector/dashboard.toml` を編集して PR を出す。collector は起動時に検証し、誤りがあると起動に失敗する (ConfigMap 反映後に Pod を再起動して確認する)。
 
 - プランの切り替え: `[[plans]]` の `from` / `until` を書き換える。同一 `service` の期間は重ねない。
-- 稼働しているべきサーバー: `[[servers]]` に `name` を列挙する (イベント期間中に `prod-node-2` / `prod-node-3` を追加する場合は、期間に合わせて追加・削除する)。
+- 稼働しているべきサーバー: `[[servers]]` に `name` を列挙する。
 - 資格情報の有効期限: 期限のあるトークンを再発行したら `[[credentials]]` の `expires_on` を更新する。
 - 凍結中のワークロード: `[exclude]` に Namespace または名前を列挙する。
 - 閾値・情報源の宣言: `[thresholds]`、`[sources."<source_id>"]`。
