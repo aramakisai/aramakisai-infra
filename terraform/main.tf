@@ -1,10 +1,7 @@
 locals {
   # ノード定義: 名前 → { private_ip, server_type }
-  # prod-node-2/3 はイベント期間中のみ一時的に追加する (festival-peak-scaleout)
   nodes = {
     "prod-node-1" = { private_ip = "10.0.1.1", server_type = "cx33" }
-    "prod-node-2" = { private_ip = "10.0.1.2", server_type = "cx33" }
-    "prod-node-3" = { private_ip = "10.0.1.3", server_type = "cx33" }
   }
 }
 

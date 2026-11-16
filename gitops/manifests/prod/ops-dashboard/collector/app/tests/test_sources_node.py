@@ -2,9 +2,11 @@ import json
 import os
 import tempfile
 import unittest
+from dataclasses import replace
 from datetime import timedelta
 from unittest import mock
 
+import config
 from helpers import FIXED_NOW, FakeHttp, FakeK8s, make_ctx
 from http_client import HttpError
 from model import Status, iso
@@ -28,6 +30,12 @@ def node3(version="v1.32.3+k3s1", versions=None):
     metrics = {"items": [{"metadata": {"name": n}, "usage": {"cpu": f"{i + 1}000000000n", "memory": f"{i + 1}Gi"}}
                          for i, n in enumerate(names)]}
     return nodes, metrics
+
+
+def ctx3(k8s):
+    cfg = make_ctx().config
+    servers = type(cfg.servers)(config.Server(f"prod-node-{i}") for i in (1, 2, 3))
+    return make_ctx(cfg=replace(cfg, servers=servers), k8s=k8s)
 
 
 def stats(used_ratio):
@@ -62,7 +70,7 @@ class ResourcesTest(unittest.TestCase):
         nodes, metrics = node3()
         k8s = FakeK8s({"/api/v1/nodes": nodes, "/apis/metrics.k8s.io/v1beta1/nodes": metrics},
                       kubelet={f"10.0.1.{n}": stats(0.1 * n) for n in (1, 2, 3)})
-        items = nr.SOURCES[0].fetch(make_ctx(k8s=k8s)).items
+        items = nr.SOURCES[0].fetch(ctx3(k8s)).items
         by = {i.key: i for i in items}
         self.assertEqual(len(items), 9)
         self.assertEqual(by["disk:prod-node-3"].values["ratio"], 30.0)
@@ -75,7 +83,7 @@ class ResourcesTest(unittest.TestCase):
         nodes, metrics = node3()
         k8s = FakeK8s({"/api/v1/nodes": nodes, "/apis/metrics.k8s.io/v1beta1/nodes": metrics},
                       kubelet={"10.0.1.1": stats(0.5), "10.0.1.2": HttpError("x"), "10.0.1.3": {"node": {}}})
-        by = {i.key: i for i in nr.SOURCES[0].fetch(make_ctx(k8s=k8s)).items}
+        by = {i.key: i for i in nr.SOURCES[0].fetch(ctx3(k8s)).items}
         self.assertEqual(by["disk:prod-node-1"].status, Status.OK)
         for k in ("disk:prod-node-2", "disk:prod-node-3"):
             self.assertEqual(by[k].status, Status.STALE)
@@ -85,7 +93,7 @@ class ResourcesTest(unittest.TestCase):
         metrics["items"] = [m for m in metrics["items"] if m["metadata"]["name"] != "prod-node-3"]
         k8s = FakeK8s({"/api/v1/nodes": nodes, "/apis/metrics.k8s.io/v1beta1/nodes": metrics},
                       kubelet={f"10.0.1.{n}": stats(0.5) for n in (1, 2, 3)})
-        by = {i.key: i for i in nr.SOURCES[0].fetch(make_ctx(k8s=k8s)).items}
+        by = {i.key: i for i in nr.SOURCES[0].fetch(ctx3(k8s)).items}
         self.assertEqual(by["cpu:prod-node-2"].values["ratio"], 50.0)
         for k in ("cpu:prod-node-3", "memory:prod-node-3"):
             self.assertEqual(by[k].status, Status.STALE)
