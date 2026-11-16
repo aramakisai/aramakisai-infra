@@ -59,9 +59,6 @@ spec:
                   key: PAYLOAD_SECRET
             - name: NODE_OPTIONS
               value: --no-deprecation
-            # migrate は primary だけを使う
-            - name: DATABASE_REPLICA_URL
-              value: ""
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
