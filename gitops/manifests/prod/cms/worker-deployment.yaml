@@ -46,11 +46,6 @@ spec:
                 secretKeyRef:
                   name: cms-secrets
                   key: DATABASE_URL
-            - name: DATABASE_REPLICA_URL
-              valueFrom:
-                secretKeyRef:
-                  name: cms-secrets
-                  key: DATABASE_REPLICA_URL
             - name: PAYLOAD_SECRET
               valueFrom:
                 secretKeyRef:

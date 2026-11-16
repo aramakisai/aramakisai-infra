@@ -9,14 +9,10 @@ metadata:
   annotations:
     secret.reloader.stakater.com/reload: "cms-secrets"
 spec:
-  replicas: 6
+  replicas: 1
   revisionHistoryLimit: 2
-  # 3 ノードへ分散しているため、新 Pod を追加で起動してから旧 Pod を落とせる (無停止 rollout)
   strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxUnavailable: 0
-      maxSurge: 1
+    type: Recreate
   selector:
     matchLabels:
       app: cms
@@ -33,18 +29,6 @@ spec:
         fsGroup: 65533
         seccompProfile:
           type: RuntimeDefault
-      # DB 接続・セッション (JWT)・アップロード (S3) をすべて Pod 外に持つため、どのノードでも動く。
-      # ScheduleAnyway なのでノード障害時は残りのノードへ寄って起動を妨げない
-      topologySpreadConstraints:
-        - maxSkew: 1
-          topologyKey: kubernetes.io/hostname
-          whenUnsatisfiable: ScheduleAnyway
-          labelSelector:
-            matchLabels:
-              app: cms
-          # rollout 中に旧リビジョンの Pod 数へ引きずられず、新リビジョンをノードへ均等に置く
-          matchLabelKeys:
-            - pod-template-hash
       containers:
         - name: cms
           image: ghcr.io/aramakisai/aramakisai-cms:main
@@ -56,11 +40,6 @@ spec:
                 secretKeyRef:
                   name: cms-secrets
                   key: DATABASE_URL
-            - name: DATABASE_REPLICA_URL
-              valueFrom:
-                secretKeyRef:
-                  name: cms-secrets
-                  key: DATABASE_REPLICA_URL
             - name: PAYLOAD_SECRET
               valueFrom:
                 secretKeyRef:
@@ -160,15 +139,13 @@ spec:
           resources:
             requests:
               memory: "256Mi"
-              cpu: "500m"
+              cpu: "250m"
             limits:
               # 本番相当ビルドのローカル実測 RSS はアイドル 144MiB、
               # 管理画面 15 回 + REST 30 回のアクセス後で 192MiB。
               # sharp の画像変換ピークだけ未計測のため Directus と同じ 512Mi から始める
               memory: "512Mi"
-              # 1 ノードに 2 Pod 載るため、etcd (k3s server 内) 等のノード常駐プロセスの CPU を残せるよう、
-              # 2 Pod 分と他プロセスの合計が allocatable の約 8 割に収まる値にする
-              cpu: "800m"
+              cpu: "2000m"
           # /api/health は DB にも Payload にも触れず HTTP 200 だけを返す。
           # readiness に DB を含めると switchover で 3 Pod が同時に NotReady になり全停止するため含めない。
           # /admin/login のような SSR ページは過負荷時に重くなり probe が落ちるため使わない。
