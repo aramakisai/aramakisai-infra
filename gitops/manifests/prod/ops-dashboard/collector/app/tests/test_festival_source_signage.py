@@ -3,6 +3,7 @@ import unittest
 from dataclasses import replace
 
 import config
+from helpers import FESTIVAL_TOML
 from helpers import FakeHttp, make_ctx
 from http_client import HttpError
 from model import Status
@@ -38,7 +39,7 @@ class SignageTest(unittest.TestCase):
                 run(body)
 
     def test_undeclared_or_disabled_makes_no_request(self):
-        cfg = config.load(os.path.join(os.path.dirname(__file__), "..", "..", "dashboard.toml"))
+        cfg = config.load(FESTIVAL_TOML)
         for c in (replace(cfg, festival=None),
                   replace(cfg, festival=replace(cfg.festival, disabled_sources=["festival.signage"]))):
             res, http = run(STATS, c)

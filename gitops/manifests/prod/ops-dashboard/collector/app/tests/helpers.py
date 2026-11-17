@@ -1,6 +1,8 @@
 """情報源のテストで fetch(ctx) に渡す FetchContext を組み立てる共通部品。"""
+import atexit
 import os
 import tempfile
+from pathlib import Path
 from datetime import datetime, timezone
 
 import config
@@ -8,6 +10,15 @@ import http_client
 from model import FetchContext
 
 FIXED_NOW = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+
+# 本番 dashboard.toml は当日監視を宣言しないため、festival 系テストは本番 toml に fixtures/festival.toml を連結して読む。
+_HERE = Path(__file__).resolve().parent
+_tmp = tempfile.TemporaryDirectory()
+atexit.register(_tmp.cleanup)
+FESTIVAL_TOML = Path(_tmp.name) / "dashboard.toml"
+FESTIVAL_TOML.write_text(
+    (_HERE.parents[1] / "dashboard.toml").read_text(encoding="utf-8") + "\n"
+    + (_HERE / "fixtures" / "festival.toml").read_text(encoding="utf-8"), encoding="utf-8")
 
 
 class FakeHttp:
@@ -67,9 +78,9 @@ class FakeK8s:
 
 
 def make_ctx(cfg=None, http=None, k8s=None, env=None, store=None, now=FIXED_NOW):
-    """cfg 省略時は本番の dashboard.toml。store 省略時は一時 DB は作らず None。"""
+    """cfg 省略時は本番の dashboard.toml + festival fixture。store 省略時は一時 DB は作らず None。"""
     if cfg is None:
-        cfg = config.load(os.path.join(os.path.dirname(__file__), "..", "..", "dashboard.toml"))
+        cfg = config.load(FESTIVAL_TOML)
     return FetchContext(config=cfg, store=store, http=http or FakeHttp(), k8s=k8s or FakeK8s(),
                         env=dict(env or {}), clock=lambda: now)
 

@@ -4,11 +4,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import config
+from helpers import FESTIVAL_TOML
 from festival import catalog
 from festival.catalog import CATALOG, EvalInput, Judgement
 from model import Breakdown, Item, SourceResult, Status
 
-PROD_TOML = Path(__file__).resolve().parents[2] / "dashboard.toml"
+PROD_TOML = FESTIVAL_TOML
 NOW = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
 CFG = config.load(PROD_TOML).festival
 
