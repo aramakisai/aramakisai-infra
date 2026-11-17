@@ -5,8 +5,9 @@ from datetime import timedelta
 from pathlib import Path
 
 import config
+from helpers import FESTIVAL_TOML
 
-PROD_TOML = Path(__file__).resolve().parents[2] / "dashboard.toml"
+PROD_TOML = FESTIVAL_TOML
 
 
 def raw_festival() -> dict:

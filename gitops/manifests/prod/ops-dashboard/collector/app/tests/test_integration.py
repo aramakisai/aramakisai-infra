@@ -6,6 +6,7 @@ from dataclasses import replace
 from datetime import timedelta
 
 import config
+from helpers import FESTIVAL_TOML
 import main
 import store as store_mod
 from helpers import make_ctx
@@ -13,7 +14,7 @@ from model import Source, Status
 from render import page
 from sources import load_sources
 
-PROD_TOML = os.path.join(os.path.dirname(__file__), "..", "..", "dashboard.toml")
+PROD_TOML = FESTIVAL_TOML
 
 
 class IntegrationTest(unittest.TestCase):

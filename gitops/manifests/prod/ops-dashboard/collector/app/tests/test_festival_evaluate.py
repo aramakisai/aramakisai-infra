@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import config
+from helpers import FESTIVAL_TOML
 import model
 import store as store_mod
 from unittest import mock
@@ -16,7 +17,7 @@ from festival.evaluate import FestivalEvaluator
 from model import AlertState, Breakdown, Item, SourceResult, Status
 from render.labels import label
 
-PROD_TOML = Path(__file__).resolve().parents[2] / "dashboard.toml"
+PROD_TOML = FESTIVAL_TOML
 NOW = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
 CFG = config.load(PROD_TOML).festival
 

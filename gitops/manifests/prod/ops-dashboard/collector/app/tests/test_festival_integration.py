@@ -11,6 +11,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import config
+from helpers import FESTIVAL_TOML
 import main
 import store as store_mod
 from festival import page
@@ -22,7 +23,7 @@ from http_client import Http
 from model import FestivalItem, Item, SourceResult, Status
 
 NOW = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
-CFG = config.load(Path(__file__).resolve().parents[2] / "dashboard.toml").festival
+CFG = config.load(FESTIVAL_TOML).festival
 WORKER = Item("worker", "worker", Status.OK, {"requests": 1000, "errors": 80, "exceeded": 0, "cpu_p99_ms": 10,
                                                "window_end": "2026-06-01T11:57:00Z"})
 

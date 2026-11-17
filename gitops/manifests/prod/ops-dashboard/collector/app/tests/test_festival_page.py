@@ -6,12 +6,13 @@ import unittest
 from datetime import datetime, timedelta, timezone
 
 import config
+from helpers import FESTIVAL_TOML
 import store as store_mod
 from festival import page
 from festival.labels import label
 from model import Breakdown, FestivalItem, Status
 
-FEST = config.load(os.path.join(os.path.dirname(__file__), "..", "..", "dashboard.toml")).festival
+FEST = config.load(FESTIVAL_TOML).festival
 NOW = datetime(2026, 11, 14, 3, 0, 0, tzinfo=timezone.utc)  # JST 12:00:00
 
 

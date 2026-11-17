@@ -8,6 +8,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 import config
+from helpers import FESTIVAL_TOML
 import store as store_mod
 from festival.evaluate import Evaluation, SourceHealth
 from festival.notify import MAX_CHARS, FestivalNotifier, Notice
@@ -15,7 +16,7 @@ from http_client import Http, HttpError, HttpResponse
 from model import AlertState, FestivalItem, Status
 
 NOW = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
-CFG = config.load(Path(__file__).resolve().parents[2] / "dashboard.toml").festival
+CFG = config.load(FESTIVAL_TOML).festival
 URL = "https://discord.test/api/webhooks/123/SECRETTOKEN"
 
 
