@@ -13,7 +13,7 @@ services:
     volumes:
       - ${T_COLLECTOR_CONF}:/etc/nginx/conf.d/default.conf:ro
   valkey:
-    image: valkey/valkey:8-alpine@sha256:081c2f5cb575efc901aa80ff9cdbd1ec6a301682fd35e1ebb4b0990a4a4a8507
+    image: valkey/valkey:8-alpine@sha256:9971099af41c36e887aabdfe22b80c0fe45df949163dfc9cb434febc57cfc3fc
     # 本番の redis.yaml と同じ権限・引数で動くことを確かめる
     user: "65532:65532"
     read_only: true
