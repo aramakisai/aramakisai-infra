@@ -1,7 +1,7 @@
 # 認可統合テスト用。パスは test_authz.py が環境変数で渡す。
 services:
   mock:
-    image: ghcr.io/navikt/mock-oauth2-server:2.1.10
+    image: ghcr.io/navikt/mock-oauth2-server:2.3.0
     environment:
       JSON_CONFIG: '{"interactiveLogin": true}'
     ports: ["18081:8080"]
